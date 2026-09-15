@@ -38,11 +38,11 @@ v1 不做角色正文双语；不做 Web 控制台；不做多需求并行。
 | 平台机制 | 用途 | 依据 |
 |---|---|---|
 | 插件根 `settings.json` 的 `agent` 键 | 主会话 = 项目经理 | 实测生效（04 §2） |
-| 主线程 `tools: Agent(...)` 白名单 | PM 只见三个直属下级，其余七角色不可见 | 实测硬强制，注册表过滤（04 §3） |
+| 主线程 `tools: Agent(...)` 白名单 | **声明整个会话可见的 agent 宇宙**（必须列全十个角色），不是边约束 | 实测，见 §3.3（04 §8） |
 | 嵌套 subagent | 二、三层派发 | 实测三层通（04 §1） |
 | `AskUserQuestion` | PM 打断用户 | 官方：所有 subagent 被剥离 |
-| 嵌套 `Agent` 并发调用 | 阶段内并行（架构师同时派五个执行角色） | 一次消息内多个 Agent 调用即并发 |
-| PreToolUse / PostToolUse hook | 第二层以下派发约束、写路径隔离、就绪门禁 | 白名单在 subagent 层被忽略 |
+| 嵌套 `Agent` 并发调用 | 阶段内并行（架构师同时派五个执行角色） | 实测：同一 `function_calls` 块内多个 invoke（04 §8） |
+| PreToolUse / PostToolUse hook | **层级的唯一强制手段**，外加写路径隔离、就绪门禁 | 白名单表达不了边约束，见 §3.3 |
 | `.agent-team/runs/<id>/state.json` | 跨压缩的位置记忆 | superpowers ledger 模式 |
 
 ### 3.2 组织图
