@@ -218,6 +218,22 @@ H1/H3/H4 是安全边界，坏了要挡住；H2 是流程辅助，坏了不该�
 
 配置错误（条目缺 `can_delegate_to`）给出指名 `roster.json` 的拒绝理由，而不是抛异常。
 
+**第 4 条（M0 · U3 实测发现，补）：命名空间归一化。**
+插件提供的 agent 在平台上的注册名带插件前缀（`agent-team:at-architect`），裸名不解析。
+而 **hook 先于名称解析生效**，所以 hook 拿到的 `subagent_type` 是全限定名。
+U3 实测撞出的死结：
+
+| 调用方写法 | 结果 |
+|---|---|
+| `at-architect`（裸名） | hook 放行 → 平台名称解析报 `not found` |
+| `agent-team:at-architect` | 名称解析通过 → hook 拒绝（花名册里是裸名） |
+
+两种写法都进不去，门禁对插件角色实际是「一律拒绝」。
+裁定：**在 `decide.mjs` 里剥前缀**，不把花名册改成全限定名。理由三条：
+调用者侧 `agent_type` 的形态尚未观测到（两次实验架构师都没启动），归一化对两种形态都成立；
+花名册保持裸名可读，闭包不变量测试才有意义；只剥 `agent-team:` 这一个前缀，
+无差别剥会让别的插件的 `otherplugin:at-product` 被误认成自己人。
+
 ### 6.1 已知边界：hook 拦不住 Bash
 
 给了 Bash 即给了写文件能力（`echo >`、`sed -i`、`git checkout`）。
