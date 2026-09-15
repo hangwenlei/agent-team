@@ -2,7 +2,7 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Agent",
+        "matcher": "^Agent$",
         "hooks": [
           {
             "type": "command",
