@@ -1,0 +1,10 @@
+{
+  "name": "agent-team",
+  "description": "十角色软件开发 agent team：项目经理为主会话，分层派发，顺序受门禁强制，业务验收独立成线。",
+  "version": "0.0.1",
+  "author": {
+    "name": "hangwenlei",
+    "email": "rorohangwenlei@gmail.com"
+  },
+  "license": "MIT"
+}

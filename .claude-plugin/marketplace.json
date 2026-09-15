@@ -1,0 +1,14 @@
+{
+  "name": "agent-team-marketplace",
+  "description": "十角色软件开发 agent team 插件的自托管市场。",
+  "owner": {
+    "name": "hangwenlei"
+  },
+  "plugins": [
+    {
+      "name": "agent-team",
+      "source": "./",
+      "description": "十角色软件开发 agent team，分层派发与门禁强制的顺序流程。"
+    }
+  ]
+}
