@@ -1,0 +1,9 @@
+{
+  "__main__":       { "can_delegate_to": ["at-product", "at-architect"] },
+  "at-pm":          { "can_delegate_to": ["at-product", "at-architect"] },
+  "at-product":     { "can_delegate_to": ["at-worker-a"] },
+  "at-architect":   { "can_delegate_to": ["at-worker-a", "at-worker-b"] },
+  "at-worker-a":    { "can_delegate_to": [] },
+  "at-worker-b":    { "can_delegate_to": [] },
+  "at-outsider":    { "can_delegate_to": [] }
+}
