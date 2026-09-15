@@ -78,6 +78,33 @@ test('条目缺 can_delegate_to 时拒绝，并说明是 roster.json 的配置�
   assert.match(r.reason, /roster\.json/)
 })
 
+test('callerOf 剥掉本插件前缀', () => {
+  assert.equal(callerOf({ agent_type: 'agent-team:at-architect' }), 'at-architect')
+})
+
+test('callerOf 不剥别的插件的前缀', () => {
+  assert.equal(callerOf({ agent_type: 'other:at-architect' }), 'other:at-architect')
+})
+
+test('带插件前缀的目标按裸名查花名册——合法派发必须放行', () => {
+  const r = decideDelegation(
+    {
+      agent_type: 'agent-team:at-architect',
+      tool_input: { subagent_type: 'agent-team:at-worker-a' },
+    },
+    ROSTER,
+  )
+  assert.equal(r.decision, 'allow')
+})
+
+test('别的插件的同名 agent 不被当作自己人', () => {
+  const r = decideDelegation(
+    { agent_type: 'at-architect', tool_input: { subagent_type: 'other:at-worker-a' } },
+    ROSTER,
+  )
+  assert.equal(r.decision, 'deny')
+})
+
 test('主线程按 __main__ 判定', () => {
   const ok = decideDelegation({ tool_input: { subagent_type: 'at-product' } }, ROSTER)
   const no = decideDelegation({ tool_input: { subagent_type: 'at-worker-a' } }, ROSTER)

@@ -3,9 +3,23 @@
 
 export const MAIN = '__main__'
 
+// 插件提供的 agent 在平台上的注册名带插件前缀（agent-team:at-pm），花名册用裸名书写。
+// U3 实测的死结：裸名过得了 hook 但名称解析报 not found；带前缀的过得了名称解析
+// 却被花名册拦下——两边对不上，合法派发会被自己的门禁全部拒掉。
+// 只剥本插件自己的前缀：无差别剥会让别的插件的 otherplugin:at-product
+// 被误认成我们的 at-product。
+const PLUGIN_PREFIX = 'agent-team:'
+
+function stripPluginPrefix(name) {
+  return typeof name === 'string' && name.startsWith(PLUGIN_PREFIX)
+    ? name.slice(PLUGIN_PREFIX.length)
+    : name
+}
+
 /** hook 输入里 agent_type 只在 subagent 中出现；缺失即主线程。 */
 export function callerOf(input) {
-  return input?.agent_type ?? MAIN
+  const raw = input?.agent_type
+  return raw === undefined || raw === null ? MAIN : stripPluginPrefix(raw)
 }
 
 function allow() {
@@ -45,7 +59,7 @@ export function decideDelegation(input, roster) {
   // Agent 工具的 subagent_type 是可选字段，省略即得到 general-purpose 代理。
   // 所以对受管辖的调用者来说，"没写目标"是一次真实的、拿到全套工具的派发，
   // 而不是"这次调用与本门禁无关"。必须拒，否则整个花名册可被一个省略的字段绕过。
-  const target = input?.tool_input?.subagent_type
+  const target = stripPluginPrefix(input?.tool_input?.subagent_type)
   if (!target) {
     return deny(
       `角色 ${caller} 调用 Agent 时未指定 subagent_type。省略该字段会得到 general-purpose ` +
