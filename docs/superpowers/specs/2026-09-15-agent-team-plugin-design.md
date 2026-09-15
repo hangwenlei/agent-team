@@ -210,9 +210,9 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
 五个 hook，统一走 Node 单入口 `hooks/gate.mjs`，不依赖 bash 与 jq。
 （调研教训：atelier-pipeline 的 12 个 hook 在 jq 缺失时 exit 2 硬阻断。）
 
-| # | Hook | 职责 | 检查不通过时 | gate.mjs 自身异常时 |
+| # | Hook | 职责 | 检查不通过时 | 门禁无法做出有依据的判定时 |
 |---|---|---|---|---|
-| H1 | PreToolUse / Agent | 派发白名单（补第二层以下） | deny | deny（fail closed） |
+| H1 | PreToolUse / Agent | 派发白名单（全部层级，含主线程） | deny | deny（fail closed） |
 | H2 | PreToolUse / Agent | 就绪门禁：前置产物缺失 | **deny**，并指明该先跑哪一阶段 | allow + warning（fail open） |
 | H3 | PreToolUse / Edit\|Write | per-role 写路径隔离 | deny | deny（fail closed） |
 | H4 | PreToolUse / Edit\|Write | 契约保护：subagent 写契约 | deny | deny（fail closed） |
@@ -256,6 +256,21 @@ U3 实测撞出的死结：
 花名册保持裸名可读，闭包不变量测试才有意义；只剥 `agent-team:` 这一个前缀，
 无差别剥会让别的插件的 `otherplugin:at-product` 被误认成自己人。
 
+**第 5 条（复审实测发现，补）：花名册形状校验。**
+「查不到条目」不止「调用者未登记」一种成因——花名册本身可能是语法合法但语义空的
+`{}`、`[]`、`null` 或其他非对象，这些同样会让按调用者查条目查不到东西。复审实测原文：
+花名册退化成 `{}`、`[]`、`null`，或单个条目本身是 `null` 时，`gate.mjs` 零输出、exit 0，
+等价于对所有派发全放行。原实现把「查不到条目」统一处理成「未登记调用者，放行」，
+没有区分「调用者确实不归本门禁管」与「花名册本身坏了」——后者本该 deny，
+因为此时无法判定任何派发是否合法。
+
+裁定：`decideDelegation` 入口先校验 `roster` 本身是「至少含一个条目的普通对象」
+（非 `null`、非数组、非空），形状不对就 deny 并在理由里指名 `roster.json`；
+查条目改用 `Object.hasOwn(roster, caller)` 而非下标访问 `roster[caller]`，
+避免 `constructor`、`toString` 这类原型链上的键被误判成花名册里的真实条目。
+六种退化形态（`{}`、`[]`、`null`、非对象、条目为 `null`、原型链键）由
+`tests/decide.test.mjs` 强制覆盖。
+
 ### 6.1 已知边界：hook 拦不住 Bash
 
 给了 Bash 即给了写文件能力（`echo >`、`sed -i`、`git checkout`）。
@@ -278,7 +293,7 @@ agent-team/
 │   └── marketplace.json          # source: "./"，自托管分发
 ├── settings.json                 # {"agent": "at-pm"}
 ├── agents/
-│   ├── at-pm.md                  # tools: Agent(at-product, at-architect, at-acceptance), AskUserQuestion, ...
+│   ├── at-pm.md                  # tools: Agent(…全部十角色的全限定名，见 §3.3…), AskUserQuestion, ...
 │   ├── at-product.md  at-architect.md  at-acceptance.md
 │   ├── at-ui.md
 │   └── at-frontend.md  at-backend.md  at-ios.md  at-android.md  at-qa.md
