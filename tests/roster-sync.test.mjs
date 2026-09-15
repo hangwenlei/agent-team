@@ -6,13 +6,28 @@ import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
 
 const bare = (n) => (n.startsWith(PLUGIN_PREFIX) ? n.slice(PLUGIN_PREFIX.length) : n)
 
-test('at-pm 的 frontmatter 白名单与 roster.json 一致（前缀归一化后）', () => {
+// ⚠️ U4 实测推翻了「白名单 == PM 的直接下级」这个模型。
+// 真实机制：主线程 agent 的 tools: Agent(...) 过滤的是**整个会话**能解析到的
+// agent 集合，并且**被所有子代理、孙代理继承**。实测原文：at-pm 的白名单写
+// (at-product, at-architect) 时，架构师派 at-worker-a 得到
+// "not found. Available agents: agent-team:at-architect, agent-team:at-product"
+// ——恰好是 at-pm 那两个。
+// 所以白名单是「这个会话里有哪些 agent 存在」的宇宙，不是「PM 能派谁」的边。
+// 层级约束全部由 hook 的花名册承担。
+test('at-pm 的白名单必须覆盖整个派发宇宙', () => {
   const md = readFileSync(new URL('../agents/at-pm.md', import.meta.url), 'utf8')
   const roster = JSON.parse(readFileSync(new URL('../roster.json', import.meta.url), 'utf8'))
-  assert.deepEqual(
-    parseAgentAllowlist(md).map(bare).sort(),
-    [...roster['at-pm'].can_delegate_to].sort(),
-  )
+  const allowed = new Set(parseAgentAllowlist(md).map(bare))
+  const universe = new Set(Object.values(roster).flatMap((e) => e.can_delegate_to))
+  assert.ok(universe.size > 0, '花名册里没有任何 can_delegate_to 目标')
+  for (const name of universe) {
+    assert.ok(
+      allowed.has(name),
+      `${name} 出现在某个角色的 can_delegate_to 里，却不在 at-pm 的白名单中。` +
+        `主线程白名单过滤的是整棵子树可见的 agent 宇宙——不在里面的角色任何层级都` +
+        `解析不到，平台报 not found，而 hook 会先放行，把排查方向指向被派的一方`,
+    )
+  }
 })
 
 // 实测：tools: Agent(...) 白名单是**过滤注册表**的，而插件 agent 的注册名带前缀。
