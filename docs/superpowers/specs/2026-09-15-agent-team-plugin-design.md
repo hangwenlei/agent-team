@@ -202,6 +202,22 @@ H1/H3/H4 是安全边界，坏了要挡住；H2 是流程辅助，坏了不该�
 
 拒绝返回 `{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"..."}}`。
 
+### 6.0 派发门禁 H1 的三条规则（M0 实施时补，来自安全评审）
+
+初稿只写了「查白名单」，实施 Task 2 时安全评审发现这不够，补三条：
+
+1. **受管辖角色调用 `Agent` 却不写 `subagent_type` → 拒绝。**
+   `subagent_type` 在 Agent 工具里是可选字段，省略即得到 general-purpose 代理。
+   若把「没写目标」当成「与本门禁无关」放行，任何角色都能用一个省略的字段拿到全套工具，
+   而新生成的 general-purpose 又不在花名册里，于是它能派任何人——**整个层级被一个省略绕过并级联**。
+2. **未登记的调用者放行**（不干涉别的插件与用户自己的 subagent），
+   但这条的安全性完全依赖第 3 条。
+3. **花名册闭包不变量**：`can_delegate_to` 里出现的每个名字本身必须也是花名册的键。
+   有了它，受管辖角色永远派不出一个不受管辖的 agent，第 2 条的放行就不构成逃逸口。
+   由 `tests/roster-closure.test.mjs` 强制，扩花名册时必须维持。
+
+配置错误（条目缺 `can_delegate_to`）给出指名 `roster.json` 的拒绝理由，而不是抛异常。
+
 ### 6.1 已知边界：hook 拦不住 Bash
 
 给了 Bash 即给了写文件能力（`echo >`、`sed -i`、`git checkout`）。
