@@ -105,6 +105,28 @@ test('别的插件的同名 agent 不被当作自己人', () => {
   assert.equal(r.decision, 'deny')
 })
 
+// 这一条是本次修复的真正回归保护。上一条（caller 与 target 都带前缀）
+// 在修复前的代码上照样通过——带前缀的 caller 查不到花名册，直接从
+// 「未登记调用者放行」岔路走掉，根本没走到 target 归一化。
+// 而下面这个形态（主线程 + 带前缀目标）正是线上真实炸掉的那一个。
+test('主线程派发带前缀的合法目标——真实复现形态，必须放行', () => {
+  const r = decideDelegation(
+    { tool_input: { subagent_type: 'agent-team:at-product' } },
+    ROSTER,
+  )
+  assert.equal(r.decision, 'allow')
+})
+
+test('退化输入 agent-team: 不被剥成空串', () => {
+  assert.equal(callerOf({ agent_type: 'agent-team:' }), 'agent-team:')
+  const r = decideDelegation(
+    { agent_type: 'at-architect', tool_input: { subagent_type: 'agent-team:' } },
+    ROSTER,
+  )
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /不得派发给/)
+})
+
 test('主线程按 __main__ 判定', () => {
   const ok = decideDelegation({ tool_input: { subagent_type: 'at-product' } }, ROSTER)
   const no = decideDelegation({ tool_input: { subagent_type: 'at-worker-a' } }, ROSTER)

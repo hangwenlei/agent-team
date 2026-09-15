@@ -8,12 +8,19 @@ export const MAIN = '__main__'
 // 却被花名册拦下——两边对不上，合法派发会被自己的门禁全部拒掉。
 // 只剥本插件自己的前缀：无差别剥会让别的插件的 otherplugin:at-product
 // 被误认成我们的 at-product。
-const PLUGIN_PREFIX = 'agent-team:'
+// 导出是为了让 tests/plugin-name-sync.test.mjs 能拿它与 plugin.json 的 name 对账。
+// decide.mjs 必须保持纯函数（不读文件），所以插件名在这里是硬编码，
+// 由那个测试负责在改名时报警——否则改名后归一化静默失效，门禁回退到
+// 「一律拒绝」，而所有测试仍然是绿的。
+export const PLUGIN_PREFIX = 'agent-team:'
 
 function stripPluginPrefix(name) {
-  return typeof name === 'string' && name.startsWith(PLUGIN_PREFIX)
-    ? name.slice(PLUGIN_PREFIX.length)
-    : name
+  if (typeof name !== 'string' || !name.startsWith(PLUGIN_PREFIX)) return name
+  const bare = name.slice(PLUGIN_PREFIX.length)
+  // 退化输入（恰好等于前缀本身）剥完是空串。空串会让 target 被误判成
+  // 「没写目标」、让 caller 被误判成未登记调用者而放行——两种语义都不对。
+  // 剥出空串时当作没剥过，让它作为一个不匹配的名字走正常拒绝路径。
+  return bare === '' ? name : bare
 }
 
 /** hook 输入里 agent_type 只在 subagent 中出现；缺失即主线程。 */
