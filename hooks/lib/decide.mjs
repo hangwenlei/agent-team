@@ -14,7 +14,7 @@ export const MAIN = '__main__'
 // 「一律拒绝」，而所有测试仍然是绿的。
 export const PLUGIN_PREFIX = 'agent-team:'
 
-function stripPluginPrefix(name) {
+export function stripPluginPrefix(name) {
   if (typeof name !== 'string' || !name.startsWith(PLUGIN_PREFIX)) return name
   const bare = name.slice(PLUGIN_PREFIX.length)
   // 退化输入（恰好等于前缀本身）剥完是空串。空串会让 target 被误判成
@@ -42,18 +42,46 @@ function fmt(list) {
 }
 
 /**
- * 派发白名单（门禁 H1）。补的是平台的空缺：
- * 主线程的 tools: Agent(...) 白名单是硬的，subagent 定义里的括号列表被忽略。
+ * 派发白名单（门禁 H1）。这是层级的唯一强制手段——
+ * 主线程的 tools: Agent(...) 白名单只声明整个会话可见的 agent 宇宙，
+ * 且被所有子孙代理继承；它表达不了「谁能派给谁」这条边，边的约束全部由这里的花名册承担。
  */
 export function decideDelegation(input, roster) {
-  const caller = callerOf(input)
-  const entry = roster?.[caller]
+  // 花名册本身的形状校验。门禁坏掉的方式不止「抛异常」一种——
+  // 一个语法合法但语义空的花名册（{}、[]、null）同样是坏掉，而且更难发现：
+  // 它会让每一条「查不到条目」的判断都走「未登记调用者放行」，整个门禁静默失效。
+  if (
+    roster === null ||
+    typeof roster !== 'object' ||
+    Array.isArray(roster) ||
+    Object.keys(roster).length === 0
+  ) {
+    return deny(
+      'agent-team 的 roster.json 不是有效的花名册对象' +
+        '（应为至少含一个条目的 JSON 对象），无法判定派发权限，按安全边界拒绝。',
+    )
+  }
 
-  // 未登记的调用者不归本门禁管：本机可能还有别的插件或用户自己的 subagent 在跑，
-  // agent-team 无权干涉它们。这条放行之所以安全，靠的是花名册闭包不变量
-  // （见 tests/roster-closure.test.mjs）：can_delegate_to 里出现的每个名字
-  // 本身也必须是花名册的键，所以受本门禁管辖的角色永远派不出一个不受管辖的 agent。
-  if (!entry) return allow()
+  const caller = callerOf(input)
+
+  // 用 Object.hasOwn 而不是下标访问：后者会走原型链，使 constructor / toString /
+  // valueOf 这类键看起来「在花名册里」，与闭包不变量对「花名册的键」的定义（own key）
+  // 不一致。两个键空间不该出现在同一个判断里。
+  if (!Object.hasOwn(roster, caller)) {
+    // 真·未登记的调用者：不归本门禁管。本机可能还有别的插件或用户自己的
+    // subagent 在跑，agent-team 无权干涉它们。这条放行之所以安全，靠的是
+    // 花名册闭包不变量（见 tests/roster-closure.test.mjs）：can_delegate_to 里
+    // 出现的每个名字本身也必须是花名册的键，所以受管辖角色永远派不出一个
+    // 不受管辖的 agent。
+    return allow()
+  }
+
+  const entry = roster[caller]
+  if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) {
+    return deny(
+      `花名册中 ${caller} 的条目不是对象。这是 roster.json 的配置错误，不是这次调用的问题。`,
+    )
+  }
 
   const allowed = entry.can_delegate_to
   if (!Array.isArray(allowed)) {

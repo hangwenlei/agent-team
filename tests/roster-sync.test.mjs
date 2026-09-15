@@ -2,9 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { parseAgentAllowlist } from '../hooks/lib/frontmatter.mjs'
-import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
-
-const bare = (n) => (n.startsWith(PLUGIN_PREFIX) ? n.slice(PLUGIN_PREFIX.length) : n)
+import { PLUGIN_PREFIX, stripPluginPrefix } from '../hooks/lib/decide.mjs'
 
 // ⚠️ U4 实测推翻了「白名单 == PM 的直接下级」这个模型。
 // 真实机制：主线程 agent 的 tools: Agent(...) 过滤的是**整个会话**能解析到的
@@ -17,7 +15,7 @@ const bare = (n) => (n.startsWith(PLUGIN_PREFIX) ? n.slice(PLUGIN_PREFIX.length)
 test('at-pm 的白名单必须覆盖整个派发宇宙', () => {
   const md = readFileSync(new URL('../agents/at-pm.md', import.meta.url), 'utf8')
   const roster = JSON.parse(readFileSync(new URL('../roster.json', import.meta.url), 'utf8'))
-  const allowed = new Set(parseAgentAllowlist(md).map(bare))
+  const allowed = new Set(parseAgentAllowlist(md).map(stripPluginPrefix))
   const universe = new Set(Object.values(roster).flatMap((e) => e.can_delegate_to))
   assert.ok(universe.size > 0, '花名册里没有任何 can_delegate_to 目标')
   for (const name of universe) {

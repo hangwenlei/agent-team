@@ -133,3 +133,55 @@ test('主线程按 __main__ 判定', () => {
   assert.equal(ok.decision, 'allow')
   assert.equal(no.decision, 'deny')
 })
+
+// 复审实测：花名册形状退化时，旧实现把「查不到条目」统一当成「未登记调用者」
+// 放行——{}、[]、null、单条目为 null 都会让 gate.mjs 零输出、exit 0，等价于
+// 对所有派发全放行。下面这组测试覆盖每一种退化形态，且都要求拒绝理由指名
+// roster.json，把责任指向花名册本身而不是这次调用。
+
+test('roster 为空对象 {} 时门禁 fail closed 并指名 roster.json', () => {
+  const r = decideDelegation({ tool_input: { subagent_type: 'at-product' } }, {})
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /roster\.json/)
+})
+
+test('roster 为空数组 [] 时门禁 fail closed 并指名 roster.json', () => {
+  const r = decideDelegation({ tool_input: { subagent_type: 'at-product' } }, [])
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /roster\.json/)
+})
+
+test('roster 为 null 时门禁 fail closed 并指名 roster.json', () => {
+  const r = decideDelegation({ tool_input: { subagent_type: 'at-product' } }, null)
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /roster\.json/)
+})
+
+test('roster 为非对象（字符串）时门禁 fail closed 并指名 roster.json', () => {
+  const r = decideDelegation(
+    { tool_input: { subagent_type: 'at-product' } },
+    'not-a-roster',
+  )
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /roster\.json/)
+})
+
+test('roster 中调用者条目为 null 时拒绝，不当成未登记调用者放行', () => {
+  const r = decideDelegation(
+    { agent_type: 'at-broken', tool_input: { subagent_type: 'at-worker-a' } },
+    { ...ROSTER, 'at-broken': null },
+  )
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /at-broken/)
+})
+
+// 原型链上的键（constructor、toString、valueOf……）不是花名册的 own key。
+// 用 Object.hasOwn 而不是下标访问，这类键必须走「未登记调用者」放行分支，
+// 不能被误判成一个真实存在、但形状不对的花名册条目。
+test('原型链键不被当成花名册条目——走未登记调用者放行', () => {
+  const r = decideDelegation(
+    { agent_type: 'constructor', tool_input: { subagent_type: 'at-worker-a' } },
+    ROSTER,
+  )
+  assert.equal(r.decision, 'allow')
+})
