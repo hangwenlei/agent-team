@@ -47,10 +47,10 @@ const FORBIDDEN_TOOLS = [
   {
     name: 'SendMessage',
     reason:
-      '持有该工具的角色能给已存在的 agent（含本机其它 Claude 会话）发消息、' +
-      '续起它——花名册 can_delegate_to 管的是能不能派，管不住能不能发消息，' +
-      '官方文档明确警告过 cross-session permission laundering（U8 结论，见 ' +
-      'docs/07-U5-U6-U8-实测结论.md）。',
+      '官方工具说明称它可给已存在的 agent（含本机其它 Claude 会话）发消息并续起，' +
+      '并明确警告过 cross-session permission laundering。花名册 can_delegate_to 管的是' +
+      '能不能派，按文档描述管不住能不能发消息。**授予后的实际行为本项目未实测**，' +
+      '此处按文档推断从严不授予（U8，见 docs/07-U5-U6-U8-实测结论.md）。',
   },
   {
     name: 'ListAgents',

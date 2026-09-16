@@ -252,14 +252,24 @@ H1/H3/H4 是安全边界，坏了要挡住；H2 是流程辅助，坏了不该�
 
 拒绝返回 `{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"..."}}`。
 
-**注记（复审 out-of-scope 观察，先记下免得 M1 踩）**：`gate.mjs` 的 `emitDeny`
-目前把 `hookEventName` 硬编码为 `PreToolUse`；H5 注册在 `PostToolUse` 上，
-等它落地时这里必须参数化，否则 H5 的拒绝会带着错误的事件名。`gate.mjs` 对
-`tool_name` 的两处判断（非字符串 deny、非 Agent 静默）同样对所有检查项
-一视同仁：M1 的 H3/H4 注册在 `Edit|Write` 上，检查名进 `KNOWN_CHECKS` 后
-会在「非 Agent 静默」那行被吃掉；H5 是流程辅助（本节表格已注明坏了不该
-阻断），却会因「非字符串 deny」而 fail closed。H3/H4/H5 落地时，这两处
-判断必须与 `emitDeny` 的 `hookEventName` 一并按 CHECK 参数化。
+**注记（先记下免得 M1 踩）**：`gate.mjs` 现在的入口对**所有**检查项一视同仁，
+而 H2–H5 各自的事件与输入形状都不同。落地前这三处必须按 CHECK 参数化：
+
+1. **`emitDeny` 硬编码 `hookEventName: 'PreToolUse'`。** H5 的 `PostToolUse` 半支与
+   `SubagentStop` 半支都不是 `PreToolUse`，不参数化的话拒绝会带着错误的事件名。
+2. **「`tool_name` 非 Agent 就静默」那行会吃掉 H3/H4。** 它们注册在 `Edit|Write` 上，
+   检查名进 `KNOWN_CHECKS` 之后仍会在这一行被静默丢弃。
+3. **⚠️ 「`tool_name` 非字符串就 deny」那行会让 H5 的 `SubagentStop` 半支全线误拒。**
+   这一条最危险，单独说明：`SubagentStop` 是**生命周期事件不是工具调用事件**，
+   它的输入里大概率根本没有 `tool_name`（M1·U5 实测的探针输入 stdin 约 869–887 字节，
+   字段集与 `PreToolUse` 不同）。若把 `SubagentStop` 直接接到现在的入口，
+   那行前置校验会**每一次 subagent 停止都读不到 `tool_name` 而 deny**——
+   配合 U5 实测的「平台会重试约 9 次」，后果是**每个角色每次收尾都被无故顶回去九次**，
+   而不是「只在真漏交付物时顶回去」。
+
+因此 H5 落地时应当**拆成 H5a（`PostToolUse`，权威记录）与 H5b（`SubagentStop`，真拦截）
+两条独立注册**，各自有自己的输入契约，不要共用 `PreToolUse` 那套前置校验。
+本节表格把它们写在同一行是为了表达「两道一起才成立」这个设计意图，不是实现形态。
 
 ### 6.0 派发门禁 H1 的五条规则（M0 实施时补；前三条来自安全评审，第 4 条来自 U3 实测，第 5 条来自整分支复审）
 
