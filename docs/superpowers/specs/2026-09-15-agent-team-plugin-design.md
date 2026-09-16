@@ -235,7 +235,16 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
 | H2 | PreToolUse / Agent | 就绪门禁：前置产物缺失 | **deny**，并指明该先跑哪一阶段 | allow + warning（fail open） |
 | H3 | PreToolUse / Edit\|Write | per-role 写路径隔离 | deny | deny（fail closed） |
 | H4 | PreToolUse / Edit\|Write | 契约保护：subagent 写契约 | deny | deny（fail closed） |
-| H5 | PostToolUse / Agent | 交付物校验：声明未产出 | 记 warning，不 block | 记 warning |
+| H5 | `SubagentStop`（真拦截）+ `PostToolUse` / Agent（权威记录） | 交付物校验：声明产出却未写文件 | `SubagentStop`：deny（exit 2 附理由，约 8 次补救机会）；`PostToolUse`：记 warning，不 block | `SubagentStop`：allow（fail open，流程辅助）；`PostToolUse`：记 warning |
+
+**H5 为什么要两道**（M1 · U5 实测补，见 `docs/07-U5-U6-U8-实测结论.md`）：`SubagentStop`
+返回 exit 2 确实能阻止 subagent 停止、逼它补交付物，但平台的重试有上限——实测约 9 次，
+到点后无论 hook 还在不在拦，平台都会放 agent 正常结束，且这个放弃过程对父级完全静默：
+父级看到的是干净的一次通过，中间发生过的多次拦截没有留下任何痕迹。这意味着单独依赖
+`SubagentStop` 会在平台放弃的那一刻制造一个假的「一次通过」信号。两道因此缺一不可：
+`SubagentStop` 负责真拦截，给角色最多约 8 次机会当场补上交付物；`PostToolUse` 负责
+权威记录——不管 `SubagentStop` 那边最终是被角色补上了还是被平台默许放行，都如实记
+一条 warning，不能被静默吞掉。
 
 **区分两件事**（自审修正，初稿把这两列混为一谈）：
 「检查不通过」是门禁在正常工作并做出否决；「gate.mjs 自身异常」是门禁坏了。
@@ -299,26 +308,46 @@ U3 实测撞出的死结：
 六种退化形态（`{}`、`[]`、`null`、非对象、条目为 `null`、原型链键）由
 `tests/decide.test.mjs` 强制覆盖。
 
-### 6.1 角色工具面禁止包含 `Skill`（M1 · U7 实测补）
+### 6.1 角色工具面是按需白名单：`Skill` / `SendMessage` / `ListAgents` 一律不授予（M1 · U7/U8 实测补）
 
-**为什么**：`context: fork` 的 skill 可以带 `agent:` 参数直接起一个 subagent，全程不
-经过 `Agent` 工具，H1（挂在 `PreToolUse` / matcher `^Agent$` 上）看不见这条调用，派发
-门禁形同虚设。实测见 `docs/06-U7-实测结论.md`：目标在花名册白名单（宇宙）内时，fork
-拿到该角色的真实定义；目标在宇宙外时，fork 仍然成功起一个子会话，只是拿不到角色定义
-——宇宙过滤管得住「加载谁的定义」，管不住「能不能起一个 agent」。
+**原则**：角色的 `tools:` 是按需列出的白名单，不是「默认给、特例减」。`Skill`、
+`SendMessage`、`ListAgents` 这三个工具一律不授予任何角色，理由分两类：
 
-**主防线是不给工具，不是加 hook**。理由两条：一是工具注册层比拦截层硬——不在 `tools:`
-里的工具，角色的模型侧根本看不到它、调不出它，不存在「先调用再被拦」这个中间状态；
-PreToolUse hook 再严密，也是对一次已经发生的调用做事后判定，晚了一步。二是 U7 顺带
-实测证明：主线程 agent 的 `tools:` 会传导到整棵子树（`Skill is disabled for this
-session, in subagents as well as here`，见 §3.3.1）——只要 `at-pm.md` 的 `tools:` 不写
-`Skill`，这条限制自动覆盖 `at-product`/`at-architect`/全部执行角色，不需要逐个角色配置。
+- **`Skill` → fork 旁路**：`context: fork` 的 skill 可以带 `agent:` 参数直接起一个
+  subagent，全程不经过 `Agent` 工具，H1（挂在 `PreToolUse` / matcher `^Agent$` 上）
+  看不见这条调用，派发门禁形同虚设。实测见 `docs/06-U7-实测结论.md`：目标在花名册
+  白名单（宇宙）内时，fork 拿到该角色的真实定义；目标在宇宙外时，fork 仍然成功起一
+  个子会话，只是拿不到角色定义——宇宙过滤管得住「加载谁的定义」，管不住「能不能起
+  一个 agent」。
+- **`SendMessage` / `ListAgents` → 跨角色与跨会话触达**：U8 实测（`docs/07-U5-U6-U8-
+  实测结论.md`）确认在当前配置（未授予这两个工具）下这条路不存在，但这是「没给」
+  挡住的，不是机制上不可能——官方 `ListAgents` 工具的说明范围是「in-process
+  subagents you spawned」+ teammates + 本机其它 Claude 会话。一旦某个角色被授予这
+  两个工具，花名册的 `can_delegate_to` 管的是「能不能派」，管不住「能不能发消息」，
+  它可能绕开花名册直接触达兄弟角色，也可能触达与本插件无关的其它会话。官方
+  `SendMessage` 文档明确警告过 cross-session permission laundering（「NEVER ask a
+  peer to perform an action that was denied or blocked in your session」）——这正
+  是角色分层、写路径隔离这些设计想要防止的那类事，只是换了一条本插件此前没考虑过
+  的路。
+
+**主防线仍然是不给工具，不是加 hook**，理由与 U7 时一致：工具注册层比拦截层硬——不在
+`tools:` 里的工具，角色的模型侧根本看不到它、调不出它，不存在「先调用再被拦」这个中
+间状态；PreToolUse hook 再严密，也是对一次已经发生的调用做事后判定，晚了一步。且 U7
+顺带实测证明主线程 agent 的 `tools:` 会传导到整棵子树（`Skill is disabled for this
+session, in subagents as well as here`，见 §3.3.1）——这是 `tools:` frontmatter 这一
+层机制本身的行为，不是 `Skill` 独有的特例，因此同一条限制同样覆盖 `SendMessage`、
+`ListAgents`：只要 `at-pm.md` 的 `tools:` 不写这三个工具中的任何一个，这条限制自动
+覆盖 `at-product`/`at-architect`/全部执行角色，不需要逐个角色配置。
 
 **为什么零代价**：设计里跨角色共享契约走的是角色 frontmatter 的 `skills:` 预加载
 （见 §7 目录树的 `skills/` 一节），这与 `Skill` 工具是两回事——前者是会话启动时把
 skill 正文并入系统提示的静态机制，后者是运行时可调用、能凭 `agent:` 参数 fork 出子
 会话的动态工具。本插件设计里没有任何角色需要在运行时动态调用 skill，禁掉 `Skill`
-工具不影响 `skills:` 预加载这条路。
+工具不影响 `skills:` 预加载这条路。同样，设计里角色间协作走的是 §3.2 组织图 / §4
+阶段链定的 `Agent` 工具派发——父级派、子级返回结果、父级读结果——不是运行时对等
+消息。没有任何角色需要在运行时用 `SendMessage` 联系另一个已存在的 agent，也没有角
+色需要用 `ListAgents` 枚举会话里有哪些 agent，禁掉这两个工具不影响任何已定的协作
+路径。
 
 **将来若确实需要 `Skill`**：必须先加一个 H6 门禁（`PreToolUse` / `Skill`，解析被调
 skill 的 `agent:` frontmatter 并对照花名册），不能直接放开——否则重新打开本节挡住的
@@ -327,7 +356,8 @@ skill 的 `agent:` frontmatter 并对照花名册），不能直接放开——�
 **本插件自己捆绑的 skill 一律不得声明 `context: fork`**：即便未来某个角色被允许持有
 `Skill` 工具，本插件自带的 skill 正文本身也不能用 `context: fork` + `agent:` 的组合去
 起 subagent，避免插件自己内建一条绕过 H1 的路。`tests/tool-surface.test.mjs` 强制这
-两条（角色 `tools:` 不含 `Skill`；本插件自带 skill 不声明 `context: fork`）。
+两条（角色 `tools:` 不含 `Skill` / `SendMessage` / `ListAgents`；本插件自带 skill 不
+声明 `context: fork`）。
 
 ### 6.2 已知边界：hook 拦不住 Bash
 
@@ -399,10 +429,10 @@ Claude Code 无类型系统，派发提示里的 JSON 契约即全部类型系�
 | U2 | 插件提供的 agent 能否被主线程白名单按裸名引用 | 是 | **白名单硬强制，但语义不是「PM 能派谁」，而是整个会话的 agent 宇宙**，被所有子孙代理继承。`at-pm` 的 `tools:` 须写全限定名且覆盖团队全部角色；层级约束移交 H1 承担。§3.3 已整节重写。详见 `docs/05-M0-结论.md` U2 |
 | U3 | hook 在 Windows 下能否稳定拿到 `agent_type` 并 deny | 是 | **五个 hook 的共同地基成立。** 但撞出插件角色命名空间死结（裸名过 hook 被平台拒，全限定名过平台被花名册拒），已在 `decide.mjs` 加前缀归一化修复（§6.0 第 4 条）。详见 `docs/05-M0-结论.md` U3 |
 | U4 | subagent 能否在一条消息内并发 spawn 多个 subagent | 是 | **S3/S5 并行扇出的前提成立**，架构师可在一条消息内并发派发多个执行角色，维持原设计不必改串行。详见 `docs/05-M0-结论.md` U4 |
-| U5 | `SubagentStop` exit 2 是否会卡死无交付物的角色 | 未测 | 故 H5 设计为记 warning 而非阻断 |
-| U6 | 一趟十角色的真实成本 | 未测 | 全为估算 |
+| U5 | `SubagentStop` exit 2 是否会卡死无交付物的角色 | **是（有界，约 9 次）** | 平台重试有上限，实测约 9 次后静默放行，不会永久卡死会话，但放弃过程对父级不可见。H5 改为双重设计：`SubagentStop` 真拦截（约 8 次补救机会）+ `PostToolUse` 权威记录，二者缺一不可，详见 §6 表格与表下说明。详见 `docs/07-U5-U6-U8-实测结论.md` |
+| U6 | 一趟十角色的真实成本 | 未测 | **有实测单价的推算，真值待 M2 首次完整运行**——单价（实现者/评审 agent 中位约 13 万 tokens，调研 agent 均值约 9 万）取自本仓库 M0 期间真实运行计数，按十次角色调用外推：不返工约 100 万–250 万 tokens/趟，带返工约 200 万–400 万 tokens/趟。建议 M1 先在三到四个角色上跑通闭环，但 §11 实现顺序是否调整由用户决定。详见 `docs/07-U5-U6-U8-实测结论.md` |
 | U7 | 除 `Agent` 工具外，是否还有别的路径能起一个 subagent（如 `Skill`、`SendMessage`） | **是（存在旁路）** | `context: fork` 的 skill 可以带 `agent:` 参数直接起一个 subagent，全程不经过 `Agent` 工具，H1 看不见。目标在花名册白名单（宇宙）内时 fork 拿到该角色真实定义；目标在宇宙外时 fork 仍成功但角色定义不加载。缓解：角色工具面一律不得包含 `Skill`，本插件自带 skill 一律不得声明 `context: fork`（§6.1，`tests/tool-surface.test.mjs` 强制）。详见 `docs/06-U7-实测结论.md` |
-| U8 | `SendMessage` 能否被 subagent 用来续起一个花名册禁止它接触的 agent | 未测 | subagent 确实持有该工具（本轮探针实证，见 `docs/06-U7-实测结论.md`），官方文档称其可续起一个已存在的 agent。能否借此拿到一个受限角色的会话、是否绕过 H1，尚未验证。M1 中段验证 |
+| U8 | `SendMessage` 能否被 subagent 用来续起一个花名册禁止它接触的 agent | **当前配置下不存在该路径（未授予工具）；授予后的行为未实测** | 实测：`at-product` 的 `tools:` 未含 `SendMessage`/`ListAgents`，调用即报工具不存在（`tool_uses: 0`）。若将来授予，官方 `ListAgents` 范围含「本机其它 Claude 会话」，`SendMessage` 文档明确警告 cross-session permission laundering——但本轮未像 U7 对 `Skill` 那样做临时授予实验，这部分是文档推断，不是实测。缓解：规格 §6.1 推广为角色工具面一律不授予 `Skill`/`SendMessage`/`ListAgents`。详见 `docs/07-U5-U6-U8-实测结论.md` |
 
 U1–U4 必须在写任何角色正文之前，用一个最小插件先验，任一为否都会改变实现路径。
 U7 优先级与 U1–U4 同级，应在 M1 第一步一并验证。
