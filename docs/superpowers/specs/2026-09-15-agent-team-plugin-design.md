@@ -224,7 +224,11 @@ H1/H3/H4 是安全边界，坏了要挡住；H2 是流程辅助，坏了不该�
 
 拒绝返回 `{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"..."}}`。
 
-### 6.0 派发门禁 H1 的三条规则（M0 实施时补，来自安全评审）
+**注记（复审 out-of-scope 观察，先记下免得 M1 踩）**：`gate.mjs` 的 `emitDeny`
+目前把 `hookEventName` 硬编码为 `PreToolUse`；H5 注册在 `PostToolUse` 上，
+等它落地时这里必须参数化，否则 H5 的拒绝会带着错误的事件名。
+
+### 6.0 派发门禁 H1 的五条规则（M0 实施时补；前三条来自安全评审，第 4 条来自 U3 实测，第 5 条来自整分支复审）
 
 初稿只写了「查白名单」，实施 Task 2 时安全评审发现这不够，补三条：
 
@@ -343,8 +347,10 @@ Claude Code 无类型系统，派发提示里的 JSON 契约即全部类型系�
 | U4 | subagent 能否在一条消息内并发 spawn 多个 subagent | 是 | **S3/S5 并行扇出的前提成立**，架构师可在一条消息内并发派发多个执行角色，维持原设计不必改串行。详见 `docs/05-M0-结论.md` U4 |
 | U5 | `SubagentStop` exit 2 是否会卡死无交付物的角色 | 未测 | 故 H5 设计为记 warning 而非阻断 |
 | U6 | 一趟十角色的真实成本 | 未测 | 全为估算 |
+| U7 | 除 `Agent` 工具外，是否还有别的路径能起一个 subagent（如 `Skill`、`SendMessage`） | 未测 | **H1 是层级的唯一强制手段，而它只注册在 `PreToolUse`/`Agent` 上。若存在别的路径，那条路上没有门禁。M1 依赖 H1 之前必须先答** |
 
 U1–U4 必须在写任何角色正文之前，用一个最小插件先验，任一为否都会改变实现路径。
+U7 优先级与 U1–U4 同级，应在 M1 第一步一并验证。
 
 ## 11. 实现顺序
 
