@@ -59,21 +59,56 @@ test('writepath：ctx.ok 为 false 时 fail closed（deny，走 stdout JSON，�
   }
 })
 
-test('writepath：ctx.ok 为 false 时，即使是主线程（无 agent_type）调用也被拒', () => {
-  // 主线程豁免的是「per-role 隔离」，不是「读不到上下文这件事本身」——
-  // 上下文都读不到时，谁都判不出任何路径的归属，包括主线程自己。这条
-  // 专门钉住检查顺序：ctx.ok 校验必须先于「是不是主线程」的豁免判断。
+// 评审顾虑 1（Task 4 复审）：这条原来断言的是相反的结果（deny），依据是
+// "ctx.ok 校验必须先于主线程豁免"。评审指出那个顺序会自己把自己锁死：
+// 规格 §6 表格里 H1 明写"派发白名单（全部层级，含主线程）"，H3 只写
+// "per-role 写路径隔离"，没有"含主线程"——两行是刻意写得不一样的。
+// 且建第一个 run 之前 .agent-team 还不存在，ctx.ok 必然是 false；如果
+// fail-closed 判在前面，从主线程（无 agent_type）写 .agent-team/project.json
+// 这类自举动作会被永久拒绝，第一个 run 永远建不出来，门禁把自己锁在门外。
+// 现在改成"没有 agent_type 就放行"排在 ctx.ok 判定之前。
+test('writepath：没有 agent_type（真·主线程）时放行，即使 ctx.ok 为 false——不会自己把自己锁死', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h3-main-cwd-'))
   try {
     const input = {
       tool_name: 'Write',
-      tool_input: { file_path: join(cwd, 'anything.ts') },
+      tool_input: { file_path: join(cwd, '.agent-team', 'project.json') },
+    }
+    const { stdout, status } = run('writepath', input, undefined, cwd)
+
+    assert.equal(status, 0)
+    assert.equal(
+      stdout.trim(),
+      '',
+      '无 agent_type 的调用不受 per-role 隔离约束，且不能被"读不到上下文"卡住——' +
+        '否则 /at-init 从主线程写 .agent-team/project.json 这类自举动作会被永久拒绝，' +
+        '第一个 run 永远建不出来',
+    )
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+// 有 agent_type 的调用（哪怕值恰好是 at-pm）走的是完全不同的分支——它不是
+// callerOf 判定的 MAIN，必须继续接受 ctx.ok 的 fail-closed 校验。这条钉住
+// "MAIN 豁免"没有被错误地放宽成"agent_type 缺失或角色名恰好是 at-pm 都豁免"。
+test('writepath：有 agent_type 时（即使是 at-pm）ctx.ok 为 false 仍然 fail closed', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h3-named-pm-cwd-'))
+  try {
+    const input = {
+      tool_name: 'Write',
+      agent_type: 'at-pm',
+      tool_input: { file_path: join(cwd, '.agent-team', 'project.json') },
     }
     const { stdout, status } = run('writepath', input, undefined, cwd)
     const out = decisionOf(stdout)
 
     assert.equal(status, 0)
-    assert.ok(out, '主线程在 ctx.ok 为 false 时也必须被 deny，不是静默放行')
+    assert.ok(
+      out,
+      '带 agent_type 的调用不享有主线程豁免，ctx.ok 为 false 时必须 deny——' +
+        '如果这里被放行，说明 MAIN 豁免被错误地放宽了',
+    )
     assert.equal(out.permissionDecision, 'deny')
   } finally {
     rmSync(cwd, { recursive: true, force: true })
@@ -173,6 +208,42 @@ test('writepath：NotebookEdit 用 notebook_path 而不是 file_path 也能被�
     )
     assert.equal(out.permissionDecision, 'deny')
     assert.match(out.permissionDecisionReason, /at-frontend/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 评审顾虑 1 的"相关情形"：settings.json 的 agent 键把 at-pm 钉成主线程 agent
+// 时，主线程的 hook 输入带 agent_type（值为 at-pm，docs/05-M0-结论.md
+// 「次要事实」——归一化前后是否带插件前缀未直接观测到，但 callerOf 两种
+// 形态都能处理，见 hooks/lib/decide.mjs 的 stripPluginPrefix）。这种配置下
+// at-pm 不是 callerOf 判定的 MAIN，会作为一个有名有姓的角色走到 per-role
+// 判定，不享受上面两条"无 agent_type"测试豁免的那条路。这条钉住：只要
+// run 已经存在（ctx.ok 为 true），at-pm 写它自己在 S1 产出的 00-contract.md
+// 不会被当成"写别人的地盘"拒绝——PROJECT.paths 里根本没有 at-pm 这个键，
+// 但 decideWritePath 的 runDir 豁免先于 owners 查找生效（纯函数层面
+// tests/writepath.test.mjs「本趟 run 目录下的产物一律放行」已测过，这里
+// 补子进程级证据，直接回应评审"请确认这条路径下 at-pm 写
+// .../00-contract.md 不会被拒"）。
+test('writepath：被 settings.json 钉成主线程的 at-pm（带 agent_type）写 run 目录下的 00-contract.md 不受阻', () => {
+  const dirs = makeRun({ runId: 'r1', project: PROJECT })
+  try {
+    const input = {
+      tool_name: 'Write',
+      agent_type: 'at-pm',
+      tool_input: {
+        file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md'),
+      },
+    }
+    const { stdout, status } = run('writepath', input, undefined, dirs.projectDir)
+
+    assert.equal(status, 0)
+    assert.equal(
+      stdout.trim(),
+      '',
+      'at-pm 写自己在 run 目录下的产物不该被 H3 拒绝，否则 S1 完不成、整条阶段链起不来',
+    )
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })
