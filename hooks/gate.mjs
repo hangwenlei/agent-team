@@ -199,12 +199,22 @@ function main() {
   }
 
   if (CHECK === 'contract') {
-    // 这里不像 writepath 那样在读运行上下文之前先用 callerOf 把 MAIN 短路
-    // 掉——H4"主线程/被钉住的 at-pm 放行"这件事本身就是 decideContractGuard
-    // 要做的判断（agentType 参数，内部用 callerOf 解出调用者身份），接口
-    // 签名与 tests/contract-guard.test.mjs 都是照这个设计给的：H4 判的是
-    // "调用者是不是 subagent"，跟 H3 判的"这个角色能不能认领这条路径"是
-    // 不同的问题，不必套用同一套短路结构。
+    // Task 5 评审顾虑 2：H4 的规则是"任何 subagent 不得写契约"——调用者是
+    // PM（MAIN 或被钉住的 at-pm）时，H4 对这次调用根本没有意见，跟运行
+    // 上下文读不读得出来无关。短路排在读 ctx 之前，跟 writepath 的 MAIN
+    // 短路同构，理由却不同：不是"没必要为了判它去多读一次磁盘"，而是
+    // unreadable 时如果连 PM 都被拦住，后果比"多拒一次"更糟——修复一个
+    // 坏掉的 run（比如这里的 project.json 本身就是坏的）恰恰要 PM 动手，
+    // 门禁会把自己需要的人也锁在门外，跟 H3 已经修过的自举死锁是同一个
+    // 形状。at-pm 单独列出的安全性依赖什么、为什么不怕子代理冒充，见
+    // hooks/lib/contract-guard.mjs 里同一条判断的完整注释（不在这里重复
+    // 第二遍），这里只是把同一条判断提前，让它在 ctx 读不出来时也生效。
+    //
+    // unreadable 对子代理继续 fail closed，这条不放松——读不到 runDir 就
+    // 算不出哪个文件是契约，那时拒绝是对的；这条短路只免除 PM 自己。
+    const caller = callerOf(input)
+    if (caller === MAIN || caller === 'at-pm') process.exit(0)
+
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
     // ctx.kind 的处理照抄 writepath：'no-run' fail open + stderr 留痕，
     // 'unreadable' 才 denyAndExit——权威解释见 hooks/lib/runctx.mjs 头部

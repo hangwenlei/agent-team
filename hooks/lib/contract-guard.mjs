@@ -57,10 +57,28 @@ export function decideContractGuard({ agentType, filePath, runDir }) {
   // 不受阻」）。H4 若只认"无 agent_type"，本仓库这种钉住配置下契约会永远
   // 写不出来——规格 §5.3 连用户的升级答复都要"作为带日期的修订块追加进
   // 00-contract.md"，那也是 PM 转写的动作，同样会被堵死。这是真的功能
-  // 断裂，不是更保守的选择。用 callerOf 而不是自己重写一遍"undefined/null
-  // 才算主线程"，是为了跟 H1/H3 共用同一个权威定义，不在这里另开一份可能
-  // 漂移的副本；callerOf 内部已经处理了插件前缀（裸 'at-pm' 与
-  // 'agent-team:at-pm' 剥完是同一个值），这里不需要重复处理。
+  // 断裂，不是更保守的选择。
+  //
+  // 为什么可以把 at-pm 和 MAIN 同等对待（规格依据）：§5.3 原话是"契约唯一
+  // 写者是用户（经 PM 转写）"——PM 就是那个被授权写契约的人，钉住配置下
+  // at-pm 就是 PM 本人，不是另一个身份。
+  //
+  // 这条豁免的安全性依赖什么（评审 Task 5 顾虑 1）：hook 输入本身分不清
+  // "被钉成主线程的 at-pm"和"被别人派发出来的 at-pm 子代理"——两者的
+  // agent_type 都是裸的 'at-pm'，这个函数拿到的只是一个字符串，看不出
+  // 背后的调用形态。这条豁免因此不是自己成立的，靠的是花名册闭包这个
+  // 结构性不变量：当前 roster.json 里没有任何角色的 can_delegate_to 包含
+  // at-pm（tests/roster-closure.test.mjs「没有任何角色能把 at-pm 当作
+  // 派发目标」钉住这条），所以"at-pm 作为被派发出来的子代理出现"这条
+  // 路径在当前花名册下根本不存在——能带着 agent_type: 'at-pm' 走到这里的，
+  // 只可能是被钉住的主线程。**如果将来有人往某个角色的 can_delegate_to
+  // 里加了 at-pm，这条豁免就会同时放行一个真正的子代理，必须回来重新
+  // 评估**，不能继续假设 at-pm 只可能是 PM。
+  //
+  // 用 callerOf 而不是自己重写一遍"undefined/null 才算主线程"，是为了跟
+  // H1/H3 共用同一个权威定义，不在这里另开一份可能漂移的副本；callerOf
+  // 内部已经处理了插件前缀（裸 'at-pm' 与 'agent-team:at-pm' 剥完是同一个
+  // 值），这里不需要重复处理。
   const caller = callerOf({ agent_type: agentType })
   if (caller === MAIN || caller === 'at-pm') return { decision: 'allow' }
 

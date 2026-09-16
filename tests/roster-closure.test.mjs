@@ -45,3 +45,22 @@ test('stages.json 里每个阶段的 role 都必须是 roster.json 的键', () =
     )
   }
 })
+
+// H4 契约保护（hooks/lib/contract-guard.mjs）把"被 settings.json 钉成主线程
+// 的 at-pm"和 MAIN 同等对待、一并豁免——hook 输入本身分不清"被钉成主线程
+// 的 at-pm"和"被派发出来的 at-pm 子代理"，两者的 agent_type 都是裸的
+// 'at-pm'。这条豁免的安全性不是自己成立的，靠的是这里守住的结构性不变量：
+// 当前花名册里没有任何角色能把 at-pm 当作派发目标，所以"at-pm 作为被派发
+// 出来的子代理出现"这条路径根本不存在（Task 5 评审顾虑 1）。这条测试一旦
+// 变红，说明有人往某个角色的 can_delegate_to 里加了 at-pm——H4 的 at-pm
+// 豁免必须同步重新评估，不能继续假设 at-pm 只可能是被钉住的主线程。
+test('没有任何角色能把 at-pm 当作派发目标——H4 的 at-pm 豁免依赖这条', () => {
+  for (const [caller, entry] of Object.entries(roster)) {
+    assert.ok(
+      !entry.can_delegate_to.includes('at-pm'),
+      `${caller} 的 can_delegate_to 包含 at-pm——H4 契约保护` +
+        `（hooks/lib/contract-guard.mjs）把 at-pm 当作 PM 豁免，前提是没有` +
+        `角色能派发给它；这个前提被打破了，需要重新评估那条豁免是否还安全`,
+    )
+  }
+})

@@ -171,7 +171,7 @@ test('contract：project.json 缺失时 H3 整体放行、H4 仍然独立拦住�
 
 // ctx.kind 分派——结构照抄 tests/gate-writepath.test.mjs 里同名测试，权威
 // 解释见 hooks/lib/runctx.mjs 头部注释，不在这里重复第二遍。
-test('contract：run 存在但 project.json 坏了——仍然 fail closed（kind: unreadable）', () => {
+test('contract：project.json 坏了（kind: unreadable），子代理——仍然 fail closed', () => {
   const dirs = makeRun({ runId: 'r1' })
   try {
     writeFileSync(join(dirs.projectDir, '.agent-team', 'project.json'), '{ not json', 'utf8')
@@ -184,9 +184,58 @@ test('contract：run 存在但 project.json 坏了——仍然 fail closed（kin
     const out = decisionOf(stdout)
 
     assert.equal(status, 0)
-    assert.ok(out, 'project.json 损坏时必须仍然 deny，不能被误判成"没有 run"')
+    assert.ok(out, 'project.json 损坏时子代理必须仍然 deny，不能被误判成"没有 run"')
     assert.equal(out.permissionDecision, 'deny')
     assert.match(out.permissionDecisionReason, /运行上下文/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// Task 5 评审顾虑 2：H4 的规则是"任何 subagent 不得写契约"——调用者是 PM
+// 时，H4 对这次调用根本没有意见，跟运行上下文读不读得出来无关。如果 PM
+// 也被 unreadable 卡住，后果比"多拒一次"更糟：修复一个坏掉的 run 恰恰要
+// PM 动手（比如这里 project.json 本身就是坏的），门禁把自己需要的人也
+// 锁在门外，跟 H3 已经修过的自举死锁是同一个形状。这两条钉住 PM（真主
+// 线程与被钉住的 at-pm 两种形态）在 unreadable 时仍然放行，跟上面"子代理
+// 仍然 fail closed"形成直接对照。
+test('contract：project.json 坏了（kind: unreadable），PM（无 agent_type）——仍然放行', () => {
+  const dirs = makeRun({ runId: 'r1' })
+  try {
+    writeFileSync(join(dirs.projectDir, '.agent-team', 'project.json'), '{ not json', 'utf8')
+    const input = {
+      tool_name: 'Write',
+      tool_input: { file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md') },
+    }
+    const { stdout, status } = run('contract', input, undefined, dirs.projectDir)
+
+    assert.equal(status, 0)
+    assert.equal(
+      stdout.trim(),
+      '',
+      'PM 不在 H4 的管辖对象里——修复一个坏掉的 run 恰恰需要 PM 动手，如果这时候' +
+        '连 PM 都被拦住，就是门禁把自己需要的人锁在门外',
+    )
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('contract：project.json 坏了（kind: unreadable），被钉成主线程的 at-pm——仍然放行', () => {
+  const dirs = makeRun({ runId: 'r1' })
+  try {
+    writeFileSync(join(dirs.projectDir, '.agent-team', 'project.json'), '{ not json', 'utf8')
+    const input = {
+      tool_name: 'Write',
+      agent_type: 'at-pm',
+      tool_input: { file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md') },
+    }
+    const { stdout, status } = run('contract', input, undefined, dirs.projectDir)
+
+    assert.equal(status, 0)
+    assert.equal(stdout.trim(), '', '钉住的 at-pm 同样不该被 unreadable 的 ctx 卡住')
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })
