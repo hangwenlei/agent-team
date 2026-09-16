@@ -85,3 +85,51 @@ test('tool_name 不是 Agent——stdout 为空，不表态', () => {
   const stdout = run('delegation', input)
   assert.equal(stdout, '')
 })
+
+// tool_name 缺失或不是字符串：门禁拿不到可依据的判定材料，必须 fail closed。
+// 这四条钉住 R1——此前 `input.tool_name !== 'Agent'` 对这些值也成立，
+// 结果是和上面「不是 Agent」同样的静默放行，但语义完全不同：那边是
+// "确认这次调用与本门禁无关"，这里是"门禁根本看不出这次调用是什么"。
+
+test('tool_name 缺失——deny（fail closed）', () => {
+  const input = JSON.stringify({
+    tool_input: { subagent_type: 'at-worker-a' },
+  })
+  const stdout = run('delegation', input)
+  const out = parseDeny(stdout)
+  assert.equal(out.permissionDecision, 'deny')
+  assert.match(out.permissionDecisionReason, /tool_name/)
+})
+
+test('tool_name 为 null——deny（fail closed）', () => {
+  const input = JSON.stringify({
+    tool_name: null,
+    tool_input: { subagent_type: 'at-worker-a' },
+  })
+  const stdout = run('delegation', input)
+  const out = parseDeny(stdout)
+  assert.equal(out.permissionDecision, 'deny')
+  assert.match(out.permissionDecisionReason, /tool_name/)
+})
+
+test('tool_name 是数组——deny（fail closed）', () => {
+  const input = JSON.stringify({
+    tool_name: ['Agent'],
+    tool_input: { subagent_type: 'at-worker-a' },
+  })
+  const stdout = run('delegation', input)
+  const out = parseDeny(stdout)
+  assert.equal(out.permissionDecision, 'deny')
+  assert.match(out.permissionDecisionReason, /tool_name/)
+})
+
+test('tool_name 是数字——deny（fail closed）', () => {
+  const input = JSON.stringify({
+    tool_name: 42,
+    tool_input: { subagent_type: 'at-worker-a' },
+  })
+  const stdout = run('delegation', input)
+  const out = parseDeny(stdout)
+  assert.equal(out.permissionDecision, 'deny')
+  assert.match(out.permissionDecisionReason, /tool_name/)
+})

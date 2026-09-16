@@ -4,7 +4,7 @@
 
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { decideDelegation } from './lib/decide.mjs'
 
 const CHECK = process.argv[2]
@@ -75,6 +75,14 @@ function main() {
   // 纵深防御：即便 hooks.json 的 matcher 配置有误导致这个 hook 在非 Agent
   // 工具上被触发，这里再断言一次工具名。目前完全信任 matcher——锚定的
   // "^Agent$" 已经很难误配，但这一步断言的成本接近零。
+  // tool_name 不是字符串：门禁拿不到可依据的判定材料，按 §6 表格 fail closed。
+  if (typeof input.tool_name !== 'string') {
+    emitDeny(
+      'agent-team 门禁无法从 hook 输入中读出 tool_name（缺失或不是字符串），按安全边界拒绝。',
+    )
+    process.exit(0)
+  }
+  // 是字符串但不是 Agent：这次调用确实与本门禁无关，保持沉默、不表态。
   if (input.tool_name !== 'Agent') {
     process.exit(0)
   }
@@ -91,7 +99,7 @@ function main() {
 // 和可导入模块（tests/hooks-registration.test.mjs 需要 import KNOWN_CHECKS），
 // 被 import 时绝不能因为 CHECK 是 undefined 就触发一整套输出与 process.exit(0)
 // 的副作用。Node 24 没有 import.meta.main，用 argv[1] 判断是否为直接执行的入口。
-if (process.argv[1] && process.argv[1].endsWith('gate.mjs')) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     main()
   } catch (err) {
