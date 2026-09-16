@@ -29,6 +29,13 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/gate.mjs", "writepath"],
             "timeout": 30,
             "statusMessage": "校验写路径归属…"
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/gate.mjs", "contract"],
+            "timeout": 30,
+            "statusMessage": "校验契约保护…"
           }
         ]
       }

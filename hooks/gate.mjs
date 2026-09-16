@@ -16,6 +16,7 @@ import { denyOutput } from './lib/deny.mjs'
 import { readRunContext } from './lib/runctx.mjs'
 import { decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath } from './lib/writepath.mjs'
+import { decideContractGuard } from './lib/contract-guard.mjs'
 
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -197,8 +198,48 @@ function main() {
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
   }
 
-  // contract / deliverable / stop-gate 的判定分别在 Task 5–6 接入，
-  // 此处先只做分派。
+  if (CHECK === 'contract') {
+    // 这里不像 writepath 那样在读运行上下文之前先用 callerOf 把 MAIN 短路
+    // 掉——H4"主线程/被钉住的 at-pm 放行"这件事本身就是 decideContractGuard
+    // 要做的判断（agentType 参数，内部用 callerOf 解出调用者身份），接口
+    // 签名与 tests/contract-guard.test.mjs 都是照这个设计给的：H4 判的是
+    // "调用者是不是 subagent"，跟 H3 判的"这个角色能不能认领这条路径"是
+    // 不同的问题，不必套用同一套短路结构。
+    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    // ctx.kind 的处理照抄 writepath：'no-run' fail open + stderr 留痕，
+    // 'unreadable' 才 denyAndExit——权威解释见 hooks/lib/runctx.mjs 头部
+    // 注释，不在这里重复第二遍。没有 run 就没有契约文件可保护，H4 的全部
+    // 前提也是"一个 run 正在跑"。
+    if (!ctx.ok) {
+      if (ctx.kind === 'no-run') {
+        process.stderr.write(
+          `agent-team H4 契约保护：当前没有进行中的 run（${ctx.reason}），本次放行、不拦截。` +
+            `若你以为有进行中的 run，检查 .agent-team/current-run。\n`,
+        )
+        process.exit(0)
+      }
+      denyAndExit(
+        `agent-team 契约保护读不到运行上下文（${ctx.reason}），按安全边界拒绝。`,
+        spec.event,
+      )
+    }
+
+    // 路径字段按 tool_name 分派，原因与上面 writepath 那段完全相同：
+    // NotebookEdit 用 notebook_path，Edit/Write 用 file_path，不能用 ??
+    // 互相兜底（tool_name 此刻已确定是三者之一，main() 顶部校验过）。
+    const filePath =
+      input.tool_name === 'NotebookEdit'
+        ? input?.tool_input?.notebook_path
+        : input?.tool_input?.file_path
+    const r = decideContractGuard({
+      agentType: input?.agent_type,
+      filePath,
+      runDir: ctx.runDir,
+    })
+    if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
+  }
+
+  // deliverable / stop-gate 的判定分别在 Task 6 接入，此处先只做分派。
 
   process.exit(0)
 }
