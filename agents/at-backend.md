@@ -1,7 +1,7 @@
 ---
 name: at-backend
 description: M0 占位执行角色 A。
-tools: Read
+tools: Read, Write, Edit
 model: haiku
 ---
 

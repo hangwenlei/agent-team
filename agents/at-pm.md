@@ -1,7 +1,7 @@
 ---
 name: at-pm
 description: M0 占位项目经理。只用于验证平台机制，不含真实职责。
-tools: Agent(agent-team:at-product, agent-team:at-architect, agent-team:at-backend, agent-team:at-frontend), Read, Glob
+tools: Agent(agent-team:at-product, agent-team:at-architect, agent-team:at-backend, agent-team:at-frontend), Read, Glob, Write, Edit
 model: sonnet
 ---
 

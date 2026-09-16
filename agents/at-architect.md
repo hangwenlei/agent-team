@@ -1,7 +1,7 @@
 ---
 name: at-architect
 description: M0 占位技术架构师。
-tools: Agent, Read, Glob
+tools: Agent, Read, Glob, Write
 model: sonnet
 ---
 

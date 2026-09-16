@@ -1,7 +1,7 @@
 ---
 name: at-product
 description: M0 占位产品经理。
-tools: Agent, Read, Glob
+tools: Agent, Read, Glob, Write
 model: sonnet
 ---
 
