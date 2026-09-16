@@ -1,17 +1,28 @@
-// H2（readiness）在 gate.mjs 里唯一一段 tests/readiness.test.mjs 覆盖不到的逻辑：
-// decideReadiness 是纯函数，从不知道 ctx.ok 是什么——「读不到运行上下文时
-// 到底做了什么」完全活在 gate.mjs 自己的 CHECK === 'readiness' 分支里。
+// H2（readiness）在 gate.mjs 里 tests/readiness.test.mjs 覆盖不到的逻辑：
+// decideReadiness 是纯函数，从不知道 ctx.ok 是什么、也从不经过 denyAndExit——
+// 「读不到运行上下文时到底做了什么」「deny 判定是否真的传到了 stdout」
+// 完全活在 gate.mjs 自己的 CHECK === 'readiness' 分支里。
 //
 // 规格 §6：H2 的失败策略是 allow + warning，不是静默放行。Task 1 评审记录
 // 过这条遗留项：早期草稿在 ctx.ok === false 时只 process.exit(0)，一声不吭——
-// 如果退回那个写法，下面这条测试必须变红，不能因为只断言了 exit code
+// 如果退回那个写法，下面第一条测试必须变红，不能因为只断言了 exit code
 // 就继续绿着（那是本任务自审明确要求排除的恒真断言）。
+//
+// Task 3 评审 Important 1：ctx.ok === true → 剥前缀 → decideReadiness →
+// denyAndExit 这条链此前只有手工烟雾测试验证过，仓库里没有留任何自动化
+// 报警——把 ctx.stages 误写成 ctx、把 spec.event 传错，测试依旧全绿。
+// 第二条测试补上；跟手工烟雾测试一样接受耦合到仓库根真实 stages.json 的
+// 代价（gate.mjs 的 pluginDir 是硬编码的 ROOT，测试帮手改不了它），但只
+// 断言结构性的东西（deny + 阶段 id 出现在 reason 里），不钉死具体文案。
+//
+// Task 3 评审 Minor 5：!target 分支也是 fail open，同样要留痕，第三条测试钉住。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { run } from './helpers/gate-runner.mjs'
+import { run, decisionOf } from './helpers/gate-runner.mjs'
+import { makeRun } from './fixtures/make-run.mjs'
 
 test('readiness：ctx.ok 为 false 时 fail open 且在 stderr 留痕说明（不是静默放行）', () => {
   // 干净的临时目录当 cwd：这里必然没有 .agent-team，readRunContext 必然
@@ -38,5 +49,47 @@ test('readiness：ctx.ok 为 false 时 fail open 且在 stderr 留痕说明（�
     )
   } finally {
     rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+test('readiness：ctx.ok 为 true 时，deny 判定真的经 denyAndExit 传到 stdout', () => {
+  // at-product 是仓库根真实 stages.json 里 S2 的角色，S2 requires
+  // ['00-contract.md']——不造这个产物（artifacts 默认空），前置必然缺失。
+  // subagent_type 带插件前缀，顺带验证 stripPluginPrefix 真的在这条路径上跑了。
+  const dirs = makeRun({ runId: 'r1' })
+  try {
+    const input = { tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-product' } }
+    const { stdout, status } = run('readiness', input, undefined, dirs.projectDir)
+    const out = decisionOf(stdout)
+
+    assert.equal(status, 0, 'PreToolUse 的 deny 走 stdout JSON + exit 0，不是非零退出码')
+    assert.ok(out, 'ctx.ok 为 true 且前置缺失时必须有 deny 判定，stdout 不该是空的')
+    assert.equal(out.hookEventName, 'PreToolUse')
+    assert.equal(out.permissionDecision, 'deny')
+    assert.match(
+      out.permissionDecisionReason,
+      /S\d/,
+      '理由里必须出现阶段 id——只断言 deny 抓不住 ctx.stages/spec.event 这类传错',
+    )
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('readiness：ctx.ok 为 true 但没有可判定的目标角色时，同样带 warning 放行', () => {
+  const dirs = makeRun({ runId: 'r1' })
+  try {
+    const input = { tool_name: 'Agent', tool_input: {} }
+    const { stdout, stderr, status } = run('readiness', input, undefined, dirs.projectDir)
+
+    assert.equal(status, 0)
+    assert.equal(stdout.trim(), '', '没有目标角色不该 deny')
+    assert.ok(stderr.trim().length > 0, '这也是一次 fail open，必须留痕，不能悄悄退出')
+    assert.match(stderr, /agent-team/)
+    assert.match(stderr, /(H2|就绪)/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
   }
 })

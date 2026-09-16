@@ -110,13 +110,27 @@ function main() {
     // 字段本项目没有实测过，换一个同样没验过的通道不会让告警更可靠。
     // 这条告警在会话里是否可见，本项目也没有实测过，留给 Task 7 核实。
     if (!ctx.ok) {
+      // Task 3 评审 Minor 4：原文案里"按规格 §6 fail open"是内部黑话，
+      // 读到它的人手上未必有 §6；"本次放行，不拦截这次调用"又把同一件事
+      // 说了两遍。改成只说一次「放行」，把省下的篇幅换成一句可执行的
+      // 下一步——ctx.reason 的大多数取值本身就是 current-run/run 目录的
+      // 问题（找不到、指向的 run 不存在、内容非法等），这是最先该查的地方。
       process.stderr.write(
-        `agent-team H2 就绪门禁：读不到运行上下文（${ctx.reason}），按规格 §6 fail open——本次放行，不拦截这次调用。\n`,
+        `agent-team H2 就绪门禁：读不到运行上下文（${ctx.reason}），本次放行、不拦截。` +
+          `若你以为有进行中的 run，检查 .agent-team/current-run。\n`,
       )
       process.exit(0)
     }
     const target = stripPluginPrefix(input?.tool_input?.subagent_type)
-    if (!target) process.exit(0)
+    if (!target) {
+      // Task 3 评审 Minor 5：这也是一次 fail open——门禁认不出目标角色，
+      // 不是"这次调用与本检查项无关"（那种情况在上面 toolNames 那道前置
+      // 校验里已经处理并保持沉默）。按 §6 的 allow + warning 对齐，同样留痕。
+      process.stderr.write(
+        'agent-team H2 就绪门禁：这次调用没有可判定的目标角色（subagent_type 缺失或为空），跳过本次校验、放行。\n',
+      )
+      process.exit(0)
+    }
     const r = decideReadiness({
       targetRole: target,
       stages: ctx.stages,

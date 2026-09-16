@@ -15,14 +15,30 @@ export function decideReadiness({ targetRole, stages, artifactExists }) {
   if (!stages || typeof stages !== 'object') return { decision: 'allow' }
 
   // 一个角色可能是多个阶段的执行者（如 at-pm 既是 S1 又是 S4）。
-  // 按阶段 id 升序找第一个「产物尚未齐全」的阶段来判定——那就是它此刻要做的那一段。
-  const mine = Object.entries(stages)
-    .filter(([, s]) => s.role === targetRole)
-    .sort(([a], [b]) => a.localeCompare(b))
+  // 找第一个「产物尚未齐全」的阶段来判定——那就是它此刻要做的那一段。
+  //
+  // Task 3 评审 Minor 2：这里不能按阶段 id 字符串排序（原先用过
+  // localeCompare）——"S10".localeCompare("S2") < 0，字典序会把 S10 排到
+  // S2 前面，S10 requires 一旦是空的就会被提前判定成"已完成"，漏过 S2
+  // 真正缺失的前置。stages.json 里各阶段的书写顺序（Object.entries 的
+  // 插入序）本来就是流水线顺序，直接用它，不重新排序。当前到 S5、规格
+  // §4 的阶段链到 S8，届时同样成立，因为插入序不取决于数值宽度。
+  //
+  // 已知边界（Task 3 评审 Minor 3，与上面 produces 那条同类）：某个阶段条目
+  // 手误漏写 role（s.role 是 undefined）时，这个 filter 会让它匹配不上任何
+  // 真实 targetRole，整段既不属于任何角色、也就没人会替它跑这条门禁——
+  // 是配置错误，不是这个函数的职责，当前 stages.json 五个阶段 role 都是
+  // 非空字符串，未做改动。
+  const mine = Object.entries(stages).filter(([, s]) => s.role === targetRole)
 
   if (mine.length === 0) return { decision: 'allow' }
 
   for (const [stageId, stage] of mine) {
+    // 已知边界（Task 3 评审 Minor 3）：produces 为空/缺失的阶段，这里会被
+    // 判定为"已完成"，它的 requires 永远不会被检查——纯评审类、不产出
+    // 文件的阶段会因此完全不设防。当前 stages.json 五个阶段 produces 都
+    // 非空，暂不触发；一旦出现这类阶段，这里需要重新设计"已完成"的判定
+    // 方式，不能简单沿用"produces 都存在"这条标准。
     const done = (stage.produces || []).every((p) => artifactExists(p))
     if (done) continue
 
