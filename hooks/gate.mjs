@@ -4,20 +4,13 @@
 
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
 import { decideDelegation } from './lib/decide.mjs'
+import { KNOWN_CHECKS } from './lib/checks.mjs'
 
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..')
-
-// hooks.json 里注册的检查名、gate.mjs 认得的检查名是同一个字面量的两处硬编码。
-// 两者漂移（改名漏改一处、手滑打错字）此前会让 main() 对未知检查名直接
-// 走到底部 exit 0、不输出任何东西——把"门禁正常工作但这次无事可做"与
-// "注册已经漂移、门禁对这个检查项形同虚设"这两种截然不同的情况静默合并成
-// 同一个观测（无输出），选了看起来人畜无害、实际最危险的那个解读。
-// 导出是为了让 tests/hooks-registration.test.mjs 能拿它与 hooks.json 对账。
-export const KNOWN_CHECKS = new Set(['delegation'])
 
 function readStdin() {
   try {
@@ -95,18 +88,22 @@ function main() {
   process.exit(0)
 }
 
-// 只在本文件被当作 hook 直接执行时才跑 main()。gate.mjs 现在同时是可执行入口
-// 和可导入模块（tests/hooks-registration.test.mjs 需要 import KNOWN_CHECKS），
-// 被 import 时绝不能因为 CHECK 是 undefined 就触发一整套输出与 process.exit(0)
-// 的副作用。Node 24 没有 import.meta.main，用 argv[1] 判断是否为直接执行的入口。
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try {
-    main()
-  } catch (err) {
-    // gate.mjs 自身异常：派发白名单是 fail closed。
-    if (CHECK === 'delegation') {
-      emitDeny(`agent-team 门禁异常，按安全边界拒绝：${err.message}`)
-    }
-    process.exit(0)
+// gate.mjs 现在是纯粹的可执行入口，不再被任何测试或模块 import——
+// KNOWN_CHECKS 已经拆到 ./lib/checks.mjs，需要它的测试从那里 import。
+// 因此这里不需要「我是不是被当作 hook 直接执行」的守卫，main() 无条件跑。
+//
+// 历史教训（曾经加过这样一道守卫，已整体删除）：判断用的是
+// `resolve(process.argv[1]) === fileURLToPath(import.meta.url)`。
+// resolve() 不解析 symlink/junction，而 Node 对主入口的 import.meta.url
+// 做 realpath——经 symlink/junction 挂载执行时（本插件的开发期挂载方式，
+// 见 scripts/dev-link.mjs）两侧路径必然不相等，守卫误判「被 import」，
+// main() 永不执行，门禁静默 fail open（exit 0、零 stdout、零 stderr）。
+try {
+  main()
+} catch (err) {
+  // gate.mjs 自身异常：派发白名单是 fail closed。
+  if (CHECK === 'delegation') {
+    emitDeny(`agent-team 门禁异常，按安全边界拒绝：${err.message}`)
   }
+  process.exit(0)
 }

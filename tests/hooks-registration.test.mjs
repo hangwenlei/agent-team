@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
-import { KNOWN_CHECKS } from '../hooks/gate.mjs'
+import { KNOWN_CHECKS } from '../hooks/lib/checks.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
@@ -74,10 +74,7 @@ test('args[1] 是 gate.mjs 的 KNOWN_CHECKS 认得的检查名', () => {
 // 但刻意不要求「每一项 matcher 都必须是 ^Agent$」：M1 会有 H3/H4 注册在
 // Edit|Write 上，那样写的话这条测试将来必错。
 function allHookCommands() {
-  const groups = [
-    ...(hooksConfig.hooks?.PreToolUse ?? []),
-    ...(hooksConfig.hooks?.PostToolUse ?? []),
-  ]
+  const groups = Object.values(hooksConfig.hooks ?? {}).flat()
   return groups.flatMap((group) => group.hooks ?? [])
 }
 
