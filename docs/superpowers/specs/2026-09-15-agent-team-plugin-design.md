@@ -226,7 +226,12 @@ H1/H3/H4 是安全边界，坏了要挡住；H2 是流程辅助，坏了不该�
 
 **注记（复审 out-of-scope 观察，先记下免得 M1 踩）**：`gate.mjs` 的 `emitDeny`
 目前把 `hookEventName` 硬编码为 `PreToolUse`；H5 注册在 `PostToolUse` 上，
-等它落地时这里必须参数化，否则 H5 的拒绝会带着错误的事件名。
+等它落地时这里必须参数化，否则 H5 的拒绝会带着错误的事件名。`gate.mjs` 对
+`tool_name` 的两处判断（非字符串 deny、非 Agent 静默）同样对所有检查项
+一视同仁：M1 的 H3/H4 注册在 `Edit|Write` 上，检查名进 `KNOWN_CHECKS` 后
+会在「非 Agent 静默」那行被吃掉；H5 是流程辅助（本节表格已注明坏了不该
+阻断），却会因「非字符串 deny」而 fail closed。H3/H4/H5 落地时，这两处
+判断必须与 `emitDeny` 的 `hookEventName` 一并按 CHECK 参数化。
 
 ### 6.0 派发门禁 H1 的五条规则（M0 实施时补；前三条来自安全评审，第 4 条来自 U3 实测，第 5 条来自整分支复审）
 
