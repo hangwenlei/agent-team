@@ -8,6 +8,16 @@
 // 相反），这里补对称的覆盖：ctx 不可读、role 判定、deny 传导、以及
 // NotebookEdit 的路径字段名（这条是本任务实现时发现的真实分支，见下方
 // 具体测试的注释）都要经真实子进程走一遍，不能只信纯函数测试。
+//
+// 评审三轮 Minor 4：下面每条测试都用 makeRun() 造出 { projectDir, pluginDir }
+// 并在 finally 里清理两者，但 pluginDir 从未被真正用到——gate.mjs 的
+// ROOT = join(HERE, '..') 是硬编码的真实仓库根，读的是仓库根那份真实
+// stages.json（Task 2 的设计，测试帮手改不了它，跟 tests/gate-readiness.
+// test.mjs 的既有取舍一致）。继续调用 makeRun 并清理 pluginDir 只是为了
+// 不在系统临时目录里留垃圾，不代表这些测试真的控制了 stages.json 的内容；
+// 涉及 run 目录内产物归属判定的用例（"00-contract.md"/"state.json"那几条）
+// 全部依赖仓库根真实 stages.json 里 S1 是 at-pm、S5 是 at-backend 这两条
+// 事实，不是夹具决定的。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -60,6 +70,10 @@ test('writepath：run 存在但 project.json 坏了——仍然 fail closed，�
         '放宽到了"run 存在但读不出来"这一类，写坏 project.json 就变成了绕过 H3 的办法',
     )
     assert.equal(out.permissionDecision, 'deny')
+    // 评审三轮 Minor 5：只断言 deny 抓不住"因为别的原因凑巧也 deny"这类
+    // 问题（比如 kind 分类错了、走到了别的 deny 分支）——理由必须真的
+    // 指向"读不到运行上下文"，不是巧合撞上了同一个决定。
+    assert.match(out.permissionDecisionReason, /运行上下文/)
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })
@@ -89,14 +103,9 @@ test('writepath：current-run 内容含路径穿越字符——仍然 fail close
   }
 })
 
-// 评审顾虑 1（Task 4 复审）：这条原来断言的是相反的结果（deny），依据是
-// "ctx.ok 校验必须先于主线程豁免"。评审指出那个顺序会自己把自己锁死：
-// 规格 §6 表格里 H1 明写"派发白名单（全部层级，含主线程）"，H3 只写
-// "per-role 写路径隔离"，没有"含主线程"——两行是刻意写得不一样的。
-// 且建第一个 run 之前 .agent-team 还不存在，ctx.ok 必然是 false；如果
-// fail-closed 判在前面，从主线程（无 agent_type）写 .agent-team/project.json
-// 这类自举动作会被永久拒绝，第一个 run 永远建不出来，门禁把自己锁在门外。
-// 现在改成"没有 agent_type 就放行"排在 ctx.ok 判定之前。
+// MAIN（无 agent_type）豁免必须排在 ctx.ok 判定之前——理由（规格 §6 表格
+// H1/H3 的措辞差异、不排前面会怎样自举死锁）见 hooks/gate.mjs 里这段判定
+// 上方的注释，不在这里重复。
 test('writepath：没有 agent_type（真·主线程）时放行，即使 ctx.ok 为 false——不会自己把自己锁死', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h3-main-cwd-'))
   try {
@@ -119,13 +128,9 @@ test('writepath：没有 agent_type（真·主线程）时放行，即使 ctx.ok
   }
 })
 
-// Task 4 二轮复审：这条原来断言"有 agent_type 时 ctx.ok 为 false 仍然
-// deny"，依据是"MAIN 豁免只认真·无 agent_type"。评审指出这个依据本身是
-// 对的，但用错了修复——死锁的真正解法不是扩大 MAIN 豁免，而是让
-// readRunContext 把"没有 run"（kind:'no-run'）和"run 读不出来"
-// （kind:'unreadable'）分开：前者不管调用者带不带 agent_type、是不是
-// 具名角色，都该放行（+ stderr 留痕）。这条改成断言 allow，直接验证
-// "有 agent_type 但没有 run"不会被过度收紧成 deny。
+// kind:'no-run' 的判定不区分调用者带不带 agent_type——定义与理由见
+// hooks/lib/runctx.mjs 头部注释。这条验证"有名有姓的角色"这一般情形，
+// 下面那条验证死锁场景本身（at-pm 写 project.json）。
 test('writepath：没有 run 时，有名有姓的角色（非 MAIN）也放行——按 no-run 处理，不因为不是 MAIN 就被收紧', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h3-norun-named-cwd-'))
   try {
@@ -150,10 +155,9 @@ test('writepath：没有 run 时，有名有姓的角色（非 MAIN）也放行�
   }
 })
 
-// 这条是死锁场景本身，字面对应评审举的例子：settings.json 的 agent 键把
-// at-pm 钉成主线程 agent 时，主线程的 hook 输入带 agent_type（docs/05-M0-
-// 结论.md「次要事实」），不享受"无 agent_type"那条豁免；如果 readRunContext
-// 不区分 no-run/unreadable，这次调用会在"建出第一个 run 之前"被永久拒绝。
+// 死锁场景本身：settings.json 的 agent 键把 at-pm 钉成主线程 agent 时，
+// 主线程的 hook 输入带 agent_type（docs/05-M0-结论.md「次要事实」），不
+// 享受上一条"无 agent_type"的豁免，走的是这条"kind:'no-run' 一般性放行"。
 test('writepath：没有 run 时，被 settings.json 钉成主线程的 at-pm 写 project.json 不受阻——这正是死锁场景本身', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h3-bootstrap-cwd-'))
   try {
@@ -275,18 +279,13 @@ test('writepath：NotebookEdit 用 notebook_path 而不是 file_path 也能被�
   }
 })
 
-// 评审顾虑 1 的"相关情形"：settings.json 的 agent 键把 at-pm 钉成主线程 agent
-// 时，主线程的 hook 输入带 agent_type（值为 at-pm，docs/05-M0-结论.md
-// 「次要事实」——归一化前后是否带插件前缀未直接观测到，但 callerOf 两种
-// 形态都能处理，见 hooks/lib/decide.mjs 的 stripPluginPrefix）。这种配置下
-// at-pm 不是 callerOf 判定的 MAIN，会作为一个有名有姓的角色走到 per-role
-// 判定，不享受上面两条"无 agent_type"测试豁免的那条路。这条钉住：只要
-// run 已经存在（ctx.ok 为 true），at-pm 写它自己在 S1 产出的 00-contract.md
-// 不会被当成"写别人的地盘"拒绝——PROJECT.paths 里根本没有 at-pm 这个键，
-// 但 decideWritePath 的 runDir 豁免先于 owners 查找生效（纯函数层面
-// tests/writepath.test.mjs「本趟 run 目录下的产物一律放行」已测过，这里
-// 补子进程级证据，直接回应评审"请确认这条路径下 at-pm 写
-// .../00-contract.md 不会被拒"）。
+// at-pm 不是 callerOf 判定的 MAIN（settings.json 钉住主线程时 hook 输入带
+// agent_type，见上面的死锁场景测试），会作为有名有姓的角色走到 run 目录
+// 内的产物归属判定。这条钉住：at-pm 写它自己在 S1 产出的 00-contract.md
+// 放行——依据是仓库根真实 stages.json 里 S1.role === 'at-pm'、
+// S1.produces 含 '00-contract.md'（评审三轮 Important 2 收紧之后，run
+// 目录下的合法写入集是"自己阶段的 produces"，不再是"目录下任何东西"，
+// 见 hooks/lib/writepath.mjs 里 decideWritePath 的用法注释）。
 test('writepath：被 settings.json 钉成主线程的 at-pm（带 agent_type）写 run 目录下的 00-contract.md 不受阻', () => {
   const dirs = makeRun({ runId: 'r1', project: PROJECT })
   try {
@@ -305,6 +304,63 @@ test('writepath：被 settings.json 钉成主线程的 at-pm（带 agent_type）
       '',
       'at-pm 写自己在 run 目录下的产物不该被 H3 拒绝，否则 S1 完不成、整条阶段链起不来',
     )
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 评审三轮 Important 2 的子进程级证据：run 目录下的写入现在按 ctx.stages
+// 收紧到"自己阶段的 produces"。00-contract.md 是 S1 的产物、归 at-pm——
+// at-backend 写它必须 deny，且理由要点名真正的阶段与角色，不能只断言
+// deny（那样抓不住"stages 传错/传漏"这类问题）。
+test('writepath：run 目录下写别人阶段的产物——仍然 deny，理由点名哪个阶段、归谁', () => {
+  const dirs = makeRun({ runId: 'r1', project: PROJECT })
+  try {
+    const input = {
+      tool_name: 'Edit',
+      agent_type: 'agent-team:at-backend',
+      tool_input: {
+        file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md'),
+      },
+    }
+    const { stdout, status } = run('writepath', input, undefined, dirs.projectDir)
+    const out = decisionOf(stdout)
+
+    assert.equal(status, 0)
+    assert.ok(out, '00-contract.md 是 S1 的产物、归 at-pm，at-backend 写它必须 deny')
+    assert.equal(out.permissionDecision, 'deny')
+    assert.match(out.permissionDecisionReason, /at-pm/)
+    assert.match(out.permissionDecisionReason, /S1/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// state.json 不是任何阶段的 produces——它是运行状态文件，H2 就绪门禁的
+// artifactExists 就是在 run 目录下解析的，H4/H5 也要读它。如果角色能在
+// run 目录下随便写，state.json 首当其冲：改写它就能伪造后续门禁的判据。
+test('writepath：run 目录下写 state.json——仍然 deny，它不是任何阶段的产物', () => {
+  const dirs = makeRun({ runId: 'r1', project: PROJECT })
+  try {
+    const input = {
+      tool_name: 'Edit',
+      agent_type: 'agent-team:at-backend',
+      tool_input: {
+        file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json'),
+      },
+    }
+    const { stdout, status } = run('writepath', input, undefined, dirs.projectDir)
+    const out = decisionOf(stdout)
+
+    assert.equal(status, 0)
+    assert.ok(
+      out,
+      'state.json 落在 run 目录下但不是任何阶段的产物——如果这里放行了，说明 run 目录' +
+        '豁免又退回了"目录下任何东西都放行"的旧行为',
+    )
+    assert.equal(out.permissionDecision, 'deny')
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })

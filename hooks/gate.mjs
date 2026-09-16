@@ -158,26 +158,11 @@ function main() {
     if (role === MAIN) process.exit(0)
 
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
-    // Task 4 复审 2：ctx.ok 为 false 时不能笼统 fail closed——readRunContext
-    // 用 ctx.kind 区分了两种性质完全不同的失败（定义见 hooks/lib/runctx.mjs
-    // 头部注释）：
-    //   'no-run'     压根没有进行中的 run。这不是「判不出来」，是门禁做出
-    //                了一个有依据的判定："这次调用不归我管"——H3 的前提是
-    //                「一个 run 正在跑，角色各自认领了地盘」，没有 run 就
-    //                没有地盘。按 H2 的先例 fail open + stderr 留痕，不能
-    //                静默（静默的放行和门禁坏掉长得一模一样）。不这样区分
-    //                的话，建第一个 run 之前 .agent-team 还不存在，ctx.ok
-    //                必然是 false；如果笼统 fail closed，从主线程（或被
-    //                settings.json 钉成主线程的具名角色，比如 at-pm）写
-    //                .agent-team/project.json 这个自举动作永远做不成，
-    //                第一个 run 永远建不出来，门禁把自己锁在门外——这才是
-    //                自举死锁真正的解法，上面的 MAIN 豁免只覆盖了"确实没有
-    //                agent_type"这一种情形，覆盖不了被钉成具名角色的主线程。
-    //   'unreadable' run 存在但读不出来（state.json/project.json 坏了、
-    //                runId 含穿越字符等）。门禁真的判不出来，规格 §6 fail
-    //                closed 说的是这种情形，继续拒绝。这条边界不能放松：
-    //                一个被写坏的 project.json 必须继续落在这里，否则把
-    //                project.json 写坏就成了绕过 H3 per-role 隔离的办法。
+    // ctx.ok 为 false 时按 ctx.kind 分派，不能笼统 fail closed。两种 kind
+    // 的定义、为什么要分、不分会怎样自举死锁——权威解释在
+    // hooks/lib/runctx.mjs 头部注释，不在这里重复第二遍：'no-run' 按 H2
+    // 先例 fail open + stderr 留痕（不能静默，静默的放行和门禁坏掉长得
+    // 一模一样）；'unreadable' 继续 denyAndExit。
     if (!ctx.ok) {
       if (ctx.kind === 'no-run') {
         process.stderr.write(
@@ -194,17 +179,20 @@ function main() {
 
     // Edit/Write 的路径字段是 tool_input.file_path；NotebookEdit 的路径字段
     // 是 tool_input.notebook_path，它的工具 schema 里根本没有 file_path。
-    // 只读 file_path 的话，每一次 NotebookEdit 调用都会拿到 undefined，
-    // 命中 decideWritePath「没有可判定路径」那条分支而无条件放行——
-    // checks.mjs 的 toolNames 把 NotebookEdit 列进 H3 的覆盖范围就白列了，
-    // 这道闸对它会静默失效。两个字段互斥（同一次调用只会有其中一个），
-    // 用 ?? 兜底取到真正存在的那个。
-    const filePath = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path
+    // 按 tool_name 精确分派，不用 ?? 兜底——?? 依赖"两个字段互斥"这个对
+    // 工具 schema 的假设，而门禁自己没有办法验证这个假设成立；tool_name
+    // 在这里已经确定是 Edit/Write/NotebookEdit 之一（main() 顶部
+    // toolNames 校验过），按它分派更严格，成本只有一行（评审三轮 Minor 2）。
+    const filePath =
+      input.tool_name === 'NotebookEdit'
+        ? input?.tool_input?.notebook_path
+        : input?.tool_input?.file_path
     const r = decideWritePath({
       role,
       filePath,
       project: ctx.project,
       runDir: ctx.runDir,
+      stages: ctx.stages,
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
   }
