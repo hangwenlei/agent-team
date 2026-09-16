@@ -13,10 +13,16 @@ import { fileURLToPath } from 'node:url'
 
 export const GATE = fileURLToPath(new URL('../../hooks/gate.mjs', import.meta.url))
 
-export function run(check, input, gate = GATE) {
+// cwd 是可选的第四个参数（默认继承调用方进程的 cwd，与此前行为一致）。
+// H2（readiness）用 process.cwd() 当「用户项目根」去找 .agent-team——
+// 要单测「项目根没有进行中的 run」这条分支，必须能把子进程的 cwd 钉在一个
+// 干净的临时目录上，不能依赖仓库根此刻恰好有没有 .agent-team（那是环境
+// 状态，不是这条分支的契约）。
+export function run(check, input, gate = GATE, cwd = undefined) {
   const result = spawnSync(process.execPath, [gate, check], {
     input: typeof input === 'string' ? input : JSON.stringify(input),
     encoding: 'utf8',
+    cwd,
   })
   return { stdout: result.stdout ?? '', stderr: result.stderr ?? '', status: result.status }
 }

@@ -11,12 +11,18 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
-import { decideDelegation } from './lib/decide.mjs'
+import { decideDelegation, stripPluginPrefix } from './lib/decide.mjs'
 import { denyOutput } from './lib/deny.mjs'
+import { readRunContext } from './lib/runctx.mjs'
+import { decideReadiness } from './lib/readiness.mjs'
 
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..')
+// 门禁读的运行状态在**用户项目**里，不在插件目录里。
+// hook 以用户项目为 cwd 运行，所以用 process.cwd()；
+// 插件自身的文件（roster.json、stages.json）仍用 ROOT。
+const ROOT_PROJECT = process.cwd()
 
 function readStdin() {
   try {
@@ -95,8 +101,32 @@ function main() {
     if (result.decision === 'deny') denyAndExit(result.reason, spec.event)
   }
 
-  // readiness / writepath / contract / deliverable / stop-gate 的判定
-  // 分别在 Task 3–6 接入，此处先只做分派。
+  if (CHECK === 'readiness') {
+    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    // H2 是流程辅助：读不到运行上下文时 fail open，但规格 §6 写的是
+    // allow + warning，不是静默放行——必须留痕，不能一声不吭就 exit(0)。
+    // stderr 是这个代码库已有的告警通道（未知检查项那条路径也走它），
+    // 跟着用；不改用 additionalContext，因为 PreToolUse 是否支持那个
+    // 字段本项目没有实测过，换一个同样没验过的通道不会让告警更可靠。
+    // 这条告警在会话里是否可见，本项目也没有实测过，留给 Task 7 核实。
+    if (!ctx.ok) {
+      process.stderr.write(
+        `agent-team H2 就绪门禁：读不到运行上下文（${ctx.reason}），按规格 §6 fail open——本次放行，不拦截这次调用。\n`,
+      )
+      process.exit(0)
+    }
+    const target = stripPluginPrefix(input?.tool_input?.subagent_type)
+    if (!target) process.exit(0)
+    const r = decideReadiness({
+      targetRole: target,
+      stages: ctx.stages,
+      artifactExists: ctx.artifactExists,
+    })
+    if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
+  }
+
+  // writepath / contract / deliverable / stop-gate 的判定
+  // 分别在 Task 4–6 接入，此处先只做分派。
 
   process.exit(0)
 }
