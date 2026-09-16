@@ -100,11 +100,30 @@ Available agents: agent-team:at-architect, agent-team:at-product
    前端 / 后端 / iOS / Android / 测试——而那正是设计里它该带的五个人。
 2. **层级约束全部由 hook 的花名册承担。** 白名单在语义上根本表达不了「谁能派给谁」，
    它只能表达「这个会话里有哪些 agent 存在」。
-3. **因此 §6 的 H1 派发门禁不是补充手段，而是层级的唯一强制手段。**
+3. **因此 §6 的 H1 派发门禁是「派发路径」的唯一强制手段——但派发不是获得 agent 的
+   唯一路径。** `context: fork` 的 skill 可以带 `agent:` 参数直接起一个 subagent，
+   全程不经过 `Agent` 工具，H1（挂在 `PreToolUse` / matcher `^Agent$` 上）看不见这条
+   路。实测见 `docs/06-U7-实测结论.md`；缓解措施见 §6.1。
 
 一个连带的诊断陷阱：角色不在宇宙里时，**hook 会先放行**（花名册认为这次派发合法），
 之后平台才报 `not found`。错误信息指向被派的一方，真正的原因却在 `at-pm.md` 的
 `tools:` 行里。`tests/roster-sync.test.mjs` 的宇宙覆盖测试就是守这一条的。
+
+### 3.3.1 更一般的表述：主线程 agent 定义的是整个会话的能力上界（M1 · U7 实测补）
+
+U4 与 U7 是同一个机制的两个观测面，只是分别撞在「agent 宇宙」与「工具面」这两层上：
+
+- **M0 · U4**：主线程 `tools: Agent(A, B)` 圈定的是整个会话能解析到的 **agent 集合**，
+  被所有子孙代理继承（本节正文）。
+- **M1 · U7**：主线程 `tools:` 行本身圈定的是整个会话的 **工具面**——某个工具（例如
+  `Skill`）不在主线程 `tools:` 里，不代表「只有主线程不能用」，而是「这棵子树里没有人
+  能用」。实测原文见 `docs/06-U7-实测结论.md` §3.3：`Skill is disabled for this
+  session, in subagents as well as here`。
+
+两条合起来是一句更一般的话：**主线程 agent 的 `tools:` 定义的是整个会话的能力上界，
+不是它自己的权限。** 给主线程角色少配一个工具或少列一个 agent 类型，影响的不是它自己，
+是它能派生出的整棵子树。配置 `at-pm.md` 的 `tools:` 行时，必须同时用这个模型去想：
+这一行既决定了「谁能被派发」（U4），也决定了「整棵树里能用哪些工具」（U7）。
 
 ## 4. 阶段链
 
@@ -280,14 +299,44 @@ U3 实测撞出的死结：
 六种退化形态（`{}`、`[]`、`null`、非对象、条目为 `null`、原型链键）由
 `tests/decide.test.mjs` 强制覆盖。
 
-### 6.1 已知边界：hook 拦不住 Bash
+### 6.1 角色工具面禁止包含 `Skill`（M1 · U7 实测补）
+
+**为什么**：`context: fork` 的 skill 可以带 `agent:` 参数直接起一个 subagent，全程不
+经过 `Agent` 工具，H1（挂在 `PreToolUse` / matcher `^Agent$` 上）看不见这条调用，派发
+门禁形同虚设。实测见 `docs/06-U7-实测结论.md`：目标在花名册白名单（宇宙）内时，fork
+拿到该角色的真实定义；目标在宇宙外时，fork 仍然成功起一个子会话，只是拿不到角色定义
+——宇宙过滤管得住「加载谁的定义」，管不住「能不能起一个 agent」。
+
+**主防线是不给工具，不是加 hook**。理由两条：一是工具注册层比拦截层硬——不在 `tools:`
+里的工具，角色的模型侧根本看不到它、调不出它，不存在「先调用再被拦」这个中间状态；
+PreToolUse hook 再严密，也是对一次已经发生的调用做事后判定，晚了一步。二是 U7 顺带
+实测证明：主线程 agent 的 `tools:` 会传导到整棵子树（`Skill is disabled for this
+session, in subagents as well as here`，见 §3.3.1）——只要 `at-pm.md` 的 `tools:` 不写
+`Skill`，这条限制自动覆盖 `at-product`/`at-architect`/全部执行角色，不需要逐个角色配置。
+
+**为什么零代价**：设计里跨角色共享契约走的是角色 frontmatter 的 `skills:` 预加载
+（见 §7 目录树的 `skills/` 一节），这与 `Skill` 工具是两回事——前者是会话启动时把
+skill 正文并入系统提示的静态机制，后者是运行时可调用、能凭 `agent:` 参数 fork 出子
+会话的动态工具。本插件设计里没有任何角色需要在运行时动态调用 skill，禁掉 `Skill`
+工具不影响 `skills:` 预加载这条路。
+
+**将来若确实需要 `Skill`**：必须先加一个 H6 门禁（`PreToolUse` / `Skill`，解析被调
+skill 的 `agent:` frontmatter 并对照花名册），不能直接放开——否则重新打开本节挡住的
+这条旁路。
+
+**本插件自己捆绑的 skill 一律不得声明 `context: fork`**：即便未来某个角色被允许持有
+`Skill` 工具，本插件自带的 skill 正文本身也不能用 `context: fork` + `agent:` 的组合去
+起 subagent，避免插件自己内建一条绕过 H1 的路。`tests/tool-surface.test.mjs` 强制这
+两条（角色 `tools:` 不含 `Skill`；本插件自带 skill 不声明 `context: fork`）。
+
+### 6.2 已知边界：hook 拦不住 Bash
 
 给了 Bash 即给了写文件能力（`echo >`、`sed -i`、`git checkout`）。
 执行角色必须保留 Bash 以跑构建与测试，因此**写路径隔离对 Edit/Write 是硬约束，
 对 Bash 是软约束**。补偿：角色正文写明红线；PostToolUse 检测越界文件改动并记 warning。
 README 明示此边界，不将其表述为沙箱。
 
-### 6.2 提示注入防护
+### 6.3 提示注入防护
 
 角色正文与下级返回一律视为数据，不视为指令。PM 角色卡内置该条款
 （自写，不抄 claude-security 的措辞）。插件自身的角色卡是第二人称祈使句，
@@ -352,7 +401,8 @@ Claude Code 无类型系统，派发提示里的 JSON 契约即全部类型系�
 | U4 | subagent 能否在一条消息内并发 spawn 多个 subagent | 是 | **S3/S5 并行扇出的前提成立**，架构师可在一条消息内并发派发多个执行角色，维持原设计不必改串行。详见 `docs/05-M0-结论.md` U4 |
 | U5 | `SubagentStop` exit 2 是否会卡死无交付物的角色 | 未测 | 故 H5 设计为记 warning 而非阻断 |
 | U6 | 一趟十角色的真实成本 | 未测 | 全为估算 |
-| U7 | 除 `Agent` 工具外，是否还有别的路径能起一个 subagent（如 `Skill`、`SendMessage`） | 未测 | **H1 是层级的唯一强制手段，而它只注册在 `PreToolUse`/`Agent` 上。若存在别的路径，那条路上没有门禁。M1 依赖 H1 之前必须先答** |
+| U7 | 除 `Agent` 工具外，是否还有别的路径能起一个 subagent（如 `Skill`、`SendMessage`） | **是（存在旁路）** | `context: fork` 的 skill 可以带 `agent:` 参数直接起一个 subagent，全程不经过 `Agent` 工具，H1 看不见。目标在花名册白名单（宇宙）内时 fork 拿到该角色真实定义；目标在宇宙外时 fork 仍成功但角色定义不加载。缓解：角色工具面一律不得包含 `Skill`，本插件自带 skill 一律不得声明 `context: fork`（§6.1，`tests/tool-surface.test.mjs` 强制）。详见 `docs/06-U7-实测结论.md` |
+| U8 | `SendMessage` 能否被 subagent 用来续起一个花名册禁止它接触的 agent | 未测 | subagent 确实持有该工具（本轮探针实证，见 `docs/06-U7-实测结论.md`），官方文档称其可续起一个已存在的 agent。能否借此拿到一个受限角色的会话、是否绕过 H1，尚未验证。M1 中段验证 |
 
 U1–U4 必须在写任何角色正文之前，用一个最小插件先验，任一为否都会改变实现路径。
 U7 优先级与 U1–U4 同级，应在 M1 第一步一并验证。
