@@ -163,6 +163,15 @@ test('contract：project.json 缺失时 H3 整体放行、H4 仍然独立拦住�
     const out = decisionOf(contractResult.stdout)
     assert.ok(out, 'project.json 缺失不能成为 H4 放行契约写入的理由')
     assert.equal(out.permissionDecision, 'deny')
+    // 评审 Minor 3：只断言 deny 抓不住"这个 deny 其实来自别处"这类问题——
+    // 比如将来有人把 runctx.mjs 里"project.json 缺失"重新归类成
+    // unreadable，deny 会照样发生，但理由会变成"读不到运行上下文"，此时
+    // 这条测试原本想证明的事（H4 自己独立判定契约保护）已经不成立了，却
+    // 会因为同样落在 fail-closed 分支而继续显示绿色。理由必须点名契约
+    // 文件本身（decideContractGuard 的 reason 里带 00-contract.md），不能
+    // 是 /运行上下文/ 这种通用的"读不到 ctx"措辞，才能真的锁死"这个 deny 是
+    // H4 自己判出来的，不是巧合撞上了别的 fail-closed 分支"。
+    assert.match(out.permissionDecisionReason, /00-contract\.md/)
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })

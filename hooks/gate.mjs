@@ -16,7 +16,7 @@ import { denyOutput } from './lib/deny.mjs'
 import { readRunContext } from './lib/runctx.mjs'
 import { decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath } from './lib/writepath.mjs'
-import { decideContractGuard } from './lib/contract-guard.mjs'
+import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -207,13 +207,16 @@ function main() {
     // 坏掉的 run（比如这里的 project.json 本身就是坏的）恰恰要 PM 动手，
     // 门禁会把自己需要的人也锁在门外，跟 H3 已经修过的自举死锁是同一个
     // 形状。at-pm 单独列出的安全性依赖什么、为什么不怕子代理冒充，见
-    // hooks/lib/contract-guard.mjs 里同一条判断的完整注释（不在这里重复
-    // 第二遍），这里只是把同一条判断提前，让它在 ctx 读不出来时也生效。
+    // hooks/lib/contract-guard.mjs 里 isContractWriter 上方的完整注释（不
+    // 在这里重复第二遍）：同一条判断提前到读 ctx 之前，从 isContractWriter
+    // 里 import，不在这里另写一份；decideContractGuard 内部那份调用是这个
+    // 函数自身对任意调用方（不只是 gate.mjs）的契约，从这条入口路径上走
+    // 不到第二遍——两处调用点服务的是不同的调用面，不是同一件事测了两遍
+    // （Task 5 评审 Important 1）。
     //
     // unreadable 对子代理继续 fail closed，这条不放松——读不到 runDir 就
     // 算不出哪个文件是契约，那时拒绝是对的；这条短路只免除 PM 自己。
-    const caller = callerOf(input)
-    if (caller === MAIN || caller === 'at-pm') process.exit(0)
+    if (isContractWriter(input?.agent_type)) process.exit(0)
 
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
     // ctx.kind 的处理照抄 writepath：'no-run' fail open + stderr 留痕，

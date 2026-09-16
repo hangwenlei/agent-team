@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { resolve } from 'node:path'
 import { decideContractGuard } from '../hooks/lib/contract-guard.mjs'
 
 const RUN = '/proj/.agent-team/runs/r1'
@@ -96,38 +97,61 @@ test('filePath 是空字符串时放行——没有可判定的目标路径', ()
 // "大小写/分隔符处理应该也对"——hooks/lib/writepath.mjs 的 norm() 曾经
 // 因为漏了 .toLowerCase() 被评审当场实测抓到（Task 4 评审 Important 1），
 // H4 比对契约路径时是同一类风险，这里真的在 Windows 上验证。
+//
+// 下面三条都用 node:test 的 { skip } 选项而不是 `if (...) return`（评审
+// Minor 2）：`if (...) return` 在 POSIX 上是"函数体一行没跑就直接判通过"，
+// node --test 的输出里这条测试看起来和真的跑过、断言过没有区别；
+// { skip } 会让 node --test 把它标成 skipped，"这条没跑"这件事看得见。
 
-test('Windows 路径段/文件名大小写不同仍判定为同一份契约文件——不能被大小写绕过 fail closed', () => {
-  if (process.platform !== 'win32') return
-  const r = decideContractGuard({
-    agentType: 'agent-team:at-product',
-    filePath: `${RUN.toUpperCase()}/00-CONTRACT.MD`,
-    runDir: RUN,
-  })
-  assert.equal(r.decision, 'deny')
-})
+// 评审 Minor 1：盘符不能硬编码成 'c:'——那会让这条测试跟仓库检出的盘符
+// 耦合，换到 D: 盘检出时，即使实现完全正确也会红（两个盘符真的不同，
+// 应该 allow，不是这条测试想验证的"同一个盘符、大小写不同"）。改成从
+// resolve(RUN) 真实解析出来的盘符里取第一个字符、翻转它的大小写，不管
+// 仓库检出在哪个盘都成立。
+function withFlippedDriveLetter(absPath) {
+  const drive = absPath[0]
+  const flipped = drive === drive.toUpperCase() ? drive.toLowerCase() : drive.toUpperCase()
+  return flipped + absPath.slice(1)
+}
+
+test(
+  'Windows 路径段/文件名大小写不同仍判定为同一份契约文件——不能被大小写绕过 fail closed',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const r = decideContractGuard({
+      agentType: 'agent-team:at-product',
+      filePath: `${RUN.toUpperCase()}/00-CONTRACT.MD`,
+      runDir: RUN,
+    })
+    assert.equal(r.decision, 'deny')
+  },
+)
 
 // resolve() 保留调用方给的原始大小写，而 runDir 走 resolve('/proj/...') 时
 // 盘符大小写来自 process.cwd()——两者不同源，不能假设两次 resolve() 出来的
 // 盘符大小写碰巧一致。
-test('Windows 盘符大小写不同（与 runDir 解析出的盘符不同源）仍判定为同一份契约文件', () => {
-  if (process.platform !== 'win32') return
-  const r = decideContractGuard({
-    agentType: 'agent-team:at-product',
-    filePath: 'c:\\proj\\.agent-team\\runs\\r1\\00-contract.md',
-    runDir: RUN,
-  })
-  assert.equal(r.decision, 'deny')
-})
+test(
+  'Windows 盘符大小写不同（与 runDir 解析出的盘符不同源）仍判定为同一份契约文件',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const filePath = withFlippedDriveLetter(`${resolve(RUN)}\\00-contract.md`)
+    const r = decideContractGuard({ agentType: 'agent-team:at-product', filePath, runDir: RUN })
+    assert.equal(r.decision, 'deny')
+  },
+)
 
-test('反斜杠路径与正斜杠 runDir 等价——分隔符差异不能造成误判', () => {
-  const r = decideContractGuard({
-    agentType: 'agent-team:at-product',
-    filePath: `${RUN.replace(/\//g, '\\')}\\00-contract.md`,
-    runDir: RUN,
-  })
-  assert.equal(r.decision, 'deny')
-})
+test(
+  '反斜杠路径与正斜杠 runDir 等价——分隔符差异不能造成误判',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const r = decideContractGuard({
+      agentType: 'agent-team:at-product',
+      filePath: `${RUN.replace(/\//g, '\\')}\\00-contract.md`,
+      runDir: RUN,
+    })
+    assert.equal(r.decision, 'deny')
+  },
+)
 
 // 相对路径按 process.cwd()（测试进程自己的 cwd，跟 RUN 这个虚构前缀无关）
 // 解析，不能被字符串上"看起来像"契约文件名就误判成契约本身——这条专门
@@ -136,4 +160,21 @@ test('反斜杠路径与正斜杠 runDir 等价——分隔符差异不能造成
 test('相对路径按 cwd 解析，不会因为文件名"看起来像"契约就被误判', () => {
   const r = decideContractGuard({ agentType: 'agent-team:at-product', filePath: '00-contract.md', runDir: RUN })
   assert.equal(r.decision, 'allow')
+})
+
+// 评审 Minor 4：上一条只钉了 allow 方向（文件名像契约但 cwd 不对→放行）；
+// deny 方向没测过——子代理真的传一个相对路径，resolve 后正好落在契约
+// 文件上，同样要被拒绝，不能"因为是相对路径就天然放行"。这里不用模块
+// 顶部的 RUN 常量（它是虚构前缀，不跟真实 cwd 对应），改用从真实
+// process.cwd() 派生出来的 runDir——相对路径就是要靠真实 cwd 解析，用
+// 虚构前缀凑不出这个场景。不涉及真实文件系统：path.resolve 是纯词法
+// 计算，不要求 .agent-team/runs/r1 真的存在于磁盘上。
+test('相对路径真的解析到契约文件时——一样拒绝，不是"相对路径天然放行"', () => {
+  const runDirFromCwd = resolve('.agent-team/runs/r1')
+  const r = decideContractGuard({
+    agentType: 'agent-team:at-product',
+    filePath: '.agent-team/runs/r1/00-contract.md',
+    runDir: runDirFromCwd,
+  })
+  assert.equal(r.decision, 'deny')
 })
