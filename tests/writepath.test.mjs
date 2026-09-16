@@ -80,8 +80,51 @@ test('不在 project.paths 里的角色不归本门禁管，放行', () => {
   assert.equal(call('at-worker-a', '/proj/anything.ts').decision, 'allow')
 })
 
-test('project 为 null 时放行——尚未跑过勘察', () => {
+test('project 为 null 时，run 目录外的普通路径放行——尚未跑过勘察，per-role 隔离没有判据', () => {
   const r = decideWritePath({ role: 'at-backend', filePath: '/proj/x.ts', project: null, runDir: RUN })
+  assert.equal(r.decision, 'allow')
+})
+
+// 全分支评审 I1：上一条的"放行"只该覆盖 project.paths 那一段。run 目录保护
+// 只依赖 runDir/stages，跟 project.json 在不在没有关系——而旧版本把
+// `!project.paths → allow` 写在整个函数最前面，于是 run 正在跑、
+// project.json 不在时（runctx.mjs 明确允许这种状态：project 为 null 且
+// ctx.ok 为 true），整块 run 目录收紧变成彻底的空操作：角色可以在 run 目录下
+// 随便写，凭空伪造别人阶段的产物去满足 H2 的 requires，或者直接改 state.json。
+// 上面那五条"run 目录下…拒绝"的用例全都带着 project: PROJECT，一条也没有
+// 覆盖缺席路径，它们在证明一件自己没在守的事。这条钉住缺席路径。
+test('project 为 null 时，run 目录下写别人阶段的产物仍然拒绝——run 目录保护不挂在 project.json 上', () => {
+  const r = decideWritePath({
+    role: 'at-backend',
+    filePath: `${RUN}/05-impl/at-frontend.md`,
+    project: null,
+    runDir: RUN,
+    stages: STAGES,
+  })
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /at-frontend/)
+  assert.match(r.reason, /S6/)
+})
+
+test('project 为 null 时，run 目录下写 state.json 仍然拒绝——它是 H4/H5 的状态来源', () => {
+  const r = decideWritePath({
+    role: 'at-backend',
+    filePath: `${RUN}/state.json`,
+    project: null,
+    runDir: RUN,
+    stages: STAGES,
+  })
+  assert.equal(r.decision, 'deny')
+})
+
+test('project 为 null 时，run 目录下写自己阶段的产物仍然放行——收紧的是别人的地盘，不是自己的', () => {
+  const r = decideWritePath({
+    role: 'at-backend',
+    filePath: `${RUN}/05-impl/at-backend.md`,
+    project: null,
+    runDir: RUN,
+    stages: STAGES,
+  })
   assert.equal(r.decision, 'allow')
 })
 

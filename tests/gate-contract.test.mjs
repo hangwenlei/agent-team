@@ -137,28 +137,68 @@ test('contract：NotebookEdit 用 notebook_path 也能正确判定为契约文�
   }
 })
 
-// 核心独立性证据（Task 5 简报「一个你必须自己想清楚的点」）：project.json
-// 缺失时 decideWritePath 第一行就整体放行，H3 对这次调用完全不拦；H4 不读
-// project.json，不能借这个前提。用同一个 input 分别跑 writepath 和 contract
-// 两个检查项，把对比做成看得见的证据，不只断言"H4 deny"（那样抓不住"H4
-// 也悄悄依赖了 project.json、只是这次恰好没触发"这类问题）。
-test('contract：project.json 缺失时 H3 整体放行、H4 仍然独立拦住——H4 不借 H3 的前提', () => {
+// 核心独立性证据（Task 5 简报「一个你必须自己想清楚的点」）：H4 不读
+// project.json、也不读 stages.json，它的判定不借 H3 的任何前提。
+//
+// 全分支评审 I1 之后这条对比换了形状。旧版本拿同一个 input（run 目录下的
+// 00-contract.md）分别跑 H3 与 H4，靠"project.json 缺失 → H3 整体放行"当
+// 对照面。I1 修掉的正是那条缝：run 目录保护只依赖 runDir/stages，跟
+// project.json 在不在无关，缺席时 H3 照样按 stages.json 拦住"写别人阶段的
+// 产物"，而契约文件（S1 的产物、归 at-pm）恰好就是其中一条。于是"同一条
+// 路径上 H3 放行、H4 拒绝"这种单输入 A/B 已经构造不出来了——H4 只在
+// runDir/00-contract.md 这一条路径上拒绝，而这条路径现在 H3 也拦。改成共用
+// 同一个"没有 project.json"的 run、分三步看：
+//   ① 前提核实：run 目录外的普通源码路径——这是 I1 收窄之后
+//      `!project.paths → allow` 唯一还管的范围，H3 在这里确实整体没有判据、
+//      放行（如果有人把这条早退删了，这里会因为 project.paths 取不到而落进
+//      gate.mjs 的兜底 fail closed，assert 会红，不是恒真断言）。
+//   ② 独立性本身：同一个 run、同一个子代理写契约——H4 仍然拒，且理由点名
+//      契约文件，不是"读不到运行上下文"那种撞上别的 fail-closed 分支的措辞。
+//   ③ 顺带钉住 I1 在子进程级也成立：H3 在契约路径上现在也拒，但走的是它
+//      自己那条 run 目录归属判定（理由点名 S1 与 at-pm），跟 H4 的理由不是
+//      同一件事——两道闸同时触发、判据各自独立，这正是 Task 7 清单第 5 条
+//      记下的那个观察。
+test('contract：project.json 缺失时 H3 对普通路径整体放行、H4 仍然独立拦住契约——H4 不借 H3 的前提', () => {
   const dirs = makeRun({ runId: 'r1' }) // 不传 project，makeRun 就不会写 project.json
   try {
+    const contractPath = join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md')
     const input = {
       tool_name: 'Write',
       agent_type: 'agent-team:at-product',
-      tool_input: { file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md') },
+      tool_input: { file_path: contractPath },
     }
 
-    const writepathResult = run('writepath', input, undefined, dirs.projectDir)
+    // ① 前提核实：run 目录外的普通路径，H3 没有判据可用 → 放行。
+    const plainWrite = run(
+      'writepath',
+      {
+        tool_name: 'Write',
+        agent_type: 'agent-team:at-product',
+        tool_input: { file_path: join(dirs.projectDir, 'src', 'server', 'api.ts') },
+      },
+      undefined,
+      dirs.projectDir,
+    )
     assert.equal(
-      writepathResult.stdout.trim(),
+      plainWrite.stdout.trim(),
       '',
-      '前提核实：project.json 缺失时 H3 确实整体放行（decideWritePath 第一行），' +
+      '前提核实：project.json 缺失时 H3 的 per-role 隔离那一段确实没有判据、整体放行，' +
         '不然下面 H4 的对比就立不住',
     )
 
+    // ③ I1 的子进程级证据：同样是 project.json 缺席，run 目录内就不放行了。
+    const contractWritepath = decisionOf(
+      run('writepath', input, undefined, dirs.projectDir).stdout,
+    )
+    assert.ok(
+      contractWritepath,
+      'I1：run 目录保护不挂在 project.json 上——project.json 缺席时，子代理写别人阶段的' +
+        '产物（契约是 S1 的产物）必须仍然被 H3 拦住',
+    )
+    assert.match(contractWritepath.permissionDecisionReason, /S1/)
+    assert.match(contractWritepath.permissionDecisionReason, /at-pm/)
+
+    // ② 独立性本身。
     const contractResult = run('contract', input, undefined, dirs.projectDir)
     const out = decisionOf(contractResult.stdout)
     assert.ok(out, 'project.json 缺失不能成为 H4 放行契约写入的理由')

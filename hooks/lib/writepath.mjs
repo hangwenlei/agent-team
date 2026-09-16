@@ -62,11 +62,22 @@ function stageOwnerOfRunPath(stages, rd, target) {
 }
 
 export function decideWritePath({ role, filePath, project, runDir, stages }) {
-  if (!project || typeof project !== 'object' || !project.paths) return { decision: 'allow' }
   if (typeof filePath !== 'string' || !filePath) return { decision: 'allow' }
 
   const target = norm(filePath)
 
+  // 全分支评审 I1：下面这整块 run 目录保护必须排在 project.paths 的整体放行
+  // 之前。它只依赖 runDir 与 stages，跟 project.paths 没有任何关系——而旧版本
+  // 把 `!project.paths → allow` 写在函数第一行，等于把整块保护挂在
+  // "project.json 存在"之上。hooks/lib/runctx.mjs 明确允许 project.json 不
+  // 存在（返回 project: null 且 ctx.ok 为 true，见那里第 126 行），于是
+  // "run 正在跑、project.json 不在"这个合法状态下，H3 是一个彻底的空操作：
+  // 下面注释里论证的那套威胁模型（伪造别人阶段的产物去满足 H2 的 requires、
+  // 直接改 H4/H5 的状态来源 state.json）一条都不成立。而当时"证明"这块收紧
+  // 生效的五条测试全部带着 project: PROJECT，没有一条覆盖缺席路径——它们在
+  // 证明一件自己没在守的事。缺席路径的覆盖见 tests/writepath.test.mjs 里
+  // "project 为 null 时，run 目录下…"那三条，以及 tests/gate-contract.test.mjs
+  // 的子进程级对照。
   if (runDir) {
     const rd = norm(runDir)
     if (target === rd || target.startsWith(`${rd}/`)) {
@@ -99,6 +110,13 @@ export function decideWritePath({ role, filePath, project, runDir, stages }) {
       }
     }
   }
+
+  // 以下是 project.paths 的 per-role 隔离。判据只有一个来源：
+  // .agent-team/project.json 的 paths。它不存在、或者存在但没有 paths 字段
+  // 时，这一段没有任何可用的判据，不表态——但这条早退只跳过这一段，跳不过
+  // 上面的 run 目录保护（全分支评审 I1：它曾经排在函数第一行，把两件事绑成
+  // 了一件）。
+  if (!project || typeof project !== 'object' || !project.paths) return { decision: 'allow' }
 
   const owners = project.paths
   if (!Object.hasOwn(owners, role)) return { decision: 'allow' }
