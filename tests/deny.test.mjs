@@ -4,7 +4,10 @@
 // 只能靠人工代码走读验证，是「看起来健康、实际什么都不做」的失效形状，这个
 // 项目一路被咬的就是这个（M0 的 junction 守卫、Task 1 一轮评审的 emitDeny
 // 只换事件名不换形状）。抽成纯函数后可以直接单测三个分支，不需要经过子进程，
-// 也不用等 Task 6 的判定逻辑落地（Task 1 二轮评审）。
+// 也不用等 Task 6 的判定逻辑落地（Task 1 二轮评审）。Task 6 现在已经落地
+// （tests/gate-deliverable.test.mjs 有子进程级的 exit 2 用例），但这份直接
+// 单测没有因此变得多余：那边验证的是"gate.mjs 这条传导链接对了"，这里验证
+// 的是"denyOutput 这个契约本身没错"，两者答不同的问题。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { denyOutput } from '../hooks/lib/deny.mjs'
@@ -19,10 +22,12 @@ test('PreToolUse：stdout 上的 permissionDecision JSON，exitCode 0', () => {
   assert.equal(parsed.hookSpecificOutput.permissionDecisionReason, '测试理由')
 })
 
-// 这是本任务风险最高的一处：SubagentStop 的拒绝走 exit 2 + stderr（U5 实测，
-// docs/07-U5-U6-U8-实测结论.md §1），不是 PreToolUse 那套 stdout JSON——
-// 在 gate.mjs 里这条分支要等 Task 6 给 stop-gate 接上判定逻辑才会被真实调用，
-// 这条测试直接执行 denyOutput 本身，不必等到那时候。
+// 这是 Task 1 落地时风险最高的一处：SubagentStop 的拒绝走 exit 2 + stderr
+// （U5 实测，docs/07-U5-U6-U8-实测结论.md §1），不是 PreToolUse 那套 stdout
+// JSON——当时 gate.mjs 里这条分支要等 Task 6 给 stop-gate 接上判定逻辑才会
+// 被真实调用，这条测试直接执行 denyOutput 本身，不必等到那时候。Task 6 现在
+// 已经落地，这条分支也已经能经 gate.mjs 真实调用到了，但直接测 denyOutput
+// 仍然是必要的一半——见本文件顶部的说明。
 test('SubagentStop：stderr 上的理由，exitCode 2', () => {
   const out = denyOutput('测试理由', 'SubagentStop')
   assert.equal(out.stream, 'stderr')

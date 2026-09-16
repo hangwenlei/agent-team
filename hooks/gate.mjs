@@ -17,6 +17,7 @@ import { readRunContext } from './lib/runctx.mjs'
 import { decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
+import { decideDeliverable } from './lib/deliverable.mjs'
 
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -48,10 +49,16 @@ function loadRoster() {
 
 // 拒绝的输出契约（按 hook 事件分派 stdout/stderr/exitCode）抽在
 // hooks/lib/deny.mjs 的 denyOutput 里，是纯函数，被 tests/deny.test.mjs
-// 直接单测过三个分支——包括 SubagentStop 那条 exit 2 + stderr 分支，它在
-// Task 6 给 stop-gate 接上判定逻辑之前，从这条路径永远不会被真实执行到
-// （Task 1 二轮评审）。这里只做 I/O：拿到结果、写对应的流、退出，永不返回，
-// 调用点之后不需要再写 exit。
+// 直接单测过三个分支——包括 SubagentStop 那条 exit 2 + stderr 分支。单独抽
+// 出来测是 Task 1 定下的：当时 stop-gate 还没有判定逻辑，这条分支从
+// gate.mjs 这条路径永远走不到，只能靠人工代码走读，是「看起来健康、实际
+// 什么都不做」的失效形状（Task 1 二轮评审）。Task 6 给 stop-gate 接上判定
+// 逻辑之后，这条分支已经能被真实执行到了（下面 CHECK === 'stop-gate' 分支
+// 的 denyAndExit 调用，回归见 tests/gate-deliverable.test.mjs 的 exit 2
+// 用例），但 denyOutput 仍然保持纯函数、仍然被直接单测——子进程级测试证明
+// "传导链接对了"，纯函数测试证明"契约本身没错"，两层不冲突，答的是不同的
+// 问题。这里只做 I/O：拿到结果、写对应的流、退出，永不返回，调用点之后
+// 不需要再写 exit。
 function denyAndExit(reason, event) {
   const { stream, text, exitCode } = denyOutput(reason, event)
   process[stream].write(text)
@@ -252,7 +259,83 @@ function main() {
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
   }
 
-  // deliverable / stop-gate 的判定分别在 Task 6 接入，此处先只做分派。
+  if (CHECK === 'stop-gate' || CHECK === 'deliverable') {
+    // H5b（stop-gate）判的是"正在停止的这个 subagent 自己"：SubagentStop 是
+    // 生命周期事件，agent_type 就是这次事件所属的那个 subagent——
+    // docs/07-U5-U6-U8-实测结论.md §4 实测过，平台真实发的是全限定名
+    // "agent-team:at-xxx"，必须 stripPluginPrefix。
+    //
+    // H5a（deliverable）判的是"刚被派发、已经返回的那个目标角色"，不是发起
+    // 这次 Agent 调用的调用者。PostToolUse 保留同一次调用的 tool_input：
+    // 调用者是 agent_type，目标是 tool_input.subagent_type——跟 H1
+    // （decideDelegation）、H2（上面 readiness 分支）在 PreToolUse/Agent 上
+    // 读的是同一套字段，同一个字段在两个事件里含义不同，不能混用。这里如果
+    // 也读 agent_type，H5a 查的会是调用者而不是刚返回的那个角色：主线程
+    // 发起的顶层派发（agent_type 缺失）会被整段跳过，PM 发起的派发会查成
+    // PM 自己的阶段——H5a 作为权威记录这件事就形同虚设。这是 Task 6 落地
+    // 时发现的、简报没写对的地方，不在简报明确列出的"已经过时的地方"那
+    // 四条里。
+    const rawTarget =
+      CHECK === 'stop-gate' ? input?.agent_type : input?.tool_input?.subagent_type
+    if (!rawTarget) {
+      // 没有可判定的目标角色——跟 H2 的 !target 分支同一类情形（Task 3
+      // 评审 Minor 5）：不是"这次调用与本检查项无关"（那种情况在 toolNames
+      // 前置校验里已经处理并保持沉默），是"这次事件确实归本检查项管，但
+      // 认不出该查谁"，同样要放行 + 留痕，不能悄悄放行。
+      const label = CHECK === 'stop-gate' ? 'H5b 交付物拦截' : 'H5a 交付物记录'
+      process.stderr.write(
+        `agent-team ${label}：这次事件没有可判定的目标角色（agent_type 或 ` +
+          `tool_input.subagent_type 缺失），跳过本次校验、放行。\n`,
+      )
+      process.exit(0)
+    }
+    const role = stripPluginPrefix(rawTarget)
+
+    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    // H5 两道都是 fail open（规格 §6：流程辅助，坏了不该把整趟跑卡死）——
+    // 且不像 H3/H4 要按 ctx.kind 分派：H5 从头到尾没有 fail closed 的那
+    // 一半，no-run 与 unreadable 在这里一视同仁放行。但不能静默：跟着
+    // H2/H3/H4 的先例，读不到运行上下文时要往 stderr 留一行痕迹，否则
+    // "放行"和"门禁坏了"长得一模一样。
+    if (!ctx.ok) {
+      const label = CHECK === 'stop-gate' ? 'H5b 交付物拦截' : 'H5a 交付物记录'
+      process.stderr.write(
+        `agent-team ${label}：读不到运行上下文（${ctx.reason}），本次放行、不拦截。` +
+          `若你以为有进行中的 run，检查 .agent-team/current-run。\n`,
+      )
+      process.exit(0)
+    }
+
+    const r = decideDeliverable({ role, stages: ctx.stages, artifactExists: ctx.artifactExists })
+    if (r.ok) process.exit(0)
+
+    if (CHECK === 'stop-gate') {
+      // H5b：真拦截。必须走 SubagentStop 契约（exit 2 + stderr），不是
+      // PreToolUse 那套 permissionDecision JSON——U5 实测（docs/07 §1）拦住
+      // subagent 停止靠的就是 exit 2，在这个事件上发 permissionDecision
+      // 形状等于「平台不认 + exit 0」＝静默放行，H5b 会变成一个看起来健康
+      // 的空操作。denyAndExit 按事件分派输出契约，永不返回，这里不需要、
+      // 也不应该在它之后再写 process.exit。
+      denyAndExit(r.reason, spec.event)
+    } else {
+      // H5a：权威记录。不 block，只把事实留在会话里——因为 H5b 到点会被
+      // 平台静默放行，父级看到的是干净的一次通过，中间发生过的拦截不留
+      // 任何痕迹。这条 warning 就是那个不能丢的痕迹：不能被误读成"子代理
+      // 正常返回=这一段已经完成"。写完直接落到本函数末尾共用的
+      // process.exit(0)，不需要在这里另写一次。
+      process.stdout.write(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: spec.event,
+            additionalContext:
+              `⚠️ agent-team 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，` +
+              `但磁盘上还没有。SubagentStop 已经尝试拦截过，但平台的重试有上限（约 9 次），到点会` +
+              `静默放行——不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`,
+          },
+        }),
+      )
+    }
+  }
 
   process.exit(0)
 }

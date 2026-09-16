@@ -52,6 +52,20 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "^Agent$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/gate.mjs", "deliverable"],
+            "timeout": 30,
+            "statusMessage": "记录交付物校验…"
+          }
+        ]
+      }
     ]
   }
 }

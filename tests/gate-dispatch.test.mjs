@@ -22,8 +22,7 @@ test('stop-gate：输入里没有 tool_name 也不能因此 deny', () => {
   assert.notEqual(status, 2)
 })
 
-// 本任务只做分派，stop-gate 的判定逻辑在 Task 6；这里只钉「万一它拒绝，
-// 必须走 SubagentStop 的输出契约」，不断言它这一刻就会拒绝（现在确实不会）。
+// 这里只钉「万一它拒绝，必须走 SubagentStop 的输出契约」这个形状本身。
 // 旧版本这里断言的是 hookSpecificOutput.hookEventName === 'SubagentStop'——
 // 那是 PreToolUse 专有的 JSON 形状，在 SubagentStop 上发它等于 exit 0 + 平台
 // 不认的 blob，H5b 会变成一个看起来健康的空操作（Task 1 评审 Important 1/2）。
@@ -33,11 +32,16 @@ test('stop-gate 若拒绝，必须走 SubagentStop 契约：exit 2 + stderr，�
     agent_type: 'agent-team:at-backend',
   })
   assert.ok(status === 0 || status === 2, `stop-gate 不该以其它退出码结束，实际是 ${status}`)
-  // 这个 if 分支在 Task 6 之前恒假——stop-gate 还没有判定逻辑，status 恒为 0，
-  // 所以这里从没真正执行到 exit 2 的那两条断言。denyAndExit 的 SubagentStop
-  // 输出契约（exit 2 + stderr）不靠这条分支覆盖，由 tests/deny.test.mjs 直接
-  // 单测 hooks/lib/deny.mjs 的 denyOutput 执行验证过，不要以为这里已经测过
-  // 了（Task 1 二轮评审）。
+  // Task 6 已经给 stop-gate 接上了判定逻辑，但这条测试用的是真实
+  // process.cwd()（仓库根，没有 .agent-team）——H5b 对读不到运行上下文是
+  // fail open（见 hooks/gate.mjs），所以这里的 status 仍然恒为 0，下面这个
+  // if 分支依旧是防御性的，不代表这条测试验证过 exit 2。exit 2 的真实执行
+  // 路径（造一个产物真的缺失的 run，逼 H5b 真拦截）由
+  // tests/gate-deliverable.test.mjs 无条件断言覆盖，不是套在
+  // if (status === 2) 里面。denyAndExit 的 SubagentStop 输出契约本身
+  // （exit 2 + stderr 的具体形状）由 tests/deny.test.mjs 直接单测
+  // hooks/lib/deny.mjs 的 denyOutput 验证过；三者合起来才是完整覆盖，缺
+  // 一处都不算数（Task 1 二轮评审 / Task 6 简报）。
   if (status === 2) {
     assert.equal(stdout, '', 'SubagentStop 的拒绝不该往 stdout 写 PreToolUse 那套 JSON')
     assert.ok(stderr.length > 0, 'exit 2 时理由必须写在 stderr 里')

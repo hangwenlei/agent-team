@@ -9,13 +9,20 @@
 //                 留着是为了万一将来误调用时它会出声，而不是静默吞掉。
 //
 // 纯函数、不做 I/O（不写流、不退出进程），单独成文件是为了能脱离 Claude Code
-// 直接单测（tests/deny.test.mjs）。这是本任务里风险最高的一处：SubagentStop
-// 那条 exit 2 + stderr 分支，在 Task 6 给 stop-gate 接上判定逻辑之前，从
-// hooks/gate.mjs 这条路径永远不会被真实调用到——留在 gate.mjs 里只做人工代码
-// 走读验证，就是「看起来健康、实际什么都不做」的失效形状（这个项目一路被咬的
-// 就是这个：M0 的 junction 守卫、Task 1 一轮评审的 emitDeny 只换事件名不换
-// 形状）。抽成纯函数后，gate.mjs 的 denyAndExit 退化成「拿结果、写流、退出」
-// 三行，这个契约本身则由 tests/deny.test.mjs 直接执行验证过（Task 1 二轮评审）。
+// 直接单测（tests/deny.test.mjs）。这是 Task 1 落地时风险最高的一处：
+// SubagentStop 那条 exit 2 + stderr 分支，在 Task 6 给 stop-gate 接上判定
+// 逻辑之前，从 hooks/gate.mjs 这条路径永远不会被真实调用到——留在 gate.mjs
+// 里只做人工代码走读验证，就是「看起来健康、实际什么都不做」的失效形状
+// （这个项目一路被咬的就是这个：M0 的 junction 守卫、Task 1 一轮评审的
+// emitDeny 只换事件名不换形状）。抽成纯函数后，gate.mjs 的 denyAndExit 退化
+// 成「拿结果、写流、退出」三行，这个契约本身则由 tests/deny.test.mjs 直接
+// 执行验证过（Task 1 二轮评审）。Task 6 落地后，这条分支已经能经
+// hooks/gate.mjs 的 CHECK === 'stop-gate' 分支被真实调用到了（回归见
+// tests/gate-deliverable.test.mjs 的 exit 2 用例）——但这不代表这里的直接
+// 单测变得多余：子进程级测试证明的是"传导链接对了"（gate.mjs 挖对了字段、
+// 读对了 ctx、真的调用了 denyAndExit），这里的纯函数测试证明的是"契约本身
+// 没错"（拿到 'SubagentStop' 就该产出 exit 2 + stderr 这个形状），两者答的
+// 是不同的问题，不是同一件事测了两遍。
 
 /**
  * @param {string} reason 拒绝理由
