@@ -42,7 +42,10 @@ function fmt(list) {
 }
 
 /**
- * 派发白名单（门禁 H1）。这是层级的唯一强制手段——
+ * 派发白名单（门禁 H1）。这是**派发路径**的唯一强制手段——但派发不是获得 agent
+ * 的唯一路径：`context: fork` 的 skill 不经 Agent 工具就能起一个 subagent，这里看不见
+ * （M1 · U7 实测，见 docs/06；对策是不给角色 Skill 工具，规格 §6.1，由
+ * tests/tool-surface.test.mjs 钉住）。
  * 主线程的 tools: Agent(...) 白名单只声明整个会话可见的 agent 宇宙，
  * 且被所有子孙代理继承；它表达不了「谁能派给谁」这条边，边的约束全部由这里的花名册承担。
  */
