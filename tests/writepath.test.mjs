@@ -13,8 +13,11 @@ const RUN = '/proj/.agent-team/runs/r1'
 // Important 2（评审三轮）：run 目录下的合法写入集不再是"目录下任何东西"，
 // 而是"调用者自己阶段的 produces"，判据来自 stages.json。夹具形状照抄
 // 仓库根真实 stages.json 的风格（role + requires + produces）。
+// S4 与 S1 同属 at-pm：夹具照抄仓库根真实 stages.json 的这条事实（整理项 4），
+// 让"同一角色多个阶段"这条在纯函数这一层也有覆盖，见下面那条用例。
 const STAGES = {
   S1: { role: 'at-pm', requires: [], produces: ['00-contract.md'] },
+  S4: { role: 'at-pm', requires: [], produces: ['04-dispatch.md'] },
   S5: { role: 'at-backend', requires: [], produces: ['05-impl/at-backend.md'] },
   S6: { role: 'at-frontend', requires: [], produces: ['05-impl/at-frontend.md'] },
 }
@@ -76,8 +79,24 @@ test('写 run 目录下任意非产物文件拒绝——不是"目录下随便�
   assert.equal(r.decision, 'deny')
 })
 
+// 整理项 4：producesOf 是把该角色**所有**阶段的 produces 累加起来的，不是只看
+// 第一个阶段。at-pm 同时是 S1（00-contract.md）与 S4（04-dispatch.md）的执行者，
+// 两份都得能写。这是 hooks/lib/writepath.mjs 里 I3 那段缺口注释里唯一还正确的
+// 行为，也是 hooks/lib/deliverable.mjs 里 I4 那条错误语义的对照面——没有测试
+// 钉住的话，将来改 producesOf（比如为了修 I4 而改成"只看某一段"）会静默丢掉它。
+test('同一角色多个阶段的 produces 都能写——producesOf 累加所有阶段，不是只看第一个', () => {
+  assert.equal(call('at-pm', `${RUN}/00-contract.md`).decision, 'allow')
+  assert.equal(call('at-pm', `${RUN}/04-dispatch.md`).decision, 'allow')
+})
+
+// 整理项 12：这里原本写的是 at-worker-a——c3dc888 已经把这个 M0 占位名整体
+// 改掉了（at-worker-a→at-backend、at-worker-b→at-frontend），Task 3 评审明确
+// 裁定过它不该在新测试里复活（readiness.test.mjs 与 deliverable.test.mjs 都已
+// 照做并留了注释），Task 4 写这份文件时又写了回来。这条用例的语义是"一个真实
+// 存在、但不在 project.paths 里的角色"，roster.json 里的 at-outsider 才对得上
+// （它就是为"在花名册里但不参与阶段链"这件事准备的对照角色）。
 test('不在 project.paths 里的角色不归本门禁管，放行', () => {
-  assert.equal(call('at-worker-a', '/proj/anything.ts').decision, 'allow')
+  assert.equal(call('at-outsider', '/proj/anything.ts').decision, 'allow')
 })
 
 test('project 为 null 时，run 目录外的普通路径放行——尚未跑过勘察，per-role 隔离没有判据', () => {
@@ -169,10 +188,15 @@ test('Windows 反斜杠路径写别人地盘同样被拒——不是"反斜杠�
   assert.match(r.reason, /at-frontend/)
 })
 
-// 相对路径：resolve() 会把它锚定在 process.cwd()（测试跑在仓库根），而不是
-// base（由 runDir 推出的项目根，这里是 /proj）。字符串上看着像"落在自己地盘
-// 里"的相对路径，解析后其实落在完全无关的位置——必须不能被误判成 allow，
-// 否则一个相对路径就能绕过前缀比对（比对的是解析后的绝对路径，不是原始字符串）。
+// 整理项 3：这条断言是对的，但原来的理由在生产里不成立，改注释不改断言。
+// 原注释说"否则一个相对路径就能绕过前缀比对"——真实 hook 的 cwd 就是项目根
+// （gate.mjs 用 process.cwd() 当 ROOT_PROJECT），所以角色传相对路径时
+// resolve() 会把它正确锚定在项目根上、合法落进自己的地盘并被放行，那里没有
+// 绕过可言。这条测试实际钉的是另一件事：**比对的是 resolve() 之后的绝对路径，
+// 不是原始字符串**。在这个夹具里 cwd（跑测试的仓库根）与 base（由 runDir 推出
+// 的 /proj）故意不是同一个地方，于是"看着像落在 src/server/ 里"的相对路径解析
+// 后落在完全无关的位置，必须不是 allow——如果哪天有人把实现改成拿原始字符串
+// 做 startsWith 比对，这条会红。
 test('相对路径按 cwd 解析，不会被误判成落在调用者自己的地盘里', () => {
   const r = call('at-backend', 'src/server/api.ts')
   assert.notEqual(r.decision, 'allow')
@@ -184,17 +208,29 @@ test('相对路径按 cwd 解析，不会被误判成落在调用者自己的地
 // "没有被任何角色认领"（方向是误 deny，不是绕过，但拒绝理由是一句错误
 // 指控，会把排查方向带偏）。这两条只在 Windows 上有意义——POSIX 文件
 // 系统大小写敏感，'src' 与 'SRC' 真的是两个不同路径，不该做同样的归一化。
-test('Windows 盘符大小写不同视为同一路径——不能误判成未认领', () => {
-  if (process.platform !== 'win32') return
-  const r = call('at-backend', 'c:\\proj\\src\\server\\api.ts')
-  assert.equal(r.decision, 'allow')
-})
+//
+// 整理项 13：用 node:test 的 { skip } 选项，不用 `if (...) return`。后者在 POSIX
+// 上是"函数体一行没跑就直接判通过"，`node --test` 的输出里跟真的跑过、断言过
+// 没有区别；{ skip } 会把它标成 skipped，"这条没跑"这件事看得见。
+// tests/contract-guard.test.mjs 早就改用 { skip } 并在注释里点名了这个差别，
+// 只是没回头改这里。
+test(
+  'Windows 盘符大小写不同视为同一路径——不能误判成未认领',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const r = call('at-backend', 'c:\\proj\\src\\server\\api.ts')
+    assert.equal(r.decision, 'allow')
+  },
+)
 
-test('Windows 路径段大小写不同视为同一路径——不能误判成未认领', () => {
-  if (process.platform !== 'win32') return
-  const r = call('at-backend', 'C:\\proj\\SRC\\server\\api.ts')
-  assert.equal(r.decision, 'allow')
-})
+test(
+  'Windows 路径段大小写不同视为同一路径——不能误判成未认领',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const r = call('at-backend', 'C:\\proj\\SRC\\server\\api.ts')
+    assert.equal(r.decision, 'allow')
+  },
+)
 
 // Minor 3（评审三轮）：project.paths[role] 不是数组时（比如手误写成字符串
 // 或 null），旧代码会在 underAny 的 prefixes.some 上抛 TypeError——外层

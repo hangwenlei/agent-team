@@ -404,6 +404,37 @@ test('writepath：被 settings.json 钉成主线程的 at-pm（带 agent_type）
   }
 })
 
+// 整理项 4：at-pm 在仓库根真实 stages.json 里是两个阶段的执行者——S1
+// （00-contract.md，上一条测的）与 S4（04-dispatch.md，这一条）。上一条单独
+// 存在时，只要 producesOf 取"该角色的第一个阶段"就能通过，两份 produces 都能
+// 写这件事其实没有被钉住。补这一条把它钉死：它是 hooks/lib/writepath.mjs 里
+// I3 那段缺口注释中唯一还正确的行为，也是 hooks/lib/deliverable.mjs 里 I4 那条
+// 错误语义（H5 用"第一个未完成的阶段"代替"刚结束的阶段"）的对照面——将来为了
+// 修 I4 去动这套按角色取阶段的代码时，这条会拦住顺手改坏 H3 的那一手。
+test('writepath：被钉成主线程的 at-pm 写 S4 的产物 04-dispatch.md 也不受阻——同一角色多个阶段的 produces 都能写', () => {
+  const dirs = makeRun({ runId: 'r1', project: PROJECT })
+  try {
+    const input = {
+      tool_name: 'Write',
+      agent_type: 'at-pm',
+      tool_input: {
+        file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', '04-dispatch.md'),
+      },
+    }
+    const { stdout, status } = run('writepath', input, undefined, dirs.projectDir)
+
+    assert.equal(status, 0)
+    assert.equal(
+      stdout.trim(),
+      '',
+      'at-pm 是 S1 与 S4 两段的执行者，两段的产物都该能写——只放行第一段等于 S4 永远交不出来',
+    )
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
 // 评审三轮 Important 2 的子进程级证据：run 目录下的写入现在按 ctx.stages
 // 收紧到"自己阶段的 produces"。00-contract.md 是 S1 的产物、归 at-pm——
 // at-backend 写它必须 deny，且理由要点名真正的阶段与角色，不能只断言

@@ -20,6 +20,17 @@
 // 只管"给定一个 role，它的交付物齐不齐"，至于 gate.mjs 从输入里挖出的
 // 这个 role 到底是不是"应该被检查的那个角色"，只有跑一次真实的子进程、
 // 用一个调用者与目标不同的场景才能验出来。
+//
+// 夹具的取舍（整理项 11，照 tests/gate-writepath.test.mjs:12-20 那份补齐）：
+// 下面每条测试都用 makeRun() 造出 { projectDir, pluginDir } 并在 finally 里
+// 清理两者，但 pluginDir 从没有被真正读到过——gate.mjs 的 ROOT = join(HERE,'..')
+// 是硬编码的真实仓库根，读的是仓库根那份真实 stages.json，测试帮手改不了它
+// （Task 2 的设计）。继续调用 makeRun 并清理 pluginDir 只是为了不在系统临时
+// 目录里留垃圾，不代表这些测试控制了 stages.json 的内容。所以这份文件里每一条
+// 关于"谁在哪一段该产出什么"的断言，判据都是仓库根真实 stages.json 里的事实：
+// S1 是 at-pm/00-contract.md、S2 是 at-product/01-prd.md、S4 是
+// at-pm/04-dispatch.md——改 stages.json 会连带影响这些测试，这是有意的耦合，
+// 不是夹具漏配。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -146,6 +157,26 @@ test('deliverable：查的是被派发的目标角色（tool_input.subagent_type
       '不能报成调用者 at-pm 自己在 S4 的阶段——那是读错字段（读了 agent_type 而不是 ' +
         'tool_input.subagent_type）才会出现的症状',
     )
+
+    // 13(c)：这是整条分支上唯一没有测试保护的平台契约。「在 PostToolUse 上发
+    // permissionDecision 形状 = exit 0 + 平台不认的 blob = 看起来健康的空操作」
+    // 这句话被写进了简报、写进了 hooks/lib/deny.mjs 的头部注释、写进了三个
+    // 测试文件的注释，唯独没有一行断言。H5a 按规格 §6 表格只记 warning、从不
+    // 拒绝，所以它的 stdout 里出现 permissionDecision 本身就是错的——不管那个
+    // 值是 'deny' 还是 'allow'。在整个 stdout 上查，不只在 hookSpecificOutput
+    // 里查：放在哪一层都是错的。
+    assert.ok(
+      !('permissionDecision' in out),
+      'H5a 是 PostToolUse，不能发 PreToolUse 专有的 permissionDecision——平台不认，' +
+        '等于 exit 0 + 一坨没人读的 JSON，这道闸会变成看起来健康的空操作',
+    )
+    assert.doesNotMatch(stdout, /permissionDecision/)
+
+    // 这条 warning 存在的全部理由：H5b 到点（约 9 次）会被平台静默放行，父级
+    // 看到的是干净的一次通过。文案必须点明"不要仅凭子代理正常返回就判断这一段
+    // 完成了"，否则它退化成一句无害的提示，读的人不会去核实产物。
+    assert.match(out.additionalContext, /不要仅凭/)
+    assert.match(out.additionalContext, /核实/)
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })
@@ -189,22 +220,40 @@ test('deliverable：没有 run 时 fail open 并在 stderr 留痕，不写 warni
   }
 })
 
-test('deliverable：tool_input.subagent_type 缺失时放行——不能退而求其次读成调用者自己', () => {
+test('deliverable：tool_input.subagent_type 缺失时放行、且留痕——不能退而求其次读成调用者自己', () => {
   const dirs = makeRun({ runId: 'r1' })
   try {
     const input = { tool_name: 'Agent', agent_type: 'at-pm', tool_input: {} }
-    const { stdout, status } = run('deliverable', input, undefined, dirs.projectDir)
+    const { stdout, stderr, status } = run('deliverable', input, undefined, dirs.projectDir)
 
     assert.equal(status, 0)
     assert.equal(stdout, '')
+    // 13(b)：原来只验了"放行"，没验留痕——而它的 stop-gate 孪生用例
+    // （上面"agent_type 缺失时放行"那条）验了。这是一次 fail open：这次事件
+    // 确实归 H5a 管，只是认不出该查谁，跟"这次调用与本检查项无关"（那种在
+    // toolNames 前置校验里就静默退出了）不是一回事，必须留痕。
+    assert.ok(stderr.trim().length > 0, '认不出目标角色也要留痕，不能悄悄放行')
+    assert.match(stderr, /agent-team/)
+    assert.match(stderr, /(H5a|交付物)/)
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })
   }
 })
 
-test('deliverable：tool_name 不是 Agent 时不表态', () => {
-  const { stdout, status } = run('deliverable', { tool_name: 'Bash', tool_input: {} })
+// 13(a)：stderr 也要是空的。只断言 status === 0 与 stdout === '' 的话，把
+// checks.mjs 的 toolNames 前置校验拿掉后代码会走下面的 !rawTarget 分支
+// （stderr 留痕 + exit 0），这两条断言照样绿——测试名承诺的"不表态"其实
+// 一件没验。"不表态"是真的什么都不输出：与本检查项无关的调用连一行告警都
+// 不该有，否则每次 Bash 调用都在会话里刷一行 H5a 的噪音。
+test('deliverable：tool_name 不是 Agent 时不表态——三条流都是空的，不是"换个地方出声"', () => {
+  const { stdout, stderr, status } = run('deliverable', { tool_name: 'Bash', tool_input: {} })
   assert.equal(status, 0)
   assert.equal(stdout, '')
+  assert.equal(
+    stderr,
+    '',
+    '与本检查项无关的工具调用必须完全沉默——落进 !rawTarget 那条 fail open 分支' +
+      '（它会往 stderr 留痕）说明 toolNames 前置校验没有生效',
+  )
 })

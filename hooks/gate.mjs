@@ -65,6 +65,26 @@ function denyAndExit(reason, event) {
   process.exit(exitCode)
 }
 
+// fail open 时往 stderr 留的那行痕迹（整理项 10）。四个检查项此前各写一份
+// 近似拷贝，而且同一个 kind:'no-run' 在 H3/H4 被说成「当前没有进行中的 run」、
+// 在 H2/H5 被说成「读不到运行上下文」——这不是重复，是口径分叉：对读到这行字
+// 的人，两者意味着完全不同的下一步（前者是门禁做出了有依据的判定"本次调用不
+// 归它管"，后者是门禁自己判不出来，说明有东西坏了）。措辞按 ctx.kind 选，各
+// 检查项只提供自己的名字。
+//
+// 为什么留痕本身是硬要求（Task 3 评审 Minor 4 / Task 1 起就在的先例）：静默的
+// 放行和门禁彻底坏掉长得一模一样（exit 0、零输出）——这个项目一路被咬的就是
+// 这个失效形状。文案只说一次"放行"，剩下的篇幅换成一句可执行的下一步：
+// ctx.reason 的大多数取值本身就是 current-run / run 目录的问题，那是最先该查
+// 的地方。
+function failOpenNotice(label, ctx) {
+  const what = ctx.kind === 'no-run' ? '当前没有进行中的 run' : '读不到运行上下文'
+  return (
+    `agent-team ${label}：${what}（${ctx.reason}），本次放行、不拦截。` +
+    `若你以为有进行中的 run，检查 .agent-team/current-run。\n`
+  )
+}
+
 function main() {
   if (!KNOWN_CHECKS.has(CHECK)) {
     process.stderr.write(
@@ -119,15 +139,10 @@ function main() {
     // 字段本项目没有实测过，换一个同样没验过的通道不会让告警更可靠。
     // 这条告警在会话里是否可见，本项目也没有实测过，留给 Task 7 核实。
     if (!ctx.ok) {
-      // Task 3 评审 Minor 4：原文案里"按规格 §6 fail open"是内部黑话，
-      // 读到它的人手上未必有 §6；"本次放行，不拦截这次调用"又把同一件事
-      // 说了两遍。改成只说一次「放行」，把省下的篇幅换成一句可执行的
-      // 下一步——ctx.reason 的大多数取值本身就是 current-run/run 目录的
-      // 问题（找不到、指向的 run 不存在、内容非法等），这是最先该查的地方。
-      process.stderr.write(
-        `agent-team H2 就绪门禁：读不到运行上下文（${ctx.reason}），本次放行、不拦截。` +
-          `若你以为有进行中的 run，检查 .agent-team/current-run。\n`,
-      )
+      // 文案与措辞口径统一在 failOpenNotice 里，见那里的注释。H2 不按
+      // ctx.kind 分派行为（两种 kind 都放行），但留痕的措辞要分——
+      // "没有 run"和"读不到上下文"对读到它的人不是同一件事。
+      process.stderr.write(failOpenNotice('H2 就绪门禁', ctx))
       process.exit(0)
     }
     const target = stripPluginPrefix(input?.tool_input?.subagent_type)
@@ -173,10 +188,7 @@ function main() {
     // 一模一样）；'unreadable' 继续 denyAndExit。
     if (!ctx.ok) {
       if (ctx.kind === 'no-run') {
-        process.stderr.write(
-          `agent-team H3 写路径门禁：当前没有进行中的 run（${ctx.reason}），本次放行、不拦截。` +
-            `若你以为有进行中的 run，检查 .agent-team/current-run。\n`,
-        )
+        process.stderr.write(failOpenNotice('H3 写路径门禁', ctx))
         process.exit(0)
       }
       // 全分支评审 I2：'unreadable' 对子代理继续 fail closed，但 PM 要放行。
@@ -257,10 +269,7 @@ function main() {
     // 前提也是"一个 run 正在跑"。
     if (!ctx.ok) {
       if (ctx.kind === 'no-run') {
-        process.stderr.write(
-          `agent-team H4 契约保护：当前没有进行中的 run（${ctx.reason}），本次放行、不拦截。` +
-            `若你以为有进行中的 run，检查 .agent-team/current-run。\n`,
-        )
+        process.stderr.write(failOpenNotice('H4 契约保护', ctx))
         process.exit(0)
       }
       denyAndExit(
@@ -285,6 +294,10 @@ function main() {
   }
 
   if (CHECK === 'stop-gate' || CHECK === 'deliverable') {
+    // 两道 H5 共用这一整段，差别只有这个名字。同一句三元此前在下面相隔 16 行
+    // 写了两遍（整理项 9），提到分支外算一次。
+    const label = CHECK === 'stop-gate' ? 'H5b 交付物拦截' : 'H5a 交付物记录'
+
     // H5b（stop-gate）判的是"正在停止的这个 subagent 自己"：SubagentStop 是
     // 生命周期事件，agent_type 就是这次事件所属的那个 subagent——
     // docs/07-U5-U6-U8-实测结论.md §4 实测过，平台真实发的是全限定名
@@ -307,7 +320,6 @@ function main() {
       // 评审 Minor 5）：不是"这次调用与本检查项无关"（那种情况在 toolNames
       // 前置校验里已经处理并保持沉默），是"这次事件确实归本检查项管，但
       // 认不出该查谁"，同样要放行 + 留痕，不能悄悄放行。
-      const label = CHECK === 'stop-gate' ? 'H5b 交付物拦截' : 'H5a 交付物记录'
       process.stderr.write(
         `agent-team ${label}：这次事件没有可判定的目标角色（agent_type 或 ` +
           `tool_input.subagent_type 缺失），跳过本次校验、放行。\n`,
@@ -323,11 +335,7 @@ function main() {
     // H2/H3/H4 的先例，读不到运行上下文时要往 stderr 留一行痕迹，否则
     // "放行"和"门禁坏了"长得一模一样。
     if (!ctx.ok) {
-      const label = CHECK === 'stop-gate' ? 'H5b 交付物拦截' : 'H5a 交付物记录'
-      process.stderr.write(
-        `agent-team ${label}：读不到运行上下文（${ctx.reason}），本次放行、不拦截。` +
-          `若你以为有进行中的 run，检查 .agent-team/current-run。\n`,
-      )
+      process.stderr.write(failOpenNotice(label, ctx))
       process.exit(0)
     }
 

@@ -3,22 +3,10 @@
 // ⚠️ 已知边界（规格 §6.2）：这道闸只管 Edit/Write/NotebookEdit。
 // 执行角色保留 Bash 以跑构建与测试，而 Bash 能写文件（echo >、sed -i），
 // 那条路不在本函数的覆盖范围内，README 已明示本插件不是沙箱。
-import { resolve, sep } from 'node:path'
-
-function norm(p) {
-  // 归一化并统一分隔符，防止 .. 与斜杠差异绕过前缀比对。
-  const resolved = resolve(p).split(sep).join('/')
-  // 评审三轮 Important 1：Windows 文件系统大小写不敏感，但 resolve() 保留
-  // 调用方给的原始大小写，而 base 的盘符来自 process.cwd()——两者不同源，
-  // 大小写可能对不齐（C:\proj\... vs c:\proj\...，或 SRC vs src）。不统一
-  // 大小写会把同一个文件误判成不同路径，方向是误 deny（把自己人挡在
-  // 外面），而且拒绝理由会说"没有被任何角色认领"——这是一句错误指控，
-  // 路径明明认领了，只是大小写没对齐，会把排查方向带偏到 project.json。
-  // POSIX 文件系统大小写敏感，不能对它也做这个转换，否则会在真正大小写
-  // 不同的两个文件之间造出误判（这条判断本身不需要测：分支只在
-  // win32 触发，POSIX 上这行代码根本不会跑到）。
-  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
-}
+// 评审三轮 Important 1 定下的大小写/分隔符归一化，现在是 hooks/lib/path-norm.mjs
+// 里的公共实现——H3 与 H4 必须用同一份（整理项 5：两边判错的方向相反，
+// 各留一份的代价不对称，理由写在那个文件的头部）。
+import { norm } from './path-norm.mjs'
 
 function underAny(target, prefixes, base) {
   // 评审三轮 Minor 3：prefixes 理论上总是数组（project.paths 的值），但
@@ -90,6 +78,52 @@ export function decideWritePath({ role, filePath, project, runDir, stages }) {
       // H4/H5 的状态来源，且它本来就不是"流程产物"。收紧成：只放行调用者
       // 自己阶段（stages[s].role === role）的 produces，run 目录下其余
       // 一切（别人的产物、state.json、任何非产物文件）一律 deny。
+      //
+      // ⚠️ 已知缺口 I3（全分支评审，M1a 不在这条分支上解决）：这条规则在稳态
+      // 下会把 PM 自己也挡住。被 settings.json 钉成主线程的 at-pm 不是
+      // callerOf 判定的 MAIN（M0 实测：钉住时主会话的 hook 输入带裸的
+      // agent_type: 'at-pm'），所以一旦进入稳态（project.json 存在、run 正在
+      // 跑），它就是一个受完整 per-role 隔离约束的普通角色。实测（用仓库根
+      // 真实 stages.json，role 取 'at-pm'）：
+      //
+      //   at-pm 写 runs/<id>/state.json              -> deny（不是任何阶段的 produces）
+      //   at-pm 写 runs/<id>/00-contract.md（S1）    -> allow
+      //   at-pm 写 runs/<id>/04-dispatch.md（S4）    -> allow
+      //   at-pm 重写 .agent-team/project.json        -> 看 project.paths 里有没有 at-pm 这个键：
+      //                                                 有 -> deny（"没有被任何角色认领"）
+      //                                                 没有 -> allow（Object.hasOwn 那条早退，
+      //                                                 H3 根本不管这个角色）
+      //
+      // 其中 state.json 那条是无条件的，且 I1 之后连"project.json 不存在"都
+      // 兜不住了（这不是 I1 引入的新语义，是 I1 让原本就该生效的规则真的生效
+      // 之后，这个缺口才从"有条件"变成"总是"）。project.json 那条则取决于
+      // /at-init 生成的 paths 里写不写 at-pm——两种写法都合理，所以这个缺口
+      // 现在是"一半已经踩上、一半取决于模板怎么写"。
+      //
+      // 与规格冲突的是：§7 的 templates/ 明确列了 project.json 与
+      // state.json；§4.5 要求"计数写在 state.json，不交给模型自己数"；
+      // /at-resume 从 state.json 续跑；/at-init 重跑勘察要重写 project.json。
+      // 这些动作在稳态下会被这道闸拒掉——而且 project.json 那条的拒绝理由会说
+      // "这条路径在 .agent-team/project.json 里没有被任何角色认领"，是一句会把
+      // 排查方向完全带偏的话：真正的问题不是认领表漏了一行，是"PM 的运维动作
+      // 该不该走角色认领这套判据"从来没有被决定过。
+      //
+      // 现有的自举豁免盖不住这个缺口：它们只覆盖"第一个 run 建出来之前"
+      // （ctx.kind === 'no-run'）、"真 MAIN（无 agent_type）"、以及 I2 新加的
+      // "ctx 读不出来时的 PM"（hooks/gate.mjs 的 writepath 分支）——三者都是
+      // 异常/空白态，稳态不在其中。
+      //
+      // 什么时候会撞上：计划 B 的第一次 state.json 写入（谁来记 rework 计数、
+      // /at-resume 怎么落盘），那一刻这道闸会直接拦住主会话。
+      // 两个可选方向，到时候择一（不要在 M1a 里顺手做，两者都要改判定模型）：
+      //   (a) 给 .agent-team/ 一条独立于 project.paths 的"PM 专属可写"规则，
+      //       让 PM 的运维动作不走角色认领这套判据；
+      //   (b) 在 project.json 模板里把 .agent-team/ 划给 at-pm，并给
+      //       run 目录下的 state.json 单开一条例外（因为它不是任何阶段的
+      //       produces，走不通上面 mine 那条路）。
+      // 其中"同一角色的多个阶段 produces 都能写"（上面 S1/S4 那两条 allow）是
+      // 这块唯一已经正确的行为，由 tests/writepath.test.mjs 与
+      // tests/gate-writepath.test.mjs 各钉了一条，改 producesOf 时不要丢。
       const mine = producesOf(stages, role).some((p) => norm(`${rd}/${p}`) === target)
       if (mine) return { decision: 'allow' }
 

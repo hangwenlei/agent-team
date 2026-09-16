@@ -24,7 +24,7 @@ export function decideReadiness({ targetRole, stages, artifactExists }) {
   // 插入序）本来就是流水线顺序，直接用它，不重新排序。当前到 S5、规格
   // §4 的阶段链到 S8，届时同样成立，因为插入序不取决于数值宽度。
   //
-  // 已知边界（Task 3 评审 Minor 3，与上面 produces 那条同类）：某个阶段条目
+  // 已知边界（Task 3 评审 Minor 3，与下面 produces 那条同类）：某个阶段条目
   // 手误漏写 role（s.role 是 undefined）时，这个 filter 会让它匹配不上任何
   // 真实 targetRole，整段既不属于任何角色、也就没人会替它跑这条门禁——
   // 是配置错误，不是这个函数的职责，当前 stages.json 五个阶段 role 都是

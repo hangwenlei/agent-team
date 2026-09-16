@@ -50,7 +50,7 @@ export function denyOutput(reason, event) {
 
   return {
     stream: 'stderr',
-    text: `agent-team BUG: denyAndExit 收到不支持拒绝表达的事件名 ${JSON.stringify(event)}，无法表达拒绝。\n`,
+    text: `agent-team BUG: denyOutput 收到不支持拒绝表达的事件名 ${JSON.stringify(event)}，无法表达拒绝。\n`,
     exitCode: 0,
   }
 }

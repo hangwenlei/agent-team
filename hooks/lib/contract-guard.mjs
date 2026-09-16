@@ -13,30 +13,15 @@
 // hooks/lib/writepath.mjs），H4 仍要独立拦住契约写入；两道闸挂在同一组
 // matcher（Edit|Write|NotebookEdit）上，判据不同，不是重复
 // （Task 5 简报「一个你必须自己想清楚的点」）。
-import { resolve, sep } from 'node:path'
+// 路径归一化用公共实现，不在这里另留一份（整理项 5）。此前这里有一份与
+// writepath.mjs 逐字相同的 norm()，附带一段"重复是有意的、不会分叉"的论证；
+// I1 证明了那两个文件的假设确实会分叉，而这一侧判错的方向是**漏拦**（大小写
+// 没对齐 → 真实的契约写入被判成"目标不是契约文件"而放行，这道闸自己被绕过），
+// 是安全洞不是噪音。完整论证见 hooks/lib/path-norm.mjs 头部。
+import { norm } from './path-norm.mjs'
 import { MAIN, callerOf } from './decide.mjs'
 
 const CONTRACT = '00-contract.md'
-
-function norm(p) {
-  // 归一化并统一分隔符，防止 .. 与斜杠差异绕过路径比对——跟
-  // hooks/lib/writepath.mjs 的同名函数逻辑完全一样。两份重复是有意的：
-  // 这几行只是通用的 Windows 路径大小写/分隔符语义，不会因为"写路径隔离"
-  // 和"契约保护"各自的业务规则演化而分叉；这个代码库里纯函数决策模块本来
-  // 就不互相 import 对方的私有辅助函数（writepath.mjs 与 readiness.mjs
-  // 之间也没有）。抽一个公共模块换来的解耦收益，抵不过多一层间接、多一个
-  // 要维护的文件——对这三行不值得。
-  const resolved = resolve(p).split(sep).join('/')
-  // Windows 文件系统大小写不敏感，但 resolve() 保留调用方给的原始大小写；
-  // runDir 最终来自 process.cwd()、filePath 来自工具调用方给的
-  // file_path/notebook_path，两者不同源，大小写可能对不齐。不折叠大小写
-  // 的后果方向比 writepath.mjs 那边更危险：那边判错是"多拦"（挡住自己人，
-  // 见该文件 Important 1 的注释）；这里判错是"漏拦"——一次真实的契约写入
-  // 因为盘符或路径段大小写没对齐，被误判成"目标不是契约文件"从而放行，
-  // 等于这道闸自己被绕过去了。POSIX 文件系统大小写敏感，不对它做这个
-  // 转换。
-  return process.platform === 'win32' ? resolved.toLowerCase() : resolved
-}
 
 // 谁算"PM/主线程"，因而对 00-contract.md 没有约束：真正的主线程（没有
 // agent_type）、以及被 settings.json 的 agent 键钉成主线程的 at-pm——
