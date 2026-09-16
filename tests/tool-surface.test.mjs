@@ -1,8 +1,12 @@
 // U7 实测（docs/06-U7-实测结论.md）证明：context: fork 的 skill 能用 agent:
 // 参数直接起一个 subagent，全程不经过 Agent 工具，H1 派发门禁（挂在
 // PreToolUse / matcher ^Agent$ 上）看不见这次调用——目标角色若在花名册白名单
-// （宇宙）内，fork 直接拿到它的真实定义，绕过整套派发门禁。规格 §6.1 定的
-// 主防线是不给角色 Skill 这个工具、且本插件自带的 skill 一律不声明
+// （宇宙）内，fork 直接拿到它的真实定义，绕过整套派发门禁。U8 实测
+// （docs/07-U5-U6-U8-实测结论.md）确认当前配置下 SendMessage/ListAgents 没有
+// 被授予、这条路目前不存在，但官方工具说明的触达范围（本机其它 Claude 会话）
+// 与 cross-session permission laundering 警告，与 Skill 是同一种风险形状，
+// 只是没有像 Skill 那样临时授予后实测出真正的旁路。规格 §6.1 把这三个工具
+// 一并定为角色工具面一律不授予；本插件自带的 skill 也一律不声明
 // context: fork。这两条测试把这条防线钉死，不依赖任何人记得住这条规则。
 
 import { test } from 'node:test'
@@ -25,6 +29,37 @@ function toolsLineOf(md) {
   const line = md.split(/\r?\n/).find((l) => /^tools:/.test(l.trim()))
   return line ?? ''
 }
+
+// 规格 §6.1：角色工具面是按需白名单，这三个工具一律不授予。Skill 的旁路是
+// U7 临时授予后实测出来的（docs/06-U7-实测结论.md）；SendMessage/ListAgents
+// 是 U8 的结论（docs/07-U5-U6-U8-实测结论.md）——当前配置下未授予、这条路不
+// 存在，但官方工具说明的触达范围与 cross-session permission laundering 警告
+// 是同一形状的风险，本轮没有像 Skill 那样临时授予后实测。三个工具的理由不同，
+// 断言失败时要分别点名，不能用一句笼统的话糊弄过去。
+const FORBIDDEN_TOOLS = [
+  {
+    name: 'Skill',
+    reason:
+      'context: fork 的 skill 能用 agent: 参数绕过 Agent 工具直接起一个 ' +
+      'subagent，H1 派发门禁看不到这次调用，会直接拿到目标角色的真实定义' +
+      '（U7 实测，见 docs/06-U7-实测结论.md）。',
+  },
+  {
+    name: 'SendMessage',
+    reason:
+      '持有该工具的角色能给已存在的 agent（含本机其它 Claude 会话）发消息、' +
+      '续起它——花名册 can_delegate_to 管的是能不能派，管不住能不能发消息，' +
+      '官方文档明确警告过 cross-session permission laundering（U8 结论，见 ' +
+      'docs/07-U5-U6-U8-实测结论.md）。',
+  },
+  {
+    name: 'ListAgents',
+    reason:
+      '持有该工具的角色能枚举出「in-process subagents you spawned」之外的 ' +
+      '本机其它 Claude 会话，为绕开花名册触达受限 agent 或跨会话侦察提供前提' +
+      '（U8 结论，见 docs/07-U5-U6-U8-实测结论.md）。',
+  },
+]
 
 // 同款手法用来查 skill frontmatter 的 context: 字段是否声明为 fork。
 function declaresForkContext(md) {
@@ -54,7 +89,7 @@ function toPosix(p) {
   return p.split('\\').join('/')
 }
 
-test('没有任何角色的 tools: 包含 Skill', () => {
+test('没有任何角色的 tools: 包含 Skill / SendMessage / ListAgents', () => {
   const agentFiles = readdirSync(AGENTS_DIR).filter((f) => f.endsWith('.md'))
   assert.ok(
     agentFiles.length > 0,
@@ -64,16 +99,18 @@ test('没有任何角色的 tools: 包含 Skill', () => {
   for (const file of agentFiles) {
     const md = readFileSync(join(AGENTS_DIR, file), 'utf8')
     const toolsLine = toolsLineOf(md)
-    assert.ok(
-      !/\bSkill\b/.test(toolsLine),
-      `agents/${file} 的 tools: 行里出现了 Skill（${JSON.stringify(toolsLine)}）。` +
-        'context: fork 的 skill 能用 agent: 参数绕过 Agent 工具直接起一个 ' +
-        'subagent，H1 派发门禁看不到这次调用，会直接拿到目标角色的真实定义' +
-        '（U7 实测，见 docs/06-U7-实测结论.md）。而且主线程 agent 的 tools: ' +
-        '会把整个工具面传导给整棵子树（同一份实测里 "Skill is disabled for ' +
-        'this session, in subagents as well as here" 就是证据）——给任何一个 ' +
-        '角色开这个口子，等于给它派生出的整棵子树都开了口子。',
-    )
+    for (const { name, reason } of FORBIDDEN_TOOLS) {
+      assert.ok(
+        !new RegExp(`\\b${name}\\b`).test(toolsLine),
+        `agents/${file} 的 tools: 行里出现了 ${name}（${JSON.stringify(toolsLine)}）。` +
+          reason +
+          '而且主线程 agent 的 tools: 会把整个工具面传导给整棵子树（U7 实测里 ' +
+          '"Skill is disabled for this session, in subagents as well as ' +
+          'here" 就是证据）——给任何一个角色开这个口子，等于给它派生出的整棵 ' +
+          '子树都开了口子。规格 §6.1：角色工具面是按需白名单，这三个工具一律 ' +
+          '不授予。',
+      )
+    }
   }
 })
 
