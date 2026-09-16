@@ -80,6 +80,100 @@ test('writepath：run 存在但 project.json 坏了——仍然 fail closed，�
   }
 })
 
+// 全分支评审 I2：上一条（子代理）是 unreadable 继续 fail closed 的那一半，
+// 下面三条是另一半——被 settings.json 钉成主线程的 at-pm 必须能过去。
+//
+// 为什么：H4 在 Task 5 评审之后已经把 PM 的短路排到了读 ctx 之前，理由写在
+// hooks/gate.mjs 的 contract 分支里（「修复一个坏掉的 run 恰恰要 PM 动手，
+// 门禁会把自己需要的人也锁在门外」）。H3 当时没有跟着做，只豁免 role ===
+// MAIN，而本仓库自己的 settings.json 是 {"agent": "at-pm"}，主会话的 hook
+// 输入带 agent_type: 'at-pm'（M0 实测「次要事实」），落不进 MAIN。三点叠成
+// 硬死锁：(a) unreadable 的 deny 发生在看路径之前，拒的是这个会话的每一次
+// Edit/Write，不只是敏感路径；(b) agents/at-pm.md 的工具面没有 Bash，规格
+// §6.2 那条「Bash 是软约束」的逃生口对 PM 不存在；(c) 触发条件很廉价——
+// project.json / state.json 坏了、或 current-run 被截断成空文件，任意一条
+// 即可。结果是插件把自己唯一的运维人锁在门外，只能由用户离开 Claude 手工
+// 改文件。同一个死锁形状在这条分支上是第三次出现（H3 自己在 Task 4 修过
+// 自举死锁、H4 在 Task 5 修过）。
+//
+// 这条短路只放在 unreadable 那一支，不像 H4 那样提到读 ctx 之前——ctx 读得
+// 出来时 at-pm 仍然是一个受完整 per-role 隔离约束的角色（见
+// hooks/lib/writepath.mjs 里 run 目录那块旁边记的 I3 缺口），这次不动那条
+// 语义。
+test('writepath：project.json 坏了（unreadable），被钉成主线程的 at-pm 写普通源码——放行且留痕，不能把唯一的运维人锁在门外', () => {
+  const dirs = makeRun({ runId: 'r1' })
+  try {
+    writeFileSync(join(dirs.projectDir, '.agent-team', 'project.json'), '{ not json', 'utf8')
+    const input = {
+      tool_name: 'Edit',
+      agent_type: 'at-pm',
+      tool_input: { file_path: join(dirs.projectDir, 'src', 'x.ts') },
+    }
+    const { stdout, stderr, status } = run('writepath', input, undefined, dirs.projectDir)
+
+    assert.equal(status, 0)
+    assert.equal(
+      stdout.trim(),
+      '',
+      'unreadable 时 PM 的每一次 Edit/Write 都被拒，等于这个会话里没有任何逃生路径——' +
+        'at-pm 的工具面没有 Bash，规格 §6.2 那条软约束逃生口对它不存在',
+    )
+    assert.ok(stderr.trim().length > 0, '这是一次 fail open，必须留痕，不能悄悄放行')
+    assert.match(stderr, /agent-team/)
+    assert.match(stderr, /(H3|写路径)/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 逃生路径本身：坏掉的就是 project.json，修它的人只能是 PM。这条与
+// tests/gate-contract.test.mjs 里「project.json 坏了…被钉成主线程的 at-pm
+// ——仍然放行」对齐——两道闸此前对同一个身份给出相反结论（H3 说「at-pm 是
+// 一个普通角色」、H4 说「at-pm 是 PM」），这是六道闸之间最实在的一处语义
+// 打架，现在收口。
+test('writepath：project.json 坏了（unreadable），at-pm 修 .agent-team/project.json 本身——放行，这正是逃生路径', () => {
+  const dirs = makeRun({ runId: 'r1' })
+  try {
+    writeFileSync(join(dirs.projectDir, '.agent-team', 'project.json'), '{ not json', 'utf8')
+    const input = {
+      tool_name: 'Write',
+      agent_type: 'at-pm',
+      tool_input: { file_path: join(dirs.projectDir, '.agent-team', 'project.json') },
+    }
+    const { stdout, status } = run('writepath', input, undefined, dirs.projectDir)
+
+    assert.equal(status, 0)
+    assert.equal(stdout.trim(), '', '门禁不能把修复它自己所需的那个人也拦在外面')
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// unreadable 的来源不止 project.json——current-run 被截断成空文件同样是
+// unreadable（见 hooks/lib/runctx.mjs 头部注释：pointer 存在但内容为空属于
+// 异常状态，不是干净的缺席）。这条钉住短路认的是 kind 而不是某一个具体的
+// 坏文件。
+test('writepath：current-run 是空文件（unreadable），被钉成主线程的 at-pm——同样放行，短路认的是 kind 不是某个具体坏文件', () => {
+  const dirs = makeRun({ runId: 'r1' })
+  try {
+    writeFileSync(join(dirs.projectDir, '.agent-team', 'current-run'), '', 'utf8')
+    const input = {
+      tool_name: 'Edit',
+      agent_type: 'agent-team:at-pm',
+      tool_input: { file_path: join(dirs.projectDir, 'src', 'x.ts') },
+    }
+    const { stdout, status } = run('writepath', input, undefined, dirs.projectDir)
+
+    assert.equal(status, 0)
+    assert.equal(stdout.trim(), '', '带插件前缀的 agent_type 也要剥完前缀再判 PM，口径与 H1/H4 一致')
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
 // Task 4 复审：current-run 内容含路径穿越字符同样必须继续 fail closed——
 // 这是路径可信边界问题，不是"没有 run"。
 test('writepath：current-run 内容含路径穿越字符——仍然 fail closed', () => {

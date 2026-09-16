@@ -179,6 +179,31 @@ function main() {
         )
         process.exit(0)
       }
+      // 全分支评审 I2：'unreadable' 对子代理继续 fail closed，但 PM 要放行。
+      // 上面 role === MAIN 那条豁免盖不住这种情形——settings.json 的 agent 键
+      // 把 at-pm 钉成主线程时，主会话自己的调用带 agent_type: 'at-pm'，落不进
+      // MAIN。而这里的 deny 发生在看路径之前，拒的是这个会话的**每一次**
+      // Edit/Write；agents/at-pm.md 的工具面没有 Bash，规格 §6.2 那条「Bash 是
+      // 软约束」的逃生口对 PM 不存在；触发条件又很廉价（project.json /
+      // state.json 坏了、current-run 被截断成空文件，任意一条即可）。三点叠起来
+      // 就是把插件唯一的运维人锁在门外，只能由用户离开 Claude 手工改文件——
+      // 而修复一个坏掉的 run 恰恰要 PM 动手。这跟 H4 在 contract 分支里已经做的
+      // 是同一件事、同一个死锁形状（见下面那段注释），谓词也复用同一个
+      // isContractWriter，不另写一份 role === 'at-pm'：那个谓词的安全性依赖
+      // （当前花名册里没有角色能派发给 at-pm，由 tests/roster-closure.test.mjs
+      // 钉住）写在 hooks/lib/contract-guard.mjs 里，只该有一处。
+      //
+      // 只免除 unreadable 这一支，不像 H4 那样提到读 ctx 之前：ctx 读得出来时
+      // at-pm 仍然是受完整 per-role 隔离约束的角色（那条语义本身的缺口记在
+      // hooks/lib/writepath.mjs 的 I3 注释里，不在本次改动范围内）。
+      if (isContractWriter(role)) {
+        process.stderr.write(
+          `agent-team H3 写路径门禁：读不到运行上下文（${ctx.reason}），但调用者是 PM` +
+            `（项目经理），本次放行、不拦截——修复一个坏掉的 run 恰恰要 PM 动手。` +
+            `若你不是在修 run，先检查 .agent-team/current-run 与 .agent-team/project.json。\n`,
+        )
+        process.exit(0)
+      }
       denyAndExit(
         `agent-team 写路径门禁读不到运行上下文（${ctx.reason}），按安全边界拒绝。`,
         spec.event,
