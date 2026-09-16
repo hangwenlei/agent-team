@@ -71,9 +71,11 @@ test('args[1] 是 gate.mjs 的 KNOWN_CHECKS 认得的检查名', () => {
 // 上面几条只校验「存在一项 matcher 精确为 ^Agent$」，从不检查 hooks.json 里
 // 其它注册项——往数组里再塞一条伪造条目（哪怕 command 是 bash、args 指向
 // 不存在的文件），其它既有测试照样全绿。这条不变量对*每一个*注册项都成立，
-// 但刻意不要求「每一项 matcher 都必须是 ^Agent$」：M1a 已经把 writepath（H3）
-// 注册在 Edit|Write|NotebookEdit 上，contract（H4）迟早也会注册在同一组
-// matcher 上——那样写的话这条测试必错。
+// 但刻意不要求「每一项 matcher 都必须是 ^Agent$」：writepath（H3）、contract
+// （H4）迟早会注册在 Edit|Write|NotebookEdit 这组 matcher 上——那样写的话
+// 这条测试必错。writepath 本来在 Task 1 就注册，评审时撤回并挪到了 Task 4
+// （判定逻辑落地的那一步）：判定逻辑不在就注册，等于提前打开一条「读不到
+// stdin 就拒绝真实 Edit/Write」的 fail-closed 路径。
 function allHookCommands() {
   const groups = Object.values(hooksConfig.hooks ?? {}).flat()
   return groups.flatMap((group) => group.hooks ?? [])

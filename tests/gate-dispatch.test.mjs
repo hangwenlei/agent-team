@@ -1,76 +1,55 @@
+// 按 event/toolNames 真正分派的测试。delegation 本身的判定细节（未知检查项、
+// tool_name 校验、fail-closed 边界）已经被 tests/gate-io.test.mjs 覆盖过，
+// 不在这里重复——两份曾经并行存在的 harness 已经开始漂移（Task 1 评审
+// Important 4），现在共用 tests/helpers/gate-runner.mjs。这份文件只留一件事：
+// 换了 event（SubagentStop）或 toolNames（Edit/Write/NotebookEdit）之后，
+// 入口是否按新检查项的契约正确分派。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
-
-const GATE = fileURLToPath(new URL('../hooks/gate.mjs', import.meta.url))
-
-function run(check, input) {
-  try {
-    const stdout = execFileSync(process.execPath, [GATE, check], {
-      input: typeof input === 'string' ? input : JSON.stringify(input),
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
-    return stdout
-  } catch (err) {
-    return err.stdout ?? ''
-  }
-}
-
-function decisionOf(stdout) {
-  if (!stdout.trim()) return null
-  return JSON.parse(stdout).hookSpecificOutput
-}
-
-test('未知检查项一律 deny', () => {
-  const d = decisionOf(run('delegatoin', { tool_name: 'Agent', tool_input: {} }))
-  assert.equal(d.permissionDecision, 'deny')
-})
-
-test('delegation：tool_name 非字符串时 deny（fail closed）', () => {
-  const d = decisionOf(run('delegation', { tool_input: { subagent_type: 'at-worker-a' } }))
-  assert.equal(d.permissionDecision, 'deny')
-})
-
-test('delegation：tool_name 是别的工具时静默不表态', () => {
-  const out = run('delegation', { tool_name: 'Bash', tool_input: {} })
-  assert.equal(out.trim(), '')
-})
-
-test('delegation 的拒绝带 PreToolUse 事件名', () => {
-  const d = decisionOf(run('delegation', { tool_name: 'Agent', tool_input: {} }))
-  assert.equal(d.hookEventName, 'PreToolUse')
-})
+import { CHECKS } from '../hooks/lib/checks.mjs'
+import { run, decisionOf } from './helpers/gate-runner.mjs'
 
 // 这是本任务存在的理由：SubagentStop 不带 tool_name，
 // 若沿用 PreToolUse 那套「非字符串就 deny」的前置校验，
 // 每个角色每次收尾都会被无故顶回去约九次（U5 实测平台重试上限）。
+// SubagentStop 的拒绝走 exit 2（denyAndExit），不是 stdout 上的
+// permissionDecision JSON，所以这里断言的是退出码，不是 decisionOf(stdout)。
 test('stop-gate：输入里没有 tool_name 也不能因此 deny', () => {
-  const out = run('stop-gate', { hook_event_name: 'SubagentStop', agent_type: 'agent-team:at-worker-a' })
-  const d = decisionOf(out)
-  if (d) assert.notEqual(d.permissionDecision, 'deny')
+  const { status } = run('stop-gate', {
+    hook_event_name: 'SubagentStop',
+    agent_type: 'agent-team:at-worker-a',
+  })
+  assert.notEqual(status, 2)
 })
 
-test('stop-gate 若拒绝，事件名必须是 SubagentStop 而不是 PreToolUse', () => {
-  // 本任务只做分派，stop-gate 的判定逻辑在 Task 6；
-  // 这里只断言「若产生决策，事件名正确」，不断言它一定拒绝。
-  const out = run('stop-gate', { hook_event_name: 'SubagentStop', agent_type: 'agent-team:at-worker-a' })
-  const d = decisionOf(out)
-  if (d) assert.equal(d.hookEventName, 'SubagentStop')
+// 本任务只做分派，stop-gate 的判定逻辑在 Task 6；这里只钉「万一它拒绝，
+// 必须走 SubagentStop 的输出契约」，不断言它这一刻就会拒绝（现在确实不会）。
+// 旧版本这里断言的是 hookSpecificOutput.hookEventName === 'SubagentStop'——
+// 那是 PreToolUse 专有的 JSON 形状，在 SubagentStop 上发它等于 exit 0 + 平台
+// 不认的 blob，H5b 会变成一个看起来健康的空操作（Task 1 评审 Important 1/2）。
+test('stop-gate 若拒绝，必须走 SubagentStop 契约：exit 2 + stderr，不是 PreToolUse 的 JSON', () => {
+  const { stdout, stderr, status } = run('stop-gate', {
+    hook_event_name: 'SubagentStop',
+    agent_type: 'agent-team:at-worker-a',
+  })
+  assert.ok(status === 0 || status === 2, `stop-gate 不该以其它退出码结束，实际是 ${status}`)
+  if (status === 2) {
+    assert.equal(stdout, '', 'SubagentStop 的拒绝不该往 stdout 写 PreToolUse 那套 JSON')
+    assert.ok(stderr.length > 0, 'exit 2 时理由必须写在 stderr 里')
+  }
 })
 
-test('writepath：Edit 与 Write 都进入判定，别的工具静默', () => {
-  const edit = run('writepath', { tool_name: 'Edit', tool_input: { file_path: 'x' } })
-  const write = run('writepath', { tool_name: 'Write', tool_input: { file_path: 'x' } })
+test('writepath：已注册、按 Edit/Write/NotebookEdit 分流、不相关工具静默、且是 fail closed', () => {
+  assert.deepEqual(CHECKS.writepath.toolNames, ['Edit', 'Write', 'NotebookEdit'])
+
   const bash = run('writepath', { tool_name: 'Bash', tool_input: {} })
-  assert.equal(bash.trim(), '', 'Bash 不该进入写路径判定')
-  // Task 4 之前 writepath 尚无判定逻辑，此处只断言它没有被 tool_name 前置校验吃掉：
-  // 即 Edit/Write 的行为与 Bash 不同（要么有决策，要么至少不是同一条静默路径）。
-  assert.ok(typeof edit === 'string' && typeof write === 'string')
-})
+  assert.equal(bash.stdout.trim(), '', 'Bash 不该进入写路径判定')
 
-test('读不到 stdin 时按安全边界 deny', () => {
-  const d = decisionOf(run('delegation', ''))
+  // Task 4 之前 writepath 没有判定逻辑，此刻能观测到的唯一真实分派证据是
+  // fail-closed 前置校验：不带 tool_name 时必须 deny（H3，checks.mjs 里
+  // failClosed: true）。旧版本这里断言 typeof edit === 'string'，对 run()
+  // 的两条返回路径恒真，测试名承诺的「进入判定」其实一件没验（评审 Important 5）。
+  const { stdout } = run('writepath', { tool_input: {} })
+  const d = decisionOf(stdout)
   assert.equal(d.permissionDecision, 'deny')
 })
