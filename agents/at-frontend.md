@@ -1,5 +1,5 @@
 ---
-name: at-worker-b
+name: at-frontend
 description: M0 占位执行角色 B。
 tools: Read
 model: haiku

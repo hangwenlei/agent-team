@@ -17,7 +17,7 @@ import { run, decisionOf } from './helpers/gate-runner.mjs'
 test('stop-gate：输入里没有 tool_name 也不能因此 deny', () => {
   const { status } = run('stop-gate', {
     hook_event_name: 'SubagentStop',
-    agent_type: 'agent-team:at-worker-a',
+    agent_type: 'agent-team:at-backend',
   })
   assert.notEqual(status, 2)
 })
@@ -30,7 +30,7 @@ test('stop-gate：输入里没有 tool_name 也不能因此 deny', () => {
 test('stop-gate 若拒绝，必须走 SubagentStop 契约：exit 2 + stderr，不是 PreToolUse 的 JSON', () => {
   const { stdout, stderr, status } = run('stop-gate', {
     hook_event_name: 'SubagentStop',
-    agent_type: 'agent-team:at-worker-a',
+    agent_type: 'agent-team:at-backend',
   })
   assert.ok(status === 0 || status === 2, `stop-gate 不该以其它退出码结束，实际是 ${status}`)
   // 这个 if 分支在 Task 6 之前恒假——stop-gate 还没有判定逻辑，status 恒为 0，

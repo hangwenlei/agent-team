@@ -1,5 +1,5 @@
 ---
-name: at-worker-a
+name: at-backend
 description: M0 占位执行角色 A。
 tools: Read
 model: haiku
