@@ -11,10 +11,11 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
-import { decideDelegation, stripPluginPrefix } from './lib/decide.mjs'
+import { MAIN, callerOf, decideDelegation, stripPluginPrefix } from './lib/decide.mjs'
 import { denyOutput } from './lib/deny.mjs'
 import { readRunContext } from './lib/runctx.mjs'
 import { decideReadiness } from './lib/readiness.mjs'
+import { decideWritePath } from './lib/writepath.mjs'
 
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -139,8 +140,45 @@ function main() {
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
   }
 
-  // writepath / contract / deliverable / stop-gate 的判定
-  // 分别在 Task 4–6 接入，此处先只做分派。
+  if (CHECK === 'writepath') {
+    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    // H3 是安全边界（checks.mjs 里 writepath.failClosed 为 true）：读不到
+    // 运行上下文就没有 project.paths/runDir 可比对，无法判定任何路径的
+    // 归属，不能像 H2 那样放行——用 denyAndExit，不要照搬 readiness 分支
+    // 那套 fail-open + stderr 留痕的写法。
+    if (!ctx.ok) {
+      denyAndExit(
+        `agent-team 写路径门禁读不到运行上下文（${ctx.reason}），按安全边界拒绝。`,
+        spec.event,
+      )
+    }
+
+    // 主线程（at-pm 作为顶层会话运行时）没有 agent_type，不受 per-role
+    // 隔离约束——H3 隔离的是 project.paths 里登记的各角色之间的边，主线程
+    // 不是花名册里参与路径认领的一方。callerOf 对 agent_type 缺失/为 null
+    // 统一归为 MAIN，跟 H1 判定调用者身份用的是同一个函数，口径不重复定义。
+    const role = callerOf(input)
+    if (role === MAIN) process.exit(0)
+
+    // Edit/Write 的路径字段是 tool_input.file_path；NotebookEdit 的路径字段
+    // 是 tool_input.notebook_path，它的工具 schema 里根本没有 file_path。
+    // 只读 file_path 的话，每一次 NotebookEdit 调用都会拿到 undefined，
+    // 命中 decideWritePath「没有可判定路径」那条分支而无条件放行——
+    // checks.mjs 的 toolNames 把 NotebookEdit 列进 H3 的覆盖范围就白列了，
+    // 这道闸对它会静默失效。两个字段互斥（同一次调用只会有其中一个），
+    // 用 ?? 兜底取到真正存在的那个。
+    const filePath = input?.tool_input?.file_path ?? input?.tool_input?.notebook_path
+    const r = decideWritePath({
+      role,
+      filePath,
+      project: ctx.project,
+      runDir: ctx.runDir,
+    })
+    if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
+  }
+
+  // contract / deliverable / stop-gate 的判定分别在 Task 5–6 接入，
+  // 此处先只做分派。
 
   process.exit(0)
 }
