@@ -1,4 +1,4 @@
-// 把门禁需要的磁盘状态读成数据。所有失败都返回 { ok: false, reason }，
+// 把门禁需要的磁盘状态读成数据。所有失败都返回 { ok: false, reason, kind }，
 // 绝不抛异常——门禁的调用方需要自己决定 fail open 还是 fail closed，
 // 而不是被一个异常替它决定。
 //
@@ -8,6 +8,45 @@
 // 这类问题必须由这个函数自己兜住（下面整个函数体包一层 try/catch），而不是
 // 指望四个下游调用方各自防一遍——防漏一处，fail-closed 的检查项就会把
 // 「门禁自己读不到上下文」误判成别的错误路径（Task 2 评审 I3）。
+//
+// Task 4 复审：kind 字段是这次新加的，区分 ok:false 的两种截然不同的性质——
+// 旧版本只有一个 { ok:false, reason }，把它们压成了同一件事，H3（以及
+// Task 5 的 H4）作为 fail-closed 的检查项没法区分，只能对两者一视同仁地
+// 拒绝。这两种性质分别是：
+//
+//   kind: 'no-run'     压根没有进行中的 run（没有 .agent-team、没有
+//                       current-run、current-run 指向的 run 目录不存在）。
+//                       这不是「门禁判不出来」——门禁做出了一个有依据的
+//                       判定：本次调用不归它管。H3/H4 的全部前提是「一个
+//                       run 正在跑，角色各自认领了地盘」；没有 run 就没有
+//                       地盘可言。fail-closed 的检查项在这种情形下应该
+//                       放行（但要按 H2 的先例往 stderr 留痕，不能静默——
+//                       静默的放行和门禁真的坏掉长得一模一样，见
+//                       hooks/gate.mjs 的 writepath 分支）。
+//                       不区分的后果是自举死锁：建第一个 run 之前
+//                       .agent-team 还不存在，ok 必然是 false；如果笼统
+//                       fail closed，从主线程（或被 settings.json 钉成
+//                       主线程的具名角色，比如 at-pm）写
+//                       .agent-team/project.json 这个自举动作本身永远
+//                       做不成，第一个 run 永远建不出来，门禁把自己锁在
+//                       门外。
+//
+//   kind: 'unreadable' run 存在但读不出来，或者输入本身不可信（state.json/
+//                       project.json 坏了、内容不是对象、current-run 是
+//                       空文件、runId 含路径穿越字符、两个根传了非字符串、
+//                       以及任何意外异常）。这才是门禁真的判不出来，规格
+//                       §6 fail closed 说的是这种情形，继续拒绝。这条边界
+//                       不能因为上面那条放宽：一个被写坏的 project.json
+//                       必须继续落在这里，否则把 project.json 写坏就成了
+//                       绕过 H3/H4 per-role 隔离的办法——run 明明还在跑，
+//                       角色认领数据却因为文件损坏而不被承认。
+//
+// current-run 是空文件属于 unreadable 而不是 no-run，是一个有意的判断：
+// pointer 文件本身存在（不同于「找不到 pointer」），空内容更像是写入过程
+// 被打断的异常状态，不是「nobody has started a run yet」那种干净的缺席。
+// 分类成 unreadable 更安全——如果算 no-run，任何能把 current-run 截断成
+// 空文件的手段（哪怕只是 H3 已知边界里那条「Bash 能写文件」）都会被当成
+// 「没有 run」而放行，即便 runs/<真实 id>/ 下还有一个真正在跑的 run。
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -37,41 +76,55 @@ export function readRunContext(projectDir, pluginDir) {
     const base = join(projectDir, '.agent-team')
     const pointer = join(base, 'current-run')
     if (!existsSync(pointer)) {
-      return { ok: false, reason: `找不到 ${pointer}——当前没有进行中的 run` }
+      return { ok: false, kind: 'no-run', reason: `找不到 ${pointer}——当前没有进行中的 run` }
     }
 
     let runId = ''
     try {
       runId = readFileSync(pointer, 'utf8').trim()
     } catch (err) {
-      return { ok: false, reason: `读取 current-run 失败：${err.message}` }
+      // pointer 存在（刚过了 existsSync）但读不出来——权限、被并发进程占用
+      // 之类的异常状态，不是「没有 run」，门禁真的判不出来。
+      return { ok: false, kind: 'unreadable', reason: `读取 current-run 失败：${err.message}` }
     }
-    if (!runId) return { ok: false, reason: 'current-run 是空的' }
+    // 空文件不算 no-run，见文件头部注释：pointer 存在但内容为空是异常
+    // 状态，不是干净的缺席，归 unreadable 更安全。
+    if (!runId) return { ok: false, kind: 'unreadable', reason: 'current-run 是空的' }
     // current-run 的内容会被原样拼进 runs/<runId>/... 路径。不校验的话，一个
     // 含 ../ 的 runId 会被 path.join 正规化到 .agent-team/runs 之外，让 H5
     // 交付物门禁跑去别的目录判定产物是否存在——这是路径可信边界问题，不是
     // 普通的「文件不存在」失败，必须在拼路径之前挡住（Task 2 评审 M2）。
+    // 归 unreadable：这是输入不可信，不是「没有 run」，这条边界不能放松。
     if (runId.includes('/') || runId.includes('\\') || runId.includes('..')) {
       return {
         ok: false,
+        kind: 'unreadable',
         reason: `current-run 内容不是合法的 run id（含路径分隔符或 ..）：${JSON.stringify(runId)}`,
       }
     }
 
     const runDir = join(base, 'runs', runId)
     if (!existsSync(runDir)) {
-      return { ok: false, reason: `current-run 指向 ${runId}，但 ${runDir} 不存在` }
+      // current-run 指向的 run 目录不存在——指针指向了一个从没建出来、
+      // 或已经被清理掉的 run。同样是「没有 run 可管」，归 no-run。
+      return {
+        ok: false,
+        kind: 'no-run',
+        reason: `current-run 指向 ${runId}，但 ${runDir} 不存在`,
+      }
     }
 
+    // 走到这里，run 目录本身已确认存在——下面几步读到的任何失败都是
+    // 「这个真实存在的 run 读不出来」，不再有 no-run 的可能，一律 unreadable。
     const state = readJson(join(runDir, 'state.json'))
-    if (!state.ok) return { ok: false, reason: state.reason }
+    if (!state.ok) return { ok: false, kind: 'unreadable', reason: state.reason }
 
     const stages = readJson(join(pluginDir, 'stages.json'))
-    if (!stages.ok) return { ok: false, reason: stages.reason }
+    if (!stages.ok) return { ok: false, kind: 'unreadable', reason: stages.reason }
 
     const projectPath = join(base, 'project.json')
     const project = existsSync(projectPath) ? readJson(projectPath) : { ok: true, value: null }
-    if (!project.ok) return { ok: false, reason: project.reason }
+    if (!project.ok) return { ok: false, kind: 'unreadable', reason: project.reason }
 
     return {
       ok: true,
@@ -92,6 +145,9 @@ export function readRunContext(projectDir, pluginDir) {
       },
     }
   } catch (err) {
-    return { ok: false, reason: `读取运行上下文失败：${err.message}` }
+    // 兜底分支：projectDir/pluginDir 传了非字符串导致 join() 同步抛出，
+    // 或者任何没预料到的异常。这不是「没有 run」——门禁自己都不知道出了
+    // 什么问题，只能按最严格的 unreadable 处理。
+    return { ok: false, kind: 'unreadable', reason: `读取运行上下文失败：${err.message}` }
   }
 }

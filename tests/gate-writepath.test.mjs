@@ -10,7 +10,7 @@
 // 具体测试的注释）都要经真实子进程走一遍，不能只信纯函数测试。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, decisionOf } from './helpers/gate-runner.mjs'
@@ -31,12 +31,48 @@ const PROJECT = {
   },
 }
 
-test('writepath：ctx.ok 为 false 时 fail closed（deny，走 stdout JSON，不是静默放行）', () => {
-  // 干净的临时目录当 cwd：必然没有 .agent-team，readRunContext 必然
-  // 返回 ok:false。跟 H2 不同，H3 是安全边界，这里不该是 stderr 警告 + 放行，
-  // 而是 PreToolUse 的 deny JSON。
-  const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h3-cwd-'))
+// Task 4 复审（顾虑 1 的真正解法）：这条原来用"干净临时目录、没有
+// .agent-team"来代表"ctx.ok 为 false"，断言 deny。评审指出这个场景其实是
+// readRunContext 新分类里的 kind:'no-run'（压根没有进行中的 run，门禁没有
+// 东西要管），不该再 deny——见下面"没有 run 时"那几条。为了不丢失"H3 对
+// 真实失败仍然 fail closed"这条覆盖，这里改成一个 run 真实存在、但
+// project.json 被写坏的场景（kind:'unreadable'）：这正是评审点名的边界，
+// "一个坏掉的 project.json 必须继续拒，否则把 project.json 写坏就成了
+// 绕过 H3 的办法"。
+test('writepath：run 存在但 project.json 坏了——仍然 fail closed，不能被"没有 run"那条放宽', () => {
+  const dirs = makeRun({ runId: 'r1' })
   try {
+    // makeRun 已经造出 current-run + runs/r1/state.json，run 是真实存在的；
+    // 只手动把 project.json 写成坏 JSON——不是"没有 run"，是"run 读不出来"。
+    writeFileSync(join(dirs.projectDir, '.agent-team', 'project.json'), '{ not json', 'utf8')
+    const input = {
+      tool_name: 'Edit',
+      agent_type: 'agent-team:at-backend',
+      tool_input: { file_path: join(dirs.projectDir, 'src', 'server', 'api.ts') },
+    }
+    const { stdout, status } = run('writepath', input, undefined, dirs.projectDir)
+    const out = decisionOf(stdout)
+
+    assert.equal(status, 0, 'PreToolUse 的 deny 走 stdout JSON + exit 0，不是非零退出码')
+    assert.ok(
+      out,
+      'project.json 损坏时必须仍然 deny——如果这里放行了，说明 no-run 的判定被错误地' +
+        '放宽到了"run 存在但读不出来"这一类，写坏 project.json 就变成了绕过 H3 的办法',
+    )
+    assert.equal(out.permissionDecision, 'deny')
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// Task 4 复审：current-run 内容含路径穿越字符同样必须继续 fail closed——
+// 这是路径可信边界问题，不是"没有 run"。
+test('writepath：current-run 内容含路径穿越字符——仍然 fail closed', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h3-traversal-cwd-'))
+  try {
+    mkdirSync(join(cwd, '.agent-team'), { recursive: true })
+    writeFileSync(join(cwd, '.agent-team', 'current-run'), '../../evil', 'utf8')
     const input = {
       tool_name: 'Edit',
       agent_type: 'agent-team:at-backend',
@@ -45,15 +81,9 @@ test('writepath：ctx.ok 为 false 时 fail closed（deny，走 stdout JSON，�
     const { stdout, status } = run('writepath', input, undefined, cwd)
     const out = decisionOf(stdout)
 
-    assert.equal(status, 0, 'PreToolUse 的 deny 走 stdout JSON + exit 0，不是非零退出码')
-    assert.ok(out, 'ctx.ok 为 false 时必须有 deny 判定，stdout 不该是空的')
-    assert.equal(out.hookEventName, 'PreToolUse')
+    assert.equal(status, 0)
+    assert.ok(out, 'current-run 含路径穿越字符时必须 deny，不能被当成"没有 run"放行')
     assert.equal(out.permissionDecision, 'deny')
-    assert.match(
-      out.permissionDecisionReason,
-      /current-run/,
-      'stderr/reason 里应带上 readRunContext 给出的具体原因，而不是一句写死的固定文案',
-    )
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }
@@ -89,11 +119,43 @@ test('writepath：没有 agent_type（真·主线程）时放行，即使 ctx.ok
   }
 })
 
-// 有 agent_type 的调用（哪怕值恰好是 at-pm）走的是完全不同的分支——它不是
-// callerOf 判定的 MAIN，必须继续接受 ctx.ok 的 fail-closed 校验。这条钉住
-// "MAIN 豁免"没有被错误地放宽成"agent_type 缺失或角色名恰好是 at-pm 都豁免"。
-test('writepath：有 agent_type 时（即使是 at-pm）ctx.ok 为 false 仍然 fail closed', () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h3-named-pm-cwd-'))
+// Task 4 二轮复审：这条原来断言"有 agent_type 时 ctx.ok 为 false 仍然
+// deny"，依据是"MAIN 豁免只认真·无 agent_type"。评审指出这个依据本身是
+// 对的，但用错了修复——死锁的真正解法不是扩大 MAIN 豁免，而是让
+// readRunContext 把"没有 run"（kind:'no-run'）和"run 读不出来"
+// （kind:'unreadable'）分开：前者不管调用者带不带 agent_type、是不是
+// 具名角色，都该放行（+ stderr 留痕）。这条改成断言 allow，直接验证
+// "有 agent_type 但没有 run"不会被过度收紧成 deny。
+test('writepath：没有 run 时，有名有姓的角色（非 MAIN）也放行——按 no-run 处理，不因为不是 MAIN 就被收紧', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h3-norun-named-cwd-'))
+  try {
+    const input = {
+      tool_name: 'Edit',
+      agent_type: 'agent-team:at-backend',
+      tool_input: { file_path: join(cwd, 'src', 'server', 'api.ts') },
+    }
+    const { stdout, stderr, status } = run('writepath', input, undefined, cwd)
+
+    assert.equal(status, 0)
+    assert.equal(stdout.trim(), '', '没有 run 不该走 deny JSON，即使调用者带着 agent_type')
+    assert.ok(
+      stderr.trim().length > 0,
+      '必须往 stderr 留痕；静默的放行和门禁坏掉长得一模一样（H2 立下的先例）',
+    )
+    assert.match(stderr, /agent-team/)
+    assert.match(stderr, /(H3|写路径)/)
+    assert.match(stderr, /current-run/, 'stderr 里应带上 readRunContext 给出的具体原因')
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+// 这条是死锁场景本身，字面对应评审举的例子：settings.json 的 agent 键把
+// at-pm 钉成主线程 agent 时，主线程的 hook 输入带 agent_type（docs/05-M0-
+// 结论.md「次要事实」），不享受"无 agent_type"那条豁免；如果 readRunContext
+// 不区分 no-run/unreadable，这次调用会在"建出第一个 run 之前"被永久拒绝。
+test('writepath：没有 run 时，被 settings.json 钉成主线程的 at-pm 写 project.json 不受阻——这正是死锁场景本身', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h3-bootstrap-cwd-'))
   try {
     const input = {
       tool_name: 'Write',
@@ -101,15 +163,14 @@ test('writepath：有 agent_type 时（即使是 at-pm）ctx.ok 为 false 仍然
       tool_input: { file_path: join(cwd, '.agent-team', 'project.json') },
     }
     const { stdout, status } = run('writepath', input, undefined, cwd)
-    const out = decisionOf(stdout)
 
     assert.equal(status, 0)
-    assert.ok(
-      out,
-      '带 agent_type 的调用不享有主线程豁免，ctx.ok 为 false 时必须 deny——' +
-        '如果这里被放行，说明 MAIN 豁免被错误地放宽了',
+    assert.equal(
+      stdout.trim(),
+      '',
+      '/at-init 从被钉成主线程的 at-pm 写 .agent-team/project.json 这个自举动作' +
+        '不该被拒绝，否则第一个 run 永远建不出来',
     )
-    assert.equal(out.permissionDecision, 'deny')
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }

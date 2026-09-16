@@ -141,36 +141,51 @@ function main() {
   }
 
   if (CHECK === 'writepath') {
-    // 评审顾虑 1（Task 4 复审）：这一步必须排在 ctx.ok 判定之前，且不依赖
-    // ctx.ok。规格 §6 表格里 H1 明写「派发白名单（全部层级，含主线程）」，
-    // H3 只写「per-role 写路径隔离」，没有「含主线程」这个限定——两行是
-    // 刻意写得不一样的。且建第一个 run 之前 .agent-team 还不存在，ctx.ok
-    // 必然是 false；如果 fail-closed 判在前面，从主线程（无 agent_type）
-    // 写 .agent-team/project.json 这类自举动作会被永久拒绝，第一个 run
-    // 永远建不出来——门禁把自己锁在门外（自举死锁）。callerOf 对 agent_type
-    // 缺失/为 null 统一归为 MAIN，跟 H1 判定调用者身份用的是同一个函数，
-    // 口径不重复定义。
+    // MAIN（无 agent_type）不受 per-role 隔离约束——H3 隔离的是
+    // project.paths 里登记的各角色之间的边，主线程不是参与路径认领的
+    // 一方。callerOf 对 agent_type 缺失/为 null 统一归为 MAIN，跟 H1
+    // 判定调用者身份用的是同一个函数，口径不重复定义。这一步排在读运行
+    // 上下文之前，因为它完全不需要上下文就能判定，没必要为了判它去多读
+    // 一次磁盘。
     //
-    // 带 agent_type 的调用不算这里的"主线程"，哪怕值恰好是 at-pm——
-    // settings.json 的 agent 键把 at-pm 钉成主线程 agent 时，主线程的 hook
-    // 输入照样带 agent_type（docs/05-M0-结论.md「次要事实」），这种配置下
-    // at-pm 会作为一个有名有姓的角色继续往下走 per-role 判定，不享受这条
-    // 豁免。这类调用在 ctx.ok 为 true 时是否被拦，靠的是 decideWritePath
-    // 自己的 runDir 豁免（run 目录下的产物一律放行）——at-pm 写它在 S1
-    // 产出的 00-contract.md 正是走这条，不是靠这里的 MAIN 判断（见
-    // tests/gate-writepath.test.mjs 对应用例）。
+    // 注意：这条豁免解决不了自举死锁——见下面 ctx.kind 的注释。带
+    // agent_type 的调用不算这里的"主线程"，哪怕值恰好是 at-pm：
+    // settings.json 的 agent 键把 at-pm 钉成主线程 agent 时，主线程的
+    // hook 输入照样带 agent_type（docs/05-M0-结论.md「次要事实」），这种
+    // 配置下 at-pm 会作为一个有名有姓的角色继续往下走 per-role 判定，
+    // 不享受这条豁免（Task 4 复审 1）。
     const role = callerOf(input)
     if (role === MAIN) process.exit(0)
 
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
-    // H3 是安全边界（checks.mjs 里 writepath.failClosed 为 true）：读不到
-    // 运行上下文就没有 project.paths/runDir 可比对，无法判定任何路径的
-    // 归属，不能像 H2 那样放行——用 denyAndExit，不要照搬 readiness 分支
-    // 那套 fail-open + stderr 留痕的写法。这条判断必须在上面的 MAIN 豁免
-    // 之后：MAIN 豁免与"上下文读不读得到"是两件独立的事，读不到时只对
-    // 有名有姓的角色 fail closed，不能连带把还没自举出第一个 run 的
-    // 主线程也锁死。
+    // Task 4 复审 2：ctx.ok 为 false 时不能笼统 fail closed——readRunContext
+    // 用 ctx.kind 区分了两种性质完全不同的失败（定义见 hooks/lib/runctx.mjs
+    // 头部注释）：
+    //   'no-run'     压根没有进行中的 run。这不是「判不出来」，是门禁做出
+    //                了一个有依据的判定："这次调用不归我管"——H3 的前提是
+    //                「一个 run 正在跑，角色各自认领了地盘」，没有 run 就
+    //                没有地盘。按 H2 的先例 fail open + stderr 留痕，不能
+    //                静默（静默的放行和门禁坏掉长得一模一样）。不这样区分
+    //                的话，建第一个 run 之前 .agent-team 还不存在，ctx.ok
+    //                必然是 false；如果笼统 fail closed，从主线程（或被
+    //                settings.json 钉成主线程的具名角色，比如 at-pm）写
+    //                .agent-team/project.json 这个自举动作永远做不成，
+    //                第一个 run 永远建不出来，门禁把自己锁在门外——这才是
+    //                自举死锁真正的解法，上面的 MAIN 豁免只覆盖了"确实没有
+    //                agent_type"这一种情形，覆盖不了被钉成具名角色的主线程。
+    //   'unreadable' run 存在但读不出来（state.json/project.json 坏了、
+    //                runId 含穿越字符等）。门禁真的判不出来，规格 §6 fail
+    //                closed 说的是这种情形，继续拒绝。这条边界不能放松：
+    //                一个被写坏的 project.json 必须继续落在这里，否则把
+    //                project.json 写坏就成了绕过 H3 per-role 隔离的办法。
     if (!ctx.ok) {
+      if (ctx.kind === 'no-run') {
+        process.stderr.write(
+          `agent-team H3 写路径门禁：当前没有进行中的 run（${ctx.reason}），本次放行、不拦截。` +
+            `若你以为有进行中的 run，检查 .agent-team/current-run。\n`,
+        )
+        process.exit(0)
+      }
       denyAndExit(
         `agent-team 写路径门禁读不到运行上下文（${ctx.reason}），按安全边界拒绝。`,
         spec.event,
