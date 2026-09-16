@@ -244,6 +244,22 @@ test('writepath：没有 run 时，有名有姓的角色（非 MAIN）也放行�
     assert.match(stderr, /agent-team/)
     assert.match(stderr, /(H3|写路径)/)
     assert.match(stderr, /current-run/, 'stderr 里应带上 readRunContext 给出的具体原因')
+    // 复评 Minor 2：整理项 10 的修复本体是 failOpenNotice 里那条
+    // `ctx.kind === 'no-run' ? … : …`，此前全仓没有一条断言检查措辞——把三元
+    // 塌回单一字符串、或把两支调换，都不会有任何测试变红，刚修掉的口径分叉
+    // 可以静默回归。这条钉住 no-run 那一支。
+    //
+    // 必须连检查项名一起锚定，不能只 match /没有进行中的 run/：ctx.reason 本身
+    // 就以"当前没有进行中的 run"结尾（见 hooks/lib/runctx.mjs 的 no-run 分支），
+    // 只查那几个字的话，三元塌成"读不到运行上下文"也照样绿——那正是这条测试
+    // 要防的回归。锚到"检查项名：措辞（"这个位置才有判别力。
+    assert.match(
+      stderr,
+      /H3 写路径门禁：当前没有进行中的 run（/,
+      'no-run 的措辞要说"没有进行中的 run"（门禁做出了有依据的判定：本次调用不归它管），' +
+        '不能说成"读不到运行上下文"（那是门禁自己判不出来，意味着有东西坏了）——' +
+        '对读到这行字的人，两者的下一步完全不同',
+    )
   } finally {
     rmSync(cwd, { recursive: true, force: true })
   }

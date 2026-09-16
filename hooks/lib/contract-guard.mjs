@@ -7,12 +7,20 @@
 // 悄悄把契约改成跟自己做出来的东西一致，制造出验收通过的假象。这是这个
 // 插件存在的理由之一，不是一条普通校验。
 //
-// 判定只看两件事：调用者是不是"PM/主线程"、目标路径是不是契约文件本身——
-// 不读 project.json、不读 stages.json，因此不依赖 H3（写路径隔离）的任何
-// 前提。project.json 缺失时 decideWritePath 第一行就整体放行（见
-// hooks/lib/writepath.mjs），H4 仍要独立拦住契约写入；两道闸挂在同一组
-// matcher（Edit|Write|NotebookEdit）上，判据不同，不是重复
-// （Task 5 简报「一个你必须自己想清楚的点」）。
+// 判定只看两件事：调用者是不是"PM/主线程"、目标路径是不是契约文件本身。
+// 独立于 H3（写路径隔离）这件事是**结构性**的，不是靠某个时刻 H3 恰好会
+// 放行：decideContractGuard 的入参只有 { agentType, filePath, runDir }，
+// 根本没有 project 和 stages，它不可能借用 H3 的任何前提。两道闸挂在同一组
+// matcher（Edit|Write|NotebookEdit）上，判据不同，不是重复（Task 5 简报
+// 「一个你必须自己想清楚的点」）。
+//
+// 这里原来写的是另一套论证：「project.json 缺失时 decideWritePath 第一行就
+// 整体放行，H4 仍要独立拦住契约写入」。那句话的两个前提现在都不成立——
+// writepath.mjs 的第一行已经是 filePath 守卫，而 project.json 缺失也不再让
+// H3 整体放行（那正是 I1 拆掉的东西：run 目录保护本来就不该挂在 project.json
+// 上）。修完之后 H3 与 H4 在契约路径上会**同时**拒绝，判据各自独立：H3 说
+// "这是 S1 的产物、归 at-pm"，H4 说"任何 subagent 都不得碰契约"。子进程级
+// 对照见 tests/gate-contract.test.mjs 里那条三步走的测试。
 // 路径归一化用公共实现，不在这里另留一份（整理项 5）。此前这里有一份与
 // writepath.mjs 逐字相同的 norm()，附带一段"重复是有意的、不会分叉"的论证；
 // I1 证明了那两个文件的假设确实会分叉，而这一侧判错的方向是**漏拦**（大小写

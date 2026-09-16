@@ -104,6 +104,17 @@ test('stop-gate：run 存在但 state.json 坏了（kind: unreadable）——同
     assert.equal(stdout, '')
     assert.ok(stderr.trim().length > 0)
     assert.match(stderr, /agent-team/)
+    // 复评 Minor 2：这是 failOpenNotice 里那条 kind 三元的另一支。与
+    // tests/gate-writepath.test.mjs 里 no-run 那条配对——两条都在，三元塌成
+    // 任何一个单一字符串、或者两支调换，必定有一条变红。
+    // 这里锚定的是"读不到运行上下文"：run 目录真实存在，坏的是 state.json，
+    // 门禁确实判不出来，不能说成"当前没有进行中的 run"（那会让人去查
+    // current-run，而真正坏的是别的文件）。
+    assert.match(
+      stderr,
+      /H5b 交付物拦截：读不到运行上下文（/,
+      'unreadable 的措辞要说"读不到运行上下文"，不能说成"没有进行中的 run"——run 就在那里',
+    )
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })
