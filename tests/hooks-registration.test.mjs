@@ -38,6 +38,7 @@ test('存在一项 matcher 精确锚定为 "^Agent$"', () => {
 
 test('该项的 hook 是 exec 形式：command 为 node，且带 args 数组', () => {
   const entry = findAgentEntry()
+  assert.ok(entry, 'hooks.json 里找不到 matcher 精确为 "^Agent$" 的注册项（见上一条测试）')
   const hook = entry.hooks[0]
   assert.equal(hook.type, 'command')
   assert.equal(hook.command, 'node')
@@ -46,6 +47,7 @@ test('该项的 hook 是 exec 形式：command 为 node，且带 args 数组', (
 
 test('args[0] 把 ${CLAUDE_PLUGIN_ROOT} 替换成仓库根之后指向真实存在的文件', () => {
   const entry = findAgentEntry()
+  assert.ok(entry, 'hooks.json 里找不到 matcher 精确为 "^Agent$" 的注册项（见上一条测试）')
   const hook = entry.hooks[0]
   const resolved = hook.args[0].replace('${CLAUDE_PLUGIN_ROOT}', ROOT)
   assert.ok(
@@ -56,6 +58,7 @@ test('args[0] 把 ${CLAUDE_PLUGIN_ROOT} 替换成仓库根之后指向真实存�
 
 test('args[1] 是 gate.mjs 的 KNOWN_CHECKS 认得的检查名', () => {
   const entry = findAgentEntry()
+  assert.ok(entry, 'hooks.json 里找不到 matcher 精确为 "^Agent$" 的注册项（见上一条测试）')
   const hook = entry.hooks[0]
   assert.ok(
     KNOWN_CHECKS.has(hook.args[1]),
@@ -63,4 +66,44 @@ test('args[1] 是 gate.mjs 的 KNOWN_CHECKS 认得的检查名', () => {
       `KNOWN_CHECKS 里——两处已经漂移，gate.mjs 会对这个检查项一律 deny` +
       `（未知检查名现在 fail closed，但注册漂移本身仍是需要修的配置错误）`,
   )
+})
+
+// 上面几条只校验「存在一项 matcher 精确为 ^Agent$」，从不检查 hooks.json 里
+// 其它注册项——往数组里再塞一条伪造条目（哪怕 command 是 bash、args 指向
+// 不存在的文件），43 个既有测试照样全绿。这条不变量对*每一个*注册项都成立，
+// 但刻意不要求「每一项 matcher 都必须是 ^Agent$」：M1 会有 H3/H4 注册在
+// Edit|Write 上，那样写的话这条测试将来必错。
+function allHookCommands() {
+  const groups = [
+    ...(hooksConfig.hooks?.PreToolUse ?? []),
+    ...(hooksConfig.hooks?.PostToolUse ?? []),
+  ]
+  return groups.flatMap((group) => group.hooks ?? [])
+}
+
+test('hooks.json 里的每一个注册项都是零依赖 node 调用、参数完整、指向真实文件与已知检查名', () => {
+  const commands = allHookCommands()
+  assert.ok(commands.length > 0, 'hooks.json 里一个 hook 命令都没有')
+  for (const hook of commands) {
+    const label = JSON.stringify(hook)
+    assert.equal(hook.type, 'command', `${label} 的 type 不是 "command"`)
+    assert.equal(
+      hook.command,
+      'node',
+      `${label} 的 command 不是 "node"——本插件是零依赖插件，所有 hook 必须走 node`,
+    )
+    assert.ok(
+      Array.isArray(hook.args) && hook.args.length > 0,
+      `${label} 缺少非空的 args 数组`,
+    )
+    const resolved = hook.args[0].replace('${CLAUDE_PLUGIN_ROOT}', ROOT)
+    assert.ok(
+      existsSync(resolved),
+      `${label} 的 args[0]（解析后为 ${resolved}）不存在——与仓库里的实际文件已经漂移`,
+    )
+    assert.ok(
+      KNOWN_CHECKS.has(hook.args[1]),
+      `${label} 的 args[1]（检查名 ${JSON.stringify(hook.args[1])}）不在 gate.mjs 的 KNOWN_CHECKS 里`,
+    )
+  }
 })
