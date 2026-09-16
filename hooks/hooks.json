@@ -12,6 +12,31 @@
             "statusMessage": "校验派发白名单…"
           }
         ]
+      },
+      {
+        "matcher": "^(Edit|Write|NotebookEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/gate.mjs", "writepath"],
+            "timeout": 30,
+            "statusMessage": "校验写路径归属…"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/gate.mjs", "stop-gate"],
+            "timeout": 30,
+            "statusMessage": "校验交付物…"
+          }
+        ]
       }
     ]
   }

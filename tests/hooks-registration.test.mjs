@@ -70,9 +70,10 @@ test('args[1] 是 gate.mjs 的 KNOWN_CHECKS 认得的检查名', () => {
 
 // 上面几条只校验「存在一项 matcher 精确为 ^Agent$」，从不检查 hooks.json 里
 // 其它注册项——往数组里再塞一条伪造条目（哪怕 command 是 bash、args 指向
-// 不存在的文件），43 个既有测试照样全绿。这条不变量对*每一个*注册项都成立，
-// 但刻意不要求「每一项 matcher 都必须是 ^Agent$」：M1 会有 H3/H4 注册在
-// Edit|Write 上，那样写的话这条测试将来必错。
+// 不存在的文件），其它既有测试照样全绿。这条不变量对*每一个*注册项都成立，
+// 但刻意不要求「每一项 matcher 都必须是 ^Agent$」：M1a 已经把 writepath（H3）
+// 注册在 Edit|Write|NotebookEdit 上，contract（H4）迟早也会注册在同一组
+// matcher 上——那样写的话这条测试必错。
 function allHookCommands() {
   const groups = Object.values(hooksConfig.hooks ?? {}).flat()
   return groups.flatMap((group) => group.hooks ?? [])
