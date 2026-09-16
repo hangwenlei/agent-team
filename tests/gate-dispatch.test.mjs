@@ -33,6 +33,11 @@ test('stop-gate 若拒绝，必须走 SubagentStop 契约：exit 2 + stderr，�
     agent_type: 'agent-team:at-worker-a',
   })
   assert.ok(status === 0 || status === 2, `stop-gate 不该以其它退出码结束，实际是 ${status}`)
+  // 这个 if 分支在 Task 6 之前恒假——stop-gate 还没有判定逻辑，status 恒为 0，
+  // 所以这里从没真正执行到 exit 2 的那两条断言。denyAndExit 的 SubagentStop
+  // 输出契约（exit 2 + stderr）不靠这条分支覆盖，由 tests/deny.test.mjs 直接
+  // 单测 hooks/lib/deny.mjs 的 denyOutput 执行验证过，不要以为这里已经测过
+  // 了（Task 1 二轮评审）。
   if (status === 2) {
     assert.equal(stdout, '', 'SubagentStop 的拒绝不该往 stdout 写 PreToolUse 那套 JSON')
     assert.ok(stderr.length > 0, 'exit 2 时理由必须写在 stderr 里')
@@ -50,6 +55,24 @@ test('writepath：已注册、按 Edit/Write/NotebookEdit 分流、不相关工�
   // failClosed: true）。旧版本这里断言 typeof edit === 'string'，对 run()
   // 的两条返回路径恒真，测试名承诺的「进入判定」其实一件没验（评审 Important 5）。
   const { stdout } = run('writepath', { tool_input: {} })
+  const d = decisionOf(stdout)
+  assert.equal(d.permissionDecision, 'deny')
+})
+
+// contract（H4）和 writepath（H3）注册在同一组 matcher 上、fail-closed 策略
+// 也相同，但此前只有 writepath 侧补了分派测试——全仓检索过，contract 在
+// tests/ 下此前只在一句注释里出现过，从没有任何测试调用过
+// run('contract', ...)（Task 1 二轮评审 Finding 6 未关闭的一半）。
+test('contract：已注册、按 Edit/Write/NotebookEdit 分流、不相关工具静默、且是 fail closed', () => {
+  assert.deepEqual(CHECKS.contract.toolNames, ['Edit', 'Write', 'NotebookEdit'])
+
+  const bash = run('contract', { tool_name: 'Bash', tool_input: {} })
+  assert.equal(bash.stdout.trim(), '', 'Bash 不该进入契约保护判定')
+
+  // Task 5 之前 contract 没有判定逻辑，此刻能观测到的唯一真实分派证据是
+  // fail-closed 前置校验：不带 tool_name 时必须 deny（H4，checks.mjs 里
+  // failClosed: true）。
+  const { stdout } = run('contract', { tool_input: {} })
   const d = decisionOf(stdout)
   assert.equal(d.permissionDecision, 'deny')
 })

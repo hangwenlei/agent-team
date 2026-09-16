@@ -2,7 +2,7 @@
 // hook 单入口。第一个参数选择检查项。
 // 约定：exit 0 + stdout 上的 JSON 决策 = 生效；无输出 = 走正常权限流程。
 // SubagentStop 是例外——它的拒绝走 exit 2 + stderr，不是这套 JSON，
-// 见 denyAndExit 的注释（M1a 计划 Task 1「评审后修正」一节）。
+// 见 hooks/lib/deny.mjs 的 denyOutput（拒绝输出契约的唯一真源）。
 //
 // 入口只做「该检查项声明的前置校验」，不做统一校验——H1–H5 分布在三种
 // hook 事件上，输入形状不同（规格 §6 注记）。
@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
 import { decideDelegation } from './lib/decide.mjs'
+import { denyOutput } from './lib/deny.mjs'
 
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -37,40 +38,16 @@ function loadRoster() {
   return JSON.parse(readFileSync(join(ROOT, 'roster.json'), 'utf8'))
 }
 
-// 拒绝的输出契约按 hook 事件分派，不是同一个 JSON 换个事件名——三个事件在
-// 平台上表达「拒绝」根本不是同一种机制：
-//   PreToolUse    exit 0 + stdout 上 hookSpecificOutput.permissionDecision = 'deny'（M0 实测）
-//   SubagentStop  exit 2 + stderr 上的理由（U5 实测：docs/07-U5-U6-U8-实测结论.md §1，
-//                 九次 exit 2 全部把 subagent 顶回去；平台约 9 次后静默放行是它自己的
-//                 重试上限，不是本函数要处理的事）
-//   其它事件      本插件目前没有检查项会在这些事件上调用这个函数（PostToolUse／H5a
-//                 按规格 §6 表格只记 warning、从不拒绝）——这条分支当前不可达，
-//                 留着是为了万一将来误调用时它会出声，而不是静默吞掉（对照 M0 那次
-//                 junction 守卫失效：48 个测试全绿而门禁静默失效，静默永远是更坏的失败）。
-// 两条真实分支都以 process.exit() 收尾，永不返回——调用点之后不需要再写 exit。
+// 拒绝的输出契约（按 hook 事件分派 stdout/stderr/exitCode）抽在
+// hooks/lib/deny.mjs 的 denyOutput 里，是纯函数，被 tests/deny.test.mjs
+// 直接单测过三个分支——包括 SubagentStop 那条 exit 2 + stderr 分支，它在
+// Task 6 给 stop-gate 接上判定逻辑之前，从这条路径永远不会被真实执行到
+// （Task 1 二轮评审）。这里只做 I/O：拿到结果、写对应的流、退出，永不返回，
+// 调用点之后不需要再写 exit。
 function denyAndExit(reason, event) {
-  if (event === 'PreToolUse') {
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: event,
-          permissionDecision: 'deny',
-          permissionDecisionReason: reason,
-        },
-      }),
-    )
-    process.exit(0)
-  }
-
-  if (event === 'SubagentStop') {
-    process.stderr.write(reason + '\n')
-    process.exit(2)
-  }
-
-  process.stderr.write(
-    `agent-team BUG: denyAndExit 收到不支持拒绝表达的事件名 ${JSON.stringify(event)}，无法表达拒绝。\n`,
-  )
-  process.exit(0)
+  const { stream, text, exitCode } = denyOutput(reason, event)
+  process[stream].write(text)
+  process.exit(exitCode)
 }
 
 function main() {
