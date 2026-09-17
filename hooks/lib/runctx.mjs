@@ -148,6 +148,16 @@ export function readRunContext(projectDir, pluginDir) {
           return false
         }
       },
+      // 与 artifactExists 同构：ledger 要拿 00-contract.md 的字节去算 sha256。
+      // 读不到一律返回 null，绝不抛——这个模块对外的硬契约是「所有失败都返回数据，
+      // 不抛异常」，闭包里也不例外（join 也在 try 里面，理由同 artifactExists）。
+      artifactBytes(rel) {
+        try {
+          return readFileSync(join(runDir, rel))
+        } catch {
+          return null
+        }
+      },
     }
   } catch (err) {
     // 兜底分支：projectDir/pluginDir 传了非字符串导致 join() 同步抛出，

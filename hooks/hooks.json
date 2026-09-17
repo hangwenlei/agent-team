@@ -65,6 +65,18 @@
             "statusMessage": "记录交付物校验…"
           }
         ]
+      },
+      {
+        "matcher": "^(Edit|Write|NotebookEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/gate.mjs", "ledger"],
+            "timeout": 30,
+            "statusMessage": "回传契约哈希与触达表…"
+          }
+        ]
       }
     ]
   }

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ESCALATION_KINDS, REWORK_LIMIT, nextStage, reworkFromHistory, validateState } from '../hooks/lib/state.mjs'
+import { ESCALATION_KINDS, REWORK_LIMIT, isStageDone, nextStage, reworkFromHistory, validateState } from '../hooks/lib/state.mjs'
 
 const STAGES = {
   S1: { role: 'at-pm', requires: [], produces: ['00-contract.md'] },
@@ -137,4 +137,40 @@ test('nextStage 按 stages 的书写顺序走，不按 id 字符串排序', () =
 test('nextStage 对 S9 → S10 也对——插入序不取决于数值宽度', () => {
   const wide = { S9: { role: 'r' }, S10: { role: 'r' } }
   assert.equal(nextStage(wide, 'S9'), 'S10')
+})
+
+// isStageDone：Task 6 变异验证第 4 项发现的缺口，补在这里而不是只留在
+// hooks/gate.mjs 内联——那处代码只经子进程级测试跑到，而仓库根真实 stages.json
+// 里每个阶段的 produces 都只有一个元素，.every 与 .some 在单元素数组上永远同值，
+// 子进程级测试判不出两者的差异（完整背景见本函数在 hooks/lib/state.mjs 里的
+// 头部注释）。下面用一份合成的多产物阶段夹具，真正把 .every 的「全部」语义
+// （不是 .some 的「任一」）钉住。
+const have = (...names) => (rel) => names.includes(rel)
+const MULTI = { S2: { role: 'at-product', requires: [], produces: ['a.md', 'b.md'] } }
+
+test('isStageDone：produces 全部存在时为 true', () => {
+  assert.equal(isStageDone({ stage: 'S2', stages: MULTI, artifactExists: have('a.md', 'b.md') }), true)
+})
+
+// 这条是全部意义所在：只有一个产物存在时，.every 必须是 false——如果这里误用
+// .some，任何一个产物一到位就会误报「这个阶段齐了」，提前催 PM 推进阶段、
+// 在 history 里记一条它压根没做完的记录。
+test('isStageDone：只有部分 produces 存在时为 false（.every 不是 .some）', () => {
+  assert.equal(isStageDone({ stage: 'S2', stages: MULTI, artifactExists: have('a.md') }), false)
+  assert.equal(isStageDone({ stage: 'S2', stages: MULTI, artifactExists: have('b.md') }), false)
+})
+
+test('isStageDone：一个产物都没有时为 false', () => {
+  assert.equal(isStageDone({ stage: 'S2', stages: MULTI, artifactExists: have() }), false)
+})
+
+test('isStageDone：produces 为空数组时为 false——没有产物义务不算"齐了"', () => {
+  const stages = { S1: { role: 'at-pm', requires: [], produces: [] } }
+  assert.equal(isStageDone({ stage: 'S1', stages, artifactExists: have() }), false)
+})
+
+test('isStageDone：stage 在 stages 里查不到、或 stages 本身不是对象时为 false，不抛', () => {
+  assert.equal(isStageDone({ stage: 'S9', stages: MULTI, artifactExists: have() }), false)
+  assert.equal(isStageDone({ stage: 'S2', stages: null, artifactExists: have() }), false)
+  assert.equal(isStageDone({ stage: undefined, stages: MULTI, artifactExists: have() }), false)
 })

@@ -20,6 +20,10 @@ export const CHECKS = {
   contract: { event: 'PreToolUse', toolNames: ['Edit', 'Write', 'NotebookEdit'], failClosed: true },
   deliverable: { event: 'PostToolUse', toolNames: ['Agent'], failClosed: false },
   'stop-gate': { event: 'SubagentStop', toolNames: null, failClosed: false },
+  // ledger 不是门禁——它永不拒绝，只在 PostToolUse 上用 additionalContext 把 PM
+  // 算不出来的派生事实（契约 sha256、触达表、state.json 的校验结果）交回给 PM。
+  // failClosed: false 因为它根本没有「拒绝」这个出口。
+  ledger: { event: 'PostToolUse', toolNames: ['Edit', 'Write', 'NotebookEdit'], failClosed: false },
 }
 
 export const KNOWN_CHECKS = new Set(Object.keys(CHECKS))

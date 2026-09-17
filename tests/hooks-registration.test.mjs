@@ -107,3 +107,22 @@ test('hooks.json 里的每一个注册项都是零依赖 node 调用、参数完
     )
   }
 })
+
+// 上面那条只查一个方向：hooks.json 里注册的每一项都得是已知检查名。反方向此前
+// 没有任何测试守——KNOWN_CHECKS 里的一个检查名从 hooks.json 里被整条删掉，
+// gate.mjs 会一律对它「未知检查项」但那是另一码事：真正的失效是这个检查项自此
+// 再也不会被平台触发，而这份测试文件此前没有任何一条断言会因此变红（Task 6
+// 变异验证第 1 项实测：删掉新加的 ledger 注册，`node --test` 全绿、pass 数字都不
+// 变）。这条补上反方向：KNOWN_CHECKS 里的每个检查名，必须在 hooks.json 里至少
+// 注册一次（args[1] 命中），否则这个检查项形同虚设——写了判定逻辑、写了纯函数
+// 测试、写了子进程测试，但平台永远不会调用它。
+test('KNOWN_CHECKS 里的每一个检查名都在 hooks.json 里至少注册了一次', () => {
+  const registered = new Set(allHookCommands().map((hook) => hook.args?.[1]))
+  for (const name of KNOWN_CHECKS) {
+    assert.ok(
+      registered.has(name),
+      `检查名 ${JSON.stringify(name)} 在 checks.mjs 的 KNOWN_CHECKS 里，但 hooks.json 里没有` +
+        `任何一条 hook 命令的 args[1] 是它——这个检查项写了判定逻辑也测过，但平台永远不会触发它。`,
+    )
+  }
+})

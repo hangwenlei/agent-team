@@ -223,3 +223,26 @@ test('ctx 带 agentTeamDir，等于 <projectDir>/.agent-team', () => {
     rmSync(pluginDir, { recursive: true, force: true })
   }
 })
+
+test('artifactBytes 读得到产物字节', () => {
+  const { projectDir, pluginDir } = makeRun({ artifacts: ['00-contract.md'], stages: STAGES })
+  try {
+    const ctx = readRunContext(projectDir, pluginDir)
+    assert.ok(Buffer.isBuffer(ctx.artifactBytes('00-contract.md')))
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('artifactBytes 读不到时返回 null，不抛', () => {
+  const { projectDir, pluginDir } = makeRun({ stages: STAGES })
+  try {
+    const ctx = readRunContext(projectDir, pluginDir)
+    assert.equal(ctx.artifactBytes('不存在.md'), null)
+    assert.equal(ctx.artifactBytes(undefined), null)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})

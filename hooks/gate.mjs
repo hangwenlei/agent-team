@@ -18,6 +18,21 @@ import { decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideDeliverable } from './lib/deliverable.mjs'
+import { isControlFile } from './lib/control-files.mjs'
+import { computeReach } from './lib/reach.mjs'
+import { validateState, isStageDone } from './lib/state.mjs'
+import { sha256OfContract } from './lib/contract-hash.mjs'
+import { buildLedgerNotices } from './lib/ledger.mjs'
+import { norm } from './lib/path-norm.mjs'
+
+// ledger 关心两类路径：控制文件，以及 run 目录下的阶段产物（后者用来判断当前阶段的
+// 产物齐没齐）。写在别处的文件与它无关。
+function underRun(filePath, runDir) {
+  if (typeof filePath !== 'string' || !filePath || !runDir) return false
+  const rd = norm(runDir)
+  const t = norm(filePath)
+  return t === rd || t.startsWith(`${rd}/`)
+}
 
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -296,6 +311,69 @@ function main() {
       runDir: ctx.runDir,
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
+  }
+
+  if (CHECK === 'ledger') {
+    // ledger 不是门禁：它没有 deny 这个出口，只往 stdout 写 additionalContext。
+    // 执行面裁定（为什么算在 hook 侧而不是让 PM 跑脚本）写在 hooks/lib/ledger.mjs
+    // 头部，不在这里重复。
+    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    if (!ctx.ok) {
+      // fail open + 留痕，与 H2/H5 同一先例。措辞按 ctx.kind 分派，共用 failOpenNotice。
+      process.stderr.write(failOpenNotice('ledger 回传', ctx))
+      process.exit(0)
+    }
+
+    const filePath =
+      input.tool_name === 'NotebookEdit'
+        ? input?.tool_input?.notebook_path
+        : input?.tool_input?.file_path
+    // 不在 .agent-team/ 下的写入与本检查项无关，保持沉默——角色写业务代码是常态，
+    // 每次都刷一段 additionalContext 会把真正要看的东西淹掉。
+    if (!isControlFile(filePath, ctx.agentTeamDir) && !underRun(filePath, ctx.runDir)) {
+      process.exit(0)
+    }
+
+    const target = norm(filePath)
+    let kind = 'other'
+    if (target === norm(`${ctx.runDir}/00-contract.md`)) kind = 'contract'
+    else if (target === norm(`${ctx.agentTeamDir}/project.json`)) kind = 'project'
+    else if (target === norm(`${ctx.runDir}/state.json`)) kind = 'state'
+
+    const bytes = kind === 'contract' ? ctx.artifactBytes('00-contract.md') : null
+    const reach =
+      kind === 'project' && ctx.project
+        ? computeReach({ roster: loadRoster(), paths: ctx.project.paths })
+        : null
+    const stateProblems =
+      kind === 'state' ? validateState(ctx.state, { stages: ctx.stages }).problems : []
+
+    const stageDone = isStageDone({
+      stage: ctx.state?.stage,
+      stages: ctx.stages,
+      artifactExists: ctx.artifactExists,
+    })
+
+    const notices = buildLedgerNotices({
+      kind,
+      contractSha: bytes ? sha256OfContract(bytes) : null,
+      state: ctx.state,
+      reach,
+      stages: ctx.stages,
+      stageDone,
+      stateProblems,
+    })
+
+    if (notices.length) {
+      process.stdout.write(
+        JSON.stringify({
+          hookSpecificOutput: {
+            hookEventName: spec.event,
+            additionalContext: `agent-team 账本回传：\n${notices.join('\n\n')}`,
+          },
+        }),
+      )
+    }
   }
 
   if (CHECK === 'stop-gate' || CHECK === 'deliverable') {

@@ -60,6 +60,31 @@ export function nextStage(stages, current) {
   return ids[i + 1]
 }
 
+/**
+ * 当前阶段的 produces 是否已经全部齐了。artifactExists 由调用方注入——与
+ * hooks/lib/readiness.mjs 的 decideReadiness、hooks/lib/deliverable.mjs 的
+ * decideDeliverable 同一个理由：I/O 留在调用方，这里保持纯函数、可脱离磁盘单测。
+ *
+ * ⚠️ 这段判定原来是 hooks/gate.mjs 的 ledger 分支里一行内联的
+ * `current.produces.every((p) => ctx.artifactExists(p))`（Task 6 brief Step 7
+ * 原样给的代码）。抽成这里独立成一个可单测的纯函数，是 Task 6 变异验证第 4 项
+ * 实测后补的：gate.mjs 从不被任何测试 import（只子进程级跑），而它读的
+ * stages.json 是仓库根真实那份——M1 里每一个阶段的 produces 都只有一个元素，
+ * `.every` 与 `.some` 在单元素数组上永远同值，任何子进程级测试都不可能把两者判出
+ * 行为差异。实测：把 gate.mjs 内联那行的 `.every` 换成 `.some`，全量
+ * `node --test` 仍然 pass、fail 0，没有任何测试变红——brief 的变异表以为
+ * tests/ledger.test.mjs「无事可报时返回空数组」那条会因此变红，但那条测试传的
+ * `stageDone` 是字面量布尔值，从不经过这一行，这个预期本身就不成立（该值在
+ * ledger.test.mjs 的 `base` 里写死是 `false`，不受这里怎么算的影响）。抽成这里
+ * 之后能用一份完全合成的、有多个 produces 元素的 stages 夹具单测，不再受仓库根
+ * 真实 stages.json 「每个阶段只有一个产物」这个形状限制。
+ */
+export function isStageDone({ stage, stages, artifactExists }) {
+  const current = isPlainObject(stages) ? stages[stage] : undefined
+  if (!current || !Array.isArray(current.produces) || current.produces.length === 0) return false
+  return current.produces.every((p) => artifactExists(p))
+}
+
 export function validateState(state, { stages } = {}) {
   const problems = []
   const p = (msg) => problems.push(msg)
