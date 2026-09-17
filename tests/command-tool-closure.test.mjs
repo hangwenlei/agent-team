@@ -51,10 +51,41 @@ function toolsLineOf(md) {
   return line ?? ''
 }
 
-// 候选工具名——显式清单，不是自动收集的。这个插件当前用到的工具全集恰好就是
-// 这几个（见 agents/*.md 与 roster.json），多列的 Bash/Grep/NotebookEdit 是
+// 规格 §6.1 的三个工具（Skill、SendMessage、ListAgents）一律不授予任何角色
+// ——Skill 的 context: fork 能绕过 H1 派发门禁，SendMessage/ListAgents 能跨
+// 角色与跨会话触达——由 tests/tool-surface.test.mjs 强制：那份测试断言
+// agents/*.md 的 tools: 行不得含这三个词。
+//
+// 这三个词必须从下面「核心不变量」实际用的候选集合里排除，否则会跟
+// tool-surface.test.mjs 那条测试当场互相矛盾：命令正文里解释一句「不要用
+// `Skill` 绕过门禁」本该是被鼓励写的话（规格 §6.1 为这条旁路整节论证，
+// commands/at.md 第 5 节现在就在写同类的防护性说明）；如果本文件把这种解释
+// 性提及也算作"命令要求 PM 使用 Skill"，就会断言"at-pm.md 的 tools: 行必须
+// 加 Skill"，而 tool-surface.test.mjs 断言"绝不能加 Skill"——写那句解释的人
+// 会被两条互相矛盾的红测试卡死，看不出该听谁的。
+//
+// 排除它们不会削弱本测试守的不变量：它守的是"命令让 PM 用的工具，PM 真的
+// 有"，而这三个工具按设计任何角色都不该有，不存在"该给却没给"这种失败模式
+// ——不给正是规格要的结果，不是本测试要抓的缺口。
+//
+// 这份排除清单与 tests/tool-surface.test.mjs 实际禁用的清单是同一份知识的两
+// 份拷贝，靠下面「前置条件：FORBIDDEN_BY_SPEC 与 tool-surface.test.mjs……」
+// 那条测试防止分叉——改这里务必确认那条测试仍然通过。
+const FORBIDDEN_BY_SPEC = ['Skill', 'SendMessage', 'ListAgents']
+
+// 候选工具名——显式清单，不是自动收集的。前 9 个是这个插件当前用到的工具
+// 全集（见 agents/*.md 与 roster.json），多列的 Bash/Grep/NotebookEdit 是
 // 防御性占位：命令正文目前不提，一旦哪天真的提了，这里不用跟着改判定逻辑，
 // 只是它们此刻永远不会被命中。
+//
+// 后 3 个（Skill/SendMessage/ListAgents）故意也写进这份"原始候选清单"，
+// 不是遗漏也不是矛盾——它们要先真的成为候选，才谈得上被下面的 .filter 摘掉；
+// 如果一开始就不写进来，FORBIDDEN_BY_SPEC 的排除会是一句空话（摘掉一个本来
+// 就不存在的东西，删掉 FORBIDDEN_BY_SPEC 里的名字也不会改变任何行为，排除
+// 是否真的在起作用就没法用变异验证证明）。写进来再靠 .filter 摘掉，才能让
+// "删掉 FORBIDDEN_BY_SPEC 里的一项 → 那个工具重新变成活跃候选 → 只要命令
+// 正文提到它就会被判定要求授予"这条因果链是真的，可以被变异验证复现（Task
+// 10a 第二轮报告记了这条验证）。
 const CANDIDATE_TOOLS = [
   'Agent',
   'Read',
@@ -65,7 +96,10 @@ const CANDIDATE_TOOLS = [
   'Bash',
   'Grep',
   'NotebookEdit',
-]
+  'Skill',
+  'SendMessage',
+  'ListAgents',
+].filter((tool) => !FORBIDDEN_BY_SPEC.includes(tool))
 
 // 判断某个候选工具名是不是「以工具的身份」出现在一段正文里：用 \b 词边界、
 // 大小写敏感匹配（跟 tool-surface.test.mjs 判定禁用工具同一种手法）。这批
@@ -104,6 +138,36 @@ test('前置条件：commands/ 正文里确实提到了候选清单里的工具�
     anyMention,
     'commands/ 下没有任何文件提到 CANDIDATE_TOOLS 里的任何一个词——下面这条测试' +
       '一次都不会真正执行断言，通过是假的',
+  )
+})
+
+// 规格 §6.1 的三个工具一律不授予任何角色，由 tests/tool-surface.test.mjs 的
+// FORBIDDEN_TOOLS 强制。本文件的 FORBIDDEN_BY_SPEC 是同一份知识的第二份拷贝
+// ——两边故意分开维护，不改 tool-surface.test.mjs（它是已经过评审的既有文
+// 件），也不让两个测试文件之间产生 import 依赖（各自单独跑
+// `node --test tests/xxx.test.mjs` 时都不需要先理解另一个文件的内部结构）。
+// 代价是两份可能悄悄分叉——这条测试就是防分叉的唯一防线：把
+// tests/tool-surface.test.mjs 的源码文本当数据读（不是当模块导入、不改动
+// 它），从它的 FORBIDDEN_TOOLS 数组里抠出每个 `name: '...'`，跟本文件的
+// FORBIDDEN_BY_SPEC 比集合是否相等。
+function forbiddenToolNamesFromToolSurfaceTest() {
+  const src = readFileSync(join(ROOT, 'tests', 'tool-surface.test.mjs'), 'utf8')
+  return new Set([...src.matchAll(/\bname:\s*'([^']+)'/g)].map((m) => m[1]))
+}
+
+test('前置条件：本文件排除的 FORBIDDEN_BY_SPEC 与 tool-surface.test.mjs 实际禁用的工具是同一组名字——防两处静默分叉', () => {
+  const there = forbiddenToolNamesFromToolSurfaceTest()
+  assert.ok(
+    there.size > 0,
+    '从 tests/tool-surface.test.mjs 源码里一个 FORBIDDEN_TOOLS 的 name 都没抠出来' +
+      '——那份文件的写法可能变了，本文件的解析手法失效了，不能拿空集合去对账',
+  )
+  assert.deepEqual(
+    new Set(FORBIDDEN_BY_SPEC),
+    there,
+    `本文件 FORBIDDEN_BY_SPEC = ${JSON.stringify(FORBIDDEN_BY_SPEC)}，但 tests/` +
+      `tool-surface.test.mjs 实际禁用的是 ${JSON.stringify([...there])}——两处` +
+      '维护同一份知识的两份拷贝分叉了，其中一处需要更新',
   )
 })
 
