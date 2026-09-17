@@ -416,8 +416,41 @@ function main() {
       process.exit(0)
     }
 
-    const r = decideDeliverable({ role, stages: ctx.stages, artifactExists: ctx.artifactExists })
-    if (r.ok) process.exit(0)
+    // stageId 来自 state.json，不再让 decideDeliverable 自己猜——理由见
+    // hooks/lib/deliverable.mjs 头部的【M1b 改】那一段。ctx.state 在这里必然
+    // 存在（ctx.ok 为 true 意味着 state.json 读出来且是对象），但 stage 字段
+    // 本身可能缺，那种情形由 decideDeliverable 归成 skipped:'unknown-stage'。
+    const r = decideDeliverable({
+      role,
+      stageId: ctx.state?.stage,
+      stages: ctx.stages,
+      artifactExists: ctx.artifactExists,
+    })
+    if (r.ok) {
+      // ⚠️ ok 有三种成因，只有一种是真的「交付了」。skipped 的两种是门禁**哑掉**：
+      // 它没有意见，不是它检查过了没问题。H5a 是权威记录，这种区别必须留痕，
+      // 否则和 docs/08 §0 说的「看起来通过了」完全无法区分。
+      // 'role-not-in-stage' 尤其值得看一眼：它要么说明这次派发本身不该发生，要么
+      // 说明 state.stage 停在旧阶段没推进——后者会让 H5 对整个新阶段全程哑火。
+      // 'unknown-stage' 是 state.json 自己坏了，ledger 那条路径会给出细节。
+      // H5b（stop-gate）不发这条：SubagentStop 上没有 additionalContext 这条通道，
+      // 而且真拦截不该因为「无话可说」就往 stderr 刷字。
+      if (CHECK === 'deliverable' && r.skipped === 'role-not-in-stage') {
+        process.stdout.write(
+          JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: spec.event,
+              additionalContext:
+                `⚠️ agent-team 交付物校验：刚返回的 ${role} 不是当前阶段（state.stage = ` +
+                `${JSON.stringify(ctx.state?.stage)}）的执行者，所以这次校验**没有意见**——` +
+                `不是它查过了没问题。两种可能：这次派发本身不该发生；或者 state.stage 停在` +
+                `旧阶段没推进，那样 H5 会对整个新阶段全程哑火。去 run 目录核实。`,
+            },
+          }),
+        )
+      }
+      process.exit(0)
+    }
 
     if (CHECK === 'stop-gate') {
       // H5b：真拦截。必须走 SubagentStop 契约（exit 2 + stderr），不是

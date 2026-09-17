@@ -36,7 +36,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { run, decisionOf } from './helpers/gate-runner.mjs'
+import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 
 // ---- H5b（stop-gate，SubagentStop）----
@@ -267,4 +267,33 @@ test('deliverable：tool_name 不是 Agent 时不表态——三条流都是空�
     '与本检查项无关的工具调用必须完全沉默——落进 !rawTarget 那条 fail open 分支' +
       '（它会往 stderr 留痕）说明 toolNames 前置校验没有生效',
   )
+})
+
+// ---- state.stage 与被派角色对不上（M1b Task 7 的新失效形状）----
+
+test('state.stage 与被派角色对不上时 H5a 发 warning，而不是静默放行', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2' })
+  try {
+    const { stdout } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-architect',
+      tool_input: { subagent_type: 'agent-team:at-backend' },
+    }, GATE, projectDir)
+    const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext
+    assert.match(ctx, /没有意见/)
+    assert.match(ctx, /S2/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('H5b 在角色与当前阶段对不上时不拦——fail open，不发 exit 2', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2' })
+  try {
+    const { status } = run('stop-gate', { agent_type: 'agent-team:at-backend' }, GATE, projectDir)
+    assert.equal(status, 0)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
 })

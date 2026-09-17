@@ -8,40 +8,29 @@
 |---|---|---|
 | H2 就绪门禁 | 这个角色**接下来要做哪一段**，它的前置产物齐了吗 | `readiness.mjs` |
 | H3 写路径隔离 | run 目录下这条路径是**哪个阶段的产物、归谁** | `writepath.mjs` |
-| H5a/H5b 交付物校验 | 这个角色**刚做完的那一段**交付了吗 | `deliverable.mjs` |
+| H5a/H5b 交付物校验 | `state.stage` 这一段的执行角色交付了吗 | `deliverable.mjs` |
 
 JSON 写不了注释，所以下面这条**扩链之前必读**的结论放在这里。
 
-## ⚠️ 扩到 S6–S8 之前必须先改 `deliverable.mjs`
+## H5 按 `state.stage` 判定（M1b 改，原先的坑已填）
 
-`decideReadiness` 与 `decideDeliverable` 用的是同一条迭代规则：**取该角色第一个
-`produces` 未齐的阶段**。这条规则对 H2 问的问题是对的，对 H5 问的问题是错的——
-多阶段角色做完前一段之后，H5 会拿**下一段**的缺失产物把**这一段**顶回去。
+`decideReadiness` 与 `decideDeliverable` 曾经共用同一条迭代规则——「取该角色第一个
+`produces` 未齐的阶段」。那条规则对 H2 问的问题（「它接下来要做哪一段」）是对的，对
+H5 问的问题（「它刚做完的那一段交付了吗」）是错的：多阶段角色做完前一段之后，H5 会拿
+**下一段**的缺失产物把**这一段**顶回去，最多九次（U5 实测的平台重试上限），然后平台
+静默放行——一次纯噪音的拦截，还会把 H5b 唯一的重试预算消耗光。
 
-今天不可达：当前 `stages.json` 里唯一的多阶段角色是 `at-pm`（S1 + S4），而
-`roster.json` 里没有任何角色能派发它（`tests/roster-closure.test.mjs` 钉住这条），
-它也不触发 `SubagentStop`，所以这条错误规则一次也走不到。
+现在 `decideDeliverable` 由调用方传 `stageId`（`gate.mjs` 传 `ctx.state.stage`），
+不再自己猜。**所以扩链到 S6–S8 时可以放心把一个角色写进多个阶段**（规格 §4 的完整链
+就把 `at-architect` 同时写进 S3 与 S5）。
 
-一旦扩链就是真实误拦：规格 §4 的完整阶段链把 `at-architect` 同时写进 S3 与 S5。
-用一份这样的 stages 实测（`at-architect` 刚交完 S3，`03-arch.md` 已在磁盘上，
-S5 的产物当然还没有）：
+代价是 H5 现在依赖 `state.stage` 是准的。它停在旧阶段时 H5 会对新阶段的角色**哑掉**，
+而哑掉和「通过了」长得一模一样。两条对策：`gate.mjs` 的 H5a 在
+`skipped === 'role-not-in-stage'` 时发 warning；`ledger` 在当前阶段产物齐了时提示推进
+阶段。**改 `state.stage` 的写入路径时，先确认这两条还在。**
 
-```
-H5（"刚做完的 S3 交付了吗"）: { ok: false, stageId: 'S5', missing: ['05-impl/index.md'] }
-H2（"接下来要做哪一段"）    : { decision: 'allow' }
-```
-
-H5b 会用 `exit 2` 把交完 S3 的 `at-architect` 反复顶回去要 S5 的产物，最多九次
-（U5 实测的平台重试上限，见 `docs/07-U5-U6-U8-实测结论.md` §1），然后平台静默
-放行。一次纯噪音的拦截，还会把 H5b 唯一的重试预算消耗光——真正该拦的下一次就
-拦不住了。
-
-**改法的方向**（属计划 B，不在 M1a 范围内）：让调用方把"刚结束的阶段 id"传进
-`decideDeliverable`，不要让它自己猜。`readRunContext` 现在已经把 `state.stage`
-读出来了，却没有任何调用方用它，那很可能就是这个入参。
-
-同一条结论也写在 `hooks/lib/deliverable.mjs` 的头部注释里（改代码的人从那边进来，
-改阶段链的人从这边进来）。
+同一条结论也写在 `hooks/lib/deliverable.mjs` 的头部注释里（改代码的人从那边进来，改
+阶段链的人从这边进来）。
 
 ## 另一条相关的已知缺口
 

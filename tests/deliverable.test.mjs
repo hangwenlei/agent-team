@@ -17,18 +17,18 @@ const STAGES = {
 const have = (...names) => (rel) => names.includes(rel)
 
 test('产物已写时 ok', () => {
-  const r = decideDeliverable({ role: 'at-product', stages: STAGES, artifactExists: have('01-prd.md') })
+  const r = decideDeliverable({ role: 'at-product', stageId: 'S2', stages: STAGES, artifactExists: have('01-prd.md') })
   assert.equal(r.ok, true)
 })
 
 test('产物未写时不 ok，并列出缺的是哪些', () => {
-  const r = decideDeliverable({ role: 'at-product', stages: STAGES, artifactExists: have() })
+  const r = decideDeliverable({ role: 'at-product', stageId: 'S2', stages: STAGES, artifactExists: have() })
   assert.equal(r.ok, false)
   assert.deepEqual(r.missing, ['01-prd.md'])
 })
 
 test('理由点名阶段与文件', () => {
-  const r = decideDeliverable({ role: 'at-product', stages: STAGES, artifactExists: have() })
+  const r = decideDeliverable({ role: 'at-product', stageId: 'S2', stages: STAGES, artifactExists: have() })
   assert.match(r.reason, /S2/)
   assert.match(r.reason, /01-prd\.md/)
 })
@@ -39,40 +39,84 @@ test('理由点名阶段与文件', () => {
 // at-outsider），比随便一个"恰好没写进这个局部 STAGES 夹具"的角色更能
 // 说明这条测试到底在验证什么。
 test('不在阶段链里的角色没有交付物义务', () => {
-  const r = decideDeliverable({ role: 'at-outsider', stages: STAGES, artifactExists: have() })
+  const r = decideDeliverable({ role: 'at-outsider', stageId: 'S2', stages: STAGES, artifactExists: have() })
   assert.equal(r.ok, true)
 })
 
 test('stages 缺失时不判定为失败——门禁坏了不该诬告角色', () => {
-  const r = decideDeliverable({ role: 'at-product', stages: null, artifactExists: have() })
+  const r = decideDeliverable({ role: 'at-product', stageId: 'S2', stages: null, artifactExists: have() })
   assert.equal(r.ok, true)
 })
 
-// 下面两条边界，decideDeliverable 与 hooks/lib/readiness.mjs 的
-// decideReadiness 面对的是同一份 stages.json、同一组情形（角色身兼多阶段、
-// produces 为空）——两边的语义不能打架，否则 H2 与 H5 会对"角色这一刻该看
-// 哪个阶段"给出不一致的答案。
-
-test('同一角色的多个阶段按 stages 的书写顺序（插入序）判定，不按阶段 id 字符串排序', () => {
-  // "S10".localeCompare("S2") < 0——字典序会把 S10 排到 S2 前面。
-  // decideReadiness 曾经这样排过序，Task 3 评审 Minor 2 改成了插入序；
-  // decideDeliverable 面对的是同一份 stages.json 的书写顺序，必须延用
-  // 同一套顺序语义。S2、S10 的产物都缺：插入序下 S2 先声明、应该先报 S2；
-  // 若误用字符串排序，S10 会被排到前面，报出来的会是 S10。
-  const stages = {
-    S2: { role: 'at-pm', requires: [], produces: ['02-x.md'] },
-    S10: { role: 'at-pm', requires: [], produces: ['10-y.md'] },
-  }
-  const r = decideDeliverable({ role: 'at-pm', stages, artifactExists: have() })
-  assert.equal(r.ok, false)
-  assert.equal(r.stageId, 'S2')
-})
-
+// produces 为空这条边界，decideDeliverable 与 hooks/lib/readiness.mjs 的
+// decideReadiness 面对的是同一份 stages.json、同一组情形——两边对"没有产物
+// 义务的阶段要不要拦"这件事语义不能打架，否则 H2 与 H5 会对同一个阶段给出
+// 不一致的答案。
+//
+// "角色身兼多阶段时，先判定哪一段"这条边界，M1b 之前两个函数共用同一条迭代
+// 规则（都取该角色第一个未完成的阶段）。Task 7 把 decideDeliverable 改成只
+// 认调用方传入的 stageId、不再自己迭代所有阶段——这正是这次改动要修的 bug
+// 本体（见 hooks/lib/deliverable.mjs 头部【M1b 改】那段）。原来这里还有一条
+// "同一角色的多个阶段按插入序判定"的测试，验的是 decideDeliverable 自己遍历
+// mine 数组、跳过已完成阶段这条逻辑；这条逻辑随这次改动整体删除了（新实现是
+// stages[stageId] 直查，不再有第二个候选阶段可比顺序），继续留着那条测试、
+// 只补一个 stageId 参数，会让它退化成跟上面"产物未写时不 ok"完全同构的重复
+// 断言，而测试名和注释仍然宣称在验证"插入序"——这正是这个项目反复栽过的失效
+// 形状（一个看起来在验证某件事、实际什么都没验的断言）。删掉它，覆盖它原本
+// 要防的回归("不再自己找第一个未完成的阶段")的是下面新增的第一条测试，
+// 用的是规格 §4 里真实会出现的场景（at-architect 身兼 S3 与 S5），比原来
+// S2/S10 这个纯为了避开字典序而造的合成夹具更贴近会真正发生的情形。
 test('produces 为空的阶段视为跳过（不检查），与 decideReadiness 的已知边界一致', () => {
   // decideReadiness 那边这条边界的完整说明见 hooks/lib/readiness.mjs
   // Task 3 评审 Minor 3 的注释：纯评审类、不产出文件的阶段两边都不设防，
   // 是同一个已知边界，不是 decideDeliverable 单独引入的新缺口。
   const stages = { S1: { role: 'at-pm', requires: [], produces: [] } }
-  const r = decideDeliverable({ role: 'at-pm', stages, artifactExists: have() })
+  const r = decideDeliverable({ role: 'at-pm', stageId: 'S1', stages, artifactExists: have() })
   assert.equal(r.ok, true)
+})
+
+// 下面四条覆盖 M1b Task 7 的新语义：decideDeliverable 现在只认调用方传入的
+// stageId，不再自己猜"该看哪一段"。
+
+test('按传入的 stageId 判定，不再自己找「第一个未完成的阶段」', () => {
+  // at-architect 同时是 S3 与 S5 的执行者——规格 §4 的完整阶段链就是这样。
+  // 它刚交完 S3（03-arch.md 在磁盘上），S5 的产物当然还没有。
+  const stages = {
+    S3: { role: 'at-architect', requires: [], produces: ['03-arch.md'] },
+    S5: { role: 'at-architect', requires: [], produces: ['05-impl/index.md'] },
+  }
+  const exists = (p) => p === '03-arch.md'
+  // 老规则会拿 S5 的缺失产物把刚交完 S3 的它顶回去，最多九次然后平台静默放行。
+  assert.deepEqual(
+    decideDeliverable({ role: 'at-architect', stageId: 'S3', stages, artifactExists: exists }),
+    { ok: true },
+  )
+  // 真到了 S5 才该拦。
+  const r = decideDeliverable({ role: 'at-architect', stageId: 'S5', stages, artifactExists: exists })
+  assert.equal(r.ok, false)
+  assert.equal(r.stageId, 'S5')
+})
+
+test('角色不是当前阶段的执行者：不表态，但说明为什么', () => {
+  const stages = { S2: { role: 'at-product', requires: [], produces: ['01-prd.md'] } }
+  const r = decideDeliverable({ role: 'at-backend', stageId: 'S2', stages, artifactExists: () => false })
+  assert.deepEqual(r, { ok: true, skipped: 'role-not-in-stage' })
+})
+
+test('stageId 查不到（缺失、或 state.stage 是个不存在的阶段）：不表态，并说明为什么', () => {
+  const stages = { S2: { role: 'at-product', requires: [], produces: ['01-prd.md'] } }
+  for (const stageId of [undefined, null, 'S9', 3]) {
+    assert.deepEqual(
+      decideDeliverable({ role: 'at-product', stageId, stages, artifactExists: () => false }),
+      { ok: true, skipped: 'unknown-stage' },
+    )
+  }
+})
+
+test('当前阶段没有 produces 义务：不表态', () => {
+  const stages = { S3: { role: 'at-architect', requires: [], produces: [] } }
+  assert.deepEqual(
+    decideDeliverable({ role: 'at-architect', stageId: 'S3', stages, artifactExists: () => false }),
+    { ok: true },
+  )
 })
