@@ -516,12 +516,17 @@ test('writepath：run 目录下写 state.json——仍然 deny，它不是任何
 test('ctx.ok 时：被钉成主线程的 at-pm 能写 state.json（账一，走控制文件规则）', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', project: PROJECT })
   try {
-    const { stdout } = run('writepath', {
+    const { stdout, stderr } = run('writepath', {
       tool_name: 'Write',
       agent_type: 'at-pm',
       tool_input: { file_path: join(projectDir, '.agent-team', 'runs', 'r1', 'state.json') },
     }, GATE, projectDir)
     assert.equal(decisionOf(stdout), null, '不该有拒绝输出')
+    // 自证「走的不是 I2 豁免」：I2 豁免必留 /读不到运行上下文/ 这行 stderr 痕迹
+    // （见 gate.mjs 的 failOpenNotice 调用点），控制文件规则那条路径不会打它。
+    // 不加这行的话，「这条测试走的是控制文件规则」目前只能靠 Step 12 变异跑的
+    // 历史记录佐证，不是靠断言本身。
+    assert.doesNotMatch(stderr, /读不到运行上下文/)
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })
@@ -545,12 +550,19 @@ test('ctx.ok 时：at-backend 写 state.json 被拒，理由点名控制文件',
   }
 })
 
-test('ctx.ok 时：at-backend 写 project.json 被拒（此前会被静默放行）', () => {
+// ⚠️ 这里必须用**未登记**角色（at-outsider 不在 PROJECT.paths 里）。
+// 用 at-backend 的话这条测试会在错误的理由下变绿：它是登记过的角色，改动前写
+// .agent-team/project.json 本来就会被「这条路径没有被任何角色认领」拒掉，
+// 根本走不到「静默放行」那条早退。真正被这次改动堵上的是未登记角色那条路
+// （Object.hasOwn(owners, role) 早退 → allow），纯函数层由
+// tests/writepath.test.mjs 的 at-outsider 用例覆盖，这条补的是子进程级那一层
+// （docs/09 账一实现约束第 4 条：两层都要有）。
+test('ctx.ok 时：at-outsider 写 project.json 被拒（此前会被静默放行）', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', project: PROJECT })
   try {
     const { stdout } = run('writepath', {
       tool_name: 'Write',
-      agent_type: 'agent-team:at-backend',
+      agent_type: 'agent-team:at-outsider',
       tool_input: { file_path: join(projectDir, '.agent-team', 'project.json') },
     }, GATE, projectDir)
     const d = decisionOf(stdout)

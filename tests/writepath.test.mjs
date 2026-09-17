@@ -73,6 +73,7 @@ test('不传 agentTeamDir 时控制文件分支不触发，保持既有行为', 
     project: PROJECT, runDir: RUN, stages: STAGES,
   })
   assert.equal(r.decision, 'deny')
+  assert.doesNotMatch(r.reason, /控制文件/)
 })
 
 test('写自己名下的路径放行', () => {
