@@ -66,17 +66,28 @@ test('命令正文里出现的每个 at-* 角色名都在花名册里', () => {
 
 // M1a ⑦：at-pm 只能派 at-product / at-architect，at-backend 在第三层。
 // 清单写「PM 派 at-backend」会被 H1 正确地拒掉，而那次拒绝很容易被记成别的问题。
+//
+// ⚠️ 评审发现：原来用 .find() 只看第一条命中行——at.md 里 at-backend/at-frontend
+// 各自唯一的命中行（「你派不动 at-backend / at-frontend——花名册里 at-pm 只能派
+// at-product 与……」）恰好带着豁免词 at-product，.find() 拿到这一行就判过，不管
+// 文件里其它位置还有没有真违规行。评审实测：把一句真违规加在这行之后，.find() 还是
+// 只看到这行、全绿；加在这行之前才会红——测试的抓力因此是位置相关的，而不是内容
+// 相关的。改成遍历全部命中行，每一行独立过豁免判断，不再取决于加在哪个位置。豁免词
+// 表另加了「派不动」「只能派」，直接对应「说明为什么不能直接派」这类行本身的措辞，
+// 不再依赖这行恰好也提到 at-product 这个巧合。
 test('/at 不得指示 PM 直接派 at-pm 派不动的角色', () => {
   const t = textOf('at.md')
   const reachable = new Set(roster['at-pm'].can_delegate_to)
   for (const name of new Set(t.match(/\bat-[a-z][a-z0-9-]*\b/g) ?? [])) {
     if (name === 'at-pm' || reachable.has(name)) continue
-    const line = t.split(/\r?\n/).find((l) => l.includes(name) && /派|dispatch|Agent/.test(l)) ?? ''
-    assert.ok(
-      !line || /at-architect|at-product|经|转/.test(line),
-      `commands/at.md 有一行像是让 PM 直接派 ${name}：「${line.trim()}」——` +
-        `at-pm 的 can_delegate_to 只有 ${[...reachable].join('、')}，H1 会拒`,
-    )
+    const lines = t.split(/\r?\n/).filter((l) => l.includes(name) && /派|dispatch|Agent/.test(l))
+    for (const line of lines) {
+      assert.ok(
+        /at-architect|at-product|经|转|派不动|只能派/.test(line),
+        `commands/at.md 有一行像是让 PM 直接派 ${name}：「${line.trim()}」——` +
+          `at-pm 的 can_delegate_to 只有 ${[...reachable].join('、')}，H1 会拒`,
+      )
+    }
   }
 })
 
@@ -108,17 +119,38 @@ test('命令正文里出现的每个 .agent-team 路径都是控制文件或 run
 })
 
 // ⚠️ Task 9 实现时发现：原正则 /state\.json\s*的\s*`([a-z_]+)`/ 在四条命令的正文里
-// 一次都不会匹配——正文一律把 state.json 自己也包在反引号里（`` `state.json` 的
-// `stage` ``），紧跟在「json」后面的是反引号而不是空白，\s* 跳不过那个反引号，
-// 匹配在「的」之前就断了。逐一实测过三份文件：加一个可选的反引号之后，at.md 能测到
-// contract_sha/stage/escalations 三处、at-resume.md 能测到 stage 一处、at-status.md
-// 能测到 artifacts 一处，全部是模板里真实存在的字段——这条测试原先是 0 匹配的假通过，
-// 不是钉住了什么。
+// 一次都不会匹配——正文一律把 state.json 自己也包在反引号里，紧跟在「json」后面的是
+// 反引号而不是空白，\s* 跳不过那个反引号。加一个可选反引号修好了这个 0 匹配的假通过，
+// 但评审指出覆盖面仍然太窄：三份文件里反引号包裹的字段名引用共 22 处，只够到 5 处
+// ——原正则要求字段名紧跟在「state.json 的」后面，但 at.md §1 是「先提一次
+// state.json，冒号后面顺着列 6 个字段」的写法，字段名和「state.json」本身并不相邻；
+// history 在全文单独出现的次数也远不止「state.json 的 history」这一种写法。
+//
+// 改成：按空行切块，块里只要提到 state.json，就把块内所有反引号包裹、形状像字段名
+// （纯小写字母加下划线——00-contract.md / at-product / Glob / S1 这类明显不是字段名
+// 的写法各自带点号、连字符、大写字母，天然被这个形状过滤掉，不需要额外处理）的
+// token 都当候选查一遍。
+//
+// 这样做会顺带捞到几个「形状像字段、又跟 state.json 挨在同一段，但其实不是 state.json
+// 自己的顶层字段」的词，逐一核对过，显式豁免，不算进判定：
+//   - slug：run id 格式里的一段（YYYYMMDD-HHmm-<slug>），根本不是字段。
+//   - subagent_type：Agent 工具的参数名，跟 state.json 无关，只是说明写在同一段列表里。
+//   - kind：escalations[] 每条记录自己的字段（规格 §5.3 的五类取值），不是 state.json
+//     的顶层字段——两者经常在同一句话里一起出现（「往 state.json 的 escalations 追加
+//     一条……kind 用上表里的取值」），位置上分不开，只能显式豁免。
+//   - produces：stages.json 每个阶段自己的字段，不是 state.json 的字段——「把
+//     state.json 的 stage 那一段的 produces」这句话里两者也挨在一起。
+const STATE_JSON_BLOCK_NON_FIELDS = new Set(['slug', 'subagent_type', 'kind', 'produces'])
 test('/at 与 /at-resume 提到的 state.json 字段都在模板里', () => {
   const known = new Set(Object.keys(stateTemplate))
   for (const f of ['at.md', 'at-resume.md', 'at-status.md']) {
-    for (const m of textOf(f).matchAll(/state\.json`?\s*的\s*`([a-z_]+)`/g)) {
-      assert.ok(known.has(m[1]), `commands/${f} 提到 state.json 的 ${m[1]}，但模板里没有这个字段`)
+    for (const block of textOf(f).split(/\r?\n\s*\r?\n/)) {
+      if (!block.includes('state.json')) continue
+      for (const m of block.matchAll(/`([a-z_]+)`/g)) {
+        const name = m[1]
+        if (STATE_JSON_BLOCK_NON_FIELDS.has(name)) continue
+        assert.ok(known.has(name), `commands/${f} 提到 state.json 的 ${name}，但模板里没有这个字段`)
+      }
     }
   }
 })

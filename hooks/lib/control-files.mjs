@@ -3,10 +3,14 @@
 // 这份清单是**单一真源**（docs/09-M1b-入口决策.md 账一「实现约束」第 1 条）：
 // hooks/lib/writepath.mjs、templates/、commands/ 都不许再各写一遍。
 //
-// 这条约束现在由两条测试对账：tests/templates.test.mjs 的「模板里不得再抄一份控制
-// 文件清单」（Task 8）、tests/commands.test.mjs 的「命令正文里出现的每个 .agent-team
-// 路径都是控制文件或 run 目录下的产物」（Task 9）。两条都从这里 import CONTROL_FILES，
-// 不在 templates/ 或 commands/ 里另写一份字面量清单——改这里的清单时，两条都会感知到。
+// 这条约束现在由两条测试对账，两条都从这里 import CONTROL_FILES，不在 templates/
+// 或 commands/ 里另写一份字面量清单：
+// - tests/commands.test.mjs 的「命令正文里出现的每个 .agent-team 路径都是控制文件或
+//   run 目录下的产物」（Task 9）——这条会真感知 CONTROL_FILES 的改动：改名、增删都会
+//   让命令正文里对应的路径引用重新落到「合法/不合法」的判定上。
+// - tests/templates.test.mjs 的「模板里不得再抄一份控制文件清单」（Task 8）——这条
+//   抓的是另一种更窄的形状：「同一个模板文件里并列抄了 ≥2 个控制文件名」，不是对
+//   CONTROL_FILES 改动本身的通用对账，清单改名/增删大多数情况下不会让它变色。
 //
 // 为什么控制文件不走「角色认领产物」那套判据（完整论证见 docs/09 账一，这里只记
 // 要点）：被 settings.json 钉成主线程的 at-pm 不是 callerOf 判定的 MAIN，稳态下它
