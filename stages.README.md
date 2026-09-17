@@ -49,3 +49,14 @@ H5b 会用 `exit 2` 把交完 S3 的 `at-architect` 反复顶回去要 S5 的产
 `at-pm` 既写不了 `.agent-team/project.json`（取决于 `project.paths` 里有没有它这个
 键）也写不了 `runs/<id>/state.json`（无条件，因为它不是任何阶段的 `produces`）。
 计划 B 第一次往 `state.json` 写返工计数时会撞上，细节见那里。
+
+## ⚠️ 返工预算的写时强制还没有做（M1b 记，属 M2）
+
+`hooks/lib/state.mjs` 的 `validateState` 会校验 `rework` 等于 `history` 的派生量
+（某阶段出现 n 次 → n-1 次返工），所以**把计数改小会被 `ledger` 报出来**。但那是
+**事后告警**，不是拦截：拦住一次「把计数改小」的写入要看到改之前的那一版，
+`PostToolUse` 看不到。
+
+M1 的阶段链只到 S5，**没有任何返工边**（返工产生于 S6 失败回 S5 与 S7 驳回，
+规格 §4.2 ③），所以这条缺口在 M1 里一次也走不到。扩到 S6–S8 时必须回来把它设计完：
+那时才第一次有真实的返工计数，而「第 3 轮终局」是硬上限，靠告警守不住。
