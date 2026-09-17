@@ -133,6 +133,11 @@ export function readRunContext(projectDir, pluginDir) {
       state: state.value,
       stages: stages.value,
       project: project.value,
+      // agentTeamDir 是 .agent-team 本身（runDir 的爷爷目录）。H3 判定控制文件要用
+      // 它：current-run / project.json / reach.json 都在这一层、不在 runDir 里。
+      // 让 decideWritePath 自己从 runDir 往上推两级也行，但那会是第二处「.agent-team
+      // 在哪」的知识——这个文件已经是那条知识的唯一来源（上面的 base），直接给出去。
+      agentTeamDir: base,
       artifactExists(rel) {
         // join 放在 try 里面：rel 理论上总是 stages.json 里 requires/produces
         // 数组的字符串元素，但这层防御不该指望调用方守规矩——同一个教训

@@ -7,6 +7,8 @@
 // 里的公共实现——H3 与 H4 必须用同一份（整理项 5：两边判错的方向相反，
 // 各留一份的代价不对称，理由写在那个文件的头部）。
 import { norm } from './path-norm.mjs'
+import { isControlFile } from './control-files.mjs'
+import { isContractWriter } from './contract-guard.mjs'
 
 function underAny(target, prefixes, base) {
   // 评审三轮 Minor 3：prefixes 理论上总是数组（project.paths 的值），但
@@ -49,10 +51,40 @@ function stageOwnerOfRunPath(stages, rd, target) {
   return null
 }
 
-export function decideWritePath({ role, filePath, project, runDir, stages }) {
+export function decideWritePath({ role, filePath, project, runDir, stages, agentTeamDir }) {
   if (typeof filePath !== 'string' || !filePath) return { decision: 'allow' }
 
   const target = norm(filePath)
+
+  // docs/09 账一（规格 §6.2.1）：控制文件与阶段产物是两类东西，判据不同。
+  // 这一段必须排在下面 run 目录那块**之前**，也必须排在再下面 project.paths 那段
+  // 之前——两头的既有判据对控制文件都是错的，而且错的方向相反：
+  //   - runs/<id>/state.json 在 runDir 里，落到下面那块会被「不是你这个阶段的
+  //     produces」**无条件**拒掉，连 PM 也拒（M1a 记的 I3 死锁）；
+  //   - .agent-team/project.json 与 current-run 不在 runDir 里，落到 project.paths
+  //     那段会因为 Object.hasOwn(owners, role) 早退而被**静默放行**——任何不在 paths
+  //     里登记的角色都能重写项目配置。
+  // 一个太紧、一个太松，所以这不是「在某一段里加个 if」能解决的，必须自成一段。
+  //
+  // 「谁算 PM」复用 isContractWriter，不另写一遍 role === 'at-pm'：M1a 评审在 H4
+  // 那里已经因为同一个谓词写两份开过一轮循环，结论是抽成单一导出。它内部走
+  // callerOf，MAIN（'__main__'）与裸 'at-pm' 都返回 true；这条豁免的安全性依赖
+  // 「没有角色能把 at-pm 当派发目标」这条花名册不变量，由
+  // tests/roster-closure.test.mjs 钉住，完整论证在 contract-guard.mjs 头部。
+  //
+  // agentTeamDir 缺省时这一段整体不触发，回落到既有行为——纯函数不该假设调用方
+  // 一定传全参数，而 gate.mjs 那条路径上它总是来自 ctx.agentTeamDir。
+  if (isControlFile(filePath, agentTeamDir)) {
+    if (isContractWriter(role)) return { decision: 'allow' }
+    return {
+      decision: 'deny',
+      reason:
+        `${role} 不得写 ${filePath}——这是编排层的控制文件（run 指针、项目配置、` +
+        `触达表、运行状态），只有 PM（项目经理）能写。控制文件不是任何阶段的产物，` +
+        `不参与角色认领：流程状态该由编排层记账，不该由执行角色自己改。你如果认为` +
+        `流程状态不对（比如阶段该推进了、返工计数不对），把它冒泡给上级，由 PM 落盘。`,
+    }
+  }
 
   // 全分支评审 I1：下面这整块 run 目录保护必须排在 project.paths 的整体放行
   // 之前。它只依赖 runDir 与 stages，跟 project.paths 没有任何关系——而旧版本
@@ -79,51 +111,11 @@ export function decideWritePath({ role, filePath, project, runDir, stages }) {
       // 自己阶段（stages[s].role === role）的 produces，run 目录下其余
       // 一切（别人的产物、state.json、任何非产物文件）一律 deny。
       //
-      // ⚠️ 已知缺口 I3（全分支评审，M1a 不在这条分支上解决）：这条规则在稳态
-      // 下会把 PM 自己也挡住。被 settings.json 钉成主线程的 at-pm 不是
-      // callerOf 判定的 MAIN（M0 实测：钉住时主会话的 hook 输入带裸的
-      // agent_type: 'at-pm'），所以一旦进入稳态（project.json 存在、run 正在
-      // 跑），它就是一个受完整 per-role 隔离约束的普通角色。实测（用仓库根
-      // 真实 stages.json，role 取 'at-pm'）：
-      //
-      //   at-pm 写 runs/<id>/state.json              -> deny（不是任何阶段的 produces）
-      //   at-pm 写 runs/<id>/00-contract.md（S1）    -> allow
-      //   at-pm 写 runs/<id>/04-dispatch.md（S4）    -> allow
-      //   at-pm 重写 .agent-team/project.json        -> 看 project.paths 里有没有 at-pm 这个键：
-      //                                                 有 -> deny（"没有被任何角色认领"）
-      //                                                 没有 -> allow（Object.hasOwn 那条早退，
-      //                                                 H3 根本不管这个角色）
-      //
-      // 其中 state.json 那条是无条件的，且 I1 之后连"project.json 不存在"都
-      // 兜不住了（这不是 I1 引入的新语义，是 I1 让原本就该生效的规则真的生效
-      // 之后，这个缺口才从"有条件"变成"总是"）。project.json 那条则取决于
-      // /at-init 生成的 paths 里写不写 at-pm——两种写法都合理，所以这个缺口
-      // 现在是"一半已经踩上、一半取决于模板怎么写"。
-      //
-      // 与规格冲突的是：§7 的 templates/ 明确列了 project.json 与
-      // state.json；§4.5 要求"计数写在 state.json，不交给模型自己数"；
-      // /at-resume 从 state.json 续跑；/at-init 重跑勘察要重写 project.json。
-      // 这些动作在稳态下会被这道闸拒掉——而且 project.json 那条的拒绝理由会说
-      // "这条路径在 .agent-team/project.json 里没有被任何角色认领"，是一句会把
-      // 排查方向完全带偏的话：真正的问题不是认领表漏了一行，是"PM 的运维动作
-      // 该不该走角色认领这套判据"从来没有被决定过。
-      //
-      // 现有的自举豁免盖不住这个缺口：它们只覆盖"第一个 run 建出来之前"
-      // （ctx.kind === 'no-run'）、"真 MAIN（无 agent_type）"、以及 I2 新加的
-      // "ctx 读不出来时的 PM"（hooks/gate.mjs 的 writepath 分支）——三者都是
-      // 异常/空白态，稳态不在其中。
-      //
-      // 什么时候会撞上：计划 B 的第一次 state.json 写入（谁来记 rework 计数、
-      // /at-resume 怎么落盘），那一刻这道闸会直接拦住主会话。
-      // 两个可选方向，到时候择一（不要在 M1a 里顺手做，两者都要改判定模型）：
-      //   (a) 给 .agent-team/ 一条独立于 project.paths 的"PM 专属可写"规则，
-      //       让 PM 的运维动作不走角色认领这套判据；
-      //   (b) 在 project.json 模板里把 .agent-team/ 划给 at-pm，并给
-      //       run 目录下的 state.json 单开一条例外（因为它不是任何阶段的
-      //       produces，走不通上面 mine 那条路）。
-      // 其中"同一角色的多个阶段 produces 都能写"（上面 S1/S4 那两条 allow）是
-      // 这块唯一已经正确的行为，由 tests/writepath.test.mjs 与
-      // tests/gate-writepath.test.mjs 各钉了一条，改 producesOf 时不要丢。
+      // 控制文件（state.json 等）已经在函数顶部单独处理过，走不到这里——见那一段的
+      // 注释与 docs/09 账一。这里剩下的是纯粹的阶段产物判定。
+      // 「同一角色的多个阶段 produces 都能写」（at-pm 的 S1/S4）是这块唯一一直正确
+      // 的行为，tests/writepath.test.mjs 与 tests/gate-writepath.test.mjs 各钉了一
+      // 条，改 producesOf 时不要丢。
       const mine = producesOf(stages, role).some((p) => norm(`${rd}/${p}`) === target)
       if (mine) return { decision: 'allow' }
 

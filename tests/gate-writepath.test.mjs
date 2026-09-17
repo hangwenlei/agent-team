@@ -23,7 +23,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { run, decisionOf } from './helpers/gate-runner.mjs'
+import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 
 const PROJECT = {
@@ -505,5 +505,98 @@ test('writepath：run 目录下写 state.json——仍然 deny，它不是任何
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// docs/09 账一：控制文件与阶段产物分家的子进程级传导链。纯函数测试
+// （tests/writepath.test.mjs）证明判据本身没错，这里证明 ctx.agentTeamDir 真的
+// 从 runctx.mjs 传到了 gate.mjs 再传到 decideWritePath——这一层传导链此前没有
+// 任何测试覆盖，M1a Task 3 就是栽在"只有纯函数测试"上（docs/08 ②）。
+
+test('ctx.ok 时：被钉成主线程的 at-pm 能写 state.json（账一，走控制文件规则）', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', project: PROJECT })
+  try {
+    const { stdout } = run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'at-pm',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'runs', 'r1', 'state.json') },
+    }, GATE, projectDir)
+    assert.equal(decisionOf(stdout), null, '不该有拒绝输出')
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('ctx.ok 时：at-backend 写 state.json 被拒，理由点名控制文件', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', project: PROJECT })
+  try {
+    const { stdout } = run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'agent-team:at-backend',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'runs', 'r1', 'state.json') },
+    }, GATE, projectDir)
+    const d = decisionOf(stdout)
+    assert.equal(d.permissionDecision, 'deny')
+    assert.match(d.permissionDecisionReason, /控制文件/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('ctx.ok 时：at-backend 写 project.json 被拒（此前会被静默放行）', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', project: PROJECT })
+  try {
+    const { stdout } = run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'agent-team:at-backend',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'project.json') },
+    }, GATE, projectDir)
+    const d = decisionOf(stdout)
+    assert.equal(d.permissionDecision, 'deny')
+    assert.match(d.permissionDecisionReason, /控制文件/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ⚠️ 这一条与上面第一条**不是同一条规则**，别把其中一条的绿当成另一条生效。
+// 这里 run 目录存在但 state.json 缺失 → readRunContext 走 kind:'unreadable'
+// → 放行 at-pm 的是 gate.mjs 里 I2 那条 PM 豁免，控制文件规则根本没跑到
+// （decideWritePath 压根没被调用）。这是 PM 建第一个 run 的真实路径。
+test('unreadable 时：at-pm 仍被放行，但走的是 I2 豁免而不是控制文件规则', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', project: PROJECT })
+  try {
+    rmSync(join(projectDir, '.agent-team', 'runs', 'r1', 'state.json'), { force: true })
+    const { stdout, stderr } = run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'at-pm',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'runs', 'r1', 'state.json') },
+    }, GATE, projectDir)
+    assert.equal(decisionOf(stdout), null)
+    // 这两行 stderr 是 I2 豁免独有的留痕，控制文件规则那条路径不会打它。
+    assert.match(stderr, /读不到运行上下文/)
+    assert.match(stderr, /调用者是 PM/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('unreadable 时：at-backend 写 state.json 仍然 fail closed', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', project: PROJECT })
+  try {
+    rmSync(join(projectDir, '.agent-team', 'runs', 'r1', 'state.json'), { force: true })
+    const { stdout } = run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'agent-team:at-backend',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'runs', 'r1', 'state.json') },
+    }, GATE, projectDir)
+    assert.equal(decisionOf(stdout).permissionDecision, 'deny')
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
   }
 })

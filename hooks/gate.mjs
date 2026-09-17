@@ -206,8 +206,12 @@ function main() {
       // 钉住）写在 hooks/lib/contract-guard.mjs 里，只该有一处。
       //
       // 只免除 unreadable 这一支，不像 H4 那样提到读 ctx 之前：ctx 读得出来时
-      // at-pm 仍然是受完整 per-role 隔离约束的角色（那条语义本身的缺口记在
-      // hooks/lib/writepath.mjs 的 I3 注释里，不在本次改动范围内）。
+      // at-pm 仍然是受完整 per-role 隔离约束的角色，只是**控制文件**那一类已经由
+      // decideWritePath 顶部单独放行了（docs/09 账一 / 规格 §6.2.1）。
+      // ⚠️ 这两条路径不要混：PM 第一次建 run 时 state.json 还不存在，ctx 是
+      // unreadable，放行它的是**这条 I2 豁免**；run 建好之后（ctx.ok）放行它的才是
+      // 控制文件规则。tests/gate-writepath.test.mjs 两条都钉住了，别把其中一条的
+      // 通过当成另一条生效。
       if (isContractWriter(role)) {
         process.stderr.write(
           `agent-team H3 写路径门禁：读不到运行上下文（${ctx.reason}），但调用者是 PM` +
@@ -238,6 +242,7 @@ function main() {
       project: ctx.project,
       runDir: ctx.runDir,
       stages: ctx.stages,
+      agentTeamDir: ctx.agentTeamDir,
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
   }

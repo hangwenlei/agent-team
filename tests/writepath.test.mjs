@@ -17,13 +17,63 @@ const RUN = '/proj/.agent-team/runs/r1'
 // 让"同一角色多个阶段"这条在纯函数这一层也有覆盖，见下面那条用例。
 const STAGES = {
   S1: { role: 'at-pm', requires: [], produces: ['00-contract.md'] },
+  S2: { role: 'at-product', requires: [], produces: ['01-prd.md'] },
   S4: { role: 'at-pm', requires: [], produces: ['04-dispatch.md'] },
   S5: { role: 'at-backend', requires: [], produces: ['05-impl/at-backend.md'] },
   S6: { role: 'at-frontend', requires: [], produces: ['05-impl/at-frontend.md'] },
 }
 
+const AT = '/proj/.agent-team'
+
 const call = (role, filePath) =>
-  decideWritePath({ role, filePath, project: PROJECT, runDir: RUN, stages: STAGES })
+  decideWritePath({ role, filePath, project: PROJECT, runDir: RUN, stages: STAGES, agentTeamDir: AT })
+
+// ——— docs/09 账一：控制文件 ———
+
+test('PM 能写 run 的 state.json——账一要解的正是这个死锁', () => {
+  assert.equal(call('at-pm', `${RUN}/state.json`).decision, 'allow')
+})
+
+test('PM 能写 project.json / current-run / reach.json', () => {
+  assert.equal(call('at-pm', `${AT}/project.json`).decision, 'allow')
+  assert.equal(call('at-pm', `${AT}/current-run`).decision, 'allow')
+  assert.equal(call('at-pm', `${AT}/reach.json`).decision, 'allow')
+})
+
+test('主线程（MAIN）也是 PM，同样能写控制文件', () => {
+  assert.equal(call('__main__', `${RUN}/state.json`).decision, 'allow')
+})
+
+test('执行角色写 state.json 被拒，理由说明这是控制文件', () => {
+  const r = call('at-backend', `${RUN}/state.json`)
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /控制文件/)
+  assert.match(r.reason, /PM/)
+})
+
+test('执行角色写 project.json 被拒——收紧了「不在 paths 里的角色就放行」那条口子', () => {
+  // at-outsider 不在 PROJECT.paths 里。控制文件分支没加之前，它会命中
+  // decideWritePath 里 Object.hasOwn(owners, role) 那条早退而被**放行**。
+  const r = call('at-outsider', `${AT}/project.json`)
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /控制文件/)
+})
+
+test('账一 #2：PM 仍然不能伪造别人阶段的产物', () => {
+  // 01-prd.md 是阶段产物不是控制文件。夹具里 at-pm 只有 S1/S4，所以这条走的是
+  // 「run 目录下只有自己阶段的产物可写」那条，不是控制文件分支。
+  const r = call('at-pm', `${RUN}/01-prd.md`)
+  assert.equal(r.decision, 'deny')
+  assert.doesNotMatch(r.reason, /控制文件/)
+})
+
+test('不传 agentTeamDir 时控制文件分支不触发，保持既有行为', () => {
+  const r = decideWritePath({
+    role: 'at-pm', filePath: `${RUN}/state.json`,
+    project: PROJECT, runDir: RUN, stages: STAGES,
+  })
+  assert.equal(r.decision, 'deny')
+})
 
 test('写自己名下的路径放行', () => {
   assert.equal(call('at-backend', '/proj/src/server/api.ts').decision, 'allow')

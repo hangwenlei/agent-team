@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { readRunContext } from '../hooks/lib/runctx.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 
@@ -208,5 +209,17 @@ test('project.json 是坏 JSON 时整个上下文返回 ok:false，kind 是 unre
     assert.equal(ctx.kind, 'unreadable')
   } finally {
     cleanup(dirs)
+  }
+})
+
+test('ctx 带 agentTeamDir，等于 <projectDir>/.agent-team', () => {
+  const { projectDir, pluginDir } = makeRun({ stages: STAGES })
+  try {
+    const ctx = readRunContext(projectDir, pluginDir)
+    assert.equal(ctx.ok, true)
+    assert.equal(ctx.agentTeamDir, join(projectDir, '.agent-team'))
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
   }
 })
