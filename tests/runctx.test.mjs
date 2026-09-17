@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readRunContext } from '../hooks/lib/runctx.mjs'
+import { readProjectConfig, readRunContext } from '../hooks/lib/runctx.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 
 const STAGES = { S2: { role: 'at-product', requires: ['00-contract.md'], produces: ['01-prd.md'] } }
@@ -222,6 +222,94 @@ test('ctx 带 agentTeamDir，等于 <projectDir>/.agent-team', () => {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })
   }
+})
+
+// M1b 终审 C1：失败返回里也要有 agentTeamDir。没有它，ledger 在「还没有 run」时
+// 连「这次写的是不是 .agent-team/project.json」都问不出来，触达表回传在全新项目上
+// 结构性不可达。两条分别钉住 no-run 与 unreadable，各自占一个 test()——它们是两个
+// 不同的返回点，不是同一个不变量按数据遍历。
+test('kind 是 no-run 的失败返回也带 agentTeamDir', () => {
+  const { projectDir, pluginDir } = makeRun({ stages: STAGES })
+  try {
+    rmSync(join(projectDir, '.agent-team', 'current-run'), { force: true })
+    const ctx = readRunContext(projectDir, pluginDir)
+    assert.equal(ctx.ok, false)
+    assert.equal(ctx.kind, 'no-run')
+    assert.equal(ctx.agentTeamDir, join(projectDir, '.agent-team'))
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('kind 是 unreadable 的失败返回也带 agentTeamDir', () => {
+  const { projectDir, pluginDir } = makeRun({ stages: STAGES })
+  try {
+    writeFileSync(join(projectDir, '.agent-team', 'current-run'), '', 'utf8')
+    const ctx = readRunContext(projectDir, pluginDir)
+    assert.equal(ctx.ok, false)
+    assert.equal(ctx.kind, 'unreadable')
+    assert.equal(ctx.agentTeamDir, join(projectDir, '.agent-team'))
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 最外层兜底 catch 那一支是唯一**没有** agentTeamDir 的失败返回，而且那是有意的：
+// 抛出的很可能正是 join(projectDir, '.agent-team') 自己。调用方按「取不到就照原路
+// fail open」处理，所以这条边界要钉住——凭空补一个值出来就是在编一条路径。
+test('projectDir 不是字符串时（最外层兜底 catch）不带 agentTeamDir——那条路径根本没算出来', () => {
+  const ctx = readRunContext(undefined, undefined)
+  assert.equal(ctx.ok, false)
+  assert.equal(ctx.kind, 'unreadable')
+  assert.equal(ctx.agentTeamDir, undefined)
+  assert.match(ctx.reason, /读取运行上下文失败/)
+})
+
+// readProjectConfig：不要求有进行中的 run，ledger 在 ctx 读不出来时靠它拿到触达表的
+// 判据。三条分别是「读得到」「文件不在」「内容不是对象」，三种不同的返回形状，拆开。
+test('readProjectConfig 读得到 .agent-team/project.json', () => {
+  const { projectDir, pluginDir } = makeRun({ stages: STAGES, project: { paths: { 'at-product': ['docs/'] } } })
+  try {
+    const r = readProjectConfig(projectDir)
+    assert.equal(r.ok, true)
+    assert.deepEqual(r.value.paths['at-product'], ['docs/'])
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('readProjectConfig 在 project.json 不存在时返回 ok:false，不抛', () => {
+  const { projectDir, pluginDir } = makeRun({ stages: STAGES })
+  try {
+    const r = readProjectConfig(projectDir)
+    assert.equal(r.ok, false)
+    assert.match(r.reason, /project\.json/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('readProjectConfig 对「合法 JSON 但不是对象」返回 ok:false——与 readRunContext 同一条边界', () => {
+  const { projectDir, pluginDir } = makeRun({ stages: STAGES })
+  try {
+    writeFileSync(join(projectDir, '.agent-team', 'project.json'), 'null', 'utf8')
+    const r = readProjectConfig(projectDir)
+    assert.equal(r.ok, false)
+    assert.match(r.reason, /不是一个 JSON 对象/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('readProjectConfig 传非字符串时返回 ok:false 而不是抛异常', () => {
+  const r = readProjectConfig(undefined)
+  assert.equal(r.ok, false)
+  assert.ok(typeof r.reason === 'string' && r.reason.length > 0)
 })
 
 test('artifactBytes 读得到产物字节', () => {

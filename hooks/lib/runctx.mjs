@@ -41,6 +41,15 @@
 //                       绕过 H3/H4 per-role 隔离的办法——run 明明还在跑，
 //                       角色认领数据却因为文件损坏而不被承认。
 //
+// 【M1b 终审 C1】失败返回里也带 agentTeamDir。理由：有一类判定只需要「.agent-team
+// 在哪」，压根不需要一个进行中的 run——触达表就是这样（它的判据只有插件侧的
+// roster.json 与刚写完的 .agent-team/project.json，两者都与 run 无关），而
+// /at-init 按设计恰恰跑在**没有 run 的时候**。ok:false 时把这个字段一并给出去，
+// 调用方才有可能区分「这次写入与我无关」和「这次写入正好是我唯一该发声的那一个」。
+// 唯一没有它的是最外层兜底 catch：那一支连 join(projectDir, '.agent-team') 都可能
+// 就是抛异常的原因（projectDir 不是字符串），base 根本没被算出来、也不在作用域里。
+// ⚠️ 这个字段不改变任何 kind 语义：它只是一条路径，不是「可以继续往下判」的许可。
+//
 // current-run 是空文件属于 unreadable 而不是 no-run，是一个有意的判断：
 // pointer 文件本身存在（不同于「找不到 pointer」），空内容更像是写入过程
 // 被打断的异常状态，不是「nobody has started a run yet」那种干净的缺席。
@@ -68,6 +77,26 @@ function readJson(path) {
   return { ok: true, value }
 }
 
+/**
+ * 单独读 `.agent-team/project.json`，不要求有进行中的 run（M1b 终审 C1）。
+ *
+ * 为什么不让 gate.mjs 自己 readFileSync：`readJson` 已经把「JSON.parse 过了但取不出
+ * 字段」（`null` / `[]` / `"x"`）这条边界处理掉了，在 gate.mjs 里再手写一份就是同一份
+ * 知识的第二份拷贝——`hooks/lib/path-norm.mjs` 头部记着两份逐字相同的 `norm()` 真的
+ * 分叉过，结论是抽成单一导出。用户项目里 `.agent-team` 的读盘也只该有这一层。
+ *
+ * 与 readRunContext 一样绝不抛：失败返回 { ok: false, reason }。
+ */
+export function readProjectConfig(projectDir) {
+  try {
+    const path = join(projectDir, '.agent-team', 'project.json')
+    if (!existsSync(path)) return { ok: false, reason: `找不到 ${path}` }
+    return readJson(path)
+  } catch (err) {
+    return { ok: false, reason: `读取 project.json 失败：${err.message}` }
+  }
+}
+
 // projectDir：用户仓库根，放 .agent-team（current-run / state.json / project.json）。
 // pluginDir：插件根，放 stages.json。两者不是同一个目录——hook 以用户项目为 cwd 运行，
 // 插件文件要用 ${CLAUDE_PLUGIN_ROOT} 定位。混用会在真实环境里读不到东西而单测照样绿。
@@ -76,7 +105,12 @@ export function readRunContext(projectDir, pluginDir) {
     const base = join(projectDir, '.agent-team')
     const pointer = join(base, 'current-run')
     if (!existsSync(pointer)) {
-      return { ok: false, kind: 'no-run', reason: `找不到 ${pointer}——当前没有进行中的 run` }
+      return {
+        ok: false,
+        kind: 'no-run',
+        agentTeamDir: base,
+        reason: `找不到 ${pointer}——当前没有进行中的 run`,
+      }
     }
 
     let runId = ''
@@ -85,11 +119,18 @@ export function readRunContext(projectDir, pluginDir) {
     } catch (err) {
       // pointer 存在（刚过了 existsSync）但读不出来——权限、被并发进程占用
       // 之类的异常状态，不是「没有 run」，门禁真的判不出来。
-      return { ok: false, kind: 'unreadable', reason: `读取 current-run 失败：${err.message}` }
+      return {
+        ok: false,
+        kind: 'unreadable',
+        agentTeamDir: base,
+        reason: `读取 current-run 失败：${err.message}`,
+      }
     }
     // 空文件不算 no-run，见文件头部注释：pointer 存在但内容为空是异常
     // 状态，不是干净的缺席，归 unreadable 更安全。
-    if (!runId) return { ok: false, kind: 'unreadable', reason: 'current-run 是空的' }
+    if (!runId) {
+      return { ok: false, kind: 'unreadable', agentTeamDir: base, reason: 'current-run 是空的' }
+    }
     // current-run 的内容会被原样拼进 runs/<runId>/... 路径。不校验的话，一个
     // 含 ../ 的 runId 会被 path.join 正规化到 .agent-team/runs 之外，让 H5
     // 交付物门禁跑去别的目录判定产物是否存在——这是路径可信边界问题，不是
@@ -99,6 +140,7 @@ export function readRunContext(projectDir, pluginDir) {
       return {
         ok: false,
         kind: 'unreadable',
+        agentTeamDir: base,
         reason: `current-run 内容不是合法的 run id（含路径分隔符或 ..）：${JSON.stringify(runId)}`,
       }
     }
@@ -110,6 +152,7 @@ export function readRunContext(projectDir, pluginDir) {
       return {
         ok: false,
         kind: 'no-run',
+        agentTeamDir: base,
         reason: `current-run 指向 ${runId}，但 ${runDir} 不存在`,
       }
     }
@@ -117,14 +160,14 @@ export function readRunContext(projectDir, pluginDir) {
     // 走到这里，run 目录本身已确认存在——下面几步读到的任何失败都是
     // 「这个真实存在的 run 读不出来」，不再有 no-run 的可能，一律 unreadable。
     const state = readJson(join(runDir, 'state.json'))
-    if (!state.ok) return { ok: false, kind: 'unreadable', reason: state.reason }
+    if (!state.ok) return { ok: false, kind: 'unreadable', agentTeamDir: base, reason: state.reason }
 
     const stages = readJson(join(pluginDir, 'stages.json'))
-    if (!stages.ok) return { ok: false, kind: 'unreadable', reason: stages.reason }
+    if (!stages.ok) return { ok: false, kind: 'unreadable', agentTeamDir: base, reason: stages.reason }
 
     const projectPath = join(base, 'project.json')
     const project = existsSync(projectPath) ? readJson(projectPath) : { ok: true, value: null }
-    if (!project.ok) return { ok: false, kind: 'unreadable', reason: project.reason }
+    if (!project.ok) return { ok: false, kind: 'unreadable', agentTeamDir: base, reason: project.reason }
 
     return {
       ok: true,
@@ -163,6 +206,12 @@ export function readRunContext(projectDir, pluginDir) {
     // 兜底分支：projectDir/pluginDir 传了非字符串导致 join() 同步抛出，
     // 或者任何没预料到的异常。这不是「没有 run」——门禁自己都不知道出了
     // 什么问题，只能按最严格的 unreadable 处理。
+    //
+    // ⚠️ 这一支**没有** agentTeamDir，和上面每一条失败返回都不一样，这是有意的：
+    // 抛出的很可能正是 join(projectDir, '.agent-team') 自己（projectDir 不是字符串），
+    // base 从来没被算出来、此刻也不在作用域里。硬凑一个值出来就是在编一条路径。
+    // 调用方按「取不到 agentTeamDir 就照原路 fail open」处理，见 hooks/gate.mjs 的
+    // ledger 分支。
     return { ok: false, kind: 'unreadable', reason: `读取运行上下文失败：${err.message}` }
   }
 }

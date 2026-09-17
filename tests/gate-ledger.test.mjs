@@ -130,17 +130,58 @@ test('ledger 永不拒绝——输出里不会出现 permissionDecision', () => 
   }
 })
 
-test('没有 run 时 fail open 且留痕，不静默', () => {
+// ⚠️ 这两条替换的是一条自相矛盾的旧测试（M1b 终审 C1）。旧测试叫「没有 run 时
+// fail open 且留痕，不静默」，但它**写的正是 project.json** 并断言 stdout 为空
+// ——也就是说仓库自己把「触达表在全新项目上永远回传不了」这件事写成了一条绿测试。
+// /at-init 按设计跑在没有 run 的时候（commands/at-init.md 末尾明令不建 run），
+// 所以那条通道必须在没有 run 时也通。
+//
+// 拆成两个 test()：一条验「写 project.json 照常回传」，一条验「写别的文件才
+// fail open」。它们检验的是不同侧面，不是同一个不变量按数据遍历；而且第一条正是
+// 变异验证里期望变红的那条，必须自己占一个 test()，否则它一失败会把第二条挡住。
+test('没有 run 时写 project.json：仍然回传触达表——/at-init 按设计就跑在没有 run 的时候', () => {
+  const { projectDir, pluginDir } = makeRun({
+    runId: 'r1', stage: 'S1',
+    project: { paths: { 'at-product': ['docs/'], 'at-backend': ['src/server/'] } },
+  })
+  try {
+    rmSync(join(projectDir, '.agent-team', 'current-run'), { force: true })
+    const { stdout, status } = run('ledger', {
+      tool_name: 'Write', agent_type: 'at-pm',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'project.json') },
+    }, GATE, projectDir)
+    assert.equal(status, 0)
+    const ctx = ctxOf(stdout)
+    assert.ok(
+      ctx,
+      '没有 run 时写 project.json 必须照常回传触达表——触达表的判据只有 roster.json 与 ' +
+        'project.json，两者都与 run 无关，而 /at-init 恰恰跑在没有 run 的时候。' +
+        'stdout 为空意味着 .agent-team/reach.json 在全新项目上永远建不出来。',
+    )
+    assert.match(ctx, /reach\.json/)
+    // 仓库根真实 roster.json：at-product → at-backend 这条边存在。
+    assert.ok(ctx.includes('at-product → at-backend'))
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('没有 run 时写别的文件：fail open 且留痕，不静默', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S1' })
   try {
     rmSync(join(projectDir, '.agent-team', 'current-run'), { force: true })
     const { stdout, stderr, status } = run('ledger', {
       tool_name: 'Write', agent_type: 'at-pm',
-      tool_input: { file_path: join(projectDir, '.agent-team', 'project.json') },
+      // run 目录下的阶段产物：上面那条缝只放 project.json 一个文件，别的照旧。
+      tool_input: { file_path: join(projectDir, '.agent-team', 'runs', 'r1', '00-contract.md') },
     }, GATE, projectDir)
     assert.equal(status, 0)
     assert.equal(stdout.trim(), '')
+    // 正向锚点：doesNotMatch/为空这类否定断言单独立不住（空输出天然满足），
+    // 必须同时钉住「该出现的那行痕迹真的出现了」。
     assert.match(stderr, /ledger 回传/)
+    assert.match(stderr, /current-run/)
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })

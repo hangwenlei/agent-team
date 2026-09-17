@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
 import { MAIN, callerOf, decideDelegation, stripPluginPrefix } from './lib/decide.mjs'
 import { denyOutput } from './lib/deny.mjs'
-import { readRunContext } from './lib/runctx.mjs'
+import { readProjectConfig, readRunContext } from './lib/runctx.mjs'
 import { decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
@@ -69,6 +69,29 @@ function denyAndExit(reason, event) {
   const { stream, text, exitCode } = denyOutput(reason, event)
   process[stream].write(text)
   process.exit(exitCode)
+}
+
+// 「这次写的是不是 .agent-team/project.json」。抽成一个谓词是因为 ledger 分支现在
+// 要在两条路径上问同一个问题（ctx.ok 的正常路径，以及 ctx 读不出来时那条只为触达表
+// 留的通道），而它对 filePath 的类型防御也只该写一遍：norm() 内部是 resolve()，
+// 传非字符串会同步抛。
+function isProjectJson(filePath, agentTeamDir) {
+  if (typeof filePath !== 'string' || !filePath) return false
+  if (typeof agentTeamDir !== 'string' || !agentTeamDir) return false
+  return norm(filePath) === norm(`${agentTeamDir}/project.json`)
+}
+
+// ledger 的输出契约：notices 非空才写 stdout。抽出来同样是因为有两个调用点。
+function emitLedger(event, notices) {
+  if (!notices.length) return
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: event,
+        additionalContext: `agent-team 账本回传：\n${notices.join('\n\n')}`,
+      },
+    }),
+  )
 }
 
 // fail open 时往 stderr 留的那行痕迹（整理项 10）。四个检查项此前各写一份
@@ -308,17 +331,50 @@ function main() {
     // ledger 不是门禁：它没有 deny 这个出口，只往 stdout 写 additionalContext。
     // 执行面裁定（为什么算在 hook 侧而不是让 PM 跑脚本）写在 hooks/lib/ledger.mjs
     // 头部，不在这里重复。
+    // filePath 提到读 ctx 之前：下面 !ctx.ok 那条分支要靠它判断这次写的是不是
+    // project.json，它本身不依赖运行上下文。
+    const filePath =
+      input.tool_name === 'NotebookEdit'
+        ? input?.tool_input?.notebook_path
+        : input?.tool_input?.file_path
+
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
     if (!ctx.ok) {
+      // ⚠️ 这里**不能**无条件 fail open（M1b 终审 C1）。
+      //
+      // 触达表的判据只有两样：插件侧的 roster.json，和刚写完的
+      // .agent-team/project.json。两者都与 run 无关——computeReach 是纯数据推导，
+      // 不看 state、不看 runDir。而 /at-init **按设计就跑在没有 run 的时候**
+      // （commands/at-init.md 末尾明令「不要在这条命令里建 run、写 state.json 或
+      // current-run」）。把整条通道挂在 ctx.ok 上，等于让它在它唯一该发声的场合
+      // 永远沉默：全新项目上 PM 写完 project.json 之后什么都收不到，
+      // .agent-team/reach.json（控制文件之一、规格 §6.2.1、docs/09 账二 ③ 的唯一
+      // 交付物）因此永远不存在，而 /at-status 让用户「重跑 /at-init」是个死循环。
+      //
+      // 只放这一条缝，不放宽别的：这次写的必须正好是 project.json 本身。别的写入
+      // （包括 run 目录下的阶段产物）在没有运行上下文时照旧 fail open + 留痕。
+      // ctx.agentTeamDir 取不到时（runctx 最外层兜底 catch 那一支，连 .agent-team
+      // 在哪都不知道）也照原路 fail open —— 见 hooks/lib/runctx.mjs 那里的注释。
+      if (isProjectJson(filePath, ctx.agentTeamDir)) {
+        const project = readProjectConfig(ROOT_PROJECT)
+        if (project.ok) {
+          emitLedger(
+            spec.event,
+            buildLedgerNotices({
+              kind: 'project',
+              reach: computeReach({ roster: loadRoster(), paths: project.value.paths }),
+            }),
+          )
+          process.exit(0)
+        }
+        // project.json 刚写进去却读不出来（写坏了、或者被并发占用）——没有判据，
+        // 继续往下走原来的 fail open 留痕，不要凭空造一张空触达表回传。
+      }
       // fail open + 留痕，与 H2/H5 同一先例。措辞按 ctx.kind 分派，共用 failOpenNotice。
       process.stderr.write(failOpenNotice('ledger 回传', ctx))
       process.exit(0)
     }
 
-    const filePath =
-      input.tool_name === 'NotebookEdit'
-        ? input?.tool_input?.notebook_path
-        : input?.tool_input?.file_path
     // 不在 .agent-team/ 下的写入与本检查项无关，保持沉默——角色写业务代码是常态，
     // 每次都刷一段 additionalContext 会把真正要看的东西淹掉。ledger 关心两类
     // 路径：控制文件，以及 run 目录下的阶段产物（后者用来判断当前阶段的产物齐
@@ -331,7 +387,9 @@ function main() {
     const target = norm(filePath)
     let kind = 'other'
     if (target === norm(`${ctx.runDir}/00-contract.md`)) kind = 'contract'
-    else if (target === norm(`${ctx.agentTeamDir}/project.json`)) kind = 'project'
+    // project.json 这一问复用上面那个谓词，不在这里再写一遍同样的等式——
+    // 上面 !ctx.ok 那条分支问的是同一个问题，两处分叉就是 C1 的复发形状。
+    else if (isProjectJson(filePath, ctx.agentTeamDir)) kind = 'project'
     else if (target === norm(`${ctx.runDir}/state.json`)) kind = 'state'
 
     const bytes = kind === 'contract' ? ctx.artifactBytes('00-contract.md') : null
@@ -358,16 +416,7 @@ function main() {
       stateProblems,
     })
 
-    if (notices.length) {
-      process.stdout.write(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: spec.event,
-            additionalContext: `agent-team 账本回传：\n${notices.join('\n\n')}`,
-          },
-        }),
-      )
-    }
+    emitLedger(spec.event, notices)
   }
 
   if (CHECK === 'stop-gate' || CHECK === 'deliverable') {
