@@ -81,6 +81,39 @@ function isProjectJson(filePath, agentTeamDir) {
   return norm(filePath) === norm(`${agentTeamDir}/project.json`)
 }
 
+// 刚返回的这个角色，是不是当前阶段执行角色的一个**合法协调者**？
+//
+// 【M1b 终审 C4】commands/at.md 的 S5 正路是「派 at-architect，由它去分发执行角色」
+// ——那是对的，花名册里 at-pm 派不动 at-backend，执行角色在第三层。而 stages.json
+// 的 S5.role 是 at-backend（那是对的：S5 的 produces 是 05-impl/at-backend.md，
+// 那就是 at-backend 的交付物；同一个 role 字段还要喂 H2「这个角色开工前需要什么」
+// 与 H3「run 目录下这条路径归谁」，三个语义下 at-backend 都是对的）。
+// 两者不冲突，但撞在一起会让 H5a 在这条**正路**上必然误报：at-architect 返回时
+// decideDeliverable 给 skipped:'role-not-in-stage'，原来的 warning 说「两种可能：
+// 这次派发本身不该发生；或者 state.stage 停在旧阶段」——在 S5 正路上两种都是假的。
+// 更糟的是最坏的一种「修复」：PM 把 state.stage 改回 S3 去消警告，那会真的让 H5
+// 对整个 S5 全程哑火 —— **这条告警有能力制造它自己警告的那个失效。**
+//
+// 判据用 hooks/lib/reach.mjs 的传递闭包：能（传递地）派发到当前阶段执行角色的，
+// 就是协调者，静默。paths 传 {} 是有意的——这里只要拓扑可达性，不关心路径归属。
+// 不另写一份闭包：computeReach 已经处理环与自引用，且已有 14 条测试。
+//
+// ⚠️ 只改**告警条件**，没有削弱 H5 本身：H5a 这条 warning 是「H5 哑掉」的两条对策
+// 之一（另一条是 ledger 在当前阶段产物齐了时的阶段推进提示），
+// hooks/lib/deliverable.mjs 头部与 stages.README.md 都写着缺一不可，**不能因为噪音
+// 就整条删掉**。这里排掉的只是「它其实是一次合法的层级协调」这一类，剩下的两类
+// 照发。
+function isCoordinatorFor(ctx, role) {
+  const stageId = ctx.state?.stage
+  const stages = ctx.stages
+  if (!stages || typeof stages !== 'object') return false
+  if (typeof stageId !== 'string' || !Object.hasOwn(stages, stageId)) return false
+  const stageRole = stages[stageId]?.role
+  if (typeof stageRole !== 'string' || !stageRole) return false
+  const reach = computeReach({ roster: loadRoster(), paths: {} })
+  return (reach[role]?.reachableRoles ?? []).includes(stageRole)
+}
+
 // ledger 的输出契约：notices 非空才写 stdout。抽出来同样是因为有两个调用点。
 function emitLedger(event, notices) {
   if (!notices.length) return
@@ -481,19 +514,24 @@ function main() {
       // 否则和 docs/08 §0 说的「看起来通过了」完全无法区分。
       // 'role-not-in-stage' 尤其值得看一眼：它要么说明这次派发本身不该发生，要么
       // 说明 state.stage 停在旧阶段没推进——后者会让 H5 对整个新阶段全程哑火。
+      // 但它还有**第三种**成因，而且那一种是本分支自己规定的正路：返回的是一个
+      // 合法的层级协调者（S5 派 at-architect 去分发 at-backend）。那一种由
+      // isCoordinatorFor 排掉，理由见那个函数上方（M1b 终审 C4）。
       // 'unknown-stage' 是 state.json 自己坏了，ledger 那条路径会给出细节。
       // H5b（stop-gate）不发这条：SubagentStop 上没有 additionalContext 这条通道，
       // 而且真拦截不该因为「无话可说」就往 stderr 刷字。
-      if (CHECK === 'deliverable' && r.skipped === 'role-not-in-stage') {
+      if (CHECK === 'deliverable' && r.skipped === 'role-not-in-stage' && !isCoordinatorFor(ctx, role)) {
         process.stdout.write(
           JSON.stringify({
             hookSpecificOutput: {
               hookEventName: spec.event,
               additionalContext:
                 `⚠️ agent-team 交付物校验：刚返回的 ${role} 不是当前阶段（state.stage = ` +
-                `${JSON.stringify(ctx.state?.stage)}）的执行者，所以这次校验**没有意见**——` +
-                `不是它查过了没问题。两种可能：这次派发本身不该发生；或者 state.stage 停在` +
-                `旧阶段没推进，那样 H5 会对整个新阶段全程哑火。去 run 目录核实。`,
+                `${JSON.stringify(ctx.state?.stage)}）的执行者，**而且它也派不到那个执行者**` +
+                `（所以不是一次层级协调），所以这次校验**没有意见**——不是它查过了没问题。` +
+                `两种可能：state.stage 停在旧阶段没推进，那样 H5 会对整个新阶段全程哑火；` +
+                `或者这次派发本身不该发生。去 run 目录核实。` +
+                `⚠️ **不要靠把 state.stage 改回旧阶段来消掉这条**——那正好制造前一种失效。`,
             },
           }),
         )

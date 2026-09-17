@@ -287,6 +287,62 @@ test('state.stage 与被派角色对不上时 H5a 发 warning，而不是静默�
   }
 })
 
+// ---- 合法的层级协调者不该被报成异常（M1b 终审 C4）----
+//
+// commands/at.md 的 S5 正路是「派 at-architect，由它去分发执行角色」（at-pm 派不动
+// at-backend），而 stages.json 的 S5.role 是 at-backend。于是 at-architect 在
+// state.stage === 'S5' 时返回，必然落进 skipped:'role-not-in-stage'——原来的 H5a
+// 会在这条正路上每次都发 warning，而它给出的两种「可能」在这里都是假的。更糟：
+// 最坏的一种「修复」是 PM 把 state.stage 改回 S3 去消警告，那会真的让 H5 对整个 S5
+// 全程哑火——这条告警有能力制造它自己警告的那个失效。
+//
+// 两条各占一个 test()，因为它们验的是这条新判据的两侧（排掉谁、留下谁），
+// 不是同一个断言形状遍历互不耦合的数据点。都是子进程级：isCoordinatorFor 活在
+// gate.mjs 里，decideDeliverable 这个纯函数从不知道花名册长什么样。
+test('S5 派 at-architect 去分发（正路）：H5a 不发 warning——它是合法的协调者', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    const { stdout, status } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm',
+      tool_input: { subagent_type: 'agent-team:at-architect' },
+    }, GATE, projectDir)
+    assert.equal(status, 0)
+    assert.equal(
+      stdout,
+      '',
+      'at-architect 能（传递地）派到 S5 的执行角色 at-backend，这是 commands/at.md ' +
+        '规定的 S5 正路，不是异常——在正路上每次都刷一条 warning，最省事的消警告方式' +
+        '正好是把 state.stage 改回旧阶段，那会真的让 H5 对整个 S5 哑火',
+    )
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('S5 返回的是一个派不到执行角色的角色（at-outsider）：H5a 照发 warning', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    const { stdout, status } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm',
+      tool_input: { subagent_type: 'agent-team:at-outsider' },
+    }, GATE, projectDir)
+    assert.equal(status, 0)
+    // 正向锚点：上一条是「stdout 为空」这种否定断言，单独立不住——必须有一条
+    // 证明同样的夹具下 warning 真的还能发出来，否则把整条 warning 删掉两条都绿。
+    const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext
+    assert.match(ctx, /没有意见/)
+    assert.match(ctx, /at-outsider/)
+    assert.match(ctx, /S5/)
+    // roster.json 里 at-outsider 的 can_delegate_to 是空——它派不到任何人，更不是
+    // 协调者。文案要点明这一点，否则读到的人会以为它跟 at-architect 是一回事。
+    assert.match(ctx, /派不到/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
 test('H5b 在角色与当前阶段对不上时不拦——fail open，不发 exit 2', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2' })
   try {
