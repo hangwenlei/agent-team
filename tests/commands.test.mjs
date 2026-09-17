@@ -116,7 +116,37 @@ test('/at 不得指示 PM 直接派 at-pm 派不动的角色', () => {
 // 问过能不能写出一条有甄别力的断言——这一条对它要防的回归（M2 加角色时有人回头在正文
 // 里列一份名单）是真有甄别力的（变异验证：把删掉的那一句加回去 → 这条变红），但它不
 // 是一道完备的防线，真正的保证是 /at 的收尾读 project.json 的 available_roles。
-const ROLE_LIST_RE = /(?:`?at-[a-z][a-z0-9-]*`?\s*[/、,，]\s*){2,}`?at-[a-z][a-z0-9-]*`?/g
+//
+// ⚠️ 正则的**源文本**单独拎出来，两处各自 new 一个对象，不共享同一个正则实例。
+// 带 `g` 的正则是有状态的：`.test()` 与 `.exec()`/`matchAll` 会推进 `lastIndex`。
+// 下面那条自检如果直接拿 ROLE_LIST_RE 去 `assert.match`（内部走 `.test()`），
+// 它会从上一次遗留的 lastIndex 往后找——做出的是一条**时好时坏**的锚点，跑第二次
+// 就可能不匹配。自检用一份不带 `g` 的副本，两边都没有跨调用的状态。
+const ROLE_LIST_SOURCE = '(?:`?at-[a-z][a-z0-9-]*`?\\s*[/、,，]\\s*){2,}`?at-[a-z][a-z0-9-]*`?'
+const ROLE_LIST_RE = new RegExp(ROLE_LIST_SOURCE, 'g')
+
+// 正向锚点，独立占一个 test()。
+//
+// 下面那条不变量是**纯否定断言**（有 match 就 assert.fail），正文干净时一个断言都
+// 不执行——复评实跑证明：把 ROLE_LIST_RE 换成 /THIS_WILL_NEVER_MATCH_ANYTHING/g，
+// 这个文件 14/14 全绿，那条测试什么都没在守。这是本分支为「否定断言没有正向锚点」
+// 开的**第四轮**循环（Task 5 拆断言、Task 6 的 I-1 空断言、终审 I7，现在这条），
+// 而同一个 commit 的邻居（「前置条件：命令正文里确实引用了插件自带的文件」↔
+// 「必须带 ${CLAUDE_PLUGIN_ROOT} 前缀」）用的就是正确手法，这一条漏了。
+//
+// 样本用**顿号**形式，不用被删掉的那条斜杠形式——换一种分隔符能顺带证明这条判据
+// 不是只认一种写法。
+test('前置条件：ROLE_LIST_RE 认得出一份硬编码的角色名清单——否则下面那条否定断言恒绿', () => {
+  const probe = '花名册里 `at-product`、`at-architect`、`at-backend` 这几个执行角色中'
+  assert.match(
+    probe,
+    new RegExp(ROLE_LIST_SOURCE),
+    `ROLE_LIST_RE 连这份明显是清单的样本都认不出来（${JSON.stringify(probe)}）——` +
+      '下面那条「不得出现硬编码的角色名清单」是纯否定断言，判据失效时它不会报错，' +
+      '只会一个断言都不执行然后全绿，跟正文真的干净长得一模一样',
+  )
+})
+
 test('commands/ 正文里不得出现硬编码的角色名清单——班底要从 project.json 读', () => {
   for (const f of FILES) {
     for (const m of textOf(f).matchAll(ROLE_LIST_RE)) {

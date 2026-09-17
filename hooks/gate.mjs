@@ -103,6 +103,15 @@ function isProjectJson(filePath, agentTeamDir) {
 // hooks/lib/deliverable.mjs 头部与 stages.README.md 都写着缺一不可，**不能因为噪音
 // 就整条删掉**。这里排掉的只是「它其实是一次合法的层级协调」这一类，剩下的两类
 // 照发。
+//
+// ⚠️⚠️ **被静默的不止 at-architect。** 当前花名册下，`state.stage === 'S5'` 时
+// `at-product` 返回同样落在协调者一侧（它的 can_delegate_to 含 at-backend）。这是
+// 这条判据的**固有代价，不是漏网**：按规格 §6.4 自己的触达语义，at-product 确实
+// **有能力**让 at-backend 交付，说它「不是协调者」会与 §6.4 自相矛盾。
+// 代价要认下来：PM 在 S5 误派 at-product 时，H1（花名册里 at-pm → at-product 这条边
+// 存在）与 H2 都零输出，H5a 原本是唯一的机械信号，现在也没了。
+// 判据是「返回角色能传递派到 stages[state.stage].role」——**扩链到 S6–S8 时这个静默
+// 集合要回来重算**，见 stages.README.md。
 function isCoordinatorFor(ctx, role) {
   const stageId = ctx.state?.stage
   const stages = ctx.stages
@@ -391,6 +400,21 @@ function main() {
       if (isProjectJson(filePath, ctx.agentTeamDir)) {
         const project = readProjectConfig(ROOT_PROJECT)
         if (project.ok) {
+          // ⚠️ ctx.kind 的两支在这条缝上**不是**二选一（终审复评 a）：
+          //   - 'no-run' 是 /at-init 的正常形态（那条命令按设计就不建 run），不留痕
+          //     ——在正路上刷一行「当前没有进行中的 run，本次放行、不拦截」只会把人
+          //     指向 current-run 去查一个根本不存在的问题。
+          //   - 'unreadable' 是门禁**自己判不出来**（current-run 被截断成空文件、
+          //     run 目录缺 state.json、project.json 之外的东西坏了……）。触达表照发
+          //     ——它的判据只有 roster.json + 刚写完的 project.json，跟那个坏掉的 run
+          //     无关，而「在一个坏掉的 run 上重跑 /at-init」恰恰是要支持的动作——
+          //     但**留痕照留**。「fail open 必须留痕」是这个仓库的硬规矩：静默的放行
+          //     和门禁彻底坏掉长得一模一样。hooks/lib/runctx.mjs 头部写着 unreadable
+          //     「这条边界不能因为上面那条放宽」，这里就是不放宽它：这条缝放行的是
+          //     触达表这一条通道，不是那个坏掉的 run 的可判定性，两件事分开表述。
+          // kind 取不到时也留痕（往安全的那一侧偏）：留一行多余的痕迹，代价远小于
+          // 丢掉唯一一次「门禁判不出来」的信号。
+          if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
           emitLedger(
             spec.event,
             buildLedgerNotices({

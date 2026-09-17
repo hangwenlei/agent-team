@@ -299,6 +299,13 @@ test('state.stage 与被派角色对不上时 H5a 发 warning，而不是静默�
 // 两条各占一个 test()，因为它们验的是这条新判据的两侧（排掉谁、留下谁），
 // 不是同一个断言形状遍历互不耦合的数据点。都是子进程级：isCoordinatorFor 活在
 // gate.mjs 里，decideDeliverable 这个纯函数从不知道花名册长什么样。
+//
+// ⚠️ **下面第一条用 at-architect，但被静默的不止它。** 当前花名册下 at-product 在
+// state.stage === 'S5' 时同样静默（它的 can_delegate_to 含 at-backend，落在协调者
+// 一侧）。那是这条判定的固有代价而不是漏网——按规格 §6.4 的触达语义 at-product 确实
+// 有能力让 at-backend 交付——但读这两条测试的人很容易以为静默面只有 at-architect
+// 一个，所以在这里点明。判据是「能传递派到 stages[state.stage].role」，扩链到
+// S6–S8 时要回来重算这个集合（stages.README.md 记了）。
 test('S5 派 at-architect 去分发（正路）：H5a 不发 warning——它是合法的协调者', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S5' })
   try {

@@ -167,6 +167,82 @@ test('没有 run 时写 project.json：仍然回传触达表——/at-init 按�
   }
 })
 
+// run 存在但读不出来（kind:'unreadable'）时写 project.json：**两件事都要发生**。
+// 触达表照发（判据只有 roster.json + 刚写完的 project.json，跟那个坏掉的 run 无关，
+// 而「在一个坏掉的 run 上重跑 /at-init」恰恰是要支持的动作），fail-open 留痕也照留
+// （门禁自己判不出来，这是唯一的信号）。终审复评 a：第一版只 emit 不留痕，那一次
+// 写入的 stderr 是零字节。
+//
+// 拆成两条：它们检验的是同一次调用的两个不同侧面（该说的话说了没有 / 该留的痕留了
+// 没有），放同一个 test() 里前一句失败会把后一句整个挡住，看不出丢的是哪一样。
+const makeBrokenRun = () => {
+  const dirs = makeRun({
+    runId: 'r1', stage: 'S1',
+    project: { paths: { 'at-product': ['docs/'], 'at-backend': ['src/server/'] } },
+  })
+  // 空的 current-run 是 kind:'unreadable'（不是 no-run）——pointer 文件在，内容是空的，
+  // 判据见 hooks/lib/runctx.mjs 头部。
+  writeFileSync(join(dirs.projectDir, '.agent-team', 'current-run'), '', 'utf8')
+  return dirs
+}
+const writeProjectJson = (projectDir) =>
+  run('ledger', {
+    tool_name: 'Write', agent_type: 'at-pm',
+    tool_input: { file_path: join(projectDir, '.agent-team', 'project.json') },
+  }, GATE, projectDir)
+
+test('run 坏了（unreadable）时写 project.json：触达表照发', () => {
+  const { projectDir, pluginDir } = makeBrokenRun()
+  try {
+    const { stdout, status } = writeProjectJson(projectDir)
+    assert.equal(status, 0)
+    const ctx = ctxOf(stdout)
+    assert.ok(ctx, '触达表的判据跟那个坏掉的 run 无关——在坏掉的 run 上重跑 /at-init 必须走得通')
+    assert.match(ctx, /reach\.json/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('run 坏了（unreadable）时写 project.json：fail-open 留痕照留——不是二选一', () => {
+  const { projectDir, pluginDir } = makeBrokenRun()
+  try {
+    const { stderr, status } = writeProjectJson(projectDir)
+    assert.equal(status, 0)
+    assert.match(
+      stderr,
+      /ledger 回传：读不到运行上下文（/,
+      '门禁自己判不出来时必须留痕，且措辞要说"读不到运行上下文"而不是"没有进行中的 run"' +
+        '——run 就在那里，坏的是别的东西。发了触达表不等于可以不留这一行：' +
+        '静默的放行和门禁彻底坏掉长得一模一样。',
+    )
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// no-run 是 /at-init 的**正常**形态，那条路径不该留痕——在正路上刷一行「当前没有
+// 进行中的 run，本次放行」只会把人指向 current-run 去查一个不存在的问题。
+// 这条与上面那条 unreadable 留痕配对：ctx.kind 那个三元塌成任一支，必有一条变红。
+test('没有 run 时写 project.json：不留 fail-open 痕迹——那是 /at-init 的正常形态', () => {
+  const { projectDir, pluginDir } = makeRun({
+    runId: 'r1', stage: 'S1',
+    project: { paths: { 'at-product': ['docs/'], 'at-backend': ['src/server/'] } },
+  })
+  try {
+    rmSync(join(projectDir, '.agent-team', 'current-run'), { force: true })
+    const { stdout, stderr } = writeProjectJson(projectDir)
+    // 正向锚点：光断言 stderr 为空的话，整条通道被删掉（stdout 也空）照样绿。
+    assert.ok(ctxOf(stdout), '触达表必须照常回传，否则下面那条"没留痕"证明不了任何事')
+    assert.equal(stderr.trim(), '')
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
 test('没有 run 时写别的文件：fail open 且留痕，不静默', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S1' })
   try {

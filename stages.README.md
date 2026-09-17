@@ -32,6 +32,31 @@ H5 问的问题（「它刚做完的那一段交付了吗」）是错的：多�
 同一条结论也写在 `hooks/lib/deliverable.mjs` 的头部注释里（改代码的人从那边进来，改
 阶段链的人从这边进来）。
 
+## ⚠️ 扩到 S6–S8 时要回来重算 H5a 的「静默集合」（M1b 终审记）
+
+`gate.mjs` 的 H5a 在 `skipped === 'role-not-in-stage'` 时，会先用花名册的传递闭包排掉
+「返回的是一个合法的层级协调者」再发 warning——否则它会在 S5 正路上必然误报（`/at` 的 S5
+是「派 `at-architect` 去分发」，而 `S5.role` 是 `at-backend`），而最省事的消警告方式
+（把 `state.stage` 改回旧阶段）恰好制造它警告的那个失效。
+
+被静默的**充要条件**是：**返回的角色能（传递地）派发到 `stages[state.stage].role`。**
+
+在 M1 的链上这条是完整的，逐段核过：
+
+| `state.stage` | 该段 `role` | 谁派得到它 | 会被静默吗 |
+|---|---|---|---|
+| S1 / S4 | `at-pm` | 没有角色派得到 `at-pm`（`tests/roster-closure.test.mjs` 钉着） | 不会 |
+| S2 / S3 | `at-product` / `at-architect` | 只有 `at-pm` 与 `__main__` | 实际上不会——返回的角色不会是它们 |
+| S5 | `at-backend` | `at-architect`、`at-product` | **会**（两个都会，不止 `at-architect`） |
+
+而 S5 是 M1 的最后一段，所以「`state.stage` 停在旧阶段」这个失效形状在 M1 里**根本不存在**
+——静默集合非空，但它覆盖不到任何真实的失效。
+
+**M2 接上 S6–S8 之后缺一角**：实际在 S6、而 `state.stage` 还停在 S5 时，任何能传递派到
+`at-backend` 的协调者返回都会被静默——**那正是「停在旧阶段」的标准形状**。扩链时按上面那条
+充要条件把新的静默集合重算一遍，并确认每一段的「停在旧阶段」还有可听见的信号（H5a 之外
+还有 `ledger` 的阶段推进提示，两条对策见上一节，缺一不可）。
+
 ## 另一条相关的缺口（M1b 已解决）
 
 M1a 在 `hooks/lib/writepath.mjs` 里记过一条 I3：稳态下被 `settings.json` 钉成主线程的
