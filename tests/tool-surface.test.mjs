@@ -14,21 +14,21 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join, relative } from 'node:path'
+import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const AGENTS_DIR = join(ROOT, 'agents')
 const SKILLS_DIR = join(ROOT, 'skills')
 
-// 与 hooks/lib/frontmatter.mjs 的 parseAgentAllowlist 同一种行扫描手法：找
-// 以 tools: 开头的那一行。但那个函数只挖 Agent(...) 括号里的类型列表，挖不出
-// 整条 tools: 行——这里要查的是"整行里有没有 Skill 这个词"，不是 Agent 白
-// 名单的内容，parseAgentAllowlist 帮不上忙。不改 frontmatter.mjs：它是生产
-// 代码，当前唯一消费者是 tests/roster-sync.test.mjs，不该为这份新测试扩出一
-// 个用不到第二次的导出。
-function toolsLineOf(md) {
-  const line = md.split(/\r?\n/).find((l) => /^tools:/.test(l.trim()))
-  return line ?? ''
-}
+// ⚠️ 这里此前是一份只取表头那一行的扫描（`.find(l => /^tools:/.test(l.trim()))`），
+// 在它上面做三次否定断言、没有任何正向断言证明这一行解得出工具名。M1b 终审 C2
+// 实测：把 agents/at-backend.md 的 tools: 改写成合法的 YAML 块序列并把三个禁授
+// 工具全写进去，`node --test` 仍然 304 pass / 0 fail —— 规格 §6.1 唯一的机械防线
+// 被一次合法的 YAML 改写整体架空。解析改到 tests/helpers/agent-tools.mjs，那里
+// 认行内与块序列两种形式，并且是 tests/command-tool-closure.test.mjs 共用的**同
+// 一份**实现：C2 的成因正是两份行扫描只改了一份（详见那个 helper 的头部注释）。
+const AGENT_FILES = readdirSync(AGENTS_DIR).filter((f) => f.endsWith('.md'))
+const declarationOf = (file) => toolsDeclarationOf(readFileSync(join(AGENTS_DIR, file), 'utf8'))
 
 // 规格 §6.1：角色工具面是按需白名单，这三个工具一律不授予。Skill 的旁路是
 // U7 临时授予后实测出来的（docs/06-U7-实测结论.md）；SendMessage/ListAgents
@@ -89,20 +89,40 @@ function toPosix(p) {
   return p.split('\\').join('/')
 }
 
-test('没有任何角色的 tools: 包含 Skill / SendMessage / ListAgents', () => {
-  const agentFiles = readdirSync(AGENTS_DIR).filter((f) => f.endsWith('.md'))
+// 正向前置断言，单独占一个 test()。为什么必须独立：它一旦失败（解析手法失效、
+// 或某个角色根本没有 tools: 声明），排在它后面的那些否定断言会在同一个 test()
+// 里被 assert 抛出直接挡住——而那正是 C2 的失效形状：否定断言对着一个空字符串
+// 天然全部成立，「全绿」什么都不证明。先例是 tests/command-tool-closure.test.mjs
+// 的「前置条件：agents/at-pm.md 有 tools: 行，且能从里面解出至少一个候选工具」
+// ——那条知识本轮才回灌到安全这一侧。
+test('前置条件：agents/ 下每个 .md 都解得出至少一个工具名——否则下面的否定断言在对空集合空转', () => {
   assert.ok(
-    agentFiles.length > 0,
-    'agents/ 目录下一个 .md 都没找到——这条测试没有实际检查任何东西',
+    AGENT_FILES.length > 0,
+    'agents/ 目录下一个 .md 都没找到——下面那条测试没有实际检查任何东西',
   )
+  for (const file of AGENT_FILES) {
+    const { text, names } = declarationOf(file)
+    assert.ok(
+      names.length > 0,
+      `agents/${file} 的 frontmatter 里没有解出任何工具名（tools: 声明原文为 ` +
+        `${JSON.stringify(text)}）。要么这个角色真的没有 tools: 声明，要么它用了一种 ` +
+        'tests/helpers/agent-tools.mjs 还不认识的 YAML 写法——两种情况下，下面那条' +
+        '「不得出现 Skill / SendMessage / ListAgents」的否定断言都是在对着空文本做，' +
+        '恒真、什么都不证明（M1b 终审 C2 的成因）。',
+    )
+  }
+})
 
-  for (const file of agentFiles) {
-    const md = readFileSync(join(AGENTS_DIR, file), 'utf8')
-    const toolsLine = toolsLineOf(md)
+test('没有任何角色的 tools: 包含 Skill / SendMessage / ListAgents', () => {
+  for (const file of AGENT_FILES) {
+    const { text, names } = declarationOf(file)
     for (const { name, reason } of FORBIDDEN_TOOLS) {
+      // 两道一起查，各自抓不同的形状：names 是解析出来的顶层工具名（精确）；
+      // text 是整条声明的原文（保守，连写在括号里、注释里的同名词也一并挡住）。
+      // 原来只有后者，而且 text 只有表头一行——块序列形式整条溜过去。
       assert.ok(
-        !new RegExp(`\\b${name}\\b`).test(toolsLine),
-        `agents/${file} 的 tools: 行里出现了 ${name}（${JSON.stringify(toolsLine)}）。` +
+        !names.includes(name) && !new RegExp(`\\b${name}\\b`).test(text),
+        `agents/${file} 的 tools: 声明里出现了 ${name}（原文 ${JSON.stringify(text)}）。` +
           reason +
           '而且主线程 agent 的 tools: 会把整个工具面传导给整棵子树（U7 实测里 ' +
           '"Skill is disabled for this session, in subagents as well as ' +

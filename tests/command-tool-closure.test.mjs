@@ -31,6 +31,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
+import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const COMMANDS_DIR = join(ROOT, 'commands')
@@ -39,17 +40,13 @@ const AT_PM_PATH = join(ROOT, 'agents', 'at-pm.md')
 const FILES = readdirSync(COMMANDS_DIR).filter((f) => f.endsWith('.md'))
 const textOf = (f) => readFileSync(join(COMMANDS_DIR, f), 'utf8')
 
-// 与 tests/tool-surface.test.mjs 的 toolsLineOf(md) 同一种行扫描手法：只找以
-// tools: 开头的那一行，不解析完整 YAML。hooks/lib/frontmatter.mjs 的
-// parseAgentAllowlist 只挖 Agent(...) 括号里的类型列表，挖不出整条 tools: 行
-// ——这里要的是整行本身，parseAgentAllowlist 帮不上忙。不改 frontmatter.mjs：
-// 它是生产代码，当前唯一消费者是 tests/roster-sync.test.mjs，不该为这份新测试
-// 扩出一个用不到第二次的导出（同一判断，tool-surface.test.mjs 的注释已经写过
-// 一次，这里不重复论证，原样沿用手法）。
-function toolsLineOf(md) {
-  const line = md.split(/\r?\n/).find((l) => /^tools:/.test(l.trim()))
-  return line ?? ''
-}
+// tools: 的解析改用 tests/helpers/agent-tools.mjs，与 tests/tool-surface.test.mjs
+// **共用同一份实现**（M1b 终审 C2）。此前两边各有一份逐字相同的行扫描，只取表头
+// 那一行；本文件给自己补了下面「grantedTools.size > 0」的正向前置断言，
+// tool-surface.test.mjs 没有——同一份知识的两份拷贝只改了一份，而没改的那一份
+// 恰好是安全那一侧，一次合法的 YAML 块序列改写就能把规格 §6.1 的防线整体架空。
+// 抽出来的完整理由（以及为什么是 tests/helpers/ 而不是 hooks/lib/frontmatter.mjs、
+// 为什么这不算「两个测试文件互相 import」）写在那个 helper 的头部。
 
 // 规格 §6.1 的三个工具（Skill、SendMessage、ListAgents）一律不授予任何角色
 // ——Skill 的 context: fork 能绕过 H1 派发门禁，SendMessage/ListAgents 能跨
@@ -111,23 +108,26 @@ function mentionsTool(text, tool) {
   return new RegExp('\\b' + tool + '\\b').test(text)
 }
 
-function toolSetFromToolsLine(line) {
+function toolSetFromToolsText(text) {
   const set = new Set()
   for (const tool of CANDIDATE_TOOLS) {
-    if (mentionsTool(line, tool)) set.add(tool)
+    if (mentionsTool(text, tool)) set.add(tool)
   }
   return set
 }
 
 const atPmMd = readFileSync(AT_PM_PATH, 'utf8')
-const atPmToolsLine = toolsLineOf(atPmMd)
-const grantedTools = toolSetFromToolsLine(atPmToolsLine)
+// text 是整条 tools: 声明的原文（块序列形式下含后面每一个 `- X` 行），不再只是
+// 表头那一行——候选工具用 \b 词边界在这段原文上查，跟 Agent(...) 括号里的角色名
+// 撞不上（那些是小写连字符形式）。
+const atPmToolsText = toolsDeclarationOf(atPmMd).text
+const grantedTools = toolSetFromToolsText(atPmToolsText)
 
-test('前置条件：agents/at-pm.md 有 tools: 行，且能从里面解出至少一个候选工具', () => {
-  assert.notEqual(atPmToolsLine, '', 'agents/at-pm.md 没有找到 tools: 行——下面的对账没有基准')
+test('前置条件：agents/at-pm.md 有 tools: 声明，且能从里面解出至少一个候选工具', () => {
+  assert.notEqual(atPmToolsText, '', 'agents/at-pm.md 没有找到 tools: 声明——下面的对账没有基准')
   assert.ok(
     grantedTools.size > 0,
-    `agents/at-pm.md 的 tools: 行（${JSON.stringify(atPmToolsLine)}）一个候选工具都没解出来，` +
+    `agents/at-pm.md 的 tools: 声明（${JSON.stringify(atPmToolsText)}）一个候选工具都没解出来，` +
       '下面的对账会在跟空集合比，永远全绿',
   )
 })
@@ -183,7 +183,7 @@ test('commands/ 每条命令正文里以工具身份提到的每个工具，都�
       assert.ok(
         grantedTools.has(tool),
         `commands/${file} 提到了工具 ${tool}，但 agents/at-pm.md 的 tools: 行` +
-          `（${JSON.stringify(atPmToolsLine)}）里没有它。主线程 agent 的 tools: 行` +
+          `（${JSON.stringify(atPmToolsText)}）里没有它。主线程 agent 的 tools: 行` +
           '是整个会话的能力上界，被所有子孙代理继承——不在这一行里的工具，命令' +
           '正文写的指令这辈子调不出来（错误形如 "X is disabled for this ' +
           'session, in subagents as well as here"）。',
