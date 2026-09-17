@@ -415,7 +415,8 @@ README 明示此边界，不将其表述为沙箱。
 
 `.agent-team/current-run`、`.agent-team/project.json`、`.agent-team/reach.json`、
 `.agent-team/runs/<id>/state.json` 是**控制文件**——编排层自己的账本，不是任何阶段的
-`produces`，**只有 PM 能写**。`stages[*].produces` 列出的**阶段产物**继续走 per-role
+`produces`，**只有 PM 能写**。（四项里的 `reach.json` 来自 `docs/09` **账二**，不在
+账一的决策表里——账一只列了三项，对着那张表对账的人会以为这份清单多了一项。）`stages[*].produces` 列出的**阶段产物**继续走 per-role
 认领（只有该阶段自己的角色能写），run 目录下其余一切一律 deny。
 
 为什么要分这两类：被 `settings.json` 钉成主线程的 `at-pm` **不是** `callerOf` 判定的
@@ -442,7 +443,8 @@ README 明示此边界，不将其表述为沙箱。
 在 `docs/04` §9 ①：
 
 **H3 的有效边界依赖花名册拓扑。** 一个角色的**实际写入触达** = 自己认领的路径 ∪ 它能
-（传递地）派发到的所有角色认领的路径。实测原文：`at-product` 被 H3 拒绝写
+（传递地）派发到的所有角色认领的路径。实测记录（转述，逐字的 `tool_use` 原文在
+`docs/04` §9 ①）：`at-product` 被 H3 拒绝写
 `src/web/x.ts` 之后，**没有任何人要求它这么做**，它当场把同一个写入转手派发给那条路径
 的合法拥有者 `at-frontend`；挡住它的是 H1（花名册里没有这条边），不是 H3。
 **改一条 `can_delegate_to` 就可能悄悄放大某个角色的写入范围。** 加重它的一条事实：
