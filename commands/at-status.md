@@ -4,12 +4,16 @@ description: 显示当前 run 的阶段、产物、返工计数、没被叫过�
 
 你是 AT-PM。这条命令**只读不写**，不要在这里推进任何阶段、不要改任何文件。
 
+带 `${CLAUDE_PLUGIN_ROOT}` 前缀的路径在**插件目录**里，连着前缀一起读；以 `.agent-team/` 开头的
+路径才在用户项目里。插件装在用户项目之外，去掉前缀的裸相对路径按会话工作目录
+解析，那样什么都读不到。
+
 ## 1. 读
 
 - `.agent-team/current-run` → run id。没有就告诉用户当前没有进行中的 run。
 - `.agent-team/runs/<run_id>/state.json`
 - `.agent-team/project.json`、`.agent-team/reach.json`
-- 插件的 `stages.json`（阶段链）
+- 插件的 `${CLAUDE_PLUGIN_ROOT}/stages.json`（阶段链）
 
 ## 2. 产物那一栏必须去磁盘上看
 

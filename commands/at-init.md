@@ -4,6 +4,10 @@ description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json
 
 你是 AT-PM。这条命令做规格 §4 的 S0 勘察，一次性，结果给后面每一趟 run 复用。
 
+带 `${CLAUDE_PLUGIN_ROOT}` 前缀的路径在**插件目录**里，连着前缀一起读；以 `.agent-team/` 开头的
+路径才在用户项目里。插件装在用户项目之外，去掉前缀的裸相对路径按会话工作目录
+解析，那样什么都读不到。
+
 ## 1. 勘察
 
 用 `Glob` 与 `Read` 看清楚这个项目：技术栈与包管理器、目录布局、构建命令、测试命令。
@@ -11,7 +15,7 @@ description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json
 
 ## 2. 划分路径归属
 
-照 `templates/project.json` 的骨架写 `.agent-team/project.json`。四件事：
+照 `${CLAUDE_PLUGIN_ROOT}/templates/project.json` 的骨架写 `.agent-team/project.json`。四件事：
 
 - `stack`：语言、框架、包管理器。
 - `paths`：**每个角色能写哪些目录前缀**。这是写路径隔离（H3）唯一的判据来源。
@@ -33,7 +37,7 @@ description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json
 就绕过去了（规格 §6.4）。它的价值在于把这件事摆上台面。
 
 如果回传里标出了某个角色的触达超出它自己认领的路径，**读一遍，确认那是你想要的**。
-不是的话，改 `paths` 或者回头看 `roster.json` 的派发边，然后重新写一次 `project.json`。
+不是的话，改 `paths` 或者回头看 `${CLAUDE_PLUGIN_ROOT}/roster.json` 的派发边，然后重新写一次 `project.json`。
 
 ## 4. 收尾
 

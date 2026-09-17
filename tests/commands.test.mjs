@@ -91,6 +91,45 @@ test('/at 不得指示 PM 直接派 at-pm 派不动的角色', () => {
   }
 })
 
+// 承重假设，记了三次从未被回答（docs/02 P0-#1/#2、docs/03 P0-3、docs/04 §6 开放
+// 问题 3）：**插件根在会话工作目录之外**。命令正文里引用插件自带的文件（templates/、
+// stages.json、roster.json）时若写裸相对路径，PM 会按会话工作目录去解析，什么都读
+// 不到——而读不到模板的 PM 会照自己的记忆编一份 state.json，这在会话里长得跟正常
+// 完全一样（M1b 终审 C3）。唯一的定位方式是 ${CLAUDE_PLUGIN_ROOT}。
+//
+// ⚠️ 这条测试只证明「正文写对了前缀」，**不证明 PM 真的读得到那个文件**——那需要
+// 真实环境，见 docs/10 第 8 条。
+const PLUGIN_OWNED = ['stages.json', 'roster.json', 'templates/']
+const pluginSpansOf = (f) =>
+  [...textOf(f).matchAll(/`([^`\n]+)`/g)]
+    .map((m) => m[1])
+    .filter((span) => PLUGIN_OWNED.some((p) => span.includes(p)))
+
+// 正向锚点单独占一个 test()：下面那条是「每一个都要带前缀」，一条都没有时它零次
+// 迭代、恒绿——空集合天然满足全称命题，这正是本仓库反复栽的形状。
+test('前置条件：命令正文里确实引用了插件自带的文件——否则下面那条前缀测试在空转', () => {
+  const total = FILES.reduce((n, f) => n + pluginSpansOf(f).length, 0)
+  assert.ok(
+    total > 0,
+    `commands/ 下没有任何反引号路径提到 ${PLUGIN_OWNED.join(' / ')}——` +
+      '下面那条测试一次都不会真正执行断言，通过是假的',
+  )
+})
+
+test('命令正文引用插件自带的文件时必须带 ${CLAUDE_PLUGIN_ROOT} 前缀', () => {
+  for (const f of FILES) {
+    for (const span of pluginSpansOf(f)) {
+      assert.ok(
+        span.startsWith('${CLAUDE_PLUGIN_ROOT}/'),
+        `commands/${f} 用裸相对路径引用了插件自带的文件：\`${span}\`。` +
+          '插件目录不在用户项目里，裸相对路径按会话工作目录解析，PM 读不到它——' +
+          '而读不到模板/阶段链的 PM 会自己编一份，失效形式是「看起来正常」。' +
+          '写成 ${CLAUDE_PLUGIN_ROOT}/' + span,
+      )
+    }
+  }
+})
+
 test('命令正文里出现的每个 NN-*.md 产物名都是 stages.json 的 produces', () => {
   const produced = new Set(Object.values(stages).flatMap((s) => s.produces ?? []))
   for (const f of FILES) {

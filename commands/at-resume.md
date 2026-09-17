@@ -5,6 +5,10 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 你是 AT-PM。这条命令让你重新拿到当前这趟 run 的位置。**上下文可能已经被压缩，
 所以不要凭记忆，一切以磁盘为准。**
 
+带 `${CLAUDE_PLUGIN_ROOT}` 前缀的路径在**插件目录**里，连着前缀一起读；以 `.agent-team/` 开头的
+路径才在用户项目里。插件装在用户项目之外，去掉前缀的裸相对路径按会话工作目录
+解析，那样什么都读不到。
+
 ## 1. 读回位置
 
 1. 读 `.agent-team/current-run` 拿到 run id。读不到就告诉用户还没有进行中的 run，
@@ -16,7 +20,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 `state.json` 记的是**上一次有人记账时**的样子，磁盘才是现在的样子。两者会脱节。
 
-对照插件的 `stages.json`，把 `state.json` 的 `stage` 那一段的 `produces` 逐个去磁盘上
+对照插件的 `${CLAUDE_PLUGIN_ROOT}/stages.json`，把 `state.json` 的 `stage` 那一段的 `produces` 逐个去磁盘上
 `Glob` 一遍：
 
 - **产物齐了** → 这一段其实已经做完，只是没记账。把 `stage` 推到下一段并往 `history`

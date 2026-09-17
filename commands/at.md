@@ -12,21 +12,27 @@ $ARGUMENTS
 若 `.agent-team/project.json` 不存在，**停下**，让用户先跑 `/at-init`——没有它，
 写路径隔离没有判据，每个执行角色都会被拒。
 
+本文里带 `${CLAUDE_PLUGIN_ROOT}` 前缀的路径都在**插件目录**里，用 `Read` 连着这个
+前缀一起读；以 `.agent-team/` 开头的路径才在用户项目里。两者不是同一个目录树——
+插件装在用户项目之外，去掉前缀的裸相对路径会按会话工作目录解析，那样什么都读不到。
+
 ## 1. 建 run
 
 - run id：`YYYYMMDD-HHmm-<slug>`，`slug` 用小写字母、数字与连字符，取自需求本身
   （例：`20260917-1430-login-sso`）。
 - 建目录 `.agent-team/runs/<run_id>/`。
-- 照 `templates/state.json` 写 `.agent-team/runs/<run_id>/state.json`：
+- 照 `${CLAUDE_PLUGIN_ROOT}/templates/state.json` 写 `.agent-team/runs/<run_id>/state.json`。
+  模板有**九个顶层键，一个都不能少**（少了会被账本回传报成状态不合法）：
   `run_id` 填你上面生成的那个 run id（**必须与目录名逐字相同**），`stage` 填 `S1`，
   `history` 填一条 `{ "stage": "S1", "at": "<ISO 时间>" }`，`contract_sha` 保持
-  `PENDING`，`roster` 与 `never_invoked` 先留空。
+  `PENDING`，`roster` 与 `never_invoked` 先留空数组，`artifacts` 与 `rework` 先留空
+  对象 `{}`，`escalations` 先留空数组。
 - 写 `.agent-team/current-run`，内容就是 run id 本身，**不带换行以外的任何东西，
   不含路径分隔符**。
 
 ## 2. S1 录入 —— 冻结契约
 
-照 `templates/00-contract.md` 写 `00-contract.md`。
+照 `${CLAUDE_PLUGIN_ROOT}/templates/00-contract.md` 写 `00-contract.md`。
 
 **第 1 节「用户原话」必须逐字照抄上面 `$ARGUMENTS` 的内容。** 不要改写、不要顺一顺、
 不要补全你觉得他漏掉的东西。后面每个角色的产出都要对着这段话验收；转写时润色过一次，
@@ -37,7 +43,7 @@ $ARGUMENTS
 
 ## 3. S2–S5 推进
 
-阶段链的真源是插件的 `stages.json`。按它走，每一段都是同一套动作：
+阶段链的真源是插件的 `${CLAUDE_PLUGIN_ROOT}/stages.json`。按它走，每一段都是同一套动作：
 
 1. **派**。派发用 `Agent` 工具，`subagent_type` 写**全限定名**（`agent-team:<role>`）。
 2. **核实**。子代理返回之后，用 `Glob` 或 `Read` **去磁盘上看产物在不在**。
@@ -56,7 +62,7 @@ $ARGUMENTS
 - **S2 产品设计**：派 `at-product`。它的前置是 `00-contract.md`——**必须先写完契约再
   派**，顺序反了会被就绪门禁拒，而那次拒绝很容易被误读成门禁坏了。
 - **S3 技术对齐**：派 `at-architect`。
-- **S4 裁决**：这一段是你自己做。照 `templates/04-dispatch.md` 写 `04-dispatch.md`：
+- **S4 裁决**：这一段是你自己做。照 `${CLAUDE_PLUGIN_ROOT}/templates/04-dispatch.md` 写 `04-dispatch.md`：
   本趟班底、分工、你自决的事、以及已经升级给用户的事。
 - **S5 实现**：**派 `at-architect`，由它去分发执行角色。**
   你派不动 `at-backend` / `at-frontend`——花名册里 `at-pm` 只能派 `at-product` 与
