@@ -93,7 +93,7 @@ test('写业务代码时保持沉默——零 stdout', () => {
 })
 
 // Task 6 变异验证第 3 项发现的缺口：上面那条「保持沉默」的夹具（stage S1、没有
-// artifacts）无论 isControlFile/underRun 那道早退在不在，stageDone 恒为 false、
+// artifacts）无论 isControlFile/underDir 那道早退在不在，stageDone 恒为 false、
 // kind 恒为 'other'，notices 恒是空数组——早退删不删，stdout 都是空的，那条测试
 // 证明不了早退本身有必要（实测：把早退改成无条件继续，`node --test` 仍然
 // pass 258 / fail 0，没有任何测试变红）。这一条把「当前阶段产物已经齐了」这个

@@ -6,7 +6,7 @@
 // 评审三轮 Important 1 定下的大小写/分隔符归一化，现在是 hooks/lib/path-norm.mjs
 // 里的公共实现——H3 与 H4 必须用同一份（整理项 5：两边判错的方向相反，
 // 各留一份的代价不对称，理由写在那个文件的头部）。
-import { norm } from './path-norm.mjs'
+import { norm, underDir } from './path-norm.mjs'
 import { isControlFile } from './control-files.mjs'
 import { isContractWriter } from './contract-guard.mjs'
 
@@ -100,7 +100,12 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 的子进程级对照。
   if (runDir) {
     const rd = norm(runDir)
-    if (target === rd || target.startsWith(`${rd}/`)) {
+    // 评审 I-2：这条判定与 hooks/gate.mjs 的 ledger 分支曾经各写一份逐字符相同的
+    // 拷贝，现在都用 hooks/lib/path-norm.mjs 的 underDir，传原始的 filePath/runDir
+    // （不是这里已经算好的 target/rd）——underDir 自己会 norm，调用方不用先算
+    // 一遍再传，两边不用记着保持"谁传原始值、谁传 norm 过的值"这条约定。rd 仍然
+    // 保留：下面拼产物路径（norm(`${rd}/${p}`)）要用到它。
+    if (underDir(filePath, runDir)) {
       // 评审三轮 Important 2：旧版本这里对整个 run 目录一律放行，注释说的
       // 是"自己那份"，代码做的是"任何一份"——两者不是取舍，是代码没实现
       // 它自己声明的意图。真实后果：runctx.mjs 的 artifactExists 就是在

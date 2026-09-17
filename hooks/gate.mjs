@@ -23,16 +23,7 @@ import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
 import { sha256OfContract } from './lib/contract-hash.mjs'
 import { buildLedgerNotices } from './lib/ledger.mjs'
-import { norm } from './lib/path-norm.mjs'
-
-// ledger 关心两类路径：控制文件，以及 run 目录下的阶段产物（后者用来判断当前阶段的
-// 产物齐没齐）。写在别处的文件与它无关。
-function underRun(filePath, runDir) {
-  if (typeof filePath !== 'string' || !filePath || !runDir) return false
-  const rd = norm(runDir)
-  const t = norm(filePath)
-  return t === rd || t.startsWith(`${rd}/`)
-}
+import { norm, underDir } from './lib/path-norm.mjs'
 
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -329,8 +320,11 @@ function main() {
         ? input?.tool_input?.notebook_path
         : input?.tool_input?.file_path
     // 不在 .agent-team/ 下的写入与本检查项无关，保持沉默——角色写业务代码是常态，
-    // 每次都刷一段 additionalContext 会把真正要看的东西淹掉。
-    if (!isControlFile(filePath, ctx.agentTeamDir) && !underRun(filePath, ctx.runDir)) {
+    // 每次都刷一段 additionalContext 会把真正要看的东西淹掉。ledger 关心两类
+    // 路径：控制文件，以及 run 目录下的阶段产物（后者用来判断当前阶段的产物齐
+    // 没齐）；underDir 判的是后一类，写在 hooks/lib/path-norm.mjs 里（评审 I-2：
+    // 这段比较与 writepath.mjs 里同一处判定曾经是两份逐字符相同的拷贝）。
+    if (!isControlFile(filePath, ctx.agentTeamDir) && !underDir(filePath, ctx.runDir)) {
       process.exit(0)
     }
 

@@ -69,11 +69,22 @@ export function buildLedgerNotices({
     const tail =
       `H5 交付物校验按 state.stage 判定：它停在旧阶段时，对新阶段的角色会完全无话可说——` +
       `不是放行，是哑掉，而哑掉和「通过了」在会话里长得一模一样。`
+    // 评审 M-2：这条提示可能发给任何一个刚触发 ledger 的角色，不能假设读到它的
+    // 就是 PM——运行时实测过 at-product 写自己阶段的产物（01-prd.md）时，只要
+    // state.stage 还停在一个 produces 已齐的旧阶段就会收到它。但「推进/收口」这个
+    // 动作是改 runs/*/state.json，那是控制文件，hooks/lib/writepath.mjs 对非 PM
+    // 角色一律 deny——不点破这件事，这条提示等于让一个做不到这件事的角色去做它，
+    // 跟 H3 给出互相矛盾的指示。硬约束 6 不许把提示削弱或按角色掐掉，所以补救的
+    // 是措辞：把动作明确归给 PM，再给非 PM 一条不会撞 H3 的下一步。
+    const who =
+      `这个动作（改 state.json）只能由 PM 执行——runs/*/state.json 是控制文件，` +
+      `写路径隔离对非 PM 角色一律拒绝。如果你不是 PM：把"这一段的产物已经齐了"这` +
+      `件事回报给上级，由 PM 落盘，不要自己去写 state.json。`
     out.push(
       nxt
-        ? `【阶段】${st.stage} 的产物已经齐了。这一段如果确实结束了，把 state.stage 推进到 ${nxt}，` +
-          `并往 history 追加一条 { "stage": "${nxt}", "at": "<ISO 时间>" }。${tail}`
-        : `【阶段】${st.stage} 的产物已经齐了，而它是阶段链的最后一段——该收口了。${tail}`,
+        ? `【阶段】${st.stage} 的产物已经齐了。这一段如果确实结束了，需要把 state.stage 推进到 ` +
+          `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "<ISO 时间>" }。${who}${tail}`
+        : `【阶段】${st.stage} 的产物已经齐了，而它是阶段链的最后一段——该收口了。${who}${tail}`,
     )
   }
 
