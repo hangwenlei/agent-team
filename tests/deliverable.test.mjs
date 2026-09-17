@@ -120,3 +120,29 @@ test('当前阶段没有 produces 义务：不表态', () => {
     { ok: true },
   )
 })
+
+// hooks/lib/deliverable.mjs 用 Object.hasOwn(stages, stageId) 而不是下标访问
+// stages[stageId]，理由与 decideDelegation 查花名册条目时改用 Object.hasOwn 是同一条
+// （规格 §6.0 第 5 条 / tests/decide.test.mjs 的退化形态覆盖）：原型链上自带的属性名
+// 会让"查得到条目"这件事凭空成立。stageId 来自 state.json 的 stage 字段，那是一个
+// 磁盘上的字符串，不该假设它一定是个正经阶段 id。
+//
+// ⚠️ 这条单独占一个 test()：它是这道防线唯一的证明。此前用 undefined/null/'S9'/3
+// 四个值的那条测试撞不上原型链的键，把 Object.hasOwn 退化成下标访问后全量仍然零红
+// （评审实测；本任务的复核重新跑过一遍，结论一致：280 条不变、全绿）。
+//
+// __proto__ 单独核实过是否与另外四个一致，而不是假设一致：Object.hasOwn(stages,
+// '__proto__') 是 false（它不是 stages 的 own key，只是 Object.prototype 上的一对
+// 访问器），下标访问 stages['__proto__'] 拿到的是 Object.prototype 本身（真值、
+// .role 是 undefined）——退化后的表现与 constructor/toString/hasOwnProperty/valueOf
+// 完全一致（都从 unknown-stage 变成 role-not-in-stage），所以放进同一个循环，不拆开。
+test('stageId 是原型链上的属性名时也算查不到——不能凭空冒出一个阶段', () => {
+  const stages = { S2: { role: 'at-product', requires: [], produces: ['01-prd.md'] } }
+  for (const stageId of ['constructor', 'toString', 'hasOwnProperty', 'valueOf', '__proto__']) {
+    assert.deepEqual(
+      decideDeliverable({ role: 'at-product', stageId, stages, artifactExists: () => false }),
+      { ok: true, skipped: 'unknown-stage' },
+      `stageId 为 ${stageId} 时应当归成 unknown-stage`,
+    )
+  }
+})
