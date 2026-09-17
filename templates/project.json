@@ -1,0 +1,15 @@
+{
+  "stack": {
+    "languages": ["TypeScript"],
+    "frameworks": [],
+    "package_manager": "npm"
+  },
+  "paths": {
+    "at-product": ["docs/product/"],
+    "at-architect": ["docs/arch/"],
+    "at-backend": ["src/server/", "src/shared/"],
+    "at-frontend": ["src/web/", "src/shared/"]
+  },
+  "build": "npm run build",
+  "test": "npm test"
+}

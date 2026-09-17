@@ -1,0 +1,13 @@
+{
+  "run_id": "20260917-1430-example-slug",
+  "stage": "S1",
+  "contract_sha": "PENDING",
+  "roster": [],
+  "artifacts": {},
+  "rework": {},
+  "never_invoked": [],
+  "escalations": [],
+  "history": [
+    { "stage": "S1", "at": "2026-09-17T14:30:00Z" }
+  ]
+}
