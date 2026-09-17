@@ -100,11 +100,20 @@ $ARGUMENTS
 
 ## 6. 收尾
 
-在这里把 `never_invoked` **算一次**（不是逐段累加出来的）：花名册里 `at-product`/
-`at-architect`/`at-backend`/`at-frontend` 这几个执行角色中，凡是没有出现在
-`state.json` 的 `roster` 里的，就是这一趟一次都没被真正叫到的——写进
-`never_invoked`。**写完检查一遍 `roster` 与 `never_invoked` 没有交集**：同一个角色
-不能既算「叫到了」又算「没被叫过」。
+在这里把 `never_invoked` **算一次**（不是逐段累加出来的）：
+
+1. 读 `.agent-team/project.json` 的 `available_roles`——**这个项目可用的执行角色名单
+   就以它为准，不要凭记忆列角色名**。名单是 `/at-init` 写的，加了新角色它会跟着变；
+   正文里写死一份就会在加角色那天静默漏算，而漏算的表现是「某个角色整趟没被叫过，
+   且无人发现」（规格 §4.2 ④）。读不到这个字段就停下来让用户重跑 `/at-init`。
+2. 名单里凡是没有出现在 `state.json` 的 `roster` 里的，就是这一趟一次都没被真正
+   叫到的——写进 `never_invoked`。
+
+⚠️ 这两个名单不是一回事：`available_roles` 在 `project.json` 里，是「这个项目有哪些
+角色可用」；`roster` 在 `state.json` 里，是「这一趟真正叫到了谁」。
+
+**写完检查一遍 `roster` 与 `never_invoked` 没有交集**：同一个角色不能既算「叫到了」
+又算「没被叫过」。
 
 S5 结束后告诉用户：产物清单（**去磁盘上核实过的**）、这趟叫了谁、谁没被叫过、
 有没有待办的升级。M1 的链到 S5 为止，测试与验收（S6–S8）还没有接上。

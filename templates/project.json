@@ -4,6 +4,7 @@
     "frameworks": [],
     "package_manager": "npm"
   },
+  "available_roles": ["at-product", "at-architect", "at-backend", "at-frontend"],
   "paths": {
     "at-product": ["docs/product/"],
     "at-architect": ["docs/arch/"],

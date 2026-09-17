@@ -75,6 +75,15 @@ test('命令正文里出现的每个 at-* 角色名都在花名册里', () => {
 // 相关的。改成遍历全部命中行，每一行独立过豁免判断，不再取决于加在哪个位置。豁免词
 // 表另加了「派不动」「只能派」，直接对应「说明为什么不能直接派」这类行本身的措辞，
 // 不再依赖这行恰好也提到 at-product 这个巧合。
+//
+// ⚠️⚠️ M1b 终审 I3：豁免表原来是 /at-architect|at-product|经|转|派不动|只能派/，
+// 「经」与「转」是**裸字**，会被「已经」「经过」「转述」这类常用词命中——整张豁免表
+// 被一个汉字击穿。实测：往 at.md 追加「契约**已经**定好了，这一步直接用 `Agent` 工具
+// 派 `at-backend` 去写后端代码。」→ 304 pass / 0 fail；去掉「已经」两字的同一句 →
+// 303/1。而且当时这条测试在 at.md 上只跑到 2 次断言（at-backend/at-frontend，同一行），
+// 两次都命中豁免——它对 at.md **一个非豁免行都没判过**。
+// 两个裸字直接删掉，只留不会被常用词误命中的四项：「派不动」「只能派」已经覆盖了
+// 「说明为什么不能直接派」这类行本身的措辞，正文不需要靠「经/转」来豁免。
 test('/at 不得指示 PM 直接派 at-pm 派不动的角色', () => {
   const t = textOf('at.md')
   const reachable = new Set(roster['at-pm'].can_delegate_to)
@@ -83,9 +92,40 @@ test('/at 不得指示 PM 直接派 at-pm 派不动的角色', () => {
     const lines = t.split(/\r?\n/).filter((l) => l.includes(name) && /派|dispatch|Agent/.test(l))
     for (const line of lines) {
       assert.ok(
-        /at-architect|at-product|经|转|派不动|只能派/.test(line),
+        /at-architect|at-product|派不动|只能派/.test(line),
         `commands/at.md 有一行像是让 PM 直接派 ${name}：「${line.trim()}」——` +
           `at-pm 的 can_delegate_to 只有 ${[...reachable].join('、')}，H1 会拒`,
+      )
+    }
+  }
+})
+
+// M1b 终审 I4 ⑤：「commands/ 正文里不得出现硬编码的角色名清单」。
+//
+// 判据是**语法形状**，不是语义：连续 ≥3 个角色名、中间只隔列表分隔符（/、、、,、，）
+// 与空白/反引号/换行——那就是一份**枚举清单**，不是散文里提到角色。分散提及天然不
+// 匹配，因为散文会在两个名字之间插入文字。
+//
+// 为什么阈值是 3 而不是 2：commands/at.md 有一行合法的说明「你派不动 `at-backend` /
+// `at-frontend`——花名册里 `at-pm` 只能派 `at-product` 与 `at-architect`」，它是在讲
+// **派发拓扑**（可由 roster.json 推出、另有一条测试守着），不是班底清单。那一行里最长
+// 的一段连续枚举恰好是 2 个名字，所以 2 会误伤、3 不会。
+//
+// ⚠️ 已知边界，写下来而不是假装没有：这条测试抓的是最自然的那种写法（也正是被删掉
+// 的那一段的写法）。用「和」「与」连接、或者拆成多行 bullet 的枚举**抓不到**。控制方
+// 问过能不能写出一条有甄别力的断言——这一条对它要防的回归（M2 加角色时有人回头在正文
+// 里列一份名单）是真有甄别力的（变异验证：把删掉的那一句加回去 → 这条变红），但它不
+// 是一道完备的防线，真正的保证是 /at 的收尾读 project.json 的 available_roles。
+const ROLE_LIST_RE = /(?:`?at-[a-z][a-z0-9-]*`?\s*[/、,，]\s*){2,}`?at-[a-z][a-z0-9-]*`?/g
+test('commands/ 正文里不得出现硬编码的角色名清单——班底要从 project.json 读', () => {
+  for (const f of FILES) {
+    for (const m of textOf(f).matchAll(ROLE_LIST_RE)) {
+      assert.fail(
+        `commands/${f} 里写死了一份角色名清单：「${m[0].replace(/\s+/g, ' ')}」。` +
+          '可用班底的真源是 .agent-team/project.json 的 available_roles（规格 §7.1，' +
+          '由 /at-init 写）——正文里写死一份，M2 加角色那天 /at 会静默漏算，' +
+          '而漏算的表现正是规格 §4.2 ④ 引用的那条：某个角色整个项目从未被调用，' +
+          '且无人发现。',
       )
     }
   }
@@ -179,7 +219,18 @@ test('命令正文里出现的每个 .agent-team 路径都是控制文件或 run
 //     一条……kind 用上表里的取值」），位置上分不开，只能显式豁免。
 //   - produces：stages.json 每个阶段自己的字段，不是 state.json 的字段——「把
 //     state.json 的 stage 那一段的 produces」这句话里两者也挨在一起。
-const STATE_JSON_BLOCK_NON_FIELDS = new Set(['slug', 'subagent_type', 'kind', 'produces'])
+//   - available_roles：**project.json** 的字段（规格 §7.1 的「可用班底」），不是
+//     state.json 的。两者必然出现在同一段里，因为 /at 的收尾正是拿它减去 state.json
+//     的 roster 算出 never_invoked（M1b 终审 I4）。⚠️ 它和 state.json 的 roster 语义
+//     不同，别把两个名单混成一个：available_roles 是「这个项目有哪些角色可用」
+//     （配置，/at-init 写一次），roster 是「这一趟真正叫到了谁」（运行时逐段累加）。
+const STATE_JSON_BLOCK_NON_FIELDS = new Set([
+  'slug',
+  'subagent_type',
+  'kind',
+  'produces',
+  'available_roles',
+])
 test('/at 与 /at-resume 提到的 state.json 字段都在模板里', () => {
   const known = new Set(Object.keys(stateTemplate))
   for (const f of ['at.md', 'at-resume.md', 'at-status.md']) {

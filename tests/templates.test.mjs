@@ -38,10 +38,42 @@ test('project.json 模板的每个 paths 键都是花名册里的角色', () => 
   }
 })
 
+// ⚠️ M1b 终审 I4：这条测试的标题一直写「四类」，检查的却是 ['paths','stack','build',
+// 'test'] —— 规格 §7.1 原文的四类是「路径归属、**可用班底**、技术栈、构建与测试命令」，
+// 可用班底被整类丢掉了，而「四」这个数字靠 build/test 拆成两个键凑住。更要命的是
+// 失败文案把 §7.1 引述成「路径归属、技术栈、构建与测试命令」——**三类**，也就是说
+// 这条测试在一条重新引述规格的语句里把规格的一项静默删掉了。
+//
+// 真实代价已经落地：commands/at.md 只能把四个角色名硬编码进正文来算 never_invoked，
+// 而那正是规格 §4.2 ④ 引用 aws-samples「安全架构师角色整个项目从未被调用且无人发现」
+// 要防的东西——M2 加角色时 /at 会静默漏算。
+//
+// 现在检查五个键、四类信息，失败文案逐字对上 §7.1。
 test('project.json 模板带齐 /at-init 要填的四类信息', () => {
   const p = readJson('templates/project.json')
-  for (const k of ['paths', 'stack', 'build', 'test']) {
-    assert.ok(Object.hasOwn(p, k), `模板缺 ${k}（规格 §7.1：路径归属、技术栈、构建与测试命令）`)
+  for (const k of ['paths', 'available_roles', 'stack', 'build', 'test']) {
+    assert.ok(
+      Object.hasOwn(p, k),
+      `模板缺 ${k}（规格 §7.1：路径归属、可用班底、技术栈、构建与测试命令）`,
+    )
+  }
+})
+
+// available_roles 是「这个项目有哪些执行角色可用」，M1a ② 的形状在这里会重演：
+// 一个花名册里不存在的名字写进模板，直到有真实派发撞上 H1 才会被发现。
+// ⚠️ 它与 state.json 的 roster 语义不同：那个是「这一趟真正叫到了谁」（运行时累加），
+// 这个是「这个项目有哪些角色可用」（配置，一次性）。never_invoked = 前者减后者。
+test('project.json 模板的 available_roles 都是花名册里的角色，且不含 at-pm', () => {
+  const { available_roles: roles } = readJson('templates/project.json')
+  assert.ok(Array.isArray(roles) && roles.length > 0, 'available_roles 不是一个非空数组')
+  for (const role of roles) {
+    assert.ok(Object.hasOwn(roster, role), `available_roles 里有 ${role}，但它不在 roster.json 里`)
+    assert.notEqual(
+      role,
+      'at-pm',
+      'at-pm 是这一趟的驱动者，不参与「有没有被叫到」的统计——把它写进 available_roles ' +
+        '会让 /at 的收尾永远把 PM 自己算成一个可能没被叫过的角色',
+    )
   }
 })
 

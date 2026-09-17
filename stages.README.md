@@ -32,12 +32,29 @@ H5 问的问题（「它刚做完的那一段交付了吗」）是错的：多�
 同一条结论也写在 `hooks/lib/deliverable.mjs` 的头部注释里（改代码的人从那边进来，改
 阶段链的人从这边进来）。
 
-## 另一条相关的已知缺口
+## 另一条相关的缺口（M1b 已解决）
 
-`hooks/lib/writepath.mjs` 里 run 目录那块旁边记了 I3：稳态下被钉成主线程的
-`at-pm` 既写不了 `.agent-team/project.json`（取决于 `project.paths` 里有没有它这个
-键）也写不了 `runs/<id>/state.json`（无条件，因为它不是任何阶段的 `produces`）。
-计划 B 第一次往 `state.json` 写返工计数时会撞上，细节见那里。
+M1a 在 `hooks/lib/writepath.mjs` 里记过一条 I3：稳态下被 `settings.json` 钉成主线程的
+`at-pm` 既写不了 `.agent-team/project.json`（取决于 `project.paths` 里有没有它这个键）
+也写不了 `runs/<id>/state.json`（无条件，因为它不是任何阶段的 `produces`）——而
+`§4.2 ③` 的返工计数、`/at-resume` 的续跑、`/at-init` 的重跑都要它写。
+
+**M1b 已经解掉它**（`docs/09-M1b-入口决策.md` 账一 → 规格 §6.2.1），那段 I3 注释块也已
+不在。解法是引入一个**概念**而不是一条例外：`.agent-team/` 下的文件分成两类，判据不同。
+
+| | 是什么 | 谁能写 | 判据在哪 |
+|---|---|---|---|
+| **控制文件** | 编排层自己的账本：`current-run`、`project.json`、`reach.json`、`runs/<id>/state.json` | 只有 PM | `hooks/lib/control-files.mjs` 的 `CONTROL_FILES`（**单一真源**） |
+| **阶段产物** | `stages[*].produces` 列出的文件 | 只有该阶段自己的角色 | 就是这个 `stages.json` |
+| 其余 | run 目录下其它任何文件 | 一律 deny | —— |
+
+两条边界都要在：控制文件那条解开了死锁；阶段产物那条保住了「H2 的判据对所有角色
+（**含 PM**）不可伪造」——把整个 `.agent-team/` 放给 PM 会让它在 run 目录下凭空造出
+`01-prd.md`，而 `artifactExists` 在 `runDir` 下解析、H2 拿它当前置产物的判据。
+
+`hooks/lib/writepath.mjs` 里控制文件那一段**必须排在 run 目录块与 `project.paths`
+块之前**：两头的既有判据对控制文件都是错的，而且方向相反（一个太紧、一个太松）。
+改那个函数的判定顺序之前先读那里的注释。
 
 ## ⚠️ 返工预算的写时强制还没有做（M1b 记，属 M2）
 
