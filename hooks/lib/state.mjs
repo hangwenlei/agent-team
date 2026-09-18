@@ -113,9 +113,11 @@ export function validateState(state, { stages } = {}) {
     p('artifacts 不是对象')
   } else {
     // produces 并集抽到 hooks/lib/stages.mjs（评审发现 4）：此前这里与
-    // hooks/lib/artifact-drift.mjs 的 compareArtifacts 各写一份逐字等价的拷贝。
-    // stages 形状不对时 producedNames 返回空集合，下面 isPlainObject(stages) 的
-    // 前置判断继续保留——语义与改之前完全一致：stages 不是对象时这条问题不表态。
+    // hooks/lib/artifact-drift.mjs 的 compareArtifacts 各写一份——语义等价但写法
+    // 不同（这里原来就是 Set，那边原来是 Array；不是逐字相同的拷贝，完整差异与
+    // 为什么无害见 stages.mjs 头部）。stages 形状不对时 producedNames 返回空集合，
+    // 下面 isPlainObject(stages) 的前置判断继续保留——语义与改之前完全一致：
+    // stages 不是对象时这条问题不表态。
     const produced = producedNames(stages)
     for (const [k, v] of Object.entries(state.artifacts)) {
       if (typeof v !== 'string' || !SHA_RE.test(v)) p(`artifacts["${k}"] 不是 sha256:<64 位十六进制>`)

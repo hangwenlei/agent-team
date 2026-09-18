@@ -37,9 +37,10 @@ export function compareArtifacts({ artifacts, stages, artifactBytes }) {
   if (!isPlainObject(stages)) return empty
 
   // produces 并集抽到 hooks/lib/stages.mjs（评审发现 4）：此前这里与
-  // hooks/lib/state.mjs 的 validateState 各写一份逐字等价的拷贝。上面已经判过
-  // isPlainObject(stages)，这里必然拿到非空判定的集合（除非 stages 本身没有任何
-  // 合法阶段条目）。
+  // hooks/lib/state.mjs 的 validateState 各写一份——语义等价但写法不同（这里原来
+  // 构造的是 Array，那边原来就是 Set；不是逐字相同的拷贝，完整差异与为什么无害见
+  // stages.mjs 头部）。上面已经判过 isPlainObject(stages)，这里必然拿到非空判定的
+  // 集合（除非 stages 本身没有任何合法阶段条目）。
   const produced = producedNames(stages)
 
   const out = { drifted: [], missing: [], unrecorded: [] }
