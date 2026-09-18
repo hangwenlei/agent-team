@@ -23,6 +23,7 @@ import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
 import { sha256OfContract } from './lib/contract-hash.mjs'
 import { buildLedgerNotices } from './lib/ledger.mjs'
+import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { norm, underDir } from './lib/path-norm.mjs'
 import { TRUSTED_PREFIX, trustedBlock } from './lib/trusted.mjs'
 
@@ -154,6 +155,41 @@ function failOpenNotice(label, ctx) {
   return (
     `agent-team ${label}：${what}（${ctx.reason}），本次放行、不拦截。` +
     `若你以为有进行中的 run，检查 .agent-team/current-run。\n`
+  )
+}
+
+// Task 4：账本比对的措辞组装。compareArtifacts（hooks/lib/artifact-drift.mjs）本身是
+// 纯函数、只回结构化数据；拼成人话、决定要不要发，同 buildLedgerNotices 一样放在调用
+// 它的这一层，不在纯函数模块里掺 I/O 或文案。
+//
+// 三个清单都空时返回 null——调用方据此决定要不要往这次的 notices 里塞一条（M1c 设计
+// §1.2：「每次子代理返回都刷一段会把真正要看的东西淹掉」）。
+//
+// 措辞上两条硬要求（M1c 设计 §1.2 / Task 4 简报）：不得出现「限制」「越权」——这不是一道
+// 闸，它从不拒绝任何调用；要说明这是审计、对不上账，并写明它不阻止伪造、只留痕迹——与
+// hooks/lib/reach.mjs 的触达表同一个性质，完整理由见 hooks/lib/artifact-drift.mjs 头部，
+// 不在这里重复第二遍。
+function buildDriftNotice(cmp) {
+  if (!cmp) return null
+  const { drifted, missing, unrecorded } = cmp
+  if (!drifted.length && !missing.length && !unrecorded.length) return null
+
+  const lines = []
+  for (const d of drifted) {
+    lines.push(`  - ${d.name}：记录的是 ${d.recorded}，磁盘上算出来是 ${d.actual}——记账之后被改过`)
+  }
+  for (const m of missing) {
+    lines.push(`  - ${m.name}：记录的是 ${m.recorded}，但磁盘上没有——被删了，或者从没真的写成`)
+  }
+  for (const name of unrecorded) {
+    lines.push(`  - ${name}：磁盘上有这份文件，但 artifacts 里没记`)
+  }
+
+  return (
+    `【账本比对】以下产物对不上账：\n${lines.join('\n')}\n` +
+    `这是审计产物，不是安全边界——它不阻止任何人伪造产物，只让伪造留下痕迹。真要伪造的人` +
+    `可以连 artifacts 一起改（那是控制文件，PM 写得了），但那时它不再是顺手绕过，而是一次` +
+    `需要同时改两处的刻意行为。去 run 目录核实磁盘内容，需要的话把 artifacts 改成与磁盘一致。`
   )
 }
 
@@ -549,6 +585,23 @@ function main() {
       stages: ctx.stages,
       artifactExists: ctx.artifactExists,
     })
+
+    // 账本比对（Task 4，规格 §6.2 的内容比对补偿）：排在 r.ok 分支判断之前算，因为不管
+    // r 落进下面哪一支，比对结果都要并进**同一条** additionalContext——两条 stdout.write
+    // 会让 PM 只看见后一条（下面统一交给 emitLedger 拼成一条）。只在 CHECK === 'deliverable'
+    // 时算：H5b（stop-gate）走 SubagentStop 的 stderr 契约，没有 additionalContext 这条
+    // 通道，算了也没地方发。
+    const driftNotice =
+      CHECK === 'deliverable'
+        ? buildDriftNotice(
+            compareArtifacts({
+              artifacts: ctx.state?.artifacts,
+              stages: ctx.stages,
+              artifactBytes: ctx.artifactBytes,
+            }),
+          )
+        : null
+
     if (r.ok) {
       // ⚠️ ok 有三种成因，只有一种是真的「交付了」。skipped 的两种是门禁**哑掉**：
       // 它没有意见，不是它检查过了没问题。H5a 是权威记录，这种区别必须留痕，
@@ -561,23 +614,22 @@ function main() {
       // 'unknown-stage' 是 state.json 自己坏了，ledger 那条路径会给出细节。
       // H5b（stop-gate）不发这条：SubagentStop 上没有 additionalContext 这条通道，
       // 而且真拦截不该因为「无话可说」就往 stderr 刷字。
+      const notices = []
       if (CHECK === 'deliverable' && r.skipped === 'role-not-in-stage' && !isCoordinatorFor(ctx, role)) {
-        process.stdout.write(
-          JSON.stringify({
-            hookSpecificOutput: {
-              hookEventName: spec.event,
-              additionalContext: trustedBlock(
-                `⚠️ 交付物校验：刚返回的 ${role} 不是当前阶段（state.stage = ` +
-                  `${JSON.stringify(ctx.state?.stage)}）的执行者，**而且它也派不到那个执行者**` +
-                  `（所以不是一次层级协调），所以这次校验**没有意见**——不是它查过了没问题。` +
-                  `两种可能：state.stage 停在旧阶段没推进，那样 H5 会对整个新阶段全程哑火；` +
-                  `或者这次派发本身不该发生。去 run 目录核实。` +
-                  `⚠️ **不要靠把 state.stage 改回旧阶段来消掉这条**——那正好制造前一种失效。`,
-              ),
-            },
-          }),
+        notices.push(
+          `⚠️ 交付物校验：刚返回的 ${role} 不是当前阶段（state.stage = ` +
+            `${JSON.stringify(ctx.state?.stage)}）的执行者，**而且它也派不到那个执行者**` +
+            `（所以不是一次层级协调），所以这次校验**没有意见**——不是它查过了没问题。` +
+            `两种可能：state.stage 停在旧阶段没推进，那样 H5 会对整个新阶段全程哑火；` +
+            `或者这次派发本身不该发生。去 run 目录核实。` +
+            `⚠️ **不要靠把 state.stage 改回旧阶段来消掉这条**——那正好制造前一种失效。`,
         )
       }
+      // 账本比对：不管上面那条哑火告警发不发，只要三个清单有一个非空就并进同一条——
+      // 见上面 driftNotice 计算处的注释。emitLedger 空数组时天然不写 stdout，两条
+      // 告警都不适用时这里保持原来的完全沉默。
+      if (driftNotice) notices.push(driftNotice)
+      emitLedger(spec.event, notices)
       process.exit(0)
     }
 
@@ -595,18 +647,15 @@ function main() {
       // 任何痕迹。这条 warning 就是那个不能丢的痕迹：不能被误读成"子代理
       // 正常返回=这一段已经完成"。写完直接落到本函数末尾共用的
       // process.exit(0)，不需要在这里另写一次。
-      process.stdout.write(
-        JSON.stringify({
-          hookSpecificOutput: {
-            hookEventName: spec.event,
-            additionalContext: trustedBlock(
-              `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，` +
-                `但磁盘上还没有。SubagentStop 已经尝试拦截过，但平台的重试有上限（约 9 次），到点会` +
-                `静默放行——不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`,
-            ),
-          },
-        }),
-      )
+      const notices = [
+        `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，` +
+          `但磁盘上还没有。SubagentStop 已经尝试拦截过，但平台的重试有上限（约 9 次），到点会` +
+          `静默放行——不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`,
+      ]
+      // 交付物本身还缺产物时，账本比对一样并进同一条——它审计的是全部阶段的
+      // produces，不只是刚被判定缺失的这一段（比如更早的阶段被 Bash 绕过写过）。
+      if (driftNotice) notices.push(driftNotice)
+      emitLedger(spec.event, notices)
     }
   }
 

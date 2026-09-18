@@ -33,12 +33,13 @@
 // 不是夹具漏配。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
+import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 
 // ---- H5b（stop-gate，SubagentStop）----
 
@@ -221,6 +222,24 @@ test('deliverable 的缺产物告警（H5a 真实记录）真实输出以受信�
 test('deliverable：目标角色已经写出产物——stdout 为空，不记 warning', () => {
   const dirs = makeRun({ runId: 'r1', artifacts: ['00-contract.md', '01-prd.md'] })
   try {
+    // Task 4（账本比对）补丁：makeRun 的 artifacts 参数只把文件写到磁盘，state.json 的
+    // artifacts 账本永远是 {}（tests/fixtures/make-run.mjs 里硬编码，与传了哪些
+    // artifacts 无关）。这条测试的名字承诺的是"交付且一切正常时沉默"，在 Task 4 之前
+    // 这句承诺无法被这份夹具准确代表——没有任何检查项会看账本，磁盘上有没有记录不影响
+    // 结果。Task 4 加了账本比对之后，"文件在磁盘、账本没记"这个形状本身就是"对不上账"
+    // 的定义（磁盘上有产物但 artifacts 里没记 → unrecorded，见下面 Task 4 那组新测试），
+    // 会被如实报出来，不再是沉默的那一支。这条测试要验的是"记账也对得上时沉默"这个更窄
+    // 的场景，不是"不管账本记没记都沉默"（后者现在是假的，会被下面新增的测试戳穿）——
+    // 所以在这里把账本补成与磁盘内容一致，让夹具真正代表测试名字承诺的场景，而不是
+    // 悄悄依赖"没人检查账本"这个已经不再成立的前提。
+    const statePath = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8'))
+    state.artifacts = {
+      '00-contract.md': sha256OfContract('fixture 00-contract.md\n'),
+      '01-prd.md': sha256OfContract('fixture 01-prd.md\n'),
+    }
+    writeFileSync(statePath, JSON.stringify(state), 'utf8')
+
     const input = {
       tool_name: 'Agent',
       agent_type: 'at-pm',
@@ -400,6 +419,50 @@ test('H5b 在角色与当前阶段对不上时不拦——fail open，不发 exi
   try {
     const { status } = run('stop-gate', { agent_type: 'agent-team:at-backend' }, GATE, projectDir)
     assert.equal(status, 0)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ---- 账本比对（Task 4，规格 §6.2 的内容比对补偿，并入 deliverable/H5a）----
+
+test('磁盘上有产物但 artifacts 里没记：H5a 报出来（Bash 绕过 H3 的表征）', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md'] })
+  try {
+    const { stdout } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm', tool_input: { subagent_type: 'agent-team:at-product' },
+    }, GATE, projectDir)
+    const c = JSON.parse(stdout).hookSpecificOutput.additionalContext
+    assert.match(c, /01-prd\.md/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('账本比对的措辞不得说成「限制」或「越权」', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md'] })
+  try {
+    const { stdout } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm', tool_input: { subagent_type: 'agent-team:at-product' },
+    }, GATE, projectDir)
+    const c = JSON.parse(stdout).hookSpecificOutput.additionalContext
+    assert.doesNotMatch(c, /限制|越权/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ⚠️ 正向锚点：上一条是否定断言，additionalContext 为空串时天然满足。
+test('前置条件：上一条那个场景确实产出了非空回传', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md'] })
+  try {
+    const { stdout } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm', tool_input: { subagent_type: 'agent-team:at-product' },
+    }, GATE, projectDir)
+    assert.ok(stdout.trim().length > 0)
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })
