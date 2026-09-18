@@ -127,7 +127,10 @@ test('写了阶段产物且 artifacts 里记的是别的哈希：报出来，两
 // 跟 stageDone 拼车。
 test('产物回传自己就点名非 PM 请回报上级——不依赖跟阶段推进提示拼在一起', () => {
   const s = joined({ kind: 'produce', produceName: '01-prd.md', produceSha: SHA_P })
-  assert.match(s, /回报/)
+  // 连「sha256 值」一起钉：光 /回报/ 太松，pmOnlyNotice 的模板是
+  // `把${reportWhat}回报给上级`，reportWhat 以英文/数字收尾就会拼出「sha256回报」，
+  // 与本仓库「英文/数字 + 空格 + 中文」的惯例相反，而 /回报/ 测不出这一点。
+  assert.match(s, /把这个 sha256 值回报给上级/)
 })
 
 test('当前阶段产物已齐：提示推进，并说明不推进会让 H5 哑掉', () => {

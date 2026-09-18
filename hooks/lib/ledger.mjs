@@ -87,7 +87,9 @@ export function buildLedgerNotices({
     if (recorded !== produceSha) {
       // 见本文件头部 pmOnlyNotice 上方的注释：这句话不能只靠跟 stageDone 分支拼在
       // 同一次回传里凑出语义，produce 分支自己必须说完整。
-      const who = pmOnlyNotice('把这一条写进 artifacts', '这个 sha256')
+      // 第二个参数以中文收尾：模板是 `把${reportWhat}回报给上级`，直接传 '这个 sha256'
+      // 会拼成「sha256回报」，与本文件里 77 处「英文/数字 + 空格 + 中文」的惯例相反。
+      const who = pmOnlyNotice('把这一条写进 artifacts', '这个 sha256 值')
       out.push(
         (recorded === undefined
           ? `【产物】${produceName} 的 sha256 是 ${produceSha}，state.json 的 artifacts 里还没有记。` +
