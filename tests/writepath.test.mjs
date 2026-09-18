@@ -130,6 +130,37 @@ test('写 run 目录下任意非产物文件拒绝——不是"目录下随便�
   assert.equal(r.decision, 'deny')
 })
 
+// M1b 遗留清单 1.5 第三条：H3 自己的测试（这个文件与 tests/gate-writepath.test.mjs）
+// 此前没有一条覆盖「run 目录的兄弟目录同前缀粘连」——这个场景只被
+// tests/path-norm.test.mjs 顶住，而那条测的是共享原语 underDir 本身，不是这里的
+// decideWritePath。underDir 现在是唯一实现、没有变松（hooks/lib/path-norm.mjs 头部
+// 注释：`t === d || t.startsWith(`${d}/`)`，那个斜杠就是防粘连的），但如果将来
+// writepath.mjs 里 `if (underDir(filePath, runDir))` 这个调用点被错误替换（比如手滑
+// 写成裸的 startsWith 判断），H3 这一层不会有任何东西响——这条补上。
+//
+// 夹具里 RUN 是 '/proj/.agent-team/runs/r1'，同前缀的兄弟目录是
+// '/proj/.agent-team/runs/r1-backup'：'r1-backup' 以 'r1' 开头，但不是 r1 的子目录。
+//
+// 断言不能只看 decision === 'deny'：如果 underDir 退化成 startsWith(d)（去掉尾部
+// 斜杠），目标会被误判成"在 run 目录下"，但因为它既不是任何阶段的 produces、也没有
+// stageOwnerOfRunPath 命中，结果**仍然是 deny**——只是走的是 run 目录分支里"不是
+// 任何阶段的 produces"那句话（含"产物"二字），跟真实应该走到的 project.paths 分支
+// （含"project.json"字样、不含"产物"）是两句完全不同的拒绝理由。只看 decision 会把
+// "判对了但归错闸"和"真的判对了"混成一件事——这正是 docs/08 记的 M1a ②⑤⑦「拦是
+// 拦住了，但拦它的是另一道闸」那个形状。两条断言分两个 test()：一条证明没有走 run
+// 目录那块（不含"产物"），一条证明确实走到了 project.paths 那段（点名 project.json）
+// ——避免同一个 test() 里前一个 assert 抛出后掩盖第二条的归因。
+test('run 目录的兄弟目录（同前缀）不当成 run 目录下的路径——拒绝理由不带"产物"字样', () => {
+  const r = call('at-backend', `${RUN}-backup/x.md`)
+  assert.equal(r.decision, 'deny')
+  assert.doesNotMatch(r.reason, /产物/)
+})
+
+test('run 目录的兄弟目录（同前缀）落到 project.paths 分支——拒绝理由点名 project.json', () => {
+  const r = call('at-backend', `${RUN}-backup/x.md`)
+  assert.match(r.reason, /project\.json/)
+})
+
 // 整理项 4：producesOf 是把该角色**所有**阶段的 produces 累加起来的，不是只看
 // 第一个阶段。at-pm 同时是 S1（00-contract.md）与 S4（04-dispatch.md）的执行者，
 // 两份都得能写。这是 hooks/lib/writepath.mjs 里 I3 那段缺口注释里唯一还正确的
