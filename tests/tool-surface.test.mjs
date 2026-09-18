@@ -15,6 +15,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join, relative } from 'node:path'
 import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
+import { EXPECTED_AGENTS } from './helpers/expected-agents.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const AGENTS_DIR = join(ROOT, 'agents')
@@ -89,6 +90,25 @@ function toPosix(p) {
   return p.split('\\').join('/')
 }
 
+// 修复轮 2（评审发现 1）：这条身份锚点是本轮新加的，此前唯一的正向前置断言是
+// 「AGENT_FILES.length > 0」——只证明扫到了至少一个文件，证不了扫到的就是这六个。
+// 变异实测过：把 AGENT_FILES 的过滤条件改成只匹配 `pm.md`（模拟扫描范围被意外
+// 缩小），同时给 agents/at-backend.md 授予 Skill/SendMessage/ListAgents——因为
+// 扫描结果只剩 at-pm.md 一个文件，下面禁授工具那条否定断言只检查了这一个文件，
+// at-backend.md 的真实违规完全落在检查范围之外，`node --test` 全绿、390/0——这是
+// M1b 终审 C2 的同一个文件、同一条测试、同一族失败，只是退化方式从「块序列写法」
+// 换成了「扫描范围本身被缩小」。EXPECTED_AGENTS 与 tests/agents.test.mjs 共用同一份
+// （tests/helpers/expected-agents.mjs），不在这里重复写一份字面量数组。
+test('前置条件：agents/ 目录下恰好是这六个角色文件——否则下面的否定断言可能只在被意外缩小的那一部分文件上检查', () => {
+  assert.deepEqual(
+    [...AGENT_FILES].sort(),
+    EXPECTED_AGENTS,
+    `agents/ 目录扫描结果是 ${JSON.stringify([...AGENT_FILES].sort())}，与预期的六个 ` +
+      `角色 ${JSON.stringify(EXPECTED_AGENTS)} 不一致——下面所有对 AGENT_FILES 的检查` +
+      '范围都会跟着变，且不会有任何提示',
+  )
+})
+
 // 正向前置断言，单独占一个 test()。为什么必须独立：它一旦失败（解析手法失效、
 // 或某个角色根本没有 tools: 声明），排在它后面的那些否定断言会在同一个 test()
 // 里被 assert 抛出直接挡住——而那正是 C2 的失效形状：否定断言对着一个空字符串
@@ -96,10 +116,6 @@ function toPosix(p) {
 // 的「前置条件：agents/at-pm.md 有 tools: 行，且能从里面解出至少一个候选工具」
 // ——那条知识本轮才回灌到安全这一侧。
 test('前置条件：agents/ 下每个 .md 都解得出至少一个工具名——否则下面的否定断言在对空集合空转', () => {
-  assert.ok(
-    AGENT_FILES.length > 0,
-    'agents/ 目录下一个 .md 都没找到——下面那条测试没有实际检查任何东西',
-  )
   for (const file of AGENT_FILES) {
     const { text, names } = declarationOf(file)
     assert.ok(
