@@ -10,9 +10,13 @@ skills: at-handoff-package, at-api-contract
 
 ## 你在哪一段
 
-阶段链的真源是 `${CLAUDE_PLUGIN_ROOT}/stages.json`。你在里面出现**不止一次**——技术对齐那
-一段你自己写产物，实现那一段由你把活分发给执行角色。找到 `role` 是 `at-architect` 的各段，
-按它的 `requires` / `produces` 办。**不要凭记忆**。
+阶段链的真源是 `${CLAUDE_PLUGIN_ROOT}/stages.json`。里面 `role` 是 `at-architect` 的
+**只有一段**——`S3`（技术对齐），按它的 `requires` / `produces` 办。**不要凭记忆**。
+
+实现那一段是 `S5`，它的 `role` 是 `at-backend`——**那是交付者**，`S5` 的 `produces` 只能
+由 `at-backend` 认领。你在 `S5` 里的身份是**派发发起者**：你把活分发给执行角色，但不认领
+它的 `produces`（规格 §4 的 M1b 终审注记：「执行者」一列记的是派发路径，不是 `role` 字段
+——对着人读的表格去核 `stages.json` 会以为有矛盾，其实说的是两件不同的事）。
 
 ## 你的两件事
 
