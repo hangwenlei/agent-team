@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { CONTROL_FILES } from '../hooks/lib/control-files.mjs'
 import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
+import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const readJson = (p) => JSON.parse(readFileSync(url(p), 'utf8'))
@@ -350,5 +351,38 @@ test('命令正文引用的每条斜杠命令都真的存在于 commands/', () =
           `跨文件引用指向了一个不存在的命令`,
       )
     }
+  }
+})
+
+// 终审发现 3：受信前缀（规格 §6.5）的单一真源是 hooks/lib/trusted.mjs 的 TRUSTED_PREFIX。
+// 六份 agents/*.md 对它的引用由 tests/agents.test.mjs:91-95（从 trusted.mjs import 常量，
+// 断言 bodyOf(f).includes(TRUSTED_PREFIX)）钉住，但 commands/at.md:41 与
+// commands/at-init.md:42 各自硬编码了一份同样的字面量「agent-team 账本回传」，没有被
+// 任何测试钉住。hooks/lib/trusted.mjs 头部注释自己写着「commands/at.md 与
+// commands/at-init.md 的正文都引用了这个字符串」——模块知道这两份拷贝存在，却没有东西
+// 保证它们同步。终审实测过：把 commands/at.md:41 的「账本回传」改成「账本回报」，
+// `node --test` 仍然全绿（403/0），说明这份拷贝此前确实是自由漂移的。
+//
+// 手法照抄 tests/agents.test.mjs 那条：从 trusted.mjs import 常量，这里不写字面量；
+// 断言正文 .includes(TRUSTED_PREFIX)——常量改了，这两份命令正文若没跟着改，这条测试会
+// 先于人发现分叉。放在 commands.test.mjs（消费方的测试文件）而不是 trusted.test.mjs
+// （真源自己的测试文件），是为了跟 agents.test.mjs 那条判据同一种手法：真源的测试只
+// 验证真源自己（trusted.test.mjs 已经在做这件事），「谁引用了真源、引用对不对」这件事
+// 该由引用方自己的测试文件钉住，与 tool-surface.test.mjs/command-tool-closure.test.mjs
+// 分别守 agents/ 与 commands/ 自己的工具面是同一个道理。
+//
+// at-resume.md 与 at-status.md 不在这份清单里：grep 全仓库确认过它们的正文只是散文提及
+// 「账本回传」这个概念（不带 `agent-team` 前缀，不是这个字面量的拷贝），.includes() 天然
+// 不会命中，硬把它们塞进清单只会让断言对着一个从不成立的期望空转。
+const FILES_WITH_TRUSTED_PREFIX = ['at.md', 'at-init.md']
+
+test('commands/at.md 与 commands/at-init.md 的正文必须引用受信前缀——这是那两份硬编码拷贝唯一的机械保证', () => {
+  for (const f of FILES_WITH_TRUSTED_PREFIX) {
+    assert.ok(
+      textOf(f).includes(TRUSTED_PREFIX),
+      `commands/${f} 正文里没有引用受信前缀 ${JSON.stringify(TRUSTED_PREFIX)}——hooks/lib/` +
+        'trusted.mjs 头部写着这份正文引用了这个字符串，但此前没有测试钉住，常量改了这里' +
+        '不会跟着变',
+    )
   }
 })
