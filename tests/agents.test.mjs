@@ -425,3 +425,28 @@ test('持有 Bash 的角色，正文必须说明账本比对管不到「写别�
     )
   }
 })
+
+// 终审发现 1：本轮 commit 2d0147c/8110a85 把 at-backend/at-frontend 的 tools: 从
+// `Read, Write, Edit` 改成了 `Bash, Read, Glob, Write, Edit`。H3（写路径隔离）只挂在
+// Edit/Write/NotebookEdit 上（hooks/hooks.json 的四个 matcher，没有一个覆盖 Bash），
+// 所以这两个角色从这一轮起也能用 Bash 两步无痕伪造：写伪造的产物、再把匹配的哈希写进
+// artifacts，全程零 hook。上面那条测试只钉住了红线的「写别人代码目录无痕」那一半——
+// 「连 artifacts 一起改也无痕」这一半此前只写在 at-pm.md 一份正文里，at-backend/
+// at-frontend 的正文完全没提。本轮之后这两份正文的红线也必须点破它，否则会让人以为
+// 只有「写别人代码目录」那一条无痕口子存在，看不见刚刚也对它们打开的第二条。
+//
+// 判据同样按 HAS_BASH 触发，不按词形（不写 `if (!/某个词/.test(body)) continue` 这种
+// 跳过条件）——词形跳过条件正是修复轮 3 复评当场抓到的那类漏洞（见上面那条测试改动前的
+// 注释）：跳过条件一旦挂在正文用了哪个词上，正文换一个同义词就会被整份跳过、不执行任何
+// 断言，而不是报错。持有 Bash 本身是可独立核实的事实（tools: 声明），不需要先探测正文
+// 提没提过某个词再决定查不查，所以这里像上面那条一样对 HAS_BASH 无条件执行。
+test('持有 Bash 的角色，正文必须说明「连 artifacts 一起改也无痕」这一半——不能只讲「写别人代码目录无痕」', () => {
+  for (const f of HAS_BASH) {
+    assert.match(
+      bodyOf(f),
+      /持有\s*`?Bash`?\s*的角色.{0,40}都做得到/,
+      `${f} 持有 Bash，但正文没有说明「连 artifacts 一起改也无痕」这一半——本轮 at-backend/` +
+        'at-frontend 也拿到了 Bash，两处无痕口子都要点破，不能只让 at-pm 一份正文单独扛着',
+    )
+  }
+})

@@ -33,9 +33,11 @@ skills: at-contract-format, at-handoff-package
 - **不得用 `Bash` 绕过写路径隔离。** 你有 `Bash` 是为了跑构建与测试。伪造阶段产物——比如
   `echo > 01-prd.md`——**会在账本比对里留下痕迹**：产物的 sha256 记在 `state.json` 的
   `artifacts` 里，对不上账就会被直接报出来，这不是「没人看得见」（真要连 `artifacts` 一起
-  改，你是唯一做得到的角色——那时不是「顺手绕过」，是需要同时改两处的刻意行为）。**但写
-  到别人的代码目录去，账本比对连痕迹都没有**——它只查 `stages[*].produces`，管不到
-  `project.paths` 下别的角色的地盘，那一条只有你自己的克制守着。
+  改，持有 `Bash` 的角色（你、`at-backend`、`at-frontend`）都做得到——`state.json` 对
+  `Edit`/`Write` 只对 PM 开，但 `Bash` 不经任何 hook；那时不是「顺手绕过」，是需要同时改
+  两处的刻意行为）。**但写到别人的代码目录去，账本比对连痕迹都没有**——它只查
+  `stages[*].produces`，管不到 `project.paths` 下别的角色的地盘，那一条只有你自己的克制
+  守着。
 - **契约的第 1 节逐字照抄用户原话。** 不改写、不顺一顺、不补全（完整格式见
   `${CLAUDE_PLUGIN_ROOT}/skills/at-contract-format/SKILL.md`——同上，你是主会话，
   需要时自己 `Read`）。
