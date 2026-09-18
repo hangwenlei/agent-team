@@ -40,7 +40,15 @@ function producesOf(stages, role) {
 // 用于给拒绝理由点名"这条路径其实是谁的、哪个阶段的产物"，跟
 // hooks/lib/readiness.mjs 的 producerOf 是同一种反查手法，但这里要连
 // stageId 一起带出去。
-function stageOwnerOfRunPath(stages, rd, target) {
+//
+// 导出（评审发现 4）：hooks/gate.mjs 的 ledger 分支（CHECK === 'ledger'）要回答的是
+// 同一个问题——"这次写的 run 目录下的路径，是不是某个阶段的 produces、该按哪个名字
+// 回传哈希"——此前在那里内联写了一份逐字符相同的双层循环。两份拷贝分叉的代价不对称：
+// 若某一份哪天停止认出某条路径、另一份仍然认得，sha 就会漏回传给 PM，该产物永远落在
+// H5a 账本比对的 unrecorded 清单里，变成设计 §1.3 明确要消灭的「恒假告警」（这正是
+// hooks/lib/path-norm.mjs 头部记的那类重复分叉，本轮复评又当场抓到一次同族复演）。
+// 现在只留这一份，gate.mjs 从这里 import。
+export function stageOwnerOfRunPath(stages, rd, target) {
   if (!stages || typeof stages !== 'object') return null
   for (const [stageId, s] of Object.entries(stages)) {
     if (!s || !Array.isArray(s.produces)) continue

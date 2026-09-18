@@ -14,14 +14,17 @@
 //   missing     记录了、磁盘上没有         —— 产物被删了或从没写成
 //   unrecorded  磁盘上有、账本里没有       —— **Bash 绕过 H3 的直接表征**
 //
-// 真要伪造的人可以连 artifacts 一起改（那是控制文件，PM 写得了）。但那时它不再是「顺手
-// 绕过」，而是一次需要同时改两处的刻意行为。**这条边界必须如实说，不要把它说成防护。**
+// 真要伪造的人可以连 artifacts 一起改（任何持有 Bash 的角色都写得了——state.json 对
+// Edit/Write 只对 PM 开，但 Bash 不经任何 hook；本轮 at-backend/at-frontend 也拿到了
+// Bash，不再是只有 PM 一个人做得到，见评审发现 1）。但那时它不再是「顺手绕过」，而是一次
+// 需要同时改两处的刻意行为。**这条边界必须如实说，不要把它说成防护。**
 //
 // 哈希用 contract-hash.mjs 的 sha256OfContract，不另写一个：它的归一化（剥 BOM、
 // CRLF → LF）对所有文本产物都是对的，同一份文件在 Windows 与 POSIX 之间来回时不该产生
 // 假漂移。两份逐字相同的哈希实现真的会分叉，这个仓库为此开过好几轮循环（见 path-norm.mjs
 // 头部）。
 import { sha256OfContract } from './contract-hash.mjs'
+import { producedNames } from './stages.mjs'
 
 function isPlainObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
@@ -33,10 +36,11 @@ export function compareArtifacts({ artifacts, stages, artifactBytes }) {
   const recorded = isPlainObject(artifacts) ? artifacts : {}
   if (!isPlainObject(stages)) return empty
 
-  const produced = []
-  for (const s of Object.values(stages)) {
-    if (isPlainObject(s) && Array.isArray(s.produces)) produced.push(...s.produces)
-  }
+  // produces 并集抽到 hooks/lib/stages.mjs（评审发现 4）：此前这里与
+  // hooks/lib/state.mjs 的 validateState 各写一份逐字等价的拷贝。上面已经判过
+  // isPlainObject(stages)，这里必然拿到非空判定的集合（除非 stages 本身没有任何
+  // 合法阶段条目）。
+  const produced = producedNames(stages)
 
   const out = { drifted: [], missing: [], unrecorded: [] }
   for (const name of produced) {

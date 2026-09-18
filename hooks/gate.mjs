@@ -15,7 +15,7 @@ import { MAIN, callerOf, decideDelegation, stripPluginPrefix } from './lib/decid
 import { denyOutput, crashNotice } from './lib/deny.mjs'
 import { readProjectConfig, readRunContext } from './lib/runctx.mjs'
 import { decideReadiness } from './lib/readiness.mjs'
-import { decideWritePath } from './lib/writepath.mjs'
+import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideDeliverable } from './lib/deliverable.mjs'
 import { isControlFile } from './lib/control-files.mjs'
@@ -188,8 +188,9 @@ function buildDriftNotice(cmp) {
   return (
     `【账本比对】以下产物对不上账：\n${lines.join('\n')}\n` +
     `这是审计产物，不是安全边界——它不阻止任何人伪造产物，只让伪造留下痕迹。真要伪造的人` +
-    `可以连 artifacts 一起改（那是控制文件，PM 写得了），但那时它不再是顺手绕过，而是一次` +
-    `需要同时改两处的刻意行为。去 run 目录核实磁盘内容，需要的话把 artifacts 改成与磁盘一致。`
+    `可以连 artifacts 一起改（任何持有 Bash 的角色都写得了——state.json 对 Edit/Write 只对` +
+    `PM 开，但 Bash 不经任何 hook），但那时它不再是顺手绕过，而是一次需要同时改两处的刻意` +
+    `行为。去 run 目录核实磁盘内容，需要的话把 artifacts 改成与磁盘一致。`
   )
 }
 
@@ -303,10 +304,12 @@ function main() {
       // 上面 role === MAIN 那条豁免盖不住这种情形——settings.json 的 agent 键
       // 把 at-pm 钉成主线程时，主会话自己的调用带 agent_type: 'at-pm'，落不进
       // MAIN。而这里的 deny 发生在看路径之前，拒的是这个会话的**每一次**
-      // Edit/Write；agents/at-pm.md 的工具面没有 Bash，规格 §6.2 那条「Bash 是
-      // 软约束」的逃生口对 PM 不存在；触发条件又很廉价（project.json /
-      // state.json 坏了、current-run 被截断成空文件，任意一条即可）。三点叠起来
-      // 就是把插件唯一的运维人锁在门外，只能由用户离开 Claude 手工改文件——
+      // Edit/Write；agents/at-pm.md 现在有 Bash（M1c 设计 §1.1 的上界要求——这条
+      // 注释此前写的是「PM 的工具面没有 Bash」，commit 2d0147c 给 at-pm.md 加上
+      // Bash 之后这句话就不成立了，评审发现 5 指出没人回来改），但逼 PM 用
+      // `echo >` 去修一个坏掉的 run 不是可接受的运维路径；触发条件又很廉价
+      // （project.json / state.json 坏了、current-run 被截断成空文件，任意一条
+      // 即可）。三点叠起来就是把插件唯一的运维人锁在门外，只能由用户离开 Claude 手工改文件——
       // 而修复一个坏掉的 run 恰恰要 PM 动手。这跟 H4 在 contract 分支里已经做的
       // 是同一件事、同一个死锁形状（见下面那段注释），谓词也复用同一个
       // isContractWriter，不另写一份 role === 'at-pm'：那个谓词的安全性依赖
@@ -488,15 +491,15 @@ function main() {
 
     // 写的是 run 目录下某个阶段的 produces —— 算它的哈希回传，PM 写进 artifacts。
     // 这条排在最后：上面三条都是控制文件或契约，命中它们就不会落到这里。
+    //
+    // 反查逻辑与 hooks/lib/writepath.mjs 的 decideWritePath 问的是同一个问题（"run
+    // 目录下这条路径是不是某个阶段的 produces、归哪个阶段"），此前这里各写了一份逐字符
+    // 相同的拷贝（评审发现 4）。现在从 writepath.mjs 导出 stageOwnerOfRunPath，两边共用
+    // 同一份实现——分叉的代价是 sha 漏回传、产物永远卡在账本比对的 unrecorded 清单里。
     let produceName = null
     if (kind === 'other' && ctx.stages) {
-      for (const s of Object.values(ctx.stages)) {
-        if (!s || !Array.isArray(s.produces)) continue
-        for (const p of s.produces) {
-          if (norm(`${ctx.runDir}/${p}`) === target) { produceName = p; kind = 'produce'; break }
-        }
-        if (produceName) break
-      }
+      const owner = stageOwnerOfRunPath(ctx.stages, ctx.runDir, target)
+      if (owner) { produceName = owner.produces; kind = 'produce' }
     }
     const produceBytes = produceName ? ctx.artifactBytes(produceName) : null
 

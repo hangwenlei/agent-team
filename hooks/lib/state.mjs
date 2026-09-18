@@ -13,6 +13,8 @@
 // validateState 一次报全部问题而不是遇到第一个就返回：调用方是 ledger，它把 problems
 // 一次性交给 PM；分次报会让 PM 改一条、再撞一条，来回好几轮。
 
+import { producedNames } from './stages.mjs'
+
 const SHA_RE = /^sha256:[0-9a-f]{64}$/
 const RUN_ID_RE = /^\d{8}-\d{4}-[a-z0-9][a-z0-9-]*$/
 
@@ -110,15 +112,15 @@ export function validateState(state, { stages } = {}) {
   if (!isPlainObject(state.artifacts)) {
     p('artifacts 不是对象')
   } else {
+    // produces 并集抽到 hooks/lib/stages.mjs（评审发现 4）：此前这里与
+    // hooks/lib/artifact-drift.mjs 的 compareArtifacts 各写一份逐字等价的拷贝。
+    // stages 形状不对时 producedNames 返回空集合，下面 isPlainObject(stages) 的
+    // 前置判断继续保留——语义与改之前完全一致：stages 不是对象时这条问题不表态。
+    const produced = producedNames(stages)
     for (const [k, v] of Object.entries(state.artifacts)) {
       if (typeof v !== 'string' || !SHA_RE.test(v)) p(`artifacts["${k}"] 不是 sha256:<64 位十六进制>`)
-      if (isPlainObject(stages)) {
-        const produced = new Set(
-          Object.values(stages).flatMap((s) => (isPlainObject(s) && Array.isArray(s.produces) ? s.produces : [])),
-        )
-        if (!produced.has(k)) {
-          p(`artifacts 里有 "${k}"，但它不是任何阶段的 produces——artifacts 只记阶段产物的哈希`)
-        }
+      if (isPlainObject(stages) && !produced.has(k)) {
+        p(`artifacts 里有 "${k}"，但它不是任何阶段的 produces——artifacts 只记阶段产物的哈希`)
       }
     }
   }
