@@ -24,6 +24,7 @@ import { validateState, isStageDone } from './lib/state.mjs'
 import { sha256OfContract } from './lib/contract-hash.mjs'
 import { buildLedgerNotices } from './lib/ledger.mjs'
 import { norm, underDir } from './lib/path-norm.mjs'
+import { TRUSTED_PREFIX, trustedBlock } from './lib/trusted.mjs'
 
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -130,7 +131,7 @@ function emitLedger(event, notices) {
     JSON.stringify({
       hookSpecificOutput: {
         hookEventName: event,
-        additionalContext: `agent-team 账本回传：\n${notices.join('\n\n')}`,
+        additionalContext: trustedBlock(notices.join('\n\n')),
       },
     }),
   )
@@ -549,13 +550,14 @@ function main() {
           JSON.stringify({
             hookSpecificOutput: {
               hookEventName: spec.event,
-              additionalContext:
-                `⚠️ agent-team 交付物校验：刚返回的 ${role} 不是当前阶段（state.stage = ` +
-                `${JSON.stringify(ctx.state?.stage)}）的执行者，**而且它也派不到那个执行者**` +
-                `（所以不是一次层级协调），所以这次校验**没有意见**——不是它查过了没问题。` +
-                `两种可能：state.stage 停在旧阶段没推进，那样 H5 会对整个新阶段全程哑火；` +
-                `或者这次派发本身不该发生。去 run 目录核实。` +
-                `⚠️ **不要靠把 state.stage 改回旧阶段来消掉这条**——那正好制造前一种失效。`,
+              additionalContext: trustedBlock(
+                `⚠️ 交付物校验：刚返回的 ${role} 不是当前阶段（state.stage = ` +
+                  `${JSON.stringify(ctx.state?.stage)}）的执行者，**而且它也派不到那个执行者**` +
+                  `（所以不是一次层级协调），所以这次校验**没有意见**——不是它查过了没问题。` +
+                  `两种可能：state.stage 停在旧阶段没推进，那样 H5 会对整个新阶段全程哑火；` +
+                  `或者这次派发本身不该发生。去 run 目录核实。` +
+                  `⚠️ **不要靠把 state.stage 改回旧阶段来消掉这条**——那正好制造前一种失效。`,
+              ),
             },
           }),
         )
@@ -581,10 +583,11 @@ function main() {
         JSON.stringify({
           hookSpecificOutput: {
             hookEventName: spec.event,
-            additionalContext:
-              `⚠️ agent-team 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，` +
-              `但磁盘上还没有。SubagentStop 已经尝试拦截过，但平台的重试有上限（约 9 次），到点会` +
-              `静默放行——不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`,
+            additionalContext: trustedBlock(
+              `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，` +
+                `但磁盘上还没有。SubagentStop 已经尝试拦截过，但平台的重试有上限（约 9 次），到点会` +
+                `静默放行——不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`,
+            ),
           },
         }),
       )
