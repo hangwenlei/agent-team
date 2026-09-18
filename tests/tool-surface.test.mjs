@@ -69,8 +69,8 @@ function declaresForkContext(md) {
 }
 
 // 递归找某个目录下所有指定文件名的文件；目录不存在时返回空数组而不是报错
-// ——skills/ 在本仓库当前根本不存在（规格 §7 的 skills/ 要到 M1 及以后才
-// 落地），这是预期状态，不是异常。
+// ——如果 skills/ 目录不存在或未来被清空，这是预期状态，不是异常：下面的
+// 测试对着空数组照样能通过（见下面那条测试自己的注释）。
 function findFilesNamed(dir, filename) {
   if (!existsSync(dir)) return []
   const found = []
@@ -137,10 +137,9 @@ test('没有任何角色的 tools: 包含 Skill / SendMessage / ListAgents', () 
 test('本插件自带的 skills/**/SKILL.md 不声明 context: fork（当前 0 个也算通过）', () => {
   const skillFiles = findFilesNamed(SKILLS_DIR, 'SKILL.md')
 
-  // 不对数量做断言：skills/ 目录当前在本仓库不存在（规格 §7 的 skills/ 是
-  // M1 及以后才落地的目录），findFilesNamed 对不存在的目录返回空数组，下面
-  // 的循环零次迭代、测试直接通过——这是预期状态，"有几个测几个，零个也通
-  // 过"，不代表这条防线没在守。
+  // 不对数量做断言：如果 skills/ 目录不存在或未来被清空，findFilesNamed 对
+  // 不存在的目录返回空数组，下面的循环零次迭代、测试直接通过——这是预期
+  // 状态，"有几个测几个，零个也通过"，不代表这条防线没在守。
   for (const file of skillFiles) {
     const rel = toPosix(relative(ROOT, file))
     const md = readFileSync(file, 'utf8')
