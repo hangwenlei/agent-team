@@ -530,6 +530,23 @@ H3 的拒绝措辞本身在提示这条绕法——「跨角色的改动要经�
 
 **这是约定加通道隔离，不是密码学保证。**
 
+### 6.6 `skills:` 预加载对主会话不生效（M1c 实测后补）
+
+**§2 与本文多处写的「经角色 frontmatter 的 `skills:` 预加载」，M1c 真实环境实测发现
+它只对*子代理*成立，对*主会话*不成立。** 实测方法：三次独立会话——`--agent` 指定裸名
+`at-pm`、`--agent` 指定全限定名 `agent-team:at-architect`、以及不带 `--agent` 单靠插件
+`settings.json` 把主会话钉成 `at-pm`——分别要求它原样复述自己 `skills:` 列出的正文，
+三次都答「没有拿到，只看到自己角色正文里提到的名字，不编」；同一个问题改成让 PM
+用 `Agent` 工具**派发**一次 `at-architect`（真子代理）去复述，答案逐字符命中两份 skill
+原文。**四次都在 `-p` 非交互模式下测的，交互模式未验**——`docs/12` §2 第 7、8 条已经
+记过两次「`-p` 剥掉了交互模式才有的东西」（`AskUserQuestion`、插件目录读权限），这可能
+是第三次同类现象，也可能是主会话与子代理在这一点上本来就不同，两者未区分开。
+
+**实际影响小于看上去**：`at-pm.md` 引用这两份 skill 的两处，规则本身已经直接写在
+`at-pm.md` 自己的正文里（契约第 1 节逐字照抄、交接包六项），`skills:` 只是「见更完整的
+版本」，不是唯二来源。`agents/at-pm.md` 已改成指路径、提示自己 `Read`，不再写「见预
+加载的」。完整实测与判读见 `docs/13` §3.6、§5.2。
+
 ## 7. 插件目录
 
 ```
@@ -610,6 +627,16 @@ U7 优先级与 U1–U4 同级，应在 M1 第一步一并验证。
 at-pm / at-product / at-architect / at-backend / at-frontend。
 验的是分层派发、契约冻结、就绪门禁、写路径隔离、状态机与 `/at-resume`。
 此时还没有验收，跑完看代码是否真的写出来了。
+
+> **注记（M1c 实测后补）：这里把 `at-frontend` 列进 M1 五角色，但 `stages.json` 的
+> S1–S5 只有 `at-pm`/`at-product`/`at-architect`/`at-pm`/`at-backend` 五段——**没有任何
+> 一段的 `role` 是 `at-frontend`**。两者不矛盾：`at-frontend` 是 M1 就存在的角色，只是在
+> M1 不拥有任何阶段（前端阶段从 S6 起，属 M2，见 `docs/11` §1.1）；它照样凭
+> `project.paths` 的写路径隔离写真代码，只是没有 `NN-*.md` 记在它名下。H2/H5 对「角色不
+> 拥有当前阶段」本来就是预期过的形状（H2 fail-open，H5 返回
+> `skipped:'role-not-in-stage'`），加阶段会踩进 `docs/11` §1.1 点名的「扩到 S6–S8 时必须
+> 重算 H5a 静默集合」这个 M2 危险区，所以选择改角色正文说实话（`agents/at-frontend.md`
+> 「你在哪一段」一节），不动 `stages.json`。完整实测见 `docs/13` §6。
 
 **M2 · 补齐十角色与验收闭环**
 加 at-ui / at-ios / at-android / at-qa / at-acceptance，
