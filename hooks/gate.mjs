@@ -450,6 +450,20 @@ function main() {
     else if (isProjectJson(filePath, ctx.agentTeamDir)) kind = 'project'
     else if (target === norm(`${ctx.runDir}/state.json`)) kind = 'state'
 
+    // 写的是 run 目录下某个阶段的 produces —— 算它的哈希回传，PM 写进 artifacts。
+    // 这条排在最后：上面三条都是控制文件或契约，命中它们就不会落到这里。
+    let produceName = null
+    if (kind === 'other' && ctx.stages) {
+      for (const s of Object.values(ctx.stages)) {
+        if (!s || !Array.isArray(s.produces)) continue
+        for (const p of s.produces) {
+          if (norm(`${ctx.runDir}/${p}`) === target) { produceName = p; kind = 'produce'; break }
+        }
+        if (produceName) break
+      }
+    }
+    const produceBytes = produceName ? ctx.artifactBytes(produceName) : null
+
     const bytes = kind === 'contract' ? ctx.artifactBytes('00-contract.md') : null
     const reach =
       kind === 'project' && ctx.project
@@ -472,6 +486,8 @@ function main() {
       stages: ctx.stages,
       stageDone,
       stateProblems,
+      produceName,
+      produceSha: produceBytes ? sha256OfContract(produceBytes) : null,
     })
 
     emitLedger(spec.event, notices)

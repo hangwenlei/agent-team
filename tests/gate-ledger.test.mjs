@@ -104,6 +104,73 @@ test('写了坏的 state.json：problems 逐条回传', () => {
   }
 })
 
+test('写了阶段产物：回传的哈希与磁盘实算一致', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S1', artifacts: ['00-contract.md'] })
+  try {
+    const p = join(projectDir, '.agent-team', 'runs', 'r1', '01-prd.md')
+    writeFileSync(p, '# PRD\n', 'utf8')
+    const { stdout } = run('ledger', {
+      tool_name: 'Write', agent_type: 'at-product', tool_input: { file_path: p },
+    }, GATE, projectDir)
+    assert.ok(ctxOf(stdout).includes(sha256OfContract(readFileSync(p))))
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// Task 2 修复轮 1 定下的形状：新增的回传路径要单独钉一条「真实输出以受信前缀开头」。
+// 这条严格说不是一个全新的 additionalContext 调用点——kind: 'produce' 的内容最终
+// 仍然流经 hooks/gate.mjs:134 的同一个 emitLedger（上面「写了 project.json」那条
+// 已经钉过这个调用点本身会用 trustedBlock 包装，包装逻辑不分 kind），但「同一个函数
+// 所以肯定也对」是推理，不是证据——照同一个形状直接对含【产物】内容的这次真实回传
+// 断言一遍，不留这个空子。复用上面那条测试的同一份夹具与输入。
+test('写了阶段产物：真实输出同样以受信前缀开头', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S1', artifacts: ['00-contract.md'] })
+  try {
+    const p = join(projectDir, '.agent-team', 'runs', 'r1', '01-prd.md')
+    writeFileSync(p, '# PRD\n', 'utf8')
+    const { stdout } = run('ledger', {
+      tool_name: 'Write', agent_type: 'at-product', tool_input: { file_path: p },
+    }, GATE, projectDir)
+    assert.ok(ctxOf(stdout).startsWith(TRUSTED_PREFIX))
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 正向锚点就是上面那条：它已经证明「写一个真的阶段产物」这条通道会回传非空内容。
+// 这条钉住的是新增匹配逻辑的另一侧——run 目录下不属于任何阶段 produces 的文件，
+// 不能被误判成产物回传。
+//
+// 夹具特意用 stage: 'S2'、但仍然预置 00-contract.md（S1 的产物）：
+// - 不能用 stage: 'S1' + artifacts:['00-contract.md']——那会让 isStageDone('S1') 为
+//   true，buildLedgerNotices 无论 kind 是什么都会推一条「阶段已齐」的 notice，stdout
+//   非空，这条「保持沉默」的断言会恒为假，跟这次改动是否有 bug 无关（实测踩过一次，
+//   见下面的失败记录）。stage: 'S2' 时 S2 的产物 01-prd.md 不在磁盘上，isStageDone
+//   为 false，排除了这条噪音。
+// - 但仍然要让 00-contract.md 存在：如果把 gate.mjs 里「这是不是阶段产物」的匹配
+//   条件改成恒真，产物匹配循环会把 00-contract.md（stages.json 里第一个阶段 S1 的
+//   第一个 produces）误判成这次写入对应的产物名，然后真的用 ctx.artifactBytes 去读
+//   它、真的算出一个哈希、真的回传——用一份没有任何 artifacts 的夹具测不出这个恒真
+//   塌法，因为 artifactBytes 会读不到文件、拿到 null，误判分支会因为
+//   「typeof produceSha !== 'string'」而继续沉默，恒真塌法就被悄悄放过去了。
+test('run 目录下的文件不是任何阶段的 produces：不当成产物回传', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['00-contract.md'] })
+  try {
+    const p = join(projectDir, '.agent-team', 'runs', 'r1', 'scratch.txt')
+    writeFileSync(p, '不是任何阶段的产物\n', 'utf8')
+    const { stdout } = run('ledger', {
+      tool_name: 'Write', agent_type: 'at-product', tool_input: { file_path: p },
+    }, GATE, projectDir)
+    assert.equal(stdout.trim(), '')
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
 test('写业务代码时保持沉默——零 stdout', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S1' })
   try {

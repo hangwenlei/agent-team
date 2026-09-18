@@ -25,8 +25,8 @@ $ARGUMENTS
   模板有**九个顶层键，一个都不能少**（少了会被账本回传报成状态不合法）：
   `run_id` 填你上面生成的那个 run id（**必须与目录名逐字相同**），`stage` 填 `S1`，
   `history` 填一条 `{ "stage": "S1", "at": "<ISO 时间>" }`，`contract_sha` 保持
-  `PENDING`，`roster` 与 `never_invoked` 先留空数组，`artifacts` 与 `rework` 先留空
-  对象 `{}`，`escalations` 先留空数组。
+  `PENDING`，`roster` 与 `never_invoked` 先留空数组，`artifacts` 与 `rework` 先留空对象
+  ——`artifacts` 会在每段产物写完之后按回传逐条补上，`escalations` 先留空数组。
 - 写 `.agent-team/current-run`，内容就是 run id 本身，**不带换行以外的任何东西，
   不含路径分隔符**。
 
@@ -52,6 +52,10 @@ $ARGUMENTS
 3. **记账**。产物齐了就把 `state.json` 的 `stage` 推到下一段，并往 `history` 追加一条
    `{ "stage": "<新阶段>", "at": "<ISO 时间>" }`。**两件事一起做**：`history` 的最后
    一条必须等于 `stage`，分叉会被账本回传报出来。
+
+   写完一段产物之后，你会收到一条【产物】回传，里面有那个产物的 sha256。**把它原样写进
+   `state.json` 的 `artifacts`**（键是产物名，值是那个哈希）——不要自己拼一个。它是
+   `/agent-team:at-status` 对账的依据，也是「这份产物在记账之后有没有被改过」的唯一基线。
 4. 把这一段真正叫到的角色累加进 `roster`。**`never_invoked` 不要在这里逐段累加**
    ——S2 时 `at-architect` 还没轮到，逐段累加会先把它记成「没被叫过」，等 S3 真正
    叫到它时就会同时出现在 `roster` 与 `never_invoked` 两个数组里。`never_invoked`

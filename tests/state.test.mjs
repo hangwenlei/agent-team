@@ -125,6 +125,16 @@ test('不给 stages 时跳过与阶段链有关的检查，其余照查', () => 
   assert.equal(validateState(good({ rework: { S2: 5 } }), {}).ok, false)
 })
 
+test('artifacts 的键必须是某个阶段的 produces', () => {
+  const r = validateState(good({ artifacts: { '不是产物.md': SHA } }), { stages: STAGES })
+  assert.equal(r.ok, false)
+  assert.ok(r.problems.some((x) => /不是任何阶段的 produces/.test(x)))
+})
+
+test('不给 stages 时跳过这条键名校验', () => {
+  assert.equal(validateState(good({ artifacts: { '不是产物.md': SHA } }), {}).ok, true)
+})
+
 test('nextStage 按 stages 的书写顺序走，不按 id 字符串排序', () => {
   assert.equal(nextStage(STAGES, 'S1'), 'S2')
   assert.equal(nextStage(STAGES, 'S3'), null)

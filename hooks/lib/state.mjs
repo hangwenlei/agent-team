@@ -112,6 +112,14 @@ export function validateState(state, { stages } = {}) {
   } else {
     for (const [k, v] of Object.entries(state.artifacts)) {
       if (typeof v !== 'string' || !SHA_RE.test(v)) p(`artifacts["${k}"] 不是 sha256:<64 位十六进制>`)
+      if (isPlainObject(stages)) {
+        const produced = new Set(
+          Object.values(stages).flatMap((s) => (isPlainObject(s) && Array.isArray(s.produces) ? s.produces : [])),
+        )
+        if (!produced.has(k)) {
+          p(`artifacts 里有 "${k}"，但它不是任何阶段的 produces——artifacts 只记阶段产物的哈希`)
+        }
+      }
     }
   }
 

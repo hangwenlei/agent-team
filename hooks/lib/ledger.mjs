@@ -16,7 +16,7 @@ import { compareContractSha } from './contract-hash.mjs'
 import { nextStage } from './state.mjs'
 
 export function buildLedgerNotices({
-  kind, contractSha, state, reach, stages, stageDone, stateProblems,
+  kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha,
 } = {}) {
   const out = []
   const st = state && typeof state === 'object' ? state : {}
@@ -58,6 +58,20 @@ export function buildLedgerNotices({
       `【state.json】刚写进去的状态有问题，逐条如下——改完再继续，不要带着它往下跑：\n` +
         stateProblems.map((p) => `  - ${p}`).join('\n'),
     )
+  }
+
+  if (kind === 'produce' && typeof produceName === 'string' && typeof produceSha === 'string') {
+    const recorded = (st.artifacts && typeof st.artifacts === 'object') ? st.artifacts[produceName] : undefined
+    // 已经记过同一个哈希就不吭声——每写一次产物都刷一遍会把真正要看的东西淹掉。
+    if (recorded !== produceSha) {
+      out.push(
+        recorded === undefined
+          ? `【产物】${produceName} 的 sha256 是 ${produceSha}，state.json 的 artifacts 里还没有记。` +
+            `把这一条原样写进去——不要自己拼一个。它是 §6.2 内容比对的基线，也是 /at-status 对账的依据。`
+          : `【产物】${produceName} 的 sha256 是 ${produceSha}，而 artifacts 里记的是 ${recorded}。` +
+            `这份产物在记账之后被改过——如果是有意的，把新值写进去；如果不是，去看看是谁改的。`,
+      )
+    }
   }
 
   if (stageDone && typeof st.stage === 'string') {

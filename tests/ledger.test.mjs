@@ -10,6 +10,7 @@ const SHA = 'sha256:' + 'b'.repeat(64)
 const base = {
   kind: 'other', contractSha: null, state: { stage: 'S1', contract_sha: 'PENDING' },
   reach: null, stages: STAGES, stageDone: false, stateProblems: [],
+  produceName: null, produceSha: null,
 }
 const joined = (over) => buildLedgerNotices({ ...base, ...over }).join('\n')
 
@@ -88,6 +89,33 @@ test('state.json 有问题：逐条交回', () => {
   const s = joined({ kind: 'state', stateProblems: ['rework["S2"] 是 0，但 history 里 S2 出现了 3 次'] })
   assert.match(s, /rework/)
   assert.match(s, /state\.json/)
+})
+
+const SHA_P = 'sha256:' + 'e'.repeat(64)
+
+test('写了阶段产物：回传它的 sha256，并说明要写进 artifacts', () => {
+  const s = joined({ kind: 'produce', produceName: '01-prd.md', produceSha: SHA_P })
+  assert.ok(s.includes(SHA_P))
+  assert.ok(s.includes('01-prd.md'))
+  assert.match(s, /artifacts/)
+})
+
+test('写了阶段产物且 artifacts 里已经是同一个哈希：不重复报', () => {
+  const notices = buildLedgerNotices({
+    ...base, kind: 'produce', produceName: '01-prd.md', produceSha: SHA_P,
+    state: { stage: 'S1', contract_sha: 'PENDING', artifacts: { '01-prd.md': SHA_P } },
+  })
+  assert.deepEqual(notices, [])
+})
+
+test('写了阶段产物且 artifacts 里记的是别的哈希：报出来，两个值都带上', () => {
+  const old = 'sha256:' + 'f'.repeat(64)
+  const s = joined({
+    kind: 'produce', produceName: '01-prd.md', produceSha: SHA_P,
+    state: { stage: 'S1', contract_sha: 'PENDING', artifacts: { '01-prd.md': old } },
+  })
+  assert.ok(s.includes(SHA_P))
+  assert.ok(s.includes(old))
 })
 
 test('当前阶段产物已齐：提示推进，并说明不推进会让 H5 哑掉', () => {
