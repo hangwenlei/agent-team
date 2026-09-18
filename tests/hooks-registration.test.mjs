@@ -126,3 +126,48 @@ test('KNOWN_CHECKS 里的每一个检查名都在 hooks.json 里至少注册了�
     )
   }
 })
+
+// 终审修复轮复评：本轮把「任何持有 Bash 的角色都写得了 artifacts」写进了 hooks/gate.mjs
+// 的运行时文案、hooks/lib/artifact-drift.mjs 头部、三份角色正文（at-pm/at-backend/
+// at-frontend）与两份规格文档——这句话的承重事实是「hooks.json 没有任何 matcher 覆盖
+// Bash」（见 hooks/lib/writepath.mjs 头部「这道闸只管 Edit/Write/NotebookEdit」），但
+// 这件事本身，全仓库零测试：上面几条只查「注册项指向的文件/检查名对不对」，从不检查
+// matcher 的**内容**能匹配到哪些工具名。按发现 3 用的同一条标准（「模块知道这两份拷贝
+// 存在，却没有东西保证它们同步」），这句被多处文案依赖的事实也该有一份同样的机械保证：
+// 哪天有人往 PreToolUse/PostToolUse 加了一条能匹配 Bash 的 matcher（哪怕是手滑，比如把
+// "^(Edit|Write|NotebookEdit)$" 写成不锚定的 "Edit|Write|NotebookEdit|Bash"），那些文案
+// 会当场变成错的，而不会有任何机械信号——这条测试补上那个信号。
+//
+// 只查 PreToolUse 与 PostToolUse：SubagentStop 是生命周期事件，不按 tool_name 匹配，
+// 这条判据不适用于它。
+//
+// 用 new RegExp(matcher) 而不是字符串比较：matcher 是正则源码，"^Bash$" 与
+// "^(Edit|Write|Bash)$" 都该被抓到，纯子串检查抓不住后者。matcher 缺失（undefined）
+// 时 new RegExp(undefined) 等价于 new RegExp('')——匹配一切字符串，包括 "Bash"，这正是
+// 语义上该有的结果：没有 matcher 等于不筛选、匹配一切工具调用，自然也包括 Bash，不需要
+// 额外一条防御性断言去单独判「matcher 是不是非空字符串」。
+function preAndPostToolUseMatchers() {
+  const pre = hooksConfig.hooks?.PreToolUse ?? []
+  const post = hooksConfig.hooks?.PostToolUse ?? []
+  return [...pre, ...post].map((entry) => entry.matcher)
+}
+
+test('前置条件：hooks.json 里 PreToolUse/PostToolUse 合起来确实有 matcher 可查——否则下面那条在空转', () => {
+  assert.ok(
+    preAndPostToolUseMatchers().length > 0,
+    'hooks.json 的 PreToolUse 与 PostToolUse 合起来一个注册项都没有',
+  )
+})
+
+test('hooks.json 的 PreToolUse/PostToolUse 没有任何 matcher 能匹配到 "Bash"——这是「Bash 不经任何 hook」这句话（写在多处文案里）的承重事实', () => {
+  for (const matcher of preAndPostToolUseMatchers()) {
+    assert.ok(
+      !new RegExp(matcher).test('Bash'),
+      `matcher ${JSON.stringify(matcher)} 匹配得到 "Bash"——hooks/gate.mjs 的运行时文案、` +
+        'hooks/lib/artifact-drift.mjs 头部、agents/at-pm.md、agents/at-backend.md、' +
+        'agents/at-frontend.md，以及主规格 §6.2 与 M1c 设计 §1.2 都在说「Bash 不经任何 ' +
+        'hook」，这句话现在不成立了，需要一起改，而且这件事本身说明写路径隔离/账本比对' +
+        '现在真的会挡到 Bash 调用，是一次影响面很大的行为变化，不只是文案过时。',
+    )
+  }
+})
