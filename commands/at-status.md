@@ -44,4 +44,4 @@ run:        <run_id>
 `Edit`/`Write` 的直接写入，一个角色把写入转手派发给那条路径的合法拥有者就绕过去了
 （规格 §6.4）。这张表的价值是把这件事摆上台面，让改花名册的人看得见自己改动的后果。
 
-`reach.json` 不存在时说明 `/at-init` 之后没有落盘过触达表，提示用户重跑 `/at-init`。
+`reach.json` 不存在时说明 `/agent-team:at-init` 之后没有落盘过触达表，提示用户重跑 `/agent-team:at-init`。

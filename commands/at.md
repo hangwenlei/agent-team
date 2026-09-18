@@ -9,7 +9,7 @@ $ARGUMENTS
 
 ## 0. 前置
 
-若 `.agent-team/project.json` 不存在，**停下**，让用户先跑 `/at-init`——没有它，
+若 `.agent-team/project.json` 不存在，**停下**，让用户先跑 `/agent-team:at-init`——没有它，
 写路径隔离没有判据，每个执行角色都会被拒。
 
 本文里带 `${CLAUDE_PLUGIN_ROOT}` 前缀的路径都在**插件目录**里，用 `Read` 连着这个
@@ -103,9 +103,9 @@ $ARGUMENTS
 在这里把 `never_invoked` **算一次**（不是逐段累加出来的）：
 
 1. 读 `.agent-team/project.json` 的 `available_roles`——**这个项目可用的执行角色名单
-   就以它为准，不要凭记忆列角色名**。名单是 `/at-init` 写的，加了新角色它会跟着变；
+   就以它为准，不要凭记忆列角色名**。名单是 `/agent-team:at-init` 写的，加了新角色它会跟着变；
    正文里写死一份就会在加角色那天静默漏算，而漏算的表现是「某个角色整趟没被叫过，
-   且无人发现」（规格 §4.2 ④）。读不到这个字段就停下来让用户重跑 `/at-init`。
+   且无人发现」（规格 §4.2 ④）。读不到这个字段就停下来让用户重跑 `/agent-team:at-init`。
 2. 名单里凡是没有出现在 `state.json` 的 `roster` 里的，就是这一趟一次都没被真正
    叫到的——写进 `never_invoked`。
 

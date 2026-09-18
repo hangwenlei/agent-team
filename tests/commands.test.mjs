@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { CONTROL_FILES } from '../hooks/lib/control-files.mjs'
+import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const readJson = (p) => JSON.parse(readFileSync(url(p), 'utf8'))
@@ -287,5 +288,67 @@ test('/at 写明了五类升级条件的 kind 取值', () => {
   const t = textOf('at.md')
   for (const k of ['sensitive', 'contract-conflict', 'tradeoff', 'contract-hole', 'budget-exhausted']) {
     assert.ok(t.includes(k), `commands/at.md 没有写 escalations 的 kind 取值 ${k}`)
+  }
+})
+
+// ——— 命令之间的互相引用必须带插件命名空间 ———
+//
+// 插件组件的命名空间是**无条件**加的，不是只在撞名时才加。官方插件参考原文：
+// 「This name is used for namespacing components. For example, in the UI, the agent
+// `agent-creator` for the plugin with name `plugin-dev` will appear as
+// `plugin-dev:agent-creator`.」
+// 所以这四条命令的真实调用名是 `/agent-team:at-init`，不是 `/at-init`。
+//
+// 为什么要钉住：命令正文里到处是「让用户先跑 X」「回到 X 的第 3 节」这类互相引用。写成
+// 裸名的话，PM 与用户照着敲会得到一个**按那个名字并不存在**的命令——与 stages.json 第一天
+// 把 S5 的 role 写成花名册里没有的角色是同一个形状（docs/08 ②）：一条指向不存在之物的
+// 跨文件引用，只有真有人敲进去才会暴露，而在那之前所有测试都是绿的。
+//
+// 前缀取自 hooks/lib/decide.mjs 的 PLUGIN_PREFIX，它由 tests/plugin-name-sync.test.mjs
+// 钉死与 .claude-plugin/plugin.json 的 name 一致——插件改名时这三处一起动，不会分叉。
+//
+// ⚠️ 这条判据是文档结论，不是实测：本项目还没有在真实会话里敲过任何一条命令。
+// docs/10 第 1 条负责核实文档与实际一致。
+
+// `/` 后面至少要有一个词字符：命令正文里有一个单独的 `/`（讲路径分隔符的），不是命令引用。
+// 每次调用新建一个 RegExp 对象：带 g 标志的正则共享 lastIndex，复用同一个对象会做出
+// 时好时坏的断言——本仓库刚为这个坑栽过一次（见 b13612c）。
+const slashTokenRe = () => /`\/([A-Za-z0-9][A-Za-z0-9:_-]*)/g
+
+// ⚠️ 正向锚点。下面两条都是「不得出现 X」形状的断言——正文干净时它们一个断言都不执行，
+// 判据写错了也照样全绿。本仓库为这个形状开过四轮循环（403dccb、Task 6 I-1、终审 I7、
+// b13612c），规矩是：纯否定断言必须配一条自检，拿一个已知违规样本证明判据仍然认得出它。
+test('前置条件：斜杠命令的判据认得出裸名引用——否则下面两条恒绿', () => {
+  const sample = '让用户先跑 `/at-init`，然后 `/at <需求>`，再看 `/at-status`。'
+  assert.deepEqual(
+    [...sample.matchAll(slashTokenRe())].map((m) => m[1]),
+    ['at-init', 'at', 'at-status'],
+  )
+})
+
+test('命令正文里的斜杠命令引用必须带插件命名空间', () => {
+  for (const f of FILES) {
+    for (const [, token] of textOf(f).matchAll(slashTokenRe())) {
+      assert.ok(
+        token.startsWith(PLUGIN_PREFIX),
+        `commands/${f} 引用了 \`/${token}\`——插件组件的命名空间是无条件加的，真实调用名是 ` +
+          `\`/${PLUGIN_PREFIX}${token}\`。写裸名的话，照着敲会得到一个不存在的命令。`,
+      )
+    }
+  }
+})
+
+test('命令正文引用的每条斜杠命令都真的存在于 commands/', () => {
+  const known = new Set(FILES.map((f) => f.replace(/\.md$/, '')))
+  for (const f of FILES) {
+    for (const [, token] of textOf(f).matchAll(slashTokenRe())) {
+      if (!token.startsWith(PLUGIN_PREFIX)) continue // 缺前缀由上一条报，这里只查名字
+      const name = token.slice(PLUGIN_PREFIX.length)
+      assert.ok(
+        known.has(name),
+        `commands/${f} 引用了 \`/${token}\`，但 commands/ 下没有 ${name}.md——` +
+          `跨文件引用指向了一个不存在的命令`,
+      )
+    }
   }
 })

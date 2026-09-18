@@ -12,7 +12,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 ## 1. 读回位置
 
 1. 读 `.agent-team/current-run` 拿到 run id。读不到就告诉用户还没有进行中的 run，
-   让他跑 `/at <需求>`。
+   让他跑 `/agent-team:at <需求>`。
 2. 读 `.agent-team/runs/<run_id>/state.json`。
 3. 读 `.agent-team/project.json`（路径归属）。
 
@@ -28,7 +28,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 - **产物不齐** → 从这一段继续，先看缺哪个产物、该派谁。
 
 契约那一段（`00-contract.md`）**不要重写**。它是这趟 run 的需求基线，S1 之后就冻结了；
-要改只能走升级流程（见 `/at` 的第 4 节）。
+要改只能走升级流程（见 `/agent-team:at` 的第 4 节）。
 
 ## 3. 状态文件有问题时
 
@@ -38,7 +38,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 ## 4. 接着跑
 
-回到 `/at` 的第 3 节，按同一套动作推进：派 → 去磁盘核实 → 记账。
+回到 `/agent-team:at` 的第 3 节，按同一套动作推进：派 → 去磁盘核实 → 记账。
 派发同样的规矩：执行角色在第三层，S5 要派 `at-architect` 去分发。
 
 先用一段话告诉用户你读到的位置：哪一趟 run、停在哪一段、磁盘上已经有哪些产物、
