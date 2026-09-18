@@ -89,12 +89,17 @@ test('writepath：run 存在但 project.json 坏了——仍然 fail closed，�
 // MAIN，而本仓库自己的 settings.json 是 {"agent": "at-pm"}，主会话的 hook
 // 输入带 agent_type: 'at-pm'（M0 实测「次要事实」），落不进 MAIN。三点叠成
 // 硬死锁：(a) unreadable 的 deny 发生在看路径之前，拒的是这个会话的每一次
-// Edit/Write，不只是敏感路径；(b) agents/at-pm.md 的工具面没有 Bash，规格
-// §6.2 那条「Bash 是软约束」的逃生口对 PM 不存在；(c) 触发条件很廉价——
-// project.json / state.json 坏了、或 current-run 被截断成空文件，任意一条
-// 即可。结果是插件把自己唯一的运维人锁在门外，只能由用户离开 Claude 手工
-// 改文件。同一个死锁形状在这条分支上是第三次出现（H3 自己在 Task 4 修过
-// 自举死锁、H4 在 Task 5 修过）。
+// Edit/Write，不只是敏感路径；(b) agents/at-pm.md 现在有 Bash（M1c 设计
+// §1.1 的上界要求），但逼 PM 用 `echo >` 去修一个坏掉的 run 不是可接受的
+// 运维路径；(c) 触发条件很廉价——project.json / state.json 坏了、或
+// current-run 被截断成空文件，任意一条即可。结果是插件把自己唯一的运维人
+// 锁在门外，只能由用户离开 Claude 手工改文件。同一个死锁形状在这条分支上
+// 是第三次出现（H3 自己在 Task 4 修过自举死锁、H4 在 Task 5 修过）。
+//
+// （终审修复轮发现 5 复评：这条注释与下面 :118 的断言失败消息此前都还写着
+// 「PM 的工具面没有 Bash」——commit 2d0147c 给 at-pm.md 加上 Bash 之后这句话
+// 就不成立了，hooks/gate.mjs 的同款注释已经在发现 5 那次改过，这里是镜像、
+// 没跟着改。断言逻辑与测试行为不变，只是这两处文字对齐 gate.mjs 现在的措辞。）
 //
 // 这条短路只放在 unreadable 那一支，不像 H4 那样提到读 ctx 之前——ctx 读得
 // 出来时 at-pm 仍然是一个受完整 per-role 隔离约束的角色（见
@@ -116,7 +121,7 @@ test('writepath：project.json 坏了（unreadable），被钉成主线程的 at
       stdout.trim(),
       '',
       'unreadable 时 PM 的每一次 Edit/Write 都被拒，等于这个会话里没有任何逃生路径——' +
-        'at-pm 的工具面没有 Bash，规格 §6.2 那条软约束逃生口对它不存在',
+        'at-pm 现在有 Bash，但逼它用 `echo >` 去修一个坏掉的 run 不是可接受的运维路径',
     )
     assert.ok(stderr.trim().length > 0, '这是一次 fail open，必须留痕，不能悄悄放行')
     assert.match(stderr, /agent-team/)
