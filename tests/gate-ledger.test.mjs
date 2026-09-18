@@ -124,9 +124,29 @@ test('写了阶段产物：回传的哈希与磁盘实算一致', () => {
 // 仍然流经 hooks/gate.mjs:134 的同一个 emitLedger（上面「写了 project.json」那条
 // 已经钉过这个调用点本身会用 trustedBlock 包装，包装逻辑不分 kind），但「同一个函数
 // 所以肯定也对」是推理，不是证据——照同一个形状直接对含【产物】内容的这次真实回传
-// 断言一遍，不留这个空子。复用上面那条测试的同一份夹具与输入。
+// 断言一遍，不留这个空子。
+//
+// ⚠️ 修复轮 1 缺陷 1：这条测试原来复用了上面「写了阶段产物：回传的哈希与磁盘实算
+// 一致」那份夹具（stage: 'S1', artifacts:['00-contract.md']），评审指出那是幻绿——
+// `stage: 'S1'` 加 `00-contract.md` 已经在磁盘上，让 `isStageDone('S1')` 恒真，
+// `buildLedgerNotices` 因此恒非空、恒经 `trustedBlock` 包装，跟 `kind:'produce'`
+// 分支是否正确工作完全无关，是 `stageDone` 那条 notice 搭的顺风车。评审实测：把
+// `kind === 'produce'` 分支整体短路、或把 gate.mjs 产物匹配条件改成恒真，这条测试
+// 都保持绿——上面那条正向锚点（回传的哈希与磁盘实算一致）能抓住这两种塌法是因为它
+// 断言的是"输出里含有这个具体 sha256 子串"，`stageDone` 那条 notice 天然不含这个
+// 值；这条测试原来只断言 `startsWith(TRUSTED_PREFIX)`，任何非空输出都满足，才会被
+// `stageDone` 的顺风车悄悄糊弄过去。
+//
+// 修法：换一份不会让当前阶段"恰好齐了"的夹具——`state.stage` 设成 `S3`（它的
+// `produces` 是 `03-arch.md`，全程不创建，`isStageDone('S3')` 恒假），但实际写的
+// 文件仍然是 `01-prd.md`（S2 的 produces）。gate.mjs 的匹配循环遍历 `ctx.stages`
+// 的**所有**阶段找 produces，不只当前阶段（hooks/gate.mjs 里 `for (const s of
+// Object.values(ctx.stages))` 那段自己的设计），所以写 `01-prd.md` 依然会被正确
+// 识别成 `kind:'produce'`，同时不会触发任何 `stageDone` 噪音——这是排除掉顺风车
+// 唯一的办法：仓库根真实 stages.json 每个阶段只有一个 produces，没法造一个"当前
+// 阶段没齐、但仍然齐了当前阶段"这种自相矛盾的场景，只能靠跨阶段拆开。
 test('写了阶段产物：真实输出同样以受信前缀开头', () => {
-  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S1', artifacts: ['00-contract.md'] })
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S3' })
   try {
     const p = join(projectDir, '.agent-team', 'runs', 'r1', '01-prd.md')
     writeFileSync(p, '# PRD\n', 'utf8')

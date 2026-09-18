@@ -15,6 +15,27 @@
 import { compareContractSha } from './contract-hash.mjs'
 import { nextStage } from './state.mjs'
 
+// 「这个动作只能由 PM 执行、非 PM 请回报上级」——stageDone 与 produce 两个分支都要
+// 说这句话：推进/收口 state.stage 与把哈希写进 artifacts，改的都是同一份控制文件
+// （runs/*/state.json），hooks/lib/writepath.mjs 对非 PM 角色的拒绝是同一条规则，
+// 理由只有一个，字面量只写一份。
+//
+// 这不是预先设计好的抽象，是修复轮 1 评审揪出缺陷 2 之后补的：produce 分支原来
+// 没有这句话，M1 里 stages.json 每阶段只有一个 produces，写完它几乎总是同时让
+// isStageDone 为真、跟下面 stageDone 分支（已经带这句话）拼进同一次回传，凑巧补全
+// 了语义——评审原话："那是数据形状凑巧掩盖，不是设计保证"。M2 一旦出现多 produces
+// 的阶段，先写完的那个产物会单独触发 produce 分支、没有任何"回报上级"的下一步，
+// 跟 H3 给出互相矛盾的指示（提示让一个做不到这件事的角色去做它）。抽成一份两处调用，
+// 不给"同一句话两处各写一遍、后续只改一处"这类漂移留口子——这个仓库为这类分叉开过
+// 好几轮循环，不该在自己刚写的代码里重蹈。
+function pmOnlyNotice(action, reportWhat) {
+  return (
+    `这个动作（${action}）只能由 PM 执行——runs/*/state.json 是控制文件，` +
+    `写路径隔离对非 PM 角色一律拒绝。如果你不是 PM：把${reportWhat}回报给上级，` +
+    `由 PM 落盘，不要自己去写 state.json。`
+  )
+}
+
 export function buildLedgerNotices({
   kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha,
 } = {}) {
@@ -64,12 +85,16 @@ export function buildLedgerNotices({
     const recorded = (st.artifacts && typeof st.artifacts === 'object') ? st.artifacts[produceName] : undefined
     // 已经记过同一个哈希就不吭声——每写一次产物都刷一遍会把真正要看的东西淹掉。
     if (recorded !== produceSha) {
+      // 见本文件头部 pmOnlyNotice 上方的注释：这句话不能只靠跟 stageDone 分支拼在
+      // 同一次回传里凑出语义，produce 分支自己必须说完整。
+      const who = pmOnlyNotice('把这一条写进 artifacts', '这个 sha256')
       out.push(
-        recorded === undefined
+        (recorded === undefined
           ? `【产物】${produceName} 的 sha256 是 ${produceSha}，state.json 的 artifacts 里还没有记。` +
             `把这一条原样写进去——不要自己拼一个。它是 §6.2 内容比对的基线，也是 /at-status 对账的依据。`
           : `【产物】${produceName} 的 sha256 是 ${produceSha}，而 artifacts 里记的是 ${recorded}。` +
-            `这份产物在记账之后被改过——如果是有意的，把新值写进去；如果不是，去看看是谁改的。`,
+            `这份产物在记账之后被改过——如果是有意的，把新值写进去；如果不是，去看看是谁改的。`
+        ) + who,
       )
     }
   }
@@ -90,10 +115,7 @@ export function buildLedgerNotices({
     // 角色一律 deny——不点破这件事，这条提示等于让一个做不到这件事的角色去做它，
     // 跟 H3 给出互相矛盾的指示。硬约束 6 不许把提示削弱或按角色掐掉，所以补救的
     // 是措辞：把动作明确归给 PM，再给非 PM 一条不会撞 H3 的下一步。
-    const who =
-      `这个动作（改 state.json）只能由 PM 执行——runs/*/state.json 是控制文件，` +
-      `写路径隔离对非 PM 角色一律拒绝。如果你不是 PM：把"这一段的产物已经齐了"这` +
-      `件事回报给上级，由 PM 落盘，不要自己去写 state.json。`
+    const who = pmOnlyNotice('改 state.json', '"这一段的产物已经齐了"这件事')
     out.push(
       nxt
         ? `【阶段】${st.stage} 的产物已经齐了。这一段如果确实结束了，需要把 state.stage 推进到 ` +

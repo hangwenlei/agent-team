@@ -118,6 +118,18 @@ test('写了阶段产物且 artifacts 里记的是别的哈希：报出来，两
   assert.ok(s.includes(old))
 })
 
+// 修复轮 1 缺陷 2：stages.json 里 S2/S3/S5 的 produces 恰恰是 at-product/at-architect/
+// at-backend 自己写的，PostToolUse 的 additionalContext 送给写文件的那个角色本人，
+// 不是 PM——但只有 PM 能写 state.json。M1 里每阶段只有一个 produces，写完它几乎总是
+// 同时触发下面的 stageDone 分支（已经带"回报上级"提示），两条拼在同一次回传里凑巧
+// 补全了语义；这条测试特意只给 kind:'produce'、不给 stageDone（`base` 的
+// `stageDone: false` 默认值不动），确保 produce 分支自己就把这句话说完整，不依赖
+// 跟 stageDone 拼车。
+test('产物回传自己就点名非 PM 请回报上级——不依赖跟阶段推进提示拼在一起', () => {
+  const s = joined({ kind: 'produce', produceName: '01-prd.md', produceSha: SHA_P })
+  assert.match(s, /回报/)
+})
+
 test('当前阶段产物已齐：提示推进，并说明不推进会让 H5 哑掉', () => {
   const s = joined({ stageDone: true })
   assert.match(s, /S2/)          // nextStage(STAGES, 'S1')
