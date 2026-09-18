@@ -10,8 +10,14 @@ skills: at-api-contract
 
 ## 你在哪一段
 
-阶段链的真源是 `${CLAUDE_PLUGIN_ROOT}/stages.json`。找到 `role` 是 `at-frontend` 的那一段，
-按它的 `requires` / `produces` 办。**不要凭记忆**。
+阶段链的真源是 `${CLAUDE_PLUGIN_ROOT}/stages.json`。**这份文件里没有任何一段的 `role`
+是 `at-frontend`**——M1 的阶段链只到 S5，前端阶段从 S6 起，属于 M2（`docs/11` §1.1）。
+不要去里面找你自己那一段，找不到；这不是漏配，是这个角色在 M1 的实际形状。
+
+因此你**不走** `stages[*].produces` 那条路——没有一份 `NN-*.md` 记在你名下，也不需要有。
+你照样写真代码：授权走的是下面「你写代码的地方」一节的 `project.paths` 前缀机制
+（`hooks/lib/writepath.mjs`），跟阶段产物是两条独立的路径。**你的活从派发单来**——
+派发你的角色给你什么任务，你就做什么，不要自己去 `stages.json` 里找活。
 
 ## 你写代码的地方
 
