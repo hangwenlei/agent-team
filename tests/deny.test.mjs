@@ -10,7 +10,7 @@
 // 的是"denyOutput 这个契约本身没错"，两者答不同的问题。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { denyOutput } from '../hooks/lib/deny.mjs'
+import { denyOutput, crashNotice } from '../hooks/lib/deny.mjs'
 
 test('PreToolUse：stdout 上的 permissionDecision JSON，exitCode 0', () => {
   const out = denyOutput('测试理由', 'PreToolUse')
@@ -43,4 +43,37 @@ test('其它事件：stderr 打一行 agent-team BUG 提示，exitCode 0，不�
   assert.equal(out.stream, 'stderr')
   assert.equal(out.exitCode, 0)
   assert.match(out.text, /^agent-team BUG:/)
+})
+
+// crashNotice：fail open 检查项在 main() 内部崩溃时，gate.mjs 最外层 catch
+// 写进 stderr 的那一行痕迹的唯一真源（收尾清单第一条 / M1b 遗留 1.4）。这条
+// 分支当前从外部没有任何输入能触发（main() 内部各纯函数对退化输入都很
+// 防御），文案的正确性只能靠这里的直接单测证明；gate.mjs 里那条传导链
+// （真的从最外层 catch 走到这里、真的写了 stderr、真的 exit 0）由一次性
+// 注入 throw 验证过，不留成永久测试——跟 denyOutput 的验证方式是同一个
+// 理由，见本文件顶部与 hooks/lib/deny.mjs 里 crashNotice 上方的说明。
+//
+// 四段断言检验的是文案的四个不同侧面（点名检查项、带上错误消息、非空、
+// 说明是 fail open 且没拦截），各自占一个 test()——同一个 test() 里排在
+// 前面的 assert 一失败就抛，会让后面的断言根本没机会执行、掩盖归因
+// （docs/11 §3.3 第 1 条，这个仓库已经在别处栽过三到四次）。
+test('crashNotice：文案里点名是哪个检查项崩了', () => {
+  const text = crashNotice('deliverable', new Error('boom'))
+  assert.match(text, /deliverable/)
+})
+
+test('crashNotice：文案里带着错误消息本身', () => {
+  const text = crashNotice('deliverable', new Error('roster.json 不是合法 JSON'))
+  assert.match(text, /roster\.json 不是合法 JSON/)
+})
+
+test('crashNotice：返回非空字符串', () => {
+  const text = crashNotice('deliverable', new Error('boom'))
+  assert.ok(text.length > 0)
+})
+
+test('crashNotice：说明这是 fail open、本次没有拦截', () => {
+  const text = crashNotice('deliverable', new Error('boom'))
+  assert.match(text, /fail open/)
+  assert.match(text, /没有拦截/)
 })

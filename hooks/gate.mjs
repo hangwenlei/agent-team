@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
 import { MAIN, callerOf, decideDelegation, stripPluginPrefix } from './lib/decide.mjs'
-import { denyOutput } from './lib/deny.mjs'
+import { denyOutput, crashNotice } from './lib/deny.mjs'
 import { readProjectConfig, readRunContext } from './lib/runctx.mjs'
 import { decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath } from './lib/writepath.mjs'
@@ -615,5 +615,18 @@ try {
   if (!spec || spec.failClosed) {
     denyAndExit(`agent-team 门禁异常，按安全边界拒绝：${err.message}`, event)
   }
+  // fail open 的检查项（spec.failClosed === false，此刻 spec 必然存在，见上面
+  // 那条分支）此前这里直接 process.exit(0)——零 stdout、零 stderr，跟「判定
+  // 逻辑正常跑完、结论恰好是放行」在外部观测上完全没有区别，是这个项目一路
+  // 被咬的静默放行形状（docs/08 §0；M1b 遗留与已知边界 1.4）。文案抽成纯
+  // 函数 crashNotice（hooks/lib/deny.mjs），跟 denyAndExit 用的 denyOutput
+  // 是同一种抽法、同一个理由：那份注释里写的先例这里不重复。
+  //
+  // 这条分支目前从外部没有任何输入能真正触发到（main() 内部各纯函数对退化
+  // 输入都很防御）——文案本身由 tests/deny.test.mjs 直接单测验证过；这里到
+  // stderr 的传导链（真的从这个 catch 走到 crashNotice、真的写了 stderr、
+  // 真的 exit 0）由一次性注入 throw 验证过，不留成永久测试，做法与
+  // hooks/lib/deny.mjs 头部对 denyOutput 的同类说明保持一致。
+  process.stderr.write(crashNotice(CHECK, err))
   process.exit(0)
 }
