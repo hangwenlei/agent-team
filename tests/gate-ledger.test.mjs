@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { run, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
+import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 
 // GATE 直接从 gate-runner.mjs 拿，不在本文件里另算一份——brief 原稿这里是
 // `new URL('../hooks/gate.mjs', import.meta.url).pathname`，在 win32 上
@@ -55,6 +56,31 @@ test('写了 project.json：回传触达表，含 reach.json 落盘指示', () =
     assert.match(ctx, /reach\.json/)
     // 仓库根真实 roster.json：at-product → at-backend 这条边存在。
     assert.ok(ctx.includes('at-product → at-backend'))
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// Task 2 修复轮 1：单一真源这个交付物要求的不只是「trusted.mjs 自己的单测通过」，
+// 还要「gate.mjs 三处真实调用点的真实输出确实以它开头」——否则重构可以被悄悄
+// 塌回硬编码字面量（且可能带一个字的漂移）而没有任何测试发现。这条钉的是
+// hooks/gate.mjs:134（emitLedger）。复用上面那条测试的同一份夹具与输入：它已
+// 确认过这个场景会产出非空 notices（触达表分支无条件 push）。用 startsWith，
+// 不用 includes——includes 在前缀被挪到正文中间时仍然绿，测不出"前缀在不在
+// 开头"。TRUSTED_PREFIX 从 hooks/lib/trusted.mjs import，不在本文件另写一份
+// 字面量，那正是这次要防的漂移本身。
+test('emitLedger 的真实输出以受信前缀开头，不是巧合等长的别的文本', () => {
+  const { projectDir, pluginDir } = makeRun({
+    runId: 'r1', stage: 'S1',
+    project: { paths: { 'at-product': ['docs/'], 'at-backend': ['src/server/'] } },
+  })
+  try {
+    const { stdout } = run('ledger', {
+      tool_name: 'Write', agent_type: 'at-pm',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'project.json') },
+    }, GATE, projectDir)
+    assert.ok(ctxOf(stdout).startsWith(TRUSTED_PREFIX))
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })

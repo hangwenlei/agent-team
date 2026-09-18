@@ -38,6 +38,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
+import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 
 // ---- H5b（stop-gate，SubagentStop）----
 
@@ -194,6 +195,29 @@ test('deliverable：查的是被派发的目标角色（tool_input.subagent_type
   }
 })
 
+// Task 2 修复轮 1：单一真源这个交付物要求的不只是「trusted.mjs 自己的单测通过」，
+// 还要「gate.mjs 三处真实调用点的真实输出确实以它开头」——否则重构可以被悄悄
+// 塌回硬编码字面量（且可能带一个字的漂移）而没有任何测试发现。这条钉的是
+// hooks/gate.mjs:586（H5a 真实缺产物告警）。复用上面那条测试的同一份夹具与
+// 输入——已经确认过这个场景会走到这条分支（at-product 在 S2 缺 01-prd.md）。
+// 用 startsWith，不用 includes。
+test('deliverable 的缺产物告警（H5a 真实记录）真实输出以受信前缀开头', () => {
+  const dirs = makeRun({ runId: 'r1', artifacts: ['00-contract.md'] })
+  try {
+    const input = {
+      tool_name: 'Agent',
+      agent_type: 'at-pm',
+      tool_input: { subagent_type: 'agent-team:at-product' },
+    }
+    const { stdout } = run('deliverable', input, undefined, dirs.projectDir)
+    const out = decisionOf(stdout)
+    assert.ok(out.additionalContext.startsWith(TRUSTED_PREFIX))
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
 test('deliverable：目标角色已经写出产物——stdout 为空，不记 warning', () => {
   const dirs = makeRun({ runId: 'r1', artifacts: ['00-contract.md', '01-prd.md'] })
   try {
@@ -344,6 +368,27 @@ test('S5 返回的是一个派不到执行角色的角色（at-outsider）：H5a
     // roster.json 里 at-outsider 的 can_delegate_to 是空——它派不到任何人，更不是
     // 协调者。文案要点明这一点，否则读到的人会以为它跟 at-architect 是一回事。
     assert.match(ctx, /派不到/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// Task 2 修复轮 1：单一真源这个交付物要求的不只是「trusted.mjs 自己的单测通过」，
+// 还要「gate.mjs 三处真实调用点的真实输出确实以它开头」——否则重构可以被悄悄
+// 塌回硬编码字面量（且可能带一个字的漂移）而没有任何测试发现。这条钉的是
+// hooks/gate.mjs:553（role-not-in-stage 且非协调者的哑火告警）。复用上面那条
+// 测试的同一份夹具与输入——已经确认过这个场景会走到这条分支。用 startsWith，
+// 不用 includes。
+test('deliverable 的哑火告警（role-not-in-stage 非协调者）真实输出以受信前缀开头', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    const { stdout } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm',
+      tool_input: { subagent_type: 'agent-team:at-outsider' },
+    }, GATE, projectDir)
+    const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext
+    assert.ok(ctx.startsWith(TRUSTED_PREFIX))
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })
