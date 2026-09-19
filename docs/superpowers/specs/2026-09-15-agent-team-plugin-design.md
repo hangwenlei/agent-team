@@ -161,13 +161,23 @@ U4 与 U7 是同一个机制的两个观测面，只是分别撞在「agent 宇�
 > `["05-impl/<role>.md"]`。`<role>` 的展开**按消费方不同而不同**，这一点必须照着来，
 > 混用会重演 `docs/11` §5.6 那个缺口：
 >
-> | 消费方 | `<role>` 展开成 |
+> **消费方不是四个，是八个调用点、散在五个模块里。** 这份清单是 M2a 落地时穷举 `grep`
+> 出来的——设计阶段只列了四个，漏掉的三处**每一处都是真故障**（见本表下方的注记）：
+>
+> | 展开成 | 调用点 |
 > |---|---|
-> | H3 写路径（`writepath.mjs` 的 `stageOwnerOfRunPath`） | 写入者自己（角色 R 可写 `05-impl/R.md`，当且仅当 `R ∈ producers`） |
-> | `ledger` 的 `produce` 回传 | 写入者自己——**与上一行共用同一个 `stageOwnerOfRunPath`**，不是两个改动点（M1c 终审去重时合并的，`gate.mjs` 从 `writepath.mjs` import 它；分叉的代价是 sha 漏回传、产物永远卡在 `unrecorded`） |
-> | 阶段推进判据 `isStageDone` | `roster ∩ producers`（这一趟实际派到的执行角色都交了才算 done） |
-> | 账本比对 `compareArtifacts` | `roster ∩ producers`（与推进判据同集合，否则两者互相打架） |
-> | `validateState` 的 artifacts 键校验 | **全部 `producers`**（账本里记着任何一个合法产者的文件都该被接受）。M2a 只收紧了推进判据与账本比对，**没有**要求它跟着按 roster 收紧 |
+> | **写入者自己** | `writepath.mjs` 的 `stageOwnerOfRunPath`（H3 归属判定；`ledger` 的 `produce` 回传**与它共用同一份**，`gate.mjs` 从 `writepath.mjs` import，不是两个改动点）<br>`writepath.mjs` 的 `producesOf`（H3「这是不是我的产物」）<br>`deliverable.mjs` 的 `decideDeliverable`（H5 交付物校验，展开的是刚返回的那个角色） |
+> | **`roster ∩ producers`** | `state.mjs` 的 `isStageDone`（阶段推进判据）<br>`artifact-drift.mjs` 的 `compareArtifacts`（账本比对，经 `expectedArtifacts`）<br>`readiness.mjs` 的 `done`（H2「这一段是不是已经完成、可以跳过」） |
+> | **全部 `producers`** | `state.mjs` 的 `validateState`（artifacts 键校验，经 `producedNames`）<br>`readiness.mjs` 的 `producerOf`（「这个产物名归哪一段」，用于缺失项的错误文案） |
+>
+> 「`roster ∩ producers`」这一组的单一真源是 `stages.mjs` 的 `stageRolesInRun(stage, roster)`——
+> **不要在调用点自己再 filter 一遍**。M2a 期间这段逻辑一度被写了两份，评审抓出后收敛。
+>
+> **漏掉的三处分别会怎样**（都是实测，不是推演）：`writepath.mjs` 的 `producesOf` 对
+> `<role>` 产物恒答「不是你的」，H3 会把 **at-backend 自己**也拒在写
+> `05-impl/at-backend.md` 门外；`deliverable.mjs` 拿字面量去查磁盘，H5b 把交付了的角色
+> **永久拦在 exit 2**；`readiness.mjs` 的 `done` 恒假，S5 永远判未完成。前两处由 M2a
+> Task 4 的实现者撞出来，第三处是它建议「回头看还有没有第三处」之后穷举 `grep` 找到的。
 >
 > 单一真源是 `hooks/lib/stages.mjs`。M1 期间 `stages.json` 把这个模式写成了字面量
 > `["05-impl/at-backend.md"]`，后果见 `docs/11` §5.6。

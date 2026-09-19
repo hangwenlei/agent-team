@@ -76,3 +76,63 @@ test('多阶段同角色按 stages 的书写顺序判定，不按阶段 id 的�
   assert.equal(r.decision, 'deny')
   assert.match(r.reason, /S2/, '应当按书写顺序先判定 S2，不能被字典序排到 S10 后面')
 })
+
+// M2a Task 4 之后的穷举 grep 找出的第三处 <role> 消费方（前两处 writepath.mjs 的
+// producesOf 与 deliverable.mjs 的 decideDeliverable 由 Task 4 实现者抓到并修了）。
+// 这里的两条判据原来直接读字面量 stage.produces：
+//   - producerOf：查不到 05-impl/at-backend.md 的归属，错误文案丢掉「（S5 的产物）」
+//   - done：artifactExists('05-impl/<role>.md') 恒假 → S5 永远判未完成
+const M2A_STAGES = {
+  S4: { role: 'at-pm', requires: [], produces: ['04-dispatch.md'] },
+  S5: {
+    role: 'at-backend',
+    producers: ['at-backend', 'at-frontend'],
+    requires: ['04-dispatch.md'],
+    produces: ['05-impl/<role>.md'],
+  },
+}
+
+test('H2：<role> 阶段的 done 判据按 roster 展开——这一趟只派了后端且它交了，S5 算完成', () => {
+  const r = decideReadiness({
+    targetRole: 'at-backend',
+    stages: M2A_STAGES,
+    roster: ['at-backend'],
+    artifactExists: (p) => ['04-dispatch.md', '05-impl/at-backend.md'].includes(p),
+  })
+  assert.equal(r.decision, 'allow')
+})
+
+test('H2：<role> 阶段 done 判据不再拿字面量去查磁盘——artifactExists 收到的名字里不含 <role>', () => {
+  const seen = []
+  decideReadiness({
+    targetRole: 'at-backend',
+    stages: M2A_STAGES,
+    roster: ['at-backend'],
+    artifactExists: (p) => { seen.push(p); return true },
+  })
+  assert.equal(seen.some((p) => p.includes('<role>')), false, `artifactExists 收到了含占位符的名字：${JSON.stringify(seen)}`)
+})
+
+test('前置条件：上一条的 artifactExists 真的被调用过——否则「没收到占位符」是空转', () => {
+  const seen = []
+  decideReadiness({
+    targetRole: 'at-backend',
+    stages: M2A_STAGES,
+    roster: ['at-backend'],
+    artifactExists: (p) => { seen.push(p); return true },
+  })
+  assert.ok(seen.length > 0)
+})
+
+test('H2：producerOf 认得出 <role> 展开后的产物归属——缺失项的错误文案要点名它是哪一段的产物', () => {
+  const r = decideReadiness({
+    targetRole: 'at-qa',
+    stages: {
+      ...M2A_STAGES,
+      S6: { role: 'at-qa', requires: ['05-impl/at-backend.md'], produces: ['06-test.md'] },
+    },
+    roster: ['at-backend', 'at-qa'],
+    artifactExists: (p) => p === '04-dispatch.md',
+  })
+  assert.match(r.reason, /05-impl\/at-backend\.md（S5 的产物）/)
+})

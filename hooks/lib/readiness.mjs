@@ -4,14 +4,27 @@
 // 失败策略见规格 §6 表格：H2 是流程辅助，门禁自身无法判定时 fail open；
 // 但「前置产物确实缺失」是门禁在正常工作并做出否决，那要 deny。
 
+// M2a：`<role>` 展开。这两处原来直接读字面量 `s.produces`，S5 改成
+// `["05-impl/<role>.md"]` 之后会答错——`producerOf` 查 `05-impl/at-backend.md` 会
+// 找不到归属（错误文案里丢掉「（S5 的产物）」那半句），`done` 会因为
+// `artifactExists('05-impl/<role>.md')` 恒假而永远判 S5 未完成。
+//
+// 这是 Task 4 之后做穷举 grep 才找出来的**第三处**隐藏消费方：实现者当时抓到了
+// `writepath.mjs` 的 `producesOf` 与 `deliverable.mjs` 的 `decideDeliverable`
+// 两处，并建议「回头看还有没有第三处没被穷举到」——有，就是这里。设计文档 §1.1
+// 那张「四个消费方」的表**数少了**，真实数目是六。
+import { stageRoles, stageRolesInRun, expandProduces } from './stages.mjs'
+
 function producerOf(stages, artifact) {
   for (const [id, s] of Object.entries(stages)) {
-    if (Array.isArray(s.produces) && s.produces.includes(artifact)) return id
+    // 归属查询问的是「这个名字是不是**任何一个**合法产者的产物」，所以按全部
+    // stageRoles 展开，不按 roster 收窄——与 validateState 用 producedNames 同一个口径。
+    if (expandProduces(s, stageRoles(s)).includes(artifact)) return id
   }
   return null
 }
 
-export function decideReadiness({ targetRole, stages, artifactExists }) {
+export function decideReadiness({ targetRole, stages, artifactExists, roster }) {
   if (!stages || typeof stages !== 'object') return { decision: 'allow' }
 
   // 一个角色可能是多个阶段的执行者（如 at-pm 既是 S1 又是 S4）。
@@ -39,7 +52,12 @@ export function decideReadiness({ targetRole, stages, artifactExists }) {
     // 文件的阶段会因此完全不设防。当前 stages.json 五个阶段 produces 都
     // 非空，暂不触发；一旦出现这类阶段，这里需要重新设计"已完成"的判定
     // 方式，不能简单沿用"produces 都存在"这条标准。
-    const done = (stage.produces || []).every((p) => artifactExists(p))
+    // M2a：按 roster ∩ producers 展开（与 isStageDone 同一个口径，共用
+    // stageRolesInRun）。注意这里**保留**了上面那条已知边界的语义：展开后为空数组时
+    // `.every` 仍然返回 true、判为「已完成」——对 <role> 阶段那恰好是对的
+    // （这一趟没有任何人是它的产者，这一段就没有待办），对 produces 本身为空的阶段
+    // 则仍是上面注释点名的那个已知边界，M2a 没有改变它。
+    const done = expandProduces(stage, stageRolesInRun(stage, roster)).every((p) => artifactExists(p))
     if (done) continue
 
     const missing = (stage.requires || []).filter((r) => !artifactExists(r))

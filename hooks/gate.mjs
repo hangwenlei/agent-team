@@ -268,6 +268,9 @@ function main() {
       targetRole: target,
       stages: ctx.stages,
       artifactExists: ctx.artifactExists,
+      // M2a：与 deliverable 分支同一个口径——undefined 而不是 []，state.json 坏掉时
+      // 退回「全部 producers」这个更宽的集合，宁可多判一次未完成，不要漏。
+      roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
   }
