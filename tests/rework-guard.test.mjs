@@ -72,3 +72,47 @@ test('history 混进一条不是 {stage,at} 形状的脏记录，删掉它——
   const r = decideRework({ before, after })
   assert.equal(r.ok, false)
 })
+
+// 修复轮 1 Major 1（评审实测抓到的真实绕过，不是假设）：判据③原来用 `<` 直接比较
+// `rw[stage]`，判据④原来用 `typeof v === 'number'` 当前置条件。`<`/`>` 在两边类型不同
+// 时会做隐式数值转换（`'4' < 4` 按数值比较，为 false，逃过判据③），而
+// `typeof v === 'number'` 对字符串/数组一律为 false、直接跳过判据④——两个洞合起来，
+// 从一个合法的打满状态（history 里 S5 出现 4 次、rework.S5 = 3，已经在硬上限）出发，
+// 把 rework.S5 写成字符串或数组就能让第 4 轮返工也被放行，H6 存在的全部理由（"第 3 轮
+// 终局是硬上限，告警守不住"）落空。下面三条各自独立重放评审给出的实测用例，第四条是
+// 正向锚——防止修复本身被錯改成"rework 一律拒"这种同样会让上面三条变绿、但把整条链
+// 锁死的塌法。
+test('rework 写成数字字符串 "4"、且 history 追加到第 5 次出现（真实落地第 4 轮返工）：拒', () => {
+  const r = decideRework({
+    before: st(H('S5', 'S5', 'S5', 'S5'), { S5: 3 }),
+    after: st(H('S5', 'S5', 'S5', 'S5', 'S5'), { S5: '4' }),
+  })
+  assert.equal(r.ok, false)
+})
+
+test('rework 写成单元素数组 [4]（history 不变，仍是打满状态）：拒', () => {
+  const r = decideRework({
+    before: st(H('S5', 'S5', 'S5', 'S5'), { S5: 3 }),
+    after: st(H('S5', 'S5', 'S5', 'S5'), { S5: [4] }),
+  })
+  assert.equal(r.ok, false)
+})
+
+test('rework 写成数字字符串 "99"（history 不变，仍是打满状态）：拒', () => {
+  const r = decideRework({
+    before: st(H('S5', 'S5', 'S5', 'S5'), { S5: 3 }),
+    after: st(H('S5', 'S5', 'S5', 'S5'), { S5: '99' }),
+  })
+  assert.equal(r.ok, false)
+})
+
+// 正向锚：合法的数字 3（等于硬上限、也等于 history 的派生值）在打满状态下必须放行——
+// 上面三条的修法如果被错改成"rework 字段只要不是纯数字类型就一律拒"，这条会变红，
+// 说明改坏了不是收紧、是锁死。
+test('rework 是合法数字 3、且没有变化：放行——修法不能连合法的整数都一起拒', () => {
+  const r = decideRework({
+    before: st(H('S5', 'S5', 'S5', 'S5'), { S5: 3 }),
+    after: st(H('S5', 'S5', 'S5', 'S5'), { S5: 3 }),
+  })
+  assert.equal(r.ok, true)
+})

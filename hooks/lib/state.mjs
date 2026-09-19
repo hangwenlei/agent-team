@@ -7,7 +7,9 @@
 //
 // ⚠️ 本模块只做校验，不做写时强制——写时强制由 H6（hooks/lib/rework-guard.mjs）承担，
 // M2a 补。理由见那个文件头部：PostToolUse 看不到改之前那一版，PreToolUse 看得到。
-// validateState 的同名校验降为第二道（事后告警），两道都要在。
+// validateState 的同名校验降为第二道（事后告警），两道都要在。同一条注记也更新在
+// stages.README.md 里——那份文件此前记的是"还没做"，M2a 之后要跟着改成"已实现"，
+// 不能只改一处、留另一处停在过期状态（这个仓库为「同一份知识写两份」栽过四次）。
 //
 // validateState 一次报全部问题而不是遇到第一个就返回：调用方是 ledger，它把 problems
 // 一次性交给 PM；分次报会让 PM 改一条、再撞一条，来回好几轮。

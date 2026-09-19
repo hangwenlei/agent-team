@@ -48,17 +48,27 @@ export function decideRework({ before, after }) {
     }
   }
 
+  // 修复轮 1 Major 1：这两条判据都要先把 rework[stage] 强制转成数字再比，不能只信
+  // typeof。`<` 与 `>` 在两边类型不同的时候会各玩各的把戏——`'4' < 4` 走的是数值比较
+  // （字符串先被转成数字，为 false，逃过判据③的"低于派生值"检查）；`typeof v ===
+  // 'number'` 对字符串/数组/对象一律为 false，直接跳过判据④，硬上限形同虚设。两个
+  // 洞合起来：把 rework 写成字符串或数组就能把第 4 轮返工也放行。Number() 统一转换
+  // 之后，"转不成数字"本身（NaN）与"转成了但超上限"都在判据④一次性拦住，不再区分
+  // 类型——规格 §4.2 ③要的是"第 3 轮终局"这个数值事实，不是"这个字段恰好是 number
+  // 类型"这个 JS 实现细节。
   const derived = reworkFromHistory(ha)
   const rw = isPlainObject(after.rework) ? after.rework : {}
   for (const [stage, n] of Object.entries(derived)) {
-    const v = rw[stage] ?? 0
+    const raw = rw[stage] ?? 0
+    const v = Number(raw)
     if (v < n) {
-      return { ok: false, reason: `rework["${stage}"] 写成 ${v}，但 history 里 ${stage} 出现 ${n + 1} 次、派生值是 ${n}——返工计数不可重置（规格 §4.2 ③）。` }
+      return { ok: false, reason: `rework["${stage}"] 写成 ${JSON.stringify(raw)}，但 history 里 ${stage} 出现 ${n + 1} 次、派生值是 ${n}——返工计数不可重置（规格 §4.2 ③）。` }
     }
   }
-  for (const [stage, v] of Object.entries(rw)) {
-    if (typeof v === 'number' && v > REWORK_LIMIT) {
-      return { ok: false, reason: `rework["${stage}"] 是 ${v}，超过硬上限 ${REWORK_LIMIT}（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级）。` }
+  for (const [stage, raw] of Object.entries(rw)) {
+    const v = Number(raw)
+    if (!Number.isInteger(v) || v > REWORK_LIMIT) {
+      return { ok: false, reason: `rework["${stage}"] 是 ${JSON.stringify(raw)}，不是合法整数或超过硬上限 ${REWORK_LIMIT}（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级）。` }
     }
   }
   return { ok: true }

@@ -140,13 +140,21 @@ M1a 在 `hooks/lib/writepath.mjs` 里记过一条 I3：稳态下被 `settings.js
 块之前**：两头的既有判据对控制文件都是错的，而且方向相反（一个太紧、一个太松）。
 改那个函数的判定顺序之前先读那里的注释。
 
-## ⚠️ 返工预算的写时强制还没有做（M1b 记，属 M2）
+## H6 返工预算写时强制（M1b 记为缺口，M2a Task 5 已实现）
 
 `hooks/lib/state.mjs` 的 `validateState` 会校验 `rework` 等于 `history` 的派生量
-（某阶段出现 n 次 → n-1 次返工），所以**把计数改小会被 `ledger` 报出来**。但那是
-**事后告警**，不是拦截：拦住一次「把计数改小」的写入要看到改之前的那一版，
-`PostToolUse` 看不到。
+（某阶段出现 n 次 → n-1 次返工），所以**把计数改小会被 `ledger` 报出来**——但那只是
+**事后告警**（`kind === 'ledger'`、`failClosed:false`），不是拦截：拦住一次「把计数
+改小」的写入要看到改之前的那一版，`PostToolUse` 看不到。
 
-M1 的阶段链只到 S5，**没有任何返工边**（返工产生于 S6 失败回 S5 与 S7 驳回，
-规格 §4.2 ③），所以这条缺口在 M1 里一次也走不到。扩到 S6–S8 时必须回来把它设计完：
-那时才第一次有真实的返工计数，而「第 3 轮终局」是硬上限，靠告警守不住。
+**写时强制现在由 H6 承担**（`hooks/lib/rework-guard.mjs` 的 `decideRework` +
+`hooks/gate.mjs` 的 `CHECK === 'rework'` 分支）：挂在 `PreToolUse` 的
+`^(Edit|Write|NotebookEdit)$` matcher 上，触发时磁盘上还是旧版、`tool_input` 里是
+新版，两边都在手上，能在写入落盘前把「history 整体变短」「某阶段计数变少」
+「`rework` 低于 `history` 派生值」「`rework` 超过硬上限 3」这四类写入拦下来，
+`failClosed: true`。只对 `runs/*/state.json` 生效，不豁免任何调用者（含 PM 自己）。
+
+两道校验都要在，不是新的取代旧的：H6 挡的是「这一次写入本身」；`validateState` 兜的
+是 H6 覆盖不到的路径（比如没有经过 Edit/Write 而是被别的手段写坏的 `state.json`）。
+完整设计与判据逐条理由见 `hooks/lib/rework-guard.mjs` 头部——不在这里重复第二遍，
+这份文件已经记着「重复会分叉」的教训（见本文件其它小节）。
