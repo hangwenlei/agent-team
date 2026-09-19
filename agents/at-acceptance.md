@@ -2,6 +2,7 @@
 name: at-acceptance
 description: 业务验收。M2a 占位符，真正文在 M2b。
 tools: Read, Glob, Write
+model: haiku
 ---
 
 # at-acceptance（占位）

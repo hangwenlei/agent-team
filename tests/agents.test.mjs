@@ -7,7 +7,7 @@
 // 部分文件），循环体少跑几圈甚至零圈，这些测试会安安静静地全绿，因为它们从未真正
 // 检查过该检查的文件（docs/11 §3.3 第 2 条：否定/存在性断言在「遍历的集合是空的」
 // 时同样是绿的，本质与「这段代码没被执行到」是同一件事，不限于字面上的否定断言）。
-// 下面第一条测试把 AGENTS 钉死成这六个文件（不只是数量，是身份），后面所有
+// 下面第一条测试把 AGENTS 钉死成 EXPECTED_AGENTS 里那些文件（不只是数量，是身份），后面所有
 // `for (const f of AGENTS)` 的测试都靠它兜底；对 skills/ 目录的同类扫描同样钉了
 // 一条（「skills/ 目录下恰好是这三个共享 skill」）。这个手法抄自 tests/skills.test.mjs
 // 第 8-10 行（Task 5 已经这么做过一次）。
@@ -32,7 +32,7 @@ const bodyOf = (f) => textOf(f).split(/^---\s*$/m).slice(2).join('---')
 // 缺同款身份锚点，补的时候若各写一份，就是本仓库反复踩过的「同一份知识两份拷贝、
 // 日后只改一份」（hooks/lib/path-norm.mjs 头部注释记的教训）。
 
-test('agents/ 目录下恰好是这六个角色文件——否则下面每一条 for (const f of AGENTS) 都在对空集合或半个集合空转', () => {
+test('agents/ 目录下恰好是 EXPECTED_AGENTS 列出的那些角色文件——否则下面每一条 for (const f of AGENTS) 都在对空集合或半个集合空转', () => {
   assert.deepEqual(
     [...AGENTS].sort(),
     EXPECTED_AGENTS,

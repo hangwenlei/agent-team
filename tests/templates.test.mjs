@@ -99,6 +99,26 @@ test('前置条件：available_roles 真的比 paths 的键多，且多出来的
   assert.deepEqual(extra, ['at-acceptance', 'at-qa'])
 })
 
+// Task 2 评审发现 3：上面那条正向锚只算 available_roles − paths 这一个方向，**反方向
+// 没有任何测试抓得住**——实测往 paths 里加一个 available_roles 里没有的角色
+// （如 at-outsider，它在 roster.json 里真实存在），409 条全绿。
+//
+// 严重性要说准，不要照抄上面那段注释的措辞：评审 grep 过 available_roles 在 hooks/ 下的
+// 消费面，**没有任何 hook 读它**（只有 paths 被 writepath.mjs 与 gate.mjs 消费）。所以
+// 这不是 H3 的安全洞——H3 从不看 available_roles。真实代价局限在 /at 的班底核算：一个
+// 拿到真实写权限（paths）的角色可以完全不出现在「可用班底」里，于是它连
+// never_invoked 的分母都进不去，「这个角色到底算不算数」失去机械校验。
+test('paths 的每个键都在 available_roles 里——拿到写权限的角色不能不在班底名单上', () => {
+  const p = JSON.parse(readFileSync(new URL('../templates/project.json', import.meta.url), 'utf8'))
+  const orphan = Object.keys(p.paths).filter((r) => !p.available_roles.includes(r)).sort()
+  assert.deepEqual(orphan, [])
+})
+
+test('前置条件：paths 非空——上一条否定断言不是在空集合上空转', () => {
+  const p = JSON.parse(readFileSync(new URL('../templates/project.json', import.meta.url), 'utf8'))
+  assert.ok(Object.keys(p.paths).length > 0)
+})
+
 // docs/09 账一实现约束 1：控制文件清单只有一处真源。模板里再抄一份就是第二处。
 test('模板里不得再抄一份控制文件清单', () => {
   for (const f of readdirSync(url('templates'))) {

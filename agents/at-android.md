@@ -2,6 +2,7 @@
 name: at-android
 description: Android 端实现。M2a 占位符，真正文在 M2b。
 tools: Read, Glob, Write
+model: haiku
 ---
 
 # at-android（占位）

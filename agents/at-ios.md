@@ -2,6 +2,7 @@
 name: at-ios
 description: iOS 端实现。M2a 占位符，真正文在 M2b。
 tools: Read, Glob, Write
+model: haiku
 ---
 
 # at-ios（占位）

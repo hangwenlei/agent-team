@@ -91,7 +91,7 @@ function toPosix(p) {
 }
 
 // 修复轮 2（评审发现 1）：这条身份锚点是本轮新加的，此前唯一的正向前置断言是
-// 「AGENT_FILES.length > 0」——只证明扫到了至少一个文件，证不了扫到的就是这六个。
+// 「AGENT_FILES.length > 0」——只证明扫到了至少一个文件，证不了扫到的就是 EXPECTED_AGENTS 里那些。
 // 变异实测过：把 AGENT_FILES 的过滤条件改成只匹配 `pm.md`（模拟扫描范围被意外
 // 缩小），同时给 agents/at-backend.md 授予 Skill/SendMessage/ListAgents——因为
 // 扫描结果只剩 at-pm.md 一个文件，下面禁授工具那条否定断言只检查了这一个文件，
@@ -99,7 +99,7 @@ function toPosix(p) {
 // M1b 终审 C2 的同一个文件、同一条测试、同一族失败，只是退化方式从「块序列写法」
 // 换成了「扫描范围本身被缩小」。EXPECTED_AGENTS 与 tests/agents.test.mjs 共用同一份
 // （tests/helpers/expected-agents.mjs），不在这里重复写一份字面量数组。
-test('前置条件：agents/ 目录下恰好是这六个角色文件——否则下面的否定断言可能只在被意外缩小的那一部分文件上检查', () => {
+test('前置条件：agents/ 目录下恰好是 EXPECTED_AGENTS 列出的那些角色文件——否则下面的否定断言可能只在被意外缩小的那一部分文件上检查', () => {
   assert.deepEqual(
     [...AGENT_FILES].sort(),
     EXPECTED_AGENTS,

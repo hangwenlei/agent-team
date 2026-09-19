@@ -2,6 +2,7 @@
 name: at-ui
 description: 交互与视觉设计。M2a 占位符，真正文在 M2b。
 tools: Read, Glob, Write
+model: haiku
 ---
 
 # at-ui（占位）

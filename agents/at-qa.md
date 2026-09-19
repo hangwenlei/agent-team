@@ -2,6 +2,7 @@
 name: at-qa
 description: 测试。M2a 占位符，真正文在 M2b。
 tools: Read, Glob, Write
+model: haiku
 ---
 
 # at-qa（占位）
