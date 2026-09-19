@@ -633,3 +633,59 @@ test('正向自检锚：roster 同时包含 at-frontend 时，同样的磁盘内
     rmSync(pluginDir, { recursive: true, force: true })
   }
 })
+
+// Task 6 评审发现（中低）：gate.mjs 里三处同构的
+// `Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined` 里，`: undefined`
+// 那一支**零覆盖**——把它改成 `: []`（文档反复强调不能去的方向）不会让任何测试变红。
+//
+// 这一支是承重的，不是风格选择。实测两者的差别（直接调 compareArtifacts，真实 stages.json）：
+//   roster = undefined → unrecorded: ["05-impl/at-frontend.md"]
+//   roster = []        → unrecorded: []
+// 也就是说：`state.roster` 一旦不是数组，`[]` 那个退法会让一份**磁盘上真实存在、账本里
+// 没记**的伪造产物**不被报出来**——正好是账本比对存在的理由。`undefined` 退回「全部
+// producers」是更宽的集合，宁可多报不要漏报。
+//
+// 这条测试钉的是**接线**，不是纯函数：stages.mjs 那一层「roster 缺省退回全部 producers」
+// 早有单测，缺的是「gate 真的传了 undefined 而不是 []」。
+test('账本比对：state.roster 不是数组时退回全部 producers——伪造的产物仍然被报成 unrecorded', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5', artifacts: ['05-impl/at-frontend.md'] })
+  try {
+    const statePath = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8'))
+    // 非数组。validateState 会嫌它，但那是 ledger 检查项的事，deliverable 这条路不跑它。
+    state.roster = null
+    writeFileSync(statePath, JSON.stringify(state), 'utf8')
+
+    const input = {
+      tool_name: 'Agent',
+      agent_type: 'at-pm',
+      tool_input: { subagent_type: 'agent-team:at-backend' },
+    }
+    const { stdout } = run('deliverable', input, undefined, dirs.projectDir)
+    assert.match(stdout, /05-impl\/at-frontend\.md/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('前置条件：同一夹具在 state.roster 是合法数组且含 at-frontend 时也报——上一条不是靠别的原因绿的', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5', artifacts: ['05-impl/at-frontend.md'] })
+  try {
+    const statePath = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8'))
+    state.roster = ['at-frontend']
+    writeFileSync(statePath, JSON.stringify(state), 'utf8')
+
+    const input = {
+      tool_name: 'Agent',
+      agent_type: 'at-pm',
+      tool_input: { subagent_type: 'agent-team:at-backend' },
+    }
+    const { stdout } = run('deliverable', input, undefined, dirs.projectDir)
+    assert.match(stdout, /05-impl\/at-frontend\.md/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})

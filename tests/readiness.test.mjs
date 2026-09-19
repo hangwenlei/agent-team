@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { decideReadiness } from '../hooks/lib/readiness.mjs'
 
 const STAGES = {
@@ -135,4 +136,37 @@ test('H2：producerOf 认得出 <role> 展开后的产物归属——缺失项�
     artifactExists: (p) => p === '04-dispatch.md',
   })
   assert.match(r.reason, /05-impl\/at-backend\.md（S5 的产物）/)
+})
+
+// Task 6 评审发现的同一族第三处，而且是三处里最危险的一处。
+//
+// gate.mjs 三处同构的 `Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined`
+// 实测差异（直接调纯函数，真实 stages.json）：
+//   compareArtifacts  undefined → 报出伪造产物；[] → **不报**（已由 gate-deliverable.test.mjs 覆盖）
+//   isStageDone       undefined → false；[]  → false  —— **不可观测**，没有可测的东西
+//   decideReadiness   undefined → **deny**；[] → **allow** —— 本条覆盖它
+//
+// 最后一条方向最糟：`[]` 会让 H2 **停止拒绝**一次前置产物缺失的派发。原因是
+// `expandProduces(stage, [])` 对带 <role> 的 produces 返回空数组，而空数组 `.every`
+// 恒为 true → 该阶段被判「已完成」→ `continue` 跳过，它的 requires 永远不被检查。
+test('H2：state.roster 不是数组时退回全部 producers——前置产物缺失仍然 deny，不会因为空集合而误判「已完成」', () => {
+  const stages = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
+  const r = decideReadiness({
+    targetRole: 'at-backend',
+    stages,
+    artifactExists: () => false,
+    roster: undefined,
+  })
+  assert.equal(r.decision, 'deny')
+})
+
+test('前置条件：同一夹具传合法 roster 时也 deny——上一条不是靠 roster 的取值碰巧绿的', () => {
+  const stages = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
+  const r = decideReadiness({
+    targetRole: 'at-backend',
+    stages,
+    artifactExists: () => false,
+    roster: ['at-backend'],
+  })
+  assert.equal(r.decision, 'deny')
 })
