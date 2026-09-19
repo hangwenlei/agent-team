@@ -33,7 +33,7 @@
 // 不是夹具漏配。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, cpSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
@@ -412,6 +412,83 @@ test('deliverable 的哑火告警（role-not-in-stage 非协调者）真实输�
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })
   }
+})
+
+// ---- loadRoster() 读坏 roster.json 时的留痕（docs/11 §1.4，M2a Task 8）----
+//
+// isCoordinatorFor 是 deliverable 分支里第一处、也是这条路径上唯一一处会读
+// roster.json 的地方（见 hooks/gate.mjs 里 loadRoster 上方注释）。roster.json
+// 读坏时，loadRoster() 现在自己 catch、留一行点名 roster.json 的痕、退回空花名册
+// {}——而不是让异常一路抛给 gate.mjs 最外层 try/catch 的通用兜底 crashNotice
+// （hooks/lib/deny.mjs）：那条兜底不点名具体是哪个文件读坏，而且会让这次检查项
+// 里其它已经算好但还没发出去的信号（比如账本比对）跟着一起报废，不是同一件事。
+//
+// ⚠️ 不能直接改写仓库根那份真实 roster.json、跑完再 cp 换回来：node --test 默认
+// 把不同测试文件各自起一个独立进程、并发执行——实测过两个测试文件的执行窗口
+// 确有重叠（每个文件不是排队等前一个跑完才开始）。本仓库另有
+// tests/gate-io.test.mjs 用真实 GATE 连续跑 13 次 'delegation'，同样会读这份
+// 文件；如果这里真的去改仓库根的 roster.json，会在那份文件的进程里偶发地撞见
+// 一份临时损坏的 roster.json——是这条测试自己会制造的新的不稳定，"cp 备份"只能
+// 保证事后把内容恢复，不能保证损坏期间没有别的进程正在读它。
+//
+// 改用 makeRun() 已经准备好、但从没被接上过的 pluginDir：把仓库真实 hooks/
+// 整份复制进去（gate.mjs 的 ROOT 由它自己文件的路径反推，复制之后这份拷贝的
+// ROOT 就是这个临时目录，不再是仓库根），stages.json 直接照抄仓库根的真实内容
+// （结构必须跟 decideDeliverable 等期望的一致，抄真实的最不容易漂移）——只有
+// roster.json 是这条测试自己写的坏 JSON。全程不碰仓库根那份真实文件，没有
+// 可能泄漏到别的进程的共享状态。
+function makeIsolatedRosterFixture(rosterText) {
+  const realStages = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
+  const dirs = makeRun({ runId: 'r1', stage: 'S5', stages: realStages })
+  cpSync(new URL('../hooks', import.meta.url), join(dirs.pluginDir, 'hooks'), { recursive: true })
+  writeFileSync(join(dirs.pluginDir, 'roster.json'), rosterText, 'utf8')
+  return { ...dirs, gate: join(dirs.pluginDir, 'hooks', 'gate.mjs') }
+}
+
+function runDeliverableAgainstIsolatedRoster(rosterText) {
+  const dirs = makeIsolatedRosterFixture(rosterText)
+  try {
+    return run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm',
+      tool_input: { subagent_type: 'agent-team:at-outsider' },
+    }, dirs.gate, dirs.projectDir)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+}
+
+test('loadRoster() 读到坏 JSON 时：deliverable 检查仍然 exit 0——读坏是 fail open，不是新长出来的安全边界', () => {
+  const { status } = runDeliverableAgainstIsolatedRoster('{ 这不是合法 JSON ]')
+  assert.equal(status, 0)
+})
+
+test('loadRoster() 读到坏 JSON 时：stderr 非空——不能是零 stdout、零 stderr 的静默放行', () => {
+  const { stderr } = runDeliverableAgainstIsolatedRoster('{ 这不是合法 JSON ]')
+  assert.ok(stderr.length > 0)
+})
+
+// ⚠️ 判据不能用 /roster\.json/：gate.mjs 最外层 try/catch 的通用兜底 crashNotice
+// 文案本身也提到"先检查 roster.json 与 stages.json 能否被 JSON.parse"，那个字面量
+// 是两处共有的词汇，抓不住"到底是 loadRoster 自己的 catch 接住的，还是走到了
+// 最外层通用兜底"这个区别（下面变异验证会证实：删掉 loadRoster 的 try/catch 之后，
+// 这份夹具会改由最外层通用兜底接住，stderr 依然非空、依然提到 roster.json——上面
+// 两条测试对这个变异不敏感，必须靠这一条）。改用"读不出来"——这个词只在
+// loadRoster 自己的 catch 文案里出现，通用兜底文案里没有。
+test('loadRoster() 读到坏 JSON 时：stderr 用 loadRoster 自己的文案（"读不出来"），不是最外层通用崩溃兜底接住的', () => {
+  const { stderr } = runDeliverableAgainstIsolatedRoster('{ 这不是合法 JSON ]')
+  assert.match(stderr, /读不出来/)
+})
+
+// 正向自检锚（docs/11 §3.3 第 2 条）：上面三条证明的是"读坏时有痕"，但没证明这个
+// 隔离夹具本身搭对了——如果复制 hooks/ 漏了文件、或者 ROOT 反推的路径不对，上面
+// 三条可能是因为"随便什么原因这个子进程都跑不起来"才通过，不是因为 loadRoster
+// 真的捕获了这次 JSON.parse 失败。这里换一份仓库根真实的 roster.json 内容喂给
+// 同一个隔离夹具，证明它在正常输入下能正常跑完、不落进读坏分支——stderr 应为空。
+test('自检：同一个隔离夹具换成仓库根真实的 roster.json 内容后，stderr 是空的——上面三条不是因为夹具本身坏了才非空', () => {
+  const realRoster = readFileSync(new URL('../roster.json', import.meta.url), 'utf8')
+  const { stderr } = runDeliverableAgainstIsolatedRoster(realRoster)
+  assert.equal(stderr, '')
 })
 
 // ---- H5a：扩链后「可达性」单独不再充分 —— 必须再看「当前阶段是否已经 done」

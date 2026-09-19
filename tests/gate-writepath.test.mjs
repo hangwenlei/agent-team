@@ -516,6 +516,103 @@ test('writepath：run 目录下写 state.json——仍然 deny，它不是任何
   }
 })
 
+// H3：run 目录的兄弟目录同前缀粘连（docs/11 §1.5 第 3 点）。docs/11 举的例子字面
+// 是 `.agent-team-backup` 对 `.agent-team`，跟 tests/path-norm.test.mjs 钉住的纯
+// 函数场景一致。但动手前核对 decideWritePath 的实现发现：underDir 在这个函数里
+// 唯一的调用点传的第二个参数是 runDir（`.agent-team/runs/<id>`），不是 agentTeamDir
+// （`.agent-team`）本身——agentTeamDir 层面的判定走的是 isControlFile 自己另一份
+// 独立、已经带结尾 `/` 的 inline 前缀检查（hooks/lib/control-files.mjs），根本不经过
+// underDir。这意味着"`.agent-team-backup` 对 `.agent-team`"这个具体输入，即使
+// underDir 退化成不带结尾 `/` 的裸 startsWith，在 decideWritePath 这条调用链上也
+// 不会被误判——两个字符串在到达共同的 `runs/r1` 后缀之前就已经分叉了（`.agent-team`
+// 后面接的是 `/`，`.agent-team-backup` 后面接的是 `-backup`）。这一点已经用 cp 备份
+// hooks/lib/path-norm.mjs、手动把 underDir 退化成裸 startsWith 实测验证过：这个输入
+// 在退化版本下依然是 false，path-norm.test.mjs 那条纯函数测试会变红，但下面这条不会。
+//
+// 于是这里补两条，不是一条：
+// 1. 先把 docs/11 字面写的场景原样钉住——这是一条合法、独立的不变量（"跟
+//    .agent-team 同前缀的兄弟目录不会被误认成控制文件或 run 目录产物"），只是
+//    它不会被 underDir 的裁剪 bug 触发，对那个 bug 不敏感。
+// 2. 再补一条 decideWritePath 真实调用点的参数形状会撞上的版本——runDir 自己的
+//    兄弟：run r1 进行中时，`runs/r1-backup/01-prd.md` 对 `runs/r1` 同前缀粘连。
+//    这一条才是"若 underDir 的调用点被错误换成裸 startsWith，H3 层面会变红"这句
+//    话真正成立的那一条（同一次实测：退化版本下这条输入是 true，即误判成落在
+//    run 目录里）。
+test('H3：跟 .agent-team 同前缀的兄弟目录不算控制文件也不算 run 目录内——.agent-team-backup 对 .agent-team 必须 false（docs/11 §1.5 第 3 点字面场景）', () => {
+  const dirs = makeRun({ runId: 'r1', project: PROJECT })
+  try {
+    const input = {
+      tool_name: 'Edit',
+      agent_type: 'agent-team:at-backend',
+      tool_input: {
+        file_path: join(dirs.projectDir, '.agent-team-backup', 'runs', 'r1', '01-prd.md'),
+      },
+    }
+    const { stdout, status } = run('writepath', input, undefined, dirs.projectDir)
+    const out = decisionOf(stdout)
+
+    assert.equal(status, 0)
+    assert.ok(out, '.agent-team-backup/... 不在 PROJECT.paths 任何角色名下，必须 deny')
+    assert.equal(out.permissionDecision, 'deny')
+    // 理由必须是函数末尾 project.paths 那一支的通用兜底措辞，不能是 run 目录
+    // 那一支的"不是任何阶段的 produces"——下面的自检锚证明这两支措辞真的不同。
+    assert.match(out.permissionDecisionReason, /没有被任何角色认领/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('H3：run 目录自己的兄弟目录同前缀粘连不算在 run 目录内——runs/r1-backup 对 runs/r1 必须 false（decideWritePath 真实调用点会撞上的版本，已用退化 underDir 实测验证）', () => {
+  const dirs = makeRun({ runId: 'r1', project: PROJECT })
+  try {
+    const input = {
+      tool_name: 'Edit',
+      agent_type: 'agent-team:at-backend',
+      tool_input: {
+        file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1-backup', '01-prd.md'),
+      },
+    }
+    const { stdout, status } = run('writepath', input, undefined, dirs.projectDir)
+    const out = decisionOf(stdout)
+
+    assert.equal(status, 0)
+    assert.ok(out, 'runs/r1-backup/... 不是这次 run（r1）认领的产物，也不在 PROJECT.paths 任何角色名下，必须 deny')
+    assert.equal(out.permissionDecision, 'deny')
+    assert.match(out.permissionDecisionReason, /没有被任何角色认领/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 正向自检锚：上面两条证明的都是"这个具体场景被 deny、理由是 project.paths 通用
+// 兜底那一支"，但没证明"如果真的落进了 run 目录保护块，reason 真的会换成另一句
+// 话"——万一两支措辞将来改得很像，上面那两条正则可能变成随便什么 deny 都能碰巧
+// 匹配上的假阳性覆盖。这里换一个真的落在 run 目录里、且真的是 S2 产物的同名文件
+// （01-prd.md），角色仍用 at-backend（S2 的执行者是 at-product，不是它），
+// 断言 reason 点名"归 at-product"——证明两支措辞确实不同，上面两条的正则不是
+// 巧合才匹配上的。同一条锚点服务上面两条测试，不需要各写一份。
+test('自检：同名的 01-prd.md 若真的落在 run 目录里，reason 点名"归 at-product"——证明两支措辞真的不同', () => {
+  const dirs = makeRun({ runId: 'r1', project: PROJECT })
+  try {
+    const input = {
+      tool_name: 'Edit',
+      agent_type: 'agent-team:at-backend',
+      tool_input: {
+        file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', '01-prd.md'),
+      },
+    }
+    const { stdout } = run('writepath', input, undefined, dirs.projectDir)
+    const out = decisionOf(stdout)
+
+    assert.match(out.permissionDecisionReason, /归 at-product/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
 // docs/09 账一：控制文件与阶段产物分家的子进程级传导链。纯函数测试
 // （tests/writepath.test.mjs）证明判据本身没错，这里证明 ctx.agentTeamDir 真的
 // 从 runctx.mjs 传到了 gate.mjs 再传到 decideWritePath——这一层传导链此前没有

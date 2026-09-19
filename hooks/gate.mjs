@@ -52,8 +52,30 @@ function isValidInput(input) {
   return input !== null && typeof input === 'object' && !Array.isArray(input)
 }
 
+// docs/11 §1.4：roster.json 是插件自带文件，读坏概率低，但 isCoordinatorFor 与
+// CHECK === 'delegation'/'ledger' 分支都靠它读出来的东西判定。不就地兜底的话，
+// 读坏会一路抛到 gate.mjs 最外层 try/catch（见文件末尾），那层兜底是给「判定
+// 逻辑中途崩溃」这整类问题用的通用 crashNotice（hooks/lib/deny.mjs），不专门
+// 认 roster.json——而且它会让这次检查项的其余逻辑跟着一起放弃，比如
+// deliverable 分支里已经算好但还没来得及发出去的账本比对（buildDriftNotice）。
+// 这里就地捕获、留一行更具体的痕、退回空花名册：
+// - decideDelegation（H1）已经把空对象花名册当一种已知的退化形状处理
+//   （I-1 修复，Object.keys(roster).length === 0 时 deny，理由讲清楚是
+//   roster.json 本身不合法，不是随便一条通用崩溃消息）；
+// - computeReach（isCoordinatorFor 用它）对空对象同样安全：Object.keys({})
+//   是空数组，算出的 reach 对任何角色都是「够不到任何人」，不会抛。
+// 退回空花名册不是「假装没事」，是把「读不出来」换算成这两处已经设计好的
+// 「最保守」退化路径，而不是让整个检查项的判定半途而废。
 function loadRoster() {
-  return JSON.parse(readFileSync(join(ROOT, 'roster.json'), 'utf8'))
+  try {
+    return JSON.parse(readFileSync(join(ROOT, 'roster.json'), 'utf8'))
+  } catch (e) {
+    process.stderr.write(
+      `agent-team：roster.json 读不出来（${e?.message ?? e}），本次按空花名册处理——` +
+        `派发白名单与协调者判定都会失效，请检查插件安装。\n`,
+    )
+    return {}
+  }
 }
 
 // 拒绝的输出契约（按 hook 事件分派 stdout/stderr/exitCode）抽在
