@@ -80,30 +80,53 @@ H5 问的问题（「它刚做完的那一段交付了吗」）是错的：多�
 同一条结论也写在 `hooks/lib/deliverable.mjs` 的头部注释里（改代码的人从那边进来，改
 阶段链的人从这边进来）。
 
-## ⚠️ 扩到 S6–S8 时要回来重算 H5a 的「静默集合」（M1b 终审记）
+## H5a 的「静默集合」（M2a Task 6 重算，原 M1b 终审记的坑已填）
 
-`gate.mjs` 的 H5a 在 `skipped === 'role-not-in-stage'` 时，会先用花名册的传递闭包排掉
-「返回的是一个合法的层级协调者」再发 warning——否则它会在 S5 正路上必然误报（`/at` 的 S5
-是「派 `at-architect` 去分发」，而 `S5.role` 是 `at-backend`），而最省事的消警告方式
+`gate.mjs` 的 H5a 在 `skipped === 'role-not-in-stage'` 时，会先排掉「返回的是一个合法的
+层级协调者，**且当前阶段确实还没做完**」再发 warning——否则它会在 S5 正路上必然误报（`/at`
+的 S5 是「派 `at-architect` 去分发」，而 `S5.role` 是 `at-backend`），而最省事的消警告方式
 （把 `state.stage` 改回旧阶段）恰好制造它警告的那个失效。
 
-被静默的**充要条件**是：**返回的角色能（传递地）派发到 `stages[state.stage].role`。**
+被静默的**充要条件**曾经只有一半（M1b 终审记的版本）：**返回的角色能（传递地）派发到
+`stages[state.stage].role`。** 这条在 M1 里是完整的——S5 是 M1 的最后一段，「`state.stage`
+停在旧阶段」这个失效形状在 M1 里根本走不到，所以静默集合非空但覆盖不到任何真实的失效。
+**接上 S6–S8 之后这条近似不再充分**：实际在 S6、而 `state.stage` 还停在 S5 时，任何能传递
+派到 `at-backend` 的协调者返回都会被静默——那正是「停在旧阶段」的标准形状，也正是这条告警
+存在的理由。M2a Task 6 补上了缺的那一半（`docs/11` §1.1 点名、§5.8 结清）：
 
-在 M1 的链上这条是完整的，逐段核过：
+被静默的**充要条件现在是两条同时成立**：
 
-| `state.stage` | 该段 `role` | 谁派得到它 | 会被静默吗 |
-|---|---|---|---|
-| S1 / S4 | `at-pm` | 没有角色派得到 `at-pm`（`tests/roster-closure.test.mjs` 钉着） | 不会 |
-| S2 / S3 | `at-product` / `at-architect` | 只有 `at-pm` 与 `__main__` | 实际上不会——返回的角色不会是它们 |
-| S5 | `at-backend` | `at-architect`、`at-product` | **会**（两个都会，不止 `at-architect`） |
+1. 返回的角色能（传递地）派发到 `stages[state.stage].role`（`isCoordinatorFor`，判据不变）；
+2. **且** `stages[state.stage]` 这一段的产物尚未全部齐备（`isStageDone`，M2a 新增的一半）。
 
-而 S5 是 M1 的最后一段，所以「`state.stage` 停在旧阶段」这个失效形状在 M1 里**根本不存在**
-——静默集合非空，但它覆盖不到任何真实的失效。
+只满足第 1 条、不满足第 2 条时，改判成**报**——协调者身份没变，但产物已经齐了、
+`state.stage` 却没有随之推进，这正是「停在旧阶段」。逐段核过，覆盖到 S1–S8：
 
-**M2 接上 S6–S8 之后缺一角**：实际在 S6、而 `state.stage` 还停在 S5 时，任何能传递派到
-`at-backend` 的协调者返回都会被静默——**那正是「停在旧阶段」的标准形状**。扩链时按上面那条
-充要条件把新的静默集合重算一遍，并确认每一段的「停在旧阶段」还有可听见的信号（H5a 之外
-还有 `ledger` 的阶段推进提示，两条对策见上一节，缺一不可）。
+| `state.stage` | 该段 `role` | 谁派得到它 | 第 1 条会成立吗 | 会被静默吗 |
+|---|---|---|---|---|
+| S1 / S4 | `at-pm` | 没有角色派得到 `at-pm`（`tests/roster-closure.test.mjs` 钉着） | 不会 | 不会——不看第 2 条，第 1 条已经否了 |
+| S2 | `at-product` | 只有 `at-pm`/`__main__` | 实际上不会——返回的角色不会是它们 | 不会 |
+| S3 | `at-architect` | 同上 | 同上 | 不会 |
+| S5 | `at-backend` | `at-architect`、`at-product`（两个都会，不止 `at-architect`） | **会** | **看第 2 条**：这一趟派的执行角色都交了 → 报（停在旧阶段）；没交齐 → 静默（合法协调） |
+| S6 | `at-qa` | 没有角色派得到 `at-qa`（当前花名册） | 不会 | 不会 |
+| S7 | `at-acceptance` | 没有角色派得到 `at-acceptance`（当前花名册） | 不会 | 不会 |
+| S8 | `at-pm` | 同 S1/S4 | 不会 | 不会 |
+
+**S5 是当前花名册下唯一一段第 1 条会成立的阶段**，所以 M2a 补的第 2 条也只在这一段真正
+改变行为——`state.stage` 停在 S6/S7/S8 时，第 1 条已经否了，第 2 条不影响结论（`isStageDone`
+仍然会算，只是短路：`false || 不管什么` 恒为 `true`，一样报）。**这不是巧合，是当前花名册的
+拓扑决定的**：`at-qa`/`at-acceptance`/`at-pm` 三个角色都没有任何人能传递派到，花名册变了
+（比如哪天有角色能派到 `at-qa`）这张表要跟着重算，判据本身（上面两条充要条件）不用改。
+
+`isStageDone` 在这里的调用**新增**在 `hooks/gate.mjs` 的 `CHECK === 'deliverable'` 分支，
+与 `CHECK === 'ledger'` 分支里那处（阶段推进提示用）是两个独立调用点，互不共享——两处都要
+在，改一处不代表另一处也改了。`roster` 参数的口径与 `compareArtifacts`/`readiness` 一致：
+`ctx.state?.roster` 不是数组时传 `undefined`（退回全部 `producers`，宁可多报不要漏报）。
+
+**账本比对不受这张静默表约束**（`docs/11` §5.8 结清的裁定）：`buildDriftNotice` 的三个清单
+（`drifted`/`missing`/`unrecorded`）只要非空就照发，跟这次返回是不是合法协调、当前阶段有没有
+`done` 都无关——它审的是「产物内容对不对得上账」，是独立于「阶段有没有推进」的另一个问题，
+两者故意分开判定，即使同一次 `emitLedger` 调用会把两条都发出来。
 
 ## 另一条相关的缺口（M1b 已解决）
 

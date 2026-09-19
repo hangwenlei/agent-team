@@ -414,6 +414,115 @@ test('deliverable 的哑火告警（role-not-in-stage 非协调者）真实输�
   }
 })
 
+// ---- H5a：扩链后「可达性」单独不再充分 —— 必须再看「当前阶段是否已经 done」
+// （M2a Task 6，docs/11 §1.1 点名的入口条件）----
+//
+// 上面那组测试证明了「协调者返回时静默」；但那是 M1 的判据，只到 S5 为止有效——S5 是
+// M1 的最后一段，「state.stage 停在 S5」这个形状在 M1 里根本走不到。接上 S6–S8 之后，
+// 实际在 S6、state.stage 却还停在 S5 时，任何能传递派到 at-backend 的协调者返回都会
+// 被静默——那正是「停在旧阶段」的标准形状，也正是这条告警存在的理由。
+// hooks/gate.mjs 的判据因此从 `!coordinator` 改成 `!coordinator || stageDone`：
+// 协调者身份只回答「这次返回本身合不合法」，「当前阶段是否已经 done」是第二个独立信号，
+// 两者都要问。
+//
+// 三行真值表各占一个 test()（docs/11 §3.3 第 1 条：变异验证里期望变红的断言必须自己
+// 占一个 test()）。三份夹具的关键字段集中声明在这里，测试与下面的锚点读同一份数据，
+// 不是锚点自己抄一份可能漂移的描述。
+const H5A_STAGE_DONE_FIXTURES = {
+  coordinatorNotDone: { stage: 'S5', roster: ['at-backend'], diskArtifacts: [] },
+  coordinatorDone: { stage: 'S5', roster: ['at-backend'], diskArtifacts: ['05-impl/at-backend.md'] },
+  nonCoordinator: { stage: 'S5', roster: ['at-outsider'], diskArtifacts: [] },
+}
+
+test('H5a：协调者返回且当前阶段未 done —— 静默（这是合法的层级协调）', () => {
+  const f = H5A_STAGE_DONE_FIXTURES.coordinatorNotDone
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: f.stage, artifacts: f.diskArtifacts })
+  try {
+    const statePath = join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8'))
+    state.roster = f.roster
+    writeFileSync(statePath, JSON.stringify(state), 'utf8')
+
+    // at-architect 能（传递地）派到 S5 的执行角色 at-backend——合法的层级协调；
+    // 05-impl/at-backend.md 磁盘上还没有，当前阶段没有 done。两条真值合起来是
+    // 「协调者 + 未 done」，判据的第一行：仍然静默。
+    const { stdout } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm',
+      tool_input: { subagent_type: 'agent-team:at-architect' },
+    }, GATE, projectDir)
+
+    assert.equal(stdout, '')
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('H5a：协调者返回但当前阶段已经 done —— 报（这正是「停在旧阶段」）', () => {
+  const f = H5A_STAGE_DONE_FIXTURES.coordinatorDone
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: f.stage, artifacts: f.diskArtifacts })
+  try {
+    const statePath = join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8'))
+    state.roster = f.roster
+    // 账本记录与磁盘内容对齐（哈希对得上），让这条测试只钉「stageDone 分支的 h5a
+    // 措辞」这一件事，不夹带账本比对（Task 4，独立信号）的 unrecorded 噪音——两者
+    // 谁报不报是分开的问题，见下面 emitLedger 调用点与 docs/11 §5.8。
+    state.artifacts = { '05-impl/at-backend.md': sha256OfContract('fixture 05-impl/at-backend.md\n') }
+    writeFileSync(statePath, JSON.stringify(state), 'utf8')
+
+    // 同样是 at-architect 返回，同样能传递派到 at-backend——协调者身份没变。变的是
+    // 05-impl/at-backend.md 这次真的在磁盘上：当前阶段（S5）的产物已经全部齐备，
+    // isStageDone 为真。「协调者」不再是充分的静默理由，这正是判据新增的那一半要抓的
+    // 「停在旧阶段」。断言直接匹配原始 stdout（不先 JSON.parse）：删掉 `|| stageDone`
+    // 之后这里会静默、stdout 变成空字符串，match 在空字符串上干净地失败，不会被
+    // JSON.parse('') 的异常掩盖真实的失败原因。
+    const { stdout } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm',
+      tool_input: { subagent_type: 'agent-team:at-architect' },
+    }, GATE, projectDir)
+
+    assert.match(stdout, /停在旧阶段/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('H5a：非协调者返回 —— 报（判据这一半不变）', () => {
+  const f = H5A_STAGE_DONE_FIXTURES.nonCoordinator
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: f.stage, artifacts: f.diskArtifacts })
+  try {
+    const statePath = join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8'))
+    state.roster = f.roster
+    writeFileSync(statePath, JSON.stringify(state), 'utf8')
+
+    // at-outsider 在花名册里 can_delegate_to 是空——派不到任何人，不是协调者。这一半
+    // 判据（`!coordinator`）是 M1 就有的老行为，这次改动没有碰它，这条测试证明它还在。
+    const { stdout } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm',
+      tool_input: { subagent_type: 'agent-team:at-outsider' },
+    }, GATE, projectDir)
+    const ctx = JSON.parse(stdout).hookSpecificOutput.additionalContext
+
+    assert.match(ctx, /派不到/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 前三条的锚：如果三份夹具其实是同一个场景（比如复制粘贴时忘了改 roster），改一处
+// 实现可能让三条一起绿而什么都没守住（docs/11 §3.3 第 1 条）。三次比较是同一种断言
+// 形状遍历三对互不耦合的数据点，按规矩可以共占一个 test()。
+test('前置条件：上面三条的夹具互不相同——否则三条测的是同一个场景', () => {
+  const triples = Object.values(H5A_STAGE_DONE_FIXTURES).map((f) => [f.stage, f.roster, f.diskArtifacts])
+  assert.notDeepEqual(triples[0], triples[1])
+  assert.notDeepEqual(triples[0], triples[2])
+  assert.notDeepEqual(triples[1], triples[2])
+})
+
 test('H5b 在角色与当前阶段对不上时不拦——fail open，不发 exit 2', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2' })
   try {

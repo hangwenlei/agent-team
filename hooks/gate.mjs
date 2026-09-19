@@ -98,8 +98,12 @@ function isProjectJson(filePath, agentTeamDir) {
 // 对整个 S5 全程哑火 —— **这条告警有能力制造它自己警告的那个失效。**
 //
 // 判据用 hooks/lib/reach.mjs 的传递闭包：能（传递地）派发到当前阶段执行角色的，
-// 就是协调者，静默。paths 传 {} 是有意的——这里只要拓扑可达性，不关心路径归属。
+// 就是协调者。paths 传 {} 是有意的——这里只要拓扑可达性，不关心路径归属。
 // 不另写一份闭包：computeReach 已经处理环与自引用，且已有 14 条测试。
+//
+// ⚠️ 是不是协调者，只回答「这次返回本身合不合法」——判不判定为要静默，还要看当前阶段
+// 是否已经 done（M2a 补，见调用点 stageDone 那段与 docs/11 §5.8）：这个函数本身不变，
+// 变的是调用它的地方怎么用它的结果。
 //
 // ⚠️ 只改**告警条件**，没有削弱 H5 本身：H5a 这条 warning 是「H5 哑掉」的两条对策
 // 之一（另一条是 ledger 在当前阶段产物齐了时的阶段推进提示），
@@ -112,9 +116,12 @@ function isProjectJson(filePath, agentTeamDir) {
 // 这条判据的**固有代价，不是漏网**：按规格 §6.4 自己的触达语义，at-product 确实
 // **有能力**让 at-backend 交付，说它「不是协调者」会与 §6.4 自相矛盾。
 // 代价要认下来：PM 在 S5 误派 at-product 时，H1（花名册里 at-pm → at-product 这条边
-// 存在）与 H2 都零输出，H5a 原本是唯一的机械信号，现在也没了。
-// 判据是「返回角色能传递派到 stages[state.stage].role」——**扩链到 S6–S8 时这个静默
-// 集合要回来重算**，见 stages.README.md。
+// 存在）与 H2 都零输出，H5a 原本是唯一的机械信号，现在也没了——准确地说，是「在这一
+// 阶段产物还没有全部齐备之前」也没了：一旦齐了，调用点的 stageDone 那半会把它重新
+// 报出来（M2a 补，见下面调用点与 docs/11 §5.8）。
+// 判据是「返回角色能传递派到 stages[state.stage].role」——这只是 M2a 新判据的一半，
+// 另一半（当前阶段是否已经 done）在调用点算，不在这个函数里。扩链到 S6–S8 之后重算
+// 出的静默集合见 stages.README.md。
 function isCoordinatorFor(ctx, role) {
   const stageId = ctx.state?.stage
   const stages = ctx.stages
@@ -706,26 +713,53 @@ function main() {
       // 否则和 docs/08 §0 说的「看起来通过了」完全无法区分。
       // 'role-not-in-stage' 尤其值得看一眼：它要么说明这次派发本身不该发生，要么
       // 说明 state.stage 停在旧阶段没推进——后者会让 H5 对整个新阶段全程哑火。
-      // 但它还有**第三种**成因，而且那一种是本分支自己规定的正路：返回的是一个
-      // 合法的层级协调者（S5 派 at-architect 去分发 at-backend）。那一种由
-      // isCoordinatorFor 排掉，理由见那个函数上方（M1b 终审 C4）。
+      // 但它还有**第三种**成因：返回的是一个合法的层级协调者，且当前阶段确实还没做完
+      // （S5 派 at-architect 去分发 at-backend）。那一种由 isCoordinatorFor 排掉，理由
+      // 见那个函数上方（M1b 终审 C4）。
+      //
+      // M2a（docs/11 §1.1）：「能传递派到当前阶段执行角色」这条近似接上 S6–S8 之后不再
+      // 充分——S6 里 state.stage 还停在 S5 时，at-architect/at-product 的一次合法返回，
+      // 与「压根没推进」在 isCoordinatorFor 眼里长一个样，都落在它为真这一侧。补一条
+      // 独立信号：当前阶段的产物是不是已经全部齐了（isStageDone）。协调者返回本身不假，
+      // 但只要产物已经齐了、state.stage 却没跟着推进，就改判成「停在旧阶段」。
+      //
+      // ⚠️ 这是**新增**一处 isStageDone 调用，跟上面 ledger 分支里那处不是同一处（这里是
+      // deliverable 分支，两处互不共享调用点）。roster 传 ctx.state?.roster——不是数组时
+      // 传 undefined 退回全部 producers，口径与下面 compareArtifacts、上面 readiness
+      // 分支一致：state.json 的 roster 字段本身坏掉时，宁可多判一次未推进，不要漏判。
+      const coordinator = isCoordinatorFor(ctx, role)
+      const stageDone = isStageDone({
+        stage: ctx.state?.stage,
+        stages: ctx.stages,
+        artifactExists: ctx.artifactExists,
+        roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
+      })
       // 'unknown-stage' 是 state.json 自己坏了，ledger 那条路径会给出细节。
       // H5b（stop-gate）不发这条：SubagentStop 上没有 additionalContext 这条通道，
       // 而且真拦截不该因为「无话可说」就往 stderr 刷字。
       const notices = []
-      if (CHECK === 'deliverable' && r.skipped === 'role-not-in-stage' && !isCoordinatorFor(ctx, role)) {
-        notices.push(
-          `⚠️ 交付物校验：刚返回的 ${role} 不是当前阶段（state.stage = ` +
-            `${JSON.stringify(ctx.state?.stage)}）的执行者，**而且它也派不到那个执行者**` +
-            `（所以不是一次层级协调），所以这次校验**没有意见**——不是它查过了没问题。` +
-            `两种可能：state.stage 停在旧阶段没推进，那样 H5 会对整个新阶段全程哑火；` +
-            `或者这次派发本身不该发生。去 run 目录核实。` +
-            `⚠️ **不要靠把 state.stage 改回旧阶段来消掉这条**——那正好制造前一种失效。`,
-        )
+      if (CHECK === 'deliverable' && r.skipped === 'role-not-in-stage' && (!coordinator || stageDone)) {
+        const stageLabel = JSON.stringify(ctx.state?.stage)
+        // 两支措辞不能共用同一份文案："而且它也派不到那个执行者"在 coordinator 为真时
+        // 是假话——它明明是合法的协调者，只是这一阶段的产物已经齐了、state.stage 没
+        // 跟着推进。
+        const notice = coordinator
+          ? `⚠️ 交付物校验：刚返回的 ${role} 不是当前阶段（state.stage = ${stageLabel}）的` +
+            `执行者，但它能（传递地）派到当前阶段的执行角色——这原本是合法的层级协调。` +
+            `只是当前阶段的产物已经全部齐备，state.stage 大概率没有随之推进到下一阶段：` +
+            `这正是**停在旧阶段**，H5 会对新阶段全程哑火。去 run 目录核实产物是否真的都已` +
+            `完成，确认后把 state.stage 推进到正确的阶段。`
+          : `⚠️ 交付物校验：刚返回的 ${role} 不是当前阶段（state.stage = ${stageLabel}）的` +
+            `执行者，**而且它也派不到那个执行者**（所以不是一次层级协调），所以这次校验` +
+            `**没有意见**——不是它查过了没问题。两种可能：state.stage 停在旧阶段没推进，` +
+            `那样 H5 会对整个新阶段全程哑火；或者这次派发本身不该发生。去 run 目录核实。` +
+            `⚠️ **不要靠把 state.stage 改回旧阶段来消掉这条**——那正好制造前一种失效。`
+        notices.push(notice)
       }
       // 账本比对：不管上面那条哑火告警发不发，只要三个清单有一个非空就并进同一条——
       // 见上面 driftNotice 计算处的注释。emitLedger 空数组时天然不写 stdout，两条
-      // 告警都不适用时这里保持原来的完全沉默。
+      // 告警都不适用时这里保持原来的完全沉默。账本比对不受这条静默表约束（docs/11
+      // §5.8）：它审的是产物内容对不对得上账，跟阶段有没有推进是两件独立的事。
       if (driftNotice) notices.push(driftNotice)
       emitLedger(spec.event, notices)
       process.exit(0)
