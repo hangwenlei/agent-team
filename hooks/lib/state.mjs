@@ -63,6 +63,33 @@ export function nextStage(stages, current) {
   return ids[i + 1]
 }
 
+// 规格 §4.3 驳回路由。这张表此前只活在规格里，没有任何代码消费它。
+//
+// contract-conflict 返回 null 是**有意的**：规格 §4.3 的原话是「唯一升级情形：驳回暴露
+// 00-contract.md 自身存在内在矛盾——非执行错误，只有用户能裁」。那一类不由代码决定回哪，
+// 走 §5.1 的升级路径（ESCALATION_KINDS 已含同名的一类）。
+export const REJECTION_KINDS = ['requirement', 'design', 'implementation', 'contract-conflict']
+
+const REJECT_TARGET = {
+  requirement: 'S2',
+  design: 'S3',
+  implementation: 'S5',
+  'contract-conflict': null,
+}
+
+/**
+ * 驳回路由：kind → 应回退到的阶段 id，或 null。
+ *
+ * 回退本身**不在这个函数里发生**——调用方（未来的 M2b/M2c）把返回值追加进
+ * `history` 一条新记录、把 `stage` 改成这个值，`reworkFromHistory` 会照常从出现
+ * 次数算出返工计数，不需要为「回退」单独开一套计数逻辑（详见 state.mjs 头部与
+ * reworkFromHistory 的注释）。`validateState` 也不需要为回退改一行——它现在不
+ * 校验阶段前后关系，见 tests/state.test.mjs 里钉住这条的回归测试。
+ */
+export function rejectTo(kind) {
+  return typeof kind === 'string' && Object.hasOwn(REJECT_TARGET, kind) ? REJECT_TARGET[kind] : null
+}
+
 /**
  * 当前阶段的 produces 是否已经全部齐了。artifactExists 由调用方注入——与
  * hooks/lib/readiness.mjs 的 decideReadiness、hooks/lib/deliverable.mjs 的

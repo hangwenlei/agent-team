@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { ESCALATION_KINDS, REWORK_LIMIT, isStageDone, nextStage, reworkFromHistory, validateState } from '../hooks/lib/state.mjs'
+import { readFileSync } from 'node:fs'
+import { ESCALATION_KINDS, REJECTION_KINDS, REWORK_LIMIT, isStageDone, nextStage, rejectTo, reworkFromHistory, validateState } from '../hooks/lib/state.mjs'
 
 const STAGES = {
   S1: { role: 'at-pm', requires: [], produces: ['00-contract.md'] },
@@ -213,4 +214,78 @@ test('isStageDone：roster 缺省时按全部 producers 判——不传 roster �
     artifactExists: have('05-impl/at-backend.md'),
   })
   assert.equal(done, false)
+})
+
+// Task 7：驳回路由。规格 §4.3 那张表此前没有任何代码消费它，nextStage 只会前进一格。
+// rejectTo(kind) 把那张表搬进代码，成为单一真源。
+test('rejectTo：需求理解错回到 S2', () => {
+  assert.equal(rejectTo('requirement'), 'S2')
+})
+
+test('rejectTo：设计错回到 S3', () => {
+  assert.equal(rejectTo('design'), 'S3')
+})
+
+test('rejectTo：实现错回到 S5', () => {
+  assert.equal(rejectTo('implementation'), 'S5')
+})
+
+test('rejectTo：契约内在矛盾不由代码决定回哪，返回 null 走升级', () => {
+  assert.equal(rejectTo('contract-conflict'), null)
+})
+
+test('rejectTo：不认识的 kind 返回 null，不抛', () => {
+  assert.equal(rejectTo('nonsense'), null)
+})
+
+test('前置条件：REJECTION_KINDS 恰好是规格 §4.3 的四类', () => {
+  assert.deepEqual([...REJECTION_KINDS], ['requirement', 'design', 'implementation', 'contract-conflict'])
+})
+
+test('contract-conflict 同时也是 ESCALATION_KINDS 的一类——它走升级不走路由', () => {
+  assert.ok(ESCALATION_KINDS.includes('contract-conflict'))
+})
+
+// 这条防的是将来有人顺手给 validateState 加一条「stage 只能前进」的校验，把
+// rejectTo 刚搬进代码的回退路径静默掐断。validateState 现在不校验阶段前后关系，
+// 所以这条测试今天就该是绿的——它的价值在未来，不在今天。
+//
+// 不能复用顶部的 STAGES：那份只到 S3，而且下面「nextStage 按 stages 的书写顺序走」
+// 那条测试依赖 STAGES 恰好在 S3 处到头（nextStage(STAGES, 'S3') === null）。把
+// STAGES 扩到 S5/S6 会让那条测试从绿变红——单独建一份只给这条测试用的 stages 夹具。
+const STAGES_WITH_REWORK = {
+  S5: { role: 'at-backend', requires: [], produces: ['05-impl/at-backend.md'] },
+  S6: { role: 'at-qa', requires: ['05-impl/at-backend.md'], produces: ['06-test-report.md'] },
+}
+
+test('回退后的 state 仍然合法：stage 指向更早的阶段、history 追加一条、rework 跟着涨', () => {
+  const state = {
+    run_id: '20260919-0421-x', stage: 'S5', contract_sha: SHA,
+    roster: ['at-backend'], artifacts: {}, never_invoked: [], escalations: [],
+    rework: { S5: 1 },
+    history: [{ stage: 'S5', at: 'x' }, { stage: 'S6', at: 'x' }, { stage: 'S5', at: 'x' }],
+  }
+  assert.deepEqual(validateState(state, { stages: STAGES_WITH_REWORK }).problems, [])
+})
+
+// 规格 §4.3 ↔ 代码的闭包：那张表的单一真源现在是 rejectTo(kind)，这两条测试把
+// 规格正文与代码钉在一起。**必须成对**——下面这条从规格正则解析出三行、逐行核对
+// rejectTo；正则一旦因为规格改排版而匹配不到，循环零次，那条测试会全绿而不是报错。
+// 紧跟着的前置条件测试就是防这个：钉住「真的解析出了 3 行」。
+//
+// ⚠️ 用 Write 工具落的这两条，没有走 Bash heredoc——heredoc 会吞掉正则里 \| 与 \d
+// 的反斜杠，导致测试假绿（M1c 终审复评踩过这个坑）。
+test('规格 §4.3 表里的每一行都能在 rejectTo 里命中', () => {
+  const spec = readFileSync(new URL('../docs/superpowers/specs/2026-09-15-agent-team-plugin-design.md', import.meta.url), 'utf8')
+  const rows = [...spec.matchAll(/^\| (需求理解错|设计错|实现错) \| .*? \| (S\d) → S8 \|$/gm)]
+  const byLabel = { 需求理解错: 'requirement', 设计错: 'design', 实现错: 'implementation' }
+  for (const m of rows) {
+    assert.equal(rejectTo(byLabel[m[1]]), m[2], `规格 §4.3 的「${m[1]}」写的是回到 ${m[2]}，rejectTo 答的是 ${rejectTo(byLabel[m[1]])}`)
+  }
+})
+
+test('前置条件：上一条真的从规格里解析出了 3 行——否则它是空转', () => {
+  const spec = readFileSync(new URL('../docs/superpowers/specs/2026-09-15-agent-team-plugin-design.md', import.meta.url), 'utf8')
+  const rows = [...spec.matchAll(/^\| (需求理解错|设计错|实现错) \| .*? \| (S\d) → S8 \|$/gm)]
+  assert.equal(rows.length, 3)
 })
