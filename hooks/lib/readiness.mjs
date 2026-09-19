@@ -40,9 +40,20 @@ export function decideReadiness({ targetRole, stages, artifactExists, roster }) 
   // 已知边界（Task 3 评审 Minor 3，与下面 produces 那条同类）：某个阶段条目
   // 手误漏写 role（s.role 是 undefined）时，这个 filter 会让它匹配不上任何
   // 真实 targetRole，整段既不属于任何角色、也就没人会替它跑这条门禁——
-  // 是配置错误，不是这个函数的职责，当前 stages.json 五个阶段 role 都是
+  // 是配置错误，不是这个函数的职责，当前 stages.json 八个阶段 role 都是
   // 非空字符串，未做改动。
-  const mine = Object.entries(stages).filter(([, s]) => s.role === targetRole)
+  //
+  // M2a 整分支终审发现：这里原本写的是 `s.role === targetRole`（单数），是 `<role>`
+  // 消费方里的**第十处**，也是两轮穷举都没照到的那一处——前两轮 grep 的是 `.produces`，
+  // 而这一行读的是 `.role`。后果：`at-frontend`/`at-ui`/`at-ios`/`at-android` 是 S5 的
+  // 合法产者，但 `mine` 对它们恒为空数组 → 下一行直接放行 → **它们的 requires
+  // （03-arch.md、04-dispatch.md）一次都不会被检查**。真实子进程实测：04-dispatch.md
+  // 缺失时，派 at-backend 被 deny，派其余四个全部零输出放行——H2 存在的理由就是
+  // 「不要跳过前置」，这四个角色对它完全免疫，而同一趟里 at-backend 会被拦，
+  // 行为不对称，排查时极易误判成「H2 好着呢」。
+  //
+  // 与 Task 9 修掉的第九处（deliverable.mjs 的归属判据）是同一族、同一修法。
+  const mine = Object.entries(stages).filter(([, s]) => stageRoles(s).includes(targetRole))
 
   if (mine.length === 0) return { decision: 'allow' }
 

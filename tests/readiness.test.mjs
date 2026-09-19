@@ -170,3 +170,62 @@ test('前置条件：同一夹具传合法 roster 时也 deny——上一条不�
   })
   assert.equal(r.decision, 'deny')
 })
+
+// M2a 整分支终审发现的**第十处** <role> 消费方：H2 的归属判据。
+//
+// 终审实测（真实子进程 gate.mjs readiness，04-dispatch.md 缺失）：
+//   派 at-backend  → deny
+//   派 at-frontend → allow（零输出）  ← 它是 S5 的合法产者
+//   派 at-ui/at-ios/at-android → 同样 allow
+// 也就是说这四个角色**对 H2 完全免疫**，requires 一次都不会被检查。
+//
+// 为什么两轮穷举都没照到：前两轮 grep 的是 `.produces`，而这一行读的是 `.role`。
+// **穷举的范围本身也会漏。**
+//
+// 终审还验了一件事：把它修对之后全量 505/0 **一条都不红**——说明零测试钉住这个错误
+// 行为，它不是有意裁定，是漏网。这几条就是补上那个零覆盖。
+const S5_MULTI_READY = {
+  S4: { role: 'at-pm', requires: [], produces: ['04-dispatch.md'] },
+  S5: {
+    role: 'at-backend',
+    producers: ['at-backend', 'at-frontend', 'at-ui'],
+    requires: ['04-dispatch.md'],
+    produces: ['05-impl/<role>.md'],
+  },
+}
+
+test('H2：S5 的非 role 产者（at-frontend）前置缺失时同样被拒——不能对 H2 免疫', () => {
+  const r = decideReadiness({
+    targetRole: 'at-frontend',
+    stages: S5_MULTI_READY,
+    artifactExists: () => false,
+  })
+  assert.equal(r.decision, 'deny')
+})
+
+test('H2：S5 的 role 本身（at-backend）前置缺失时被拒——与上一条对称，证明不是只有一半在工作', () => {
+  const r = decideReadiness({
+    targetRole: 'at-backend',
+    stages: S5_MULTI_READY,
+    artifactExists: () => false,
+  })
+  assert.equal(r.decision, 'deny')
+})
+
+test('H2：S5 的非 role 产者前置齐备时放行——上一条的拒不是无条件拒', () => {
+  const r = decideReadiness({
+    targetRole: 'at-frontend',
+    stages: S5_MULTI_READY,
+    artifactExists: (p) => p === '04-dispatch.md',
+  })
+  assert.equal(r.decision, 'allow')
+})
+
+test('H2：完全不在 producers 里的角色仍然放行（它在这条链上没有阶段）', () => {
+  const r = decideReadiness({
+    targetRole: 'at-outsider',
+    stages: S5_MULTI_READY,
+    artifactExists: () => false,
+  })
+  assert.equal(r.decision, 'allow')
+})
