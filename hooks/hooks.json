@@ -36,6 +36,13 @@
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/gate.mjs", "contract"],
             "timeout": 30,
             "statusMessage": "校验契约保护…"
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/gate.mjs", "rework"],
+            "timeout": 30,
+            "statusMessage": "校验返工预算…"
           }
         ]
       }

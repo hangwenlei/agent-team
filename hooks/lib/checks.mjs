@@ -18,6 +18,10 @@ export const CHECKS = {
   readiness: { event: 'PreToolUse', toolNames: ['Agent'], failClosed: false },
   writepath: { event: 'PreToolUse', toolNames: ['Edit', 'Write', 'NotebookEdit'], failClosed: true },
   contract: { event: 'PreToolUse', toolNames: ['Edit', 'Write', 'NotebookEdit'], failClosed: true },
+  // H6 返工预算写时强制（Task 5，M2a）。挂在与 writepath/contract 同一组 matcher 上，
+  // 同样 fail closed——decideRework 判出 ok:false 时必须真的挡住这次写入，理由见
+  // hooks/lib/rework-guard.mjs 头部。
+  rework: { event: 'PreToolUse', toolNames: ['Edit', 'Write', 'NotebookEdit'], failClosed: true },
   deliverable: { event: 'PostToolUse', toolNames: ['Agent'], failClosed: false },
   'stop-gate': { event: 'SubagentStop', toolNames: null, failClosed: false },
   // ledger 不是门禁——它永不拒绝，只在 PostToolUse 上用 additionalContext 把 PM

@@ -17,6 +17,7 @@ import { readProjectConfig, readRunContext } from './lib/runctx.mjs'
 import { decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
+import { decideRework } from './lib/rework-guard.mjs'
 import { decideDeliverable } from './lib/deliverable.mjs'
 import { isControlFile } from './lib/control-files.mjs'
 import { computeReach } from './lib/reach.mjs'
@@ -410,6 +411,93 @@ function main() {
       runDir: ctx.runDir,
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
+  }
+
+  if (CHECK === 'rework') {
+    // H6 返工预算写时强制（规格 §4.2 ③；docs/11 §1.2 的缺口；完整论证见
+    // hooks/lib/rework-guard.mjs 头部，不在这里重复）。判定本身（"新的比旧的少"）
+    // 是纯函数 decideRework；这一段只做三件事：认出目标是不是 runs/*/state.json、
+    // 把 Edit/Write 的 tool_input 拆成 before/after 两份 JSON、deny 时 fail closed。
+    //
+    // ⚠️ 不经过 readRunContext。这条判据结构上就是「任意 run 的 state.json」——
+    // isControlFile 的 runs/*/state.json 模式本来就是"不只是当前那个"语义（一个
+    // 角色去写别的 run 的 state.json 同样是在动编排层的账本，见
+    // hooks/lib/control-files.mjs 头部），不依赖"当前是哪个 run"。挂 ctx 会平白
+    // 多出 no-run/unreadable 两支要分派，而这条检查根本用不上：agentTeamDir 只是
+    // .agent-team 在哪，跟 readRunContext(projectDir, ...) 内部算出来的 base 是
+    // 同一条路径（join(projectDir, '.agent-team')），这里直接算一遍，不必先读
+    // current-run/state.json/stages.json 一整套只为了拿这一个字符串。
+    //
+    // ⚠️ 不豁免任何调用者（不像 H4 豁免 PM）。state.json 只有 PM 写得了是 H3 的
+    // 事；但"能写"不等于"能把计数改小"，这条要拦的恰恰是 PM 自己——规格 §4.2 ③
+    // 的"不可重置"没有对写者身份留口子，理由同样写在 rework-guard.mjs 头部。
+    //
+    // 判据只认「runs/*/state.json」这一个模式，不认另外三个控制文件
+    // （current-run/project.json/reach.json）——复用 isControlFile（已经确认这次
+    // 写入落在四个已登记控制文件模式之一），再叠一个 endsWith('/state.json') 去
+    // 消歧：四个模式里只有 runs/*/state.json 以它结尾，不需要另写一份路径匹配
+    // （brief 明令：这个仓库为「同一份知识写两份」栽过四次）。
+    const filePath =
+      input.tool_name === 'NotebookEdit'
+        ? input?.tool_input?.notebook_path
+        : input?.tool_input?.file_path
+
+    const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+    const target = typeof filePath === 'string' ? norm(filePath) : null
+
+    if (
+      input.tool_name !== 'NotebookEdit' &&
+      target &&
+      isControlFile(filePath, agentTeamDir) &&
+      target.endsWith('/state.json')
+    ) {
+      let beforeText
+      try {
+        beforeText = readFileSync(filePath, 'utf8')
+      } catch {
+        // 读不到（本趟第一次写、或者别的 I/O 问题）：当 before = null，decideRework
+        // 自己会把"旧版本不存在"判成放行——见该函数头部注释。
+        beforeText = null
+      }
+
+      // 算新内容。Write 的新全文就是 tool_input.content；Edit 的语义是"对旧文本
+      // 套用一次 old_string → new_string 的替换"，磁盘上的旧文本已经拿到手，这里
+      // 确定性地重放同一次替换，不去猜——replace_all 缺省当 false，与真实 Edit
+      // 工具的默认语义一致（只替换第一次出现，且要求 old_string 在文件里存在）。
+      // old_string 在磁盘原文里找不到时算不出确定的新内容，按"parse 不出来"同一个
+      // 理由放行，不猜第二种可能。NotebookEdit 不适用：它的 schema 里没有
+      // file_path/content/old_string 这套字段，上面的外层条件已经把它整个排除。
+      let afterText = null
+      if (input.tool_name === 'Write') {
+        afterText = typeof input?.tool_input?.content === 'string' ? input.tool_input.content : null
+      } else if (input.tool_name === 'Edit' && typeof beforeText === 'string') {
+        const { old_string, new_string, replace_all } = input?.tool_input ?? {}
+        if (typeof old_string === 'string' && typeof new_string === 'string') {
+          if (replace_all) {
+            afterText = beforeText.split(old_string).join(new_string)
+          } else {
+            const i = beforeText.indexOf(old_string)
+            afterText =
+              i === -1 ? null : beforeText.slice(0, i) + new_string + beforeText.slice(i + old_string.length)
+          }
+        }
+      }
+
+      const parseOrNull = (text) => {
+        if (typeof text !== 'string') return null
+        try {
+          return JSON.parse(text)
+        } catch {
+          // 写坏的 state.json 不归这里管——parse 不出来就放行，deny 会让 PM 连
+          // "把文件修回去"都做不到，与 gate.mjs 里 I2 豁免同一个理由。写坏的内容
+          // 由 ledger 的 kind:'state' 报出来（事后告警，不是这里的事）。
+          return null
+        }
+      }
+
+      const r = decideRework({ before: parseOrNull(beforeText), after: parseOrNull(afterText) })
+      if (!r.ok) denyAndExit(r.reason, spec.event)
+    }
   }
 
   if (CHECK === 'ledger') {
