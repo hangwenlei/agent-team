@@ -13,7 +13,7 @@
 // validateState 一次报全部问题而不是遇到第一个就返回：调用方是 ledger，它把 problems
 // 一次性交给 PM；分次报会让 PM 改一条、再撞一条，来回好几轮。
 
-import { producedNames, stageRoles, expandProduces } from './stages.mjs'
+import { producedNames, expandProduces, stageRolesInRun } from './stages.mjs'
 
 const SHA_RE = /^sha256:[0-9a-f]{64}$/
 const RUN_ID_RE = /^\d{8}-\d{4}-[a-z0-9][a-z0-9-]*$/
@@ -89,9 +89,10 @@ export function nextStage(stages, current) {
 export function isStageDone({ stage, stages, artifactExists, roster }) {
   const current = isPlainObject(stages) ? stages[stage] : undefined
   if (!current) return false
-  const roles = stageRoles(current)
-  const scoped = Array.isArray(roster) ? roles.filter((r) => roster.includes(r)) : roles
-  const names = expandProduces(current, scoped)
+  // 「这一阶段在这一趟里的产出角色」走 stages.mjs 的 stageRolesInRun，不在这里自己
+  // 再写一遍 roster 过滤——Task 3 评审发现 1：这段逻辑原本在这里和 expectedArtifacts
+  // 各有一份逐字同构的实现，现已收敛成一处。
+  const names = expandProduces(current, stageRolesInRun(current, roster))
   if (names.length === 0) return false
   return names.every((p) => artifactExists(p))
 }

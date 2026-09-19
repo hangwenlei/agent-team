@@ -58,16 +58,29 @@ export function expandProduces(stage, roles) {
   return out
 }
 
+/** 这一阶段**在这一趟里**的产出角色：`stageRoles(stage) ∩ roster`。roster 不是数组时
+ * （缺省、null、传错类型）退回全部 `stageRoles`——「没告诉我这趟派了谁」不等于「一个
+ * 都没派」，退回更宽的集合，宁可多算不要漏算。
+ *
+ * ⚠️ 这一段逻辑有两个消费方（本文件的 expectedArtifacts、state.mjs 的 isStageDone），
+ * Task 3 交付时它们各写了一份逐字同构的实现（一个用 Set.has、一个用 .includes）。
+ * 评审发现 1 点名了这一处，并预判 Task 4 接线 compareArtifacts 时会需要第三份——
+ * 收敛在这里，第三份就不可能出现。这正是本文件头部那条「多处需要同一份知识时只留一份」
+ * 的适用场景，不要再往回抄。 */
+export function stageRolesInRun(stage, roster) {
+  const roles = stageRoles(stage)
+  if (!Array.isArray(roster)) return roles
+  const inRun = new Set(roster.filter((r) => typeof r === 'string'))
+  return roles.filter((r) => inRun.has(r))
+}
+
 /** 这一趟**该有**的产物名。<role> 只按 roster ∩ producers 展开；不含占位符的条目不受
  * roster 影响（S1 的产物与谁被派了无关）。roster 缺省时退回全部 producers。 */
 export function expectedArtifacts(stages, roster) {
   const out = new Set()
   if (!isPlainObject(stages)) return out
-  const inRun = Array.isArray(roster) ? new Set(roster.filter((r) => typeof r === 'string')) : null
   for (const s of Object.values(stages)) {
-    const roles = stageRoles(s)
-    const scoped = inRun === null ? roles : roles.filter((r) => inRun.has(r))
-    for (const n of expandProduces(s, scoped)) out.add(n)
+    for (const n of expandProduces(s, stageRolesInRun(s, roster))) out.add(n)
   }
   return out
 }
