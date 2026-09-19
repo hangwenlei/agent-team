@@ -163,10 +163,11 @@ U4 与 U7 是同一个机制的两个观测面，只是分别撞在「agent 宇�
 >
 > | 消费方 | `<role>` 展开成 |
 > |---|---|
-> | H3 写路径 | 写入者自己（角色 R 可写 `05-impl/R.md`，当且仅当 `R ∈ producers`） |
+> | H3 写路径（`writepath.mjs` 的 `stageOwnerOfRunPath`） | 写入者自己（角色 R 可写 `05-impl/R.md`，当且仅当 `R ∈ producers`） |
+> | `ledger` 的 `produce` 回传 | 写入者自己——**与上一行共用同一个 `stageOwnerOfRunPath`**，不是两个改动点（M1c 终审去重时合并的，`gate.mjs` 从 `writepath.mjs` import 它；分叉的代价是 sha 漏回传、产物永远卡在 `unrecorded`） |
 > | 阶段推进判据 `isStageDone` | `roster ∩ producers`（这一趟实际派到的执行角色都交了才算 done） |
 > | 账本比对 `compareArtifacts` | `roster ∩ producers`（与推进判据同集合，否则两者互相打架） |
-> | `validateState` 的 artifacts 键校验 | **全部 `producers`**（账本里记着任何一个合法产者的文件都该被接受） |
+> | `validateState` 的 artifacts 键校验 | **全部 `producers`**（账本里记着任何一个合法产者的文件都该被接受）。M2a 只收紧了推进判据与账本比对，**没有**要求它跟着按 roster 收紧 |
 >
 > 单一真源是 `hooks/lib/stages.mjs`。M1 期间 `stages.json` 把这个模式写成了字面量
 > `["05-impl/at-backend.md"]`，后果见 `docs/11` §5.6。
@@ -308,7 +309,7 @@ S5 重做，所以 S5 在 `history` 里出现两次、`rework.S5` 是 1，而 S6
 | H3 | PreToolUse / Edit\|Write | per-role 写路径隔离（**只管阶段产物与项目路径；控制文件不走这套判据，见 §6.2.1**） | deny | deny（fail closed） |
 | H4 | PreToolUse / Edit\|Write | 契约保护：subagent 写契约 | deny | deny（fail closed） |
 | H5 | `SubagentStop`（真拦截）+ `PostToolUse` / Agent（权威记录） | 交付物校验：声明产出却未写文件 | `SubagentStop`：deny（exit 2 附理由，约 8 次补救机会）；`PostToolUse`：记 warning，不 block | `SubagentStop`：allow（fail open，流程辅助）；`PostToolUse`：记 warning |
-| H6 | 返工预算 | `PreToolUse` / `^(Edit\|Write\|NotebookEdit)$` | **fail closed** | 只对 `runs/*/state.json` 生效。只拦**减少**（`history` 变短、某阶段出现次数变少、`rework` 低于派生值、`rework` 超 `REWORK_LIMIT`），不碰增加——PM 每推进一个阶段都要正常重写这个文件 |
+| H6 | PreToolUse / Edit\|Write | 返工预算写时强制：只对 `runs/*/state.json` 生效，只拦**减少**（`history` 变短、某阶段出现次数变少、`rework` 低于派生值、`rework` 超 `REWORK_LIMIT`），不碰增加——PM 每推进一个阶段都要正常重写这个文件 | deny | deny（fail closed）；新旧任一 parse 不出 JSON 时放行，见 §4.2 ③ |
 
 **H5 为什么要两道**（M1 · U5 实测补，见 `docs/07-U5-U6-U8-实测结论.md`）：`SubagentStop`
 返回 exit 2 确实能阻止 subagent 停止、逼它补交付物，但平台的重试有上限——实测约 9 次，
