@@ -1,4 +1,9 @@
-// agents/ 目录下六个角色文件的完整文件名——单一真源。
+// agents/ 目录下角色文件的完整文件名——单一真源。
+//
+// M2a Task 2：从 M1c 留下的六个（含 at-outsider 这个测试替身）扩到十一个，新增
+// at-ui / at-ios / at-android / at-qa / at-acceptance 五个占位符（真正文在 M2b）。
+// 下面这段「修复轮 2」的叙述写于还只有六个文件的时候，数字保留原样，不因为后续
+// 扩张而回改——它记的是那一次修复本身，不是这个常量当下的大小。
 //
 // 修复轮 2（评审发现 1）：`tests/tool-surface.test.mjs` 与 `tests/agents.test.mjs` 都
 // 需要「agents/ 目录下恰好是这六个文件」这条身份锚点，此前只有后者有（写成
@@ -18,10 +23,15 @@
 // 相同的 `norm()` 真的分叉过），这六个文件名就是这样一份知识——两个测试文件各写一份
 // 硬编码数组，日后加/删角色时只改一份、另一份留着旧值，比对会悄悄失效。
 export const EXPECTED_AGENTS = [
+  'at-acceptance.md',
+  'at-android.md',
   'at-architect.md',
   'at-backend.md',
   'at-frontend.md',
+  'at-ios.md',
   'at-outsider.md',
   'at-pm.md',
   'at-product.md',
+  'at-qa.md',
+  'at-ui.md',
 ]

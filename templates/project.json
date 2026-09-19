@@ -4,12 +4,15 @@
     "frameworks": [],
     "package_manager": "npm"
   },
-  "available_roles": ["at-product", "at-architect", "at-backend", "at-frontend"],
+  "available_roles": ["at-product", "at-architect", "at-backend", "at-frontend", "at-ui", "at-ios", "at-android", "at-qa", "at-acceptance"],
   "paths": {
     "at-product": ["docs/product/"],
     "at-architect": ["docs/arch/"],
     "at-backend": ["src/server/", "src/shared/"],
-    "at-frontend": ["src/web/", "src/shared/"]
+    "at-frontend": ["src/web/", "src/shared/"],
+    "at-ui": ["docs/ui/"],
+    "at-ios": ["src/ios/"],
+    "at-android": ["src/android/"]
   },
   "build": "npm run build",
   "test": "npm test"

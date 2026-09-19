@@ -5,5 +5,10 @@
   "at-architect":   { "can_delegate_to": ["at-backend", "at-frontend"] },
   "at-backend":     { "can_delegate_to": [] },
   "at-frontend":    { "can_delegate_to": [] },
+  "at-ui":          { "can_delegate_to": [] },
+  "at-ios":         { "can_delegate_to": [] },
+  "at-android":     { "can_delegate_to": [] },
+  "at-qa":          { "can_delegate_to": [] },
+  "at-acceptance":  { "can_delegate_to": [] },
   "at-outsider":    { "can_delegate_to": [] }
 }

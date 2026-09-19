@@ -173,8 +173,21 @@ test('花名册的派发边拓扑没有变——变了就必须回来确认触�
       'at-architect': ['at-backend', 'at-frontend'],
       'at-backend': [],
       'at-frontend': [],
+      'at-ui': [],
+      'at-ios': [],
+      'at-android': [],
+      'at-qa': [],
+      'at-acceptance': [],
       'at-outsider': [],
     },
+    // M2a Task 2：五个新角色（at-ui/at-ios/at-android/at-qa/at-acceptance）加进
+    // roster.json 时都是孤立叶子——can_delegate_to 是空数组，也没有任何既有角色的
+    // can_delegate_to 指向它们。用 computeReach 比对新旧两版拓扑：既有七个节点的边
+    // 一条没变，新五个节点各自的 reach 只等于它们自己在 project.paths 里认领的路径
+    // （目前是空，见 templates/project.json），不放大任何人的触达。brief 原稿建议把
+    // at-ui 等四个直接接进 at-architect/at-product 的 can_delegate_to，但那样会让
+    // roster-sync.test.mjs 的「at-pm 白名单必须覆盖整个派发宇宙」变红——at-pm.md 的
+    // Agent(...) 白名单本任务不改（真正接线是 M2b 的事），所以这轮全部留成孤立节点。
     'roster.json 的派发边变了。这不是让你改这条断言了事：一条 can_delegate_to 的变动' +
       '会改变各角色的**实际写入触达**（规格 §6.4 / docs/09 账二）——先用 computeReach ' +
       '算一遍新旧两版，确认哪个角色的触达被放大、放大到谁的地盘，确认这是有意的之后再' +

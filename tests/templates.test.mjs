@@ -77,6 +77,28 @@ test('project.json 模板的 available_roles 都是花名册里的角色，且�
   }
 })
 
+// M2a Task 2 / docs/11 §1.3：at-qa 与 at-acceptance 故意不认领任何 project.paths——
+// 「可用班底」再也不能从 paths 的键集合派生，available_roles 是唯一来源。漏了它，
+// /at 收尾会静默漏算 never_invoked，正是规格 §4.2 ④ 引用 aws-samples「安全架构师
+// 角色整个多日项目从未被调用且无人发现」要防的东西。
+test('available_roles 不等于 paths 的键集合——at-qa/at-acceptance 不认领路径，班底只能从 available_roles 读', () => {
+  const p = JSON.parse(readFileSync(new URL('../templates/project.json', import.meta.url), 'utf8'))
+  const pathKeys = Object.keys(p.paths).sort()
+  const roles = [...p.available_roles].sort()
+  assert.notDeepEqual(roles, pathKeys)
+})
+
+// 上面那条是否定式（notDeepEqual）：光有它时，两个集合以任何方式不等都会绿——包括
+// 「paths 里多了个 available_roles 没有的角色」这种反向错误（那恰恰是危险的方向，
+// H3 写路径隔离会把权限扩到一个未登记在案的角色头上）。这条是它的正向自检锚，钉死
+// 「不等」具体是哪种不等：available_roles 比 paths 的键多，且多出来的正是不认领
+// 路径的那两个角色，不多不少。
+test('前置条件：available_roles 真的比 paths 的键多，且多出来的正是不认领路径的那两个', () => {
+  const p = JSON.parse(readFileSync(new URL('../templates/project.json', import.meta.url), 'utf8'))
+  const extra = p.available_roles.filter((r) => !Object.hasOwn(p.paths, r)).sort()
+  assert.deepEqual(extra, ['at-acceptance', 'at-qa'])
+})
+
 // docs/09 账一实现约束 1：控制文件清单只有一处真源。模板里再抄一份就是第二处。
 test('模板里不得再抄一份控制文件清单', () => {
   for (const f of readdirSync(url('templates'))) {
