@@ -67,8 +67,12 @@ export function decideRework({ before, after }) {
   }
   for (const [stage, raw] of Object.entries(rw)) {
     const v = Number(raw)
-    if (!Number.isInteger(v) || v > REWORK_LIMIT) {
-      return { ok: false, reason: `rework["${stage}"] 是 ${JSON.stringify(raw)}，不是合法整数或超过硬上限 ${REWORK_LIMIT}（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级）。` }
+    // 下界 `v < 0` 是修复轮复评补的：原来这里只有上界，而第二道 validateState
+    // （state.mjs，事后告警）写的是 `!Number.isInteger(v) || v < 0`——**fail-closed
+    // 的写时闸比 fail-open 的事后告警更宽松，方向是反的**。实测 rework:{"S5":-1}
+    // 在该阶段没有返工史时被这里放行、被 validateState 报出来。
+    if (!Number.isInteger(v) || v < 0 || v > REWORK_LIMIT) {
+      return { ok: false, reason: `rework["${stage}"] 是 ${JSON.stringify(raw)}，不是 0 到 ${REWORK_LIMIT} 之间的整数（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级）。` }
     }
   }
   return { ok: true }

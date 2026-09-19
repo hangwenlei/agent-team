@@ -116,3 +116,52 @@ test('rework 是合法数字 3、且没有变化：放行——修法不能连�
   })
   assert.equal(r.ok, true)
 })
+
+// 修复轮 1 的定向复评补的三条。
+//
+// 前两条钉的是判据④里 `!Number.isInteger(v)` 那一半。复评实测：把它删掉只留
+// `v > REWORK_LIMIT`，套件 471/0 **零红**，而带着这个变异、从打满状态追加第 5 条 S5，
+// rework 写成 "3abc" / {} / [1,2] / "NaN" 全部 ALLOW——第 4 轮返工落地。
+//
+// 根因是 NaN 参与的比较恒为 false：判据③的 `NaN < 4` 假、判据④的 `NaN > 3` 也假，
+// 两道一起被绕过去。与修复轮之前那个字符串绕过**完全同形，只是深一层**。
+//
+// 上一轮补的三条回归用的是 "4" / [4] / "99"——它们都能干净地转成整数，所以**全部
+// 锚在 `v > REWORK_LIMIT` 那一半上**，新写的另一半裸着。这正是 docs/11 §3.3 第 1 条
+// 要防的：凡是变异验证里期望某条断言变红的，那条断言必须自己占一个 test()。
+test('rework 写成转不成数字的字符串 "3abc"、且 history 追加到第 5 次出现：拒', () => {
+  const r = decideRework({
+    before: st(H('S5', 'S5', 'S5', 'S5'), { S5: 3 }),
+    after: st(H('S5', 'S5', 'S5', 'S5', 'S5'), { S5: '3abc' }),
+  })
+  assert.equal(r.ok, false)
+})
+
+test('rework 写成对象 {}（Number({}) 是 NaN）、且 history 追加到第 5 次出现：拒', () => {
+  const r = decideRework({
+    before: st(H('S5', 'S5', 'S5', 'S5'), { S5: 3 }),
+    after: st(H('S5', 'S5', 'S5', 'S5', 'S5'), { S5: {} }),
+  })
+  assert.equal(r.ok, false)
+})
+
+// 判据④的**下界**。复评发现原来这里只有上界，而第二道 validateState 写的是
+// `!Number.isInteger(v) || v < 0`——fail-closed 的写时闸比 fail-open 的事后告警更宽松，
+// 方向反了。这条钉住补上的那半。
+test('rework 写成负数、且该阶段没有返工史（判据③管不到）：拒', () => {
+  const r = decideRework({
+    before: st(H('S1'), {}),
+    after: st(H('S1', 'S2'), { S2: -1 }),
+  })
+  assert.equal(r.ok, false)
+})
+
+// Minor 6 点名的那一格：rework 改小 × Write。此前 history 删短只走 Write、
+// rework 改小只走 Edit，2×2 矩阵缺这一格。纯函数层与工具无关，这条补的是对称性。
+test('rework 改小、走 Write 路径的那一格：拒（与 Edit 路径同判据）', () => {
+  const r = decideRework({
+    before: st(H('S5', 'S5'), { S5: 1 }),
+    after: st(H('S5', 'S5'), { S5: 0 }),
+  })
+  assert.equal(r.ok, false)
+})
