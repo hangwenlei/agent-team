@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { decideWritePath } from '../hooks/lib/writepath.mjs'
+import { decideWritePath, stageOwnerOfRunPath } from '../hooks/lib/writepath.mjs'
+import { norm } from '../hooks/lib/path-norm.mjs'
 
 const PROJECT = {
   paths: {
@@ -27,6 +28,21 @@ const AT = '/proj/.agent-team'
 
 const call = (role, filePath) =>
   decideWritePath({ role, filePath, project: PROJECT, runDir: RUN, stages: STAGES, agentTeamDir: AT })
+
+// Task 4：S5 多产者夹具，自建一份、不读真 stages.json——单测要能独立于真实配置。
+// 形状照抄上面 STAGES 的风格，只是 S5 换成 producers + <role> 模式。
+const STAGES_M2A = {
+  S1: { role: 'at-pm', requires: [], produces: ['00-contract.md'] },
+  S5: {
+    role: 'at-backend',
+    producers: ['at-backend', 'at-frontend', 'at-ui'],
+    requires: [],
+    produces: ['05-impl/<role>.md'],
+  },
+}
+
+const callM2a = (role, filePath) =>
+  decideWritePath({ role, filePath, project: PROJECT, runDir: RUN, stages: STAGES_M2A, agentTeamDir: AT })
 
 // ——— docs/09 账一：控制文件 ———
 
@@ -161,14 +177,63 @@ test('run 目录的兄弟目录（同前缀）落到 project.paths 分支——�
   assert.match(r.reason, /project\.json/)
 })
 
-// 整理项 4：producesOf 是把该角色**所有**阶段的 produces 累加起来的，不是只看
-// 第一个阶段。at-pm 同时是 S1（00-contract.md）与 S4（04-dispatch.md）的执行者，
-// 两份都得能写。这是 hooks/lib/writepath.mjs 里 I3 那段缺口注释里唯一还正确的
-// 行为，也是 hooks/lib/deliverable.mjs 里 I4 那条错误语义的对照面——没有测试
-// 钉住的话，将来改 producesOf（比如为了修 I4 而改成"只看某一段"）会静默丢掉它。
-test('同一角色多个阶段的 produces 都能写——producesOf 累加所有阶段，不是只看第一个', () => {
+// 整理项 4：at-pm 同时是 S1（00-contract.md）与 S4（04-dispatch.md）的执行者，
+// 两份都得能写，不是只认第一个命中的阶段。这是 hooks/lib/writepath.mjs 里 I3 那段
+// 缺口注释里唯一还正确的行为，也是 hooks/lib/deliverable.mjs 里 I4 那条错误语义的
+// 对照面——没有测试钉住的话，将来改「是不是我的」这段判定（比如为了修 I4 而改成
+// "只看某一段"）会静默丢掉它。
+// M2a：这条原来的判据是 producesOf（按 s.role 累加该角色所有阶段的 produces）。
+// producesOf 已经删除（它对 <role> 模式的产物恒答"不是我的"，见 writepath.mjs
+// 头部注释），现在改由 stageOwnerOfRunPath 逐阶段找 target 命中哪一个、
+// owner.role === role 是否成立——同样的"多阶段都能写"效果，但不再是一个单独的
+// 累加函数，这条测试名字里的"producesOf"字样已经不对应任何真实函数，只保留
+// 测试意图本身的说明。
+test('同一角色多个阶段的 produces 都能写——不是只认第一个命中的阶段', () => {
   assert.equal(call('at-pm', `${RUN}/00-contract.md`).decision, 'allow')
   assert.equal(call('at-pm', `${RUN}/04-dispatch.md`).decision, 'allow')
+})
+
+// Task 4 Step 4（brief 逐字）：H3 要回答的是「这条路径归谁」，S5 的
+// 05-impl/at-frontend.md 归 at-frontend，不归 S5.role（at-backend）。
+test('S5 多产者：at-frontend 写自己的实现记录，归属算到 at-frontend 而不是 S5.role', () => {
+  const owner = stageOwnerOfRunPath(
+    STAGES_M2A,
+    '/p/.agent-team/runs/r1',
+    norm('/p/.agent-team/runs/r1/05-impl/at-frontend.md'),
+  )
+  assert.equal(owner.role, 'at-frontend')
+})
+
+test('S5 多产者：不在 producers 里的角色名不产生归属', () => {
+  const owner = stageOwnerOfRunPath(
+    STAGES_M2A,
+    '/p/.agent-team/runs/r1',
+    norm('/p/.agent-team/runs/r1/05-impl/at-outsider.md'),
+  )
+  assert.equal(owner, null)
+})
+
+// 上面两条只钉了 stageOwnerOfRunPath 这个纯函数本身。decideWritePath 还有一层
+// "是不是我的"（旧实现叫 producesOf）——这一层曾经对 <role> 模式的产物恒答"不是
+// 我的"：producesOf 按 s.role 字面量比对 stage.produces，S5 的 produces 是
+// ["05-impl/<role>.md"]（含占位符的字面量），永远不可能等于任何一个已经展开好的
+// 目标路径。后果是包括 S5.role 本身（at-backend）在内的**每一个**产者写自己的
+// 05-impl/<role>.md 都会被拒——M2a 想解决的"前端写不进自己的实现记录"那个缺口
+// （docs/11 §5.6）会以另一种方式原样卡住，不会被上面两条纯函数测试抓到（它们不
+// 经过 decideWritePath 的"是不是我的"判定）。下面两条经 decideWritePath 全路径，
+// 分别覆盖 S5.role 本身与非 S5.role 的产者。
+test('S5 多产者：S5.role 本身（at-backend）用 <role> 模式写自己的实现记录放行', () => {
+  assert.equal(callM2a('at-backend', `${RUN}/05-impl/at-backend.md`).decision, 'allow')
+})
+
+test('S5 多产者：非 S5.role 的产者（at-frontend）用 <role> 模式写自己的实现记录放行', () => {
+  assert.equal(callM2a('at-frontend', `${RUN}/05-impl/at-frontend.md`).decision, 'allow')
+})
+
+test('S5 多产者：产者之间互不认领——at-frontend 写 at-backend 的实现记录仍然 deny', () => {
+  const r = callM2a('at-frontend', `${RUN}/05-impl/at-backend.md`)
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /at-backend/)
 })
 
 // 整理项 12：这里原本写的是 at-worker-a——c3dc888 已经把这个 M0 占位名整体

@@ -7,6 +7,16 @@ const STAGES = {
   S1: { role: 'at-pm', requires: [], produces: ['00-contract.md'] },
   S2: { role: 'at-product', requires: [], produces: ['01-prd.md'] },
 }
+// Task 4：S5 多产者夹具，自建一份、不读真 stages.json（跟 tests/writepath.test.mjs
+// 的 STAGES_M2A 同一个理由：单测要能独立于真实配置）。
+const STAGES_M2A = {
+  S5: {
+    role: 'at-backend',
+    producers: ['at-backend', 'at-frontend'],
+    requires: [],
+    produces: ['05-impl/<role>.md'],
+  },
+}
 const A = sha256OfContract('甲\n')
 const B = sha256OfContract('乙\n')
 const bytesOf = (m) => (rel) => (m[rel] === undefined ? null : Buffer.from(m[rel], 'utf8'))
@@ -107,4 +117,49 @@ test('CRLF 与语义相同的 LF 内容不产生假漂移——账本比对必�
     artifactBytes: bytesOf({ '00-contract.md': crlf }),
   })
   assert.deepEqual(r.drifted, [])
+})
+
+// Task 4 Step 7（brief 逐字）：compareArtifacts 现在按 expectedArtifacts（roster ∩
+// producers）而不是 producedNames（全部 producers）展开 <role>。roster 里没有的
+// 角色，它的实现记录不该被算进"这一趟该有的"集合，磁盘上没有也不该报 missing。
+test('S5 多产者：roster 里没有的角色，它的实现记录不会被报成 missing', () => {
+  const r = compareArtifacts({
+    artifacts: {}, stages: STAGES_M2A, roster: ['at-backend'],
+    artifactBytes: bytesOf({}),
+  })
+  assert.deepEqual(r.missing, [])
+})
+
+test('S5 多产者：roster 里有的角色，它的实现记录记了而磁盘没有时报 missing', () => {
+  const r = compareArtifacts({
+    artifacts: { '05-impl/at-frontend.md': A }, stages: STAGES_M2A, roster: ['at-frontend'],
+    artifactBytes: bytesOf({}),
+  })
+  assert.deepEqual(r.missing, [{ name: '05-impl/at-frontend.md', recorded: A }])
+})
+
+// ⚠️ 上面第一条（brief 逐字）名字承诺的是"roster 过滤生效，所以不报 missing"，但
+// 它用的夹具（artifacts: {}，磁盘也是空的）让这条断言在**任何** produced 集合下都
+// 成立：compareArtifacts 只有 Object.hasOwn(recorded, name) 为真时才会把一个名字
+// 送进 missing，而 recorded 是 {}，对任何 name 这个判定恒为 false——missing 恒是
+// []，跟 roster 过滤到底生没生效没有关系。实测验证：把 compareArtifacts 内部改回
+// producedNames(stages)（brief Step 10 变异表第 2 项要求的那个变异）之后手工重算，
+// 这一条**不会**变红（下面两条会）。这正是 docs/11 §3.3 第 2 条点名的那种否定断言
+// ——必须配一条自检才能证明判据真的在工作，不是恒沉默。下面两条是那个自检：用同一份
+// 磁盘内容（at-frontend 的文件真的存在），roster 排除它时不进 unrecorded、roster
+// 不排除它时确实会进 unrecorded——两条对照，"排除"这件事才有可观测的证据。
+test('roster 里没有的角色，它的文件即使在磁盘上也不进 unrecorded——证明它真的被排除在"该有"集合之外，不是上一条 missing 恰好没触发', () => {
+  const r = compareArtifacts({
+    artifacts: {}, stages: STAGES_M2A, roster: ['at-backend'],
+    artifactBytes: bytesOf({ '05-impl/at-frontend.md': '甲\n' }),
+  })
+  assert.deepEqual(r.unrecorded, [])
+})
+
+test('正向自检锚：同样的磁盘内容，roster 缺省（退回全部 producers）时 at-frontend 真的会被报进 unrecorded——证明上一条的判据不是恒沉默', () => {
+  const r = compareArtifacts({
+    artifacts: {}, stages: STAGES_M2A,
+    artifactBytes: bytesOf({ '05-impl/at-frontend.md': '甲\n' }),
+  })
+  assert.deepEqual(r.unrecorded, ['05-impl/at-frontend.md'])
 })

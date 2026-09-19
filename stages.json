@@ -1,7 +1,13 @@
 {
-  "S1": { "role": "at-pm",        "requires": [],                              "produces": ["00-contract.md"] },
-  "S2": { "role": "at-product",   "requires": ["00-contract.md"],              "produces": ["01-prd.md"] },
-  "S3": { "role": "at-architect", "requires": ["00-contract.md", "01-prd.md"], "produces": ["03-arch.md"] },
-  "S4": { "role": "at-pm",        "requires": ["01-prd.md", "03-arch.md"],     "produces": ["04-dispatch.md"] },
-  "S5": { "role": "at-backend",   "requires": ["03-arch.md", "04-dispatch.md"], "produces": ["05-impl/at-backend.md"] }
+  "S1": { "role": "at-pm",         "requires": [],                                "produces": ["00-contract.md"] },
+  "S2": { "role": "at-product",    "requires": ["00-contract.md"],                "produces": ["01-prd.md"] },
+  "S3": { "role": "at-architect",  "requires": ["00-contract.md", "01-prd.md"],   "produces": ["03-arch.md"] },
+  "S4": { "role": "at-pm",         "requires": ["01-prd.md", "03-arch.md"],       "produces": ["04-dispatch.md"] },
+  "S5": { "role": "at-backend",
+          "producers": ["at-backend", "at-frontend", "at-ui", "at-ios", "at-android"],
+          "requires": ["03-arch.md", "04-dispatch.md"],
+          "produces": ["05-impl/<role>.md"] },
+  "S6": { "role": "at-qa",         "requires": ["03-arch.md", "04-dispatch.md"],  "produces": ["06-test.md"] },
+  "S7": { "role": "at-acceptance", "requires": ["01-prd.md", "06-test.md"],       "produces": ["07-acceptance.md"] },
+  "S8": { "role": "at-pm",         "requires": ["06-test.md", "07-acceptance.md"], "produces": ["08-delivery.md"] }
 }

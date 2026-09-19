@@ -468,3 +468,59 @@ test('前置条件：上一条那个场景确实产出了非空回传', () => {
     rmSync(pluginDir, { recursive: true, force: true })
   }
 })
+
+// ---- Task 4（M2a）Step 10 变异 3：gate.mjs 传给 compareArtifacts 的 roster 必须真的
+// 来自 ctx.state.roster，不能是接线时手滑写死的某个值。这条是纯函数测试
+// （tests/artifact-drift.test.mjs）覆盖不到的一层——它只能证明 compareArtifacts 本身
+// 认 roster 参数，证明不了 gate.mjs 真的把 state.json 里的 roster 字段读出来传了
+// 进去。brief 自己点名「若没有测试红，补一条」——实测把 gate.mjs 那一行改成恒
+// `roster: undefined` 之后跑全量 node --test，439 条不变、fail 0，没有任何测试变红，
+// 印证了 brief 的预判，这里补上。----
+
+// 仓库根真实 stages.json 的 S5 现在有五个 producers。roster 只派了 at-backend 一个
+// 人的 run 里，at-frontend 的实现记录不该进"这一趟该有的"集合——即使它真的被写到了
+// 磁盘上（比如一次误操作、或者角色被误派但仍然写了文件）也不该被账本比对报出来。
+test('roster 只派了 at-backend：at-frontend 磁盘上的文件不进账本比对回传（roster 真的传到了 compareArtifacts）', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S5', artifacts: ['05-impl/at-frontend.md'] })
+  try {
+    const statePath = join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8'))
+    state.roster = ['at-backend']
+    writeFileSync(statePath, JSON.stringify(state), 'utf8')
+
+    // at-architect 是 S5 的合法协调者（roster.json：can_delegate_to 含 at-backend），
+    // H5a 的「哑火告警」会被静默——stdout 里如果还有内容，只可能来自账本比对。
+    const { stdout } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm', tool_input: { subagent_type: 'agent-team:at-architect' },
+    }, GATE, projectDir)
+    assert.equal(stdout.trim(), '')
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 上一条的正向自检锚：同样的磁盘内容，roster 换成同时包含 at-backend 与 at-frontend
+// 时，at-frontend 的文件确实会被报成 unrecorded——证明上一条的沉默不是因为账本比对
+// 对这份夹具恒沉默（比如 stage/artifacts 传错了、gate 走错分支），而是 roster 排除
+// 生效。这条也正是 Step 10 变异 3 的红：把 gate.mjs 里的 roster 改成恒 undefined 时，
+// undefined 落回"退回全部 producers"，效果等价于 roster 包含了 at-frontend——上一条
+// 会变得跟这一条同构，从"沉默"变成"非空回传"，即变红。
+test('正向自检锚：roster 同时包含 at-frontend 时，同样的磁盘内容会被报成 unrecorded——证明上一条不是账本比对对这份夹具恒沉默', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S5', artifacts: ['05-impl/at-frontend.md'] })
+  try {
+    const statePath = join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8'))
+    state.roster = ['at-backend', 'at-frontend']
+    writeFileSync(statePath, JSON.stringify(state), 'utf8')
+
+    const { stdout } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm', tool_input: { subagent_type: 'agent-team:at-architect' },
+    }, GATE, projectDir)
+    const c = JSON.parse(stdout).hookSpecificOutput.additionalContext
+    assert.match(c, /05-impl\/at-frontend\.md/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})

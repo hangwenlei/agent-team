@@ -146,3 +146,42 @@ test('stageId 是原型链上的属性名时也算查不到——不能凭空冒
     )
   }
 })
+
+// Task 4：brief 与设计文档都没提到、落地 stages.json 的 <role> 模式时随手发现的一处
+// 必改点——decideDeliverable 原来直接拿 stage.produces（对 S5 是字面量
+// ["05-impl/<role>.md"]，含占位符）去问 artifactExists，永远问不到真实存在的文件。
+// 下面三条：第一条证明真正写出实现记录后 ok 变 true（这是修复本体：改之前这条
+// 恒 false，因为 artifactExists 只认得 '05-impl/at-backend.md' 这个展开后的名字，
+// 从不会被传入字面量 '05-impl/<role>.md'）；第二、三条证明 missing/reason 里带的
+// 是展开后的真实文件名，不是原样的占位符字面量——避免"改对了返回值的 true/false，
+// 但 missing 里仍然泄漏着 <role> 占位符"这种半吊子修复蒙混过关。
+const S5_MULTI = {
+  role: 'at-backend',
+  producers: ['at-backend', 'at-frontend'],
+  requires: [],
+  produces: ['05-impl/<role>.md'],
+}
+
+test('M2a：S5 是 <role> 模式时，S5.role 本身（at-backend）交付了真实文件——ok 为 true', () => {
+  const r = decideDeliverable({
+    role: 'at-backend', stageId: 'S5', stages: { S5: S5_MULTI },
+    artifactExists: (p) => p === '05-impl/at-backend.md',
+  })
+  assert.equal(r.ok, true)
+})
+
+test('M2a：S5 是 <role> 模式时，S5.role 本身没交付——missing 里是展开后的真实文件名，不是字面量占位符', () => {
+  const r = decideDeliverable({
+    role: 'at-backend', stageId: 'S5', stages: { S5: S5_MULTI },
+    artifactExists: () => false,
+  })
+  assert.deepEqual(r.missing, ['05-impl/at-backend.md'])
+})
+
+test('M2a：reason 文案里点名的也是展开后的文件名', () => {
+  const r = decideDeliverable({
+    role: 'at-backend', stageId: 'S5', stages: { S5: S5_MULTI },
+    artifactExists: () => false,
+  })
+  assert.match(r.reason, /05-impl\/at-backend\.md/)
+})

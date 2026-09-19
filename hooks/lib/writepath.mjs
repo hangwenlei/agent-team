@@ -9,6 +9,7 @@
 import { norm, underDir } from './path-norm.mjs'
 import { isControlFile } from './control-files.mjs'
 import { isContractWriter } from './contract-guard.mjs'
+import { stageRoles, expandProduces } from './stages.mjs'
 
 function underAny(target, prefixes, base) {
   // 评审三轮 Minor 3：prefixes 理论上总是数组（project.paths 的值），但
@@ -25,16 +26,16 @@ function underAny(target, prefixes, base) {
   })
 }
 
-// 评审三轮 Important 2：run 目录下的合法写入集是"调用者自己阶段的
-// produces"，不是"run 目录下任何东西"——见 decideWritePath 里的用法注释。
-function producesOf(stages, role) {
-  if (!stages || typeof stages !== 'object') return []
-  const out = []
-  for (const s of Object.values(stages)) {
-    if (s && s.role === role && Array.isArray(s.produces)) out.push(...s.produces)
-  }
-  return out
-}
+// M2a：run 目录下的合法写入集与"这条路径归谁"曾经分别由 producesOf（只按
+// s.role === role 字面量比对，不认识 <role> 占位符）与 stageOwnerOfRunPath 各自
+// 回答（评审三轮 Important 2 引入 producesOf 时如此）。producers/<role> 模式落地
+// 后 producesOf 会对每一个 S5 产者——**包括 s.role 本身的 at-backend**——恒答
+// "不是我的"：它拿字面量 05-impl/<role>.md 去比已经展开过的目标路径，永远比不出
+// 相等。这不是一条没触发到的边界，是 H3 从此拒绝任何人写 S5 的实现记录，M2a 想
+// 解决的那个缺口（docs/11 §5.6）会以另一种方式原样卡住。删掉 producesOf，
+// "是不是我的"与"是谁的"现在统一由 stageOwnerOfRunPath 回答——它已经按 <role>
+// 展开到具体产者，owner.role === role 即为"我的"，不留第二套判据（hooks/lib/
+// deliverable.mjs 的 decideDeliverable 有同一场缺口的姊妹修法，理由写在那边）。
 
 // 反查一个 run 目录下的目标路径是不是某个阶段的 produces、产物归谁——
 // 用于给拒绝理由点名"这条路径其实是谁的、哪个阶段的产物"，跟
@@ -48,12 +49,19 @@ function producesOf(stages, role) {
 // H5a 账本比对的 unrecorded 清单里，变成设计 §1.3 明确要消灭的「恒假告警」（这正是
 // hooks/lib/path-norm.mjs 头部记的那类重复分叉，本轮复评又当场抓到一次同族复演）。
 // 现在只留这一份，gate.mjs 从这里 import。
+//
+// M2a：<role> 逐个角色展开，返回的 role 是**匹配上的那个具体产者**，不是 s.role。
+// H3 要回答的是「这条路径归谁」，S5 的 05-impl/at-frontend.md 归 at-frontend，
+// 不归 s.role（at-backend）。单产者阶段没有 producers，stageRoles 退回 [s.role]，
+// 这条对 S1–S4/S6–S8 是逐字不变的行为——expandProduces 对不含 <role> 的条目原样
+// 保留一次，不随 roles 列表长度变化。
 export function stageOwnerOfRunPath(stages, rd, target) {
   if (!stages || typeof stages !== 'object') return null
   for (const [stageId, s] of Object.entries(stages)) {
-    if (!s || !Array.isArray(s.produces)) continue
-    for (const p of s.produces) {
-      if (norm(`${rd}/${p}`) === target) return { stageId, role: s.role, produces: p }
+    for (const role of stageRoles(s)) {
+      for (const p of expandProduces(s, [role])) {
+        if (norm(`${rd}/${p}`) === target) return { stageId, role, produces: p }
+      }
     }
   }
   return null
@@ -121,19 +129,22 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
       // 如果角色能在 run 目录下随便写，就能凭空伪造出别人阶段的产物去
       // 满足 H2 的 requires，H2 的判据变成可伪造的。state.json 更直接是
       // H4/H5 的状态来源，且它本来就不是"流程产物"。收紧成：只放行调用者
-      // 自己阶段（stages[s].role === role）的 produces，run 目录下其余
-      // 一切（别人的产物、state.json、任何非产物文件）一律 deny。
+      // 自己名下的 produces（stageOwnerOfRunPath 找到的 owner.role === role），
+      // run 目录下其余一切（别人的产物、state.json、任何非产物文件）一律 deny。
       //
       // 控制文件（state.json 等）已经在函数顶部单独处理过，走不到这里——见那一段的
       // 注释与 docs/09 账一。这里剩下的是纯粹的阶段产物判定。
       // 「同一角色的多个阶段 produces 都能写」（at-pm 的 S1/S4）是这块唯一一直正确
       // 的行为，tests/writepath.test.mjs 与 tests/gate-writepath.test.mjs 各钉了一
-      // 条，改 producesOf 时不要丢。
-      const mine = producesOf(stages, role).some((p) => norm(`${rd}/${p}`) === target)
-      if (mine) return { decision: 'allow' }
-
+      // 条，不要丢——stageOwnerOfRunPath 对 target 逐阶段逐产者匹配，at-pm 在 S1
+      // 与 S4 各命中一次，owner.role === 'at-pm' 两次都成立。
+      //
+      // M2a：「是不是我的」与「是谁的」现在都由 stageOwnerOfRunPath 一次回答（上面
+      // 函数头部的注释记了删掉 producesOf 的理由：它对 <role> 模式的产物恒答"不是
+      // 我的"，会把 at-backend 自己也拒在 S5 的实现记录门外）。
       const owner = stageOwnerOfRunPath(stages, rd, target)
       if (owner) {
+        if (owner.role === role) return { decision: 'allow' }
         return {
           decision: 'deny',
           reason:

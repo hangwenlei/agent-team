@@ -22,6 +22,25 @@
 // 「通过了」在会话里长得一模一样（docs/08 §0 说的正是这种形状）。所以 skipped 必须
 // 带出去：gate.mjs 的 H5a 在这种情形下发 warning，ledger 在当前阶段产物齐了时提示
 // 推进阶段。两条对策缺一不可，改这里之前先读它们。
+//
+// 【M2a 补】S5 的 produces 是 `<role>` 模式（`["05-impl/<role>.md"]`），单一真源见
+// hooks/lib/stages.mjs 头部。上面 `stage.role !== role` 那条判过之后，走到这里的
+// role 必然等于 stage.role——但 `stage.produces` 本身仍然是那份**字面量**（含占位
+// 符，不是展开过的路径），如果直接拿它去问 artifactExists，永远问的是字面意义上
+// 名叫 "05-impl/<role>.md" 的文件，这个文件不可能存在。后果：H5b 会把 at-backend
+// 永久拦在 S5 完不成的状态（stop-gate 一律 exit 2），H5a 永远报"缺 05-impl/<role>.md"
+// ——跟磁盘上是否真的写出了 05-impl/at-backend.md 完全无关。这不是"多一个产者没被
+// 照顾到"的边界情形，是**唯一被这个函数判定的那个角色**（role，此刻已等于
+// stage.role）自己的交付也判不对，S5 本身就完不成。brief/设计文档都没提到这处
+// 必须跟着 stages.json 的 <role> 模式一起改的地方，是 Task 4 落地时发现并补上的。
+// 用 expandProduces(stage, [role]) 只展开这一个已经匹配上的角色——不展开
+// producers 里的其它人，那些人走的是上面的 role-not-in-stage 分支，本函数不对
+// 他们表态（H5 的静默集合另见 gate.mjs 的 isCoordinatorFor 与 stages.README.md）。
+// 对没有 producers 的单产者阶段（S1–S4、S6–S8），expandProduces 对不含 <role> 的
+// 条目原样保留一次，逐字等价于原来的 stage.produces，这条改动对它们是零行为差异
+// （tests/deliverable.test.mjs 现有各条据此必须仍然全绿，不改签名）。
+import { expandProduces } from './stages.mjs'
+
 export function decideDeliverable({ role, stageId, stages, artifactExists }) {
   if (!stages || typeof stages !== 'object') return { ok: true, skipped: 'unknown-stage' }
 
@@ -37,7 +56,7 @@ export function decideDeliverable({ role, stageId, stages, artifactExists }) {
   // 「state.stage 停在旧阶段」这个失效的表征——见 gate.mjs 的 H5a 分支。
   if (stage.role !== role) return { ok: true, skipped: 'role-not-in-stage' }
 
-  const produces = stage.produces || []
+  const produces = expandProduces(stage, [role])
   const missing = produces.filter((p) => !artifactExists(p))
   // produces 为空时 missing 必然也是空数组（filter 空数组恒得空数组），这一条顺带
   // 覆盖了「这个阶段没有产物义务」，不需要单独判 produces.length === 0——那样会多出

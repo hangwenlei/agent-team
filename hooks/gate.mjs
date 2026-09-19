@@ -601,6 +601,10 @@ function main() {
               artifacts: ctx.state?.artifacts,
               stages: ctx.stages,
               artifactBytes: ctx.artifactBytes,
+              // M2a：undefined 而不是 []——expectedArtifacts 把 undefined 当"退回全部
+              // producers"，把 [] 当"这一趟一个执行角色都没派"。state.json 的 roster
+              // 字段坏掉（不是数组）时应当退回更宽的集合，多报几条不要漏报。
+              roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
             }),
           )
         : null

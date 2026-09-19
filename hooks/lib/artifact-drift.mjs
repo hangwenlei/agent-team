@@ -24,24 +24,26 @@
 // 假漂移。两份逐字相同的哈希实现真的会分叉，这个仓库为此开过好几轮循环（见 path-norm.mjs
 // 头部）。
 import { sha256OfContract } from './contract-hash.mjs'
-import { producedNames } from './stages.mjs'
+import { expectedArtifacts } from './stages.mjs'
 
 function isPlainObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
 }
 
-export function compareArtifacts({ artifacts, stages, artifactBytes }) {
+export function compareArtifacts({ artifacts, stages, artifactBytes, roster }) {
   const empty = { drifted: [], missing: [], unrecorded: [] }
   if (typeof artifactBytes !== 'function') return empty
   const recorded = isPlainObject(artifacts) ? artifacts : {}
   if (!isPlainObject(stages)) return empty
 
-  // produces 并集抽到 hooks/lib/stages.mjs（评审发现 4）：此前这里与
-  // hooks/lib/state.mjs 的 validateState 各写一份——语义等价但写法不同（这里原来
-  // 构造的是 Array，那边原来就是 Set；不是逐字相同的拷贝，完整差异与为什么无害见
-  // stages.mjs 头部）。上面已经判过 isPlainObject(stages)，这里必然拿到非空判定的
-  // 集合（除非 stages 本身没有任何合法阶段条目）。
-  const produced = producedNames(stages)
+  // M2a：从 producedNames（全部可能的产物名，<role> 按全部 producers 展开）换成
+  // expectedArtifacts（这一趟该有的，<role> 只按 roster ∩ producers 展开）。两者
+  // 答的是不同的问题，见 stages.mjs 头部；用错会让没派到的角色的产物被报成
+  // missing——S5 只派了 at-backend 一个人的 run，账本比对不该因为
+  // 05-impl/at-frontend.md 不存在就报它 missing，那个角色这一趟压根没被派。
+  // roster 缺省时 expectedArtifacts 退回全部 producers，与旧行为（producedNames）
+  // 一致——S1–S4/S6–S8 没有 producers，不受这次改动影响。
+  const produced = expectedArtifacts(stages, roster)
 
   const out = { drifted: [], missing: [], unrecorded: [] }
   for (const name of produced) {
