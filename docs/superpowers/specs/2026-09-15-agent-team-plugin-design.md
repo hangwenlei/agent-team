@@ -156,6 +156,21 @@ U4 与 U7 是同一个机制的两个观测面，只是分别撞在「agent 宇�
 > 闭包排掉「返回的是一个合法的层级协调者」这一类再发 warning，否则它会在 S5 正路上必然
 > 误报，而最省事的消警告方式（把 `state.stage` 改回旧阶段）恰好制造它警告的那个失效。
 
+> **注记（M2a 补）：上表 S5 的 `05-impl/<role>.md` 里的 `<role>` 是一个模式，不是字面量。**
+> `stages.json` 用 `producers` 字段列出这一阶段允许的产出角色，`produces` 写成
+> `["05-impl/<role>.md"]`。`<role>` 的展开**按消费方不同而不同**，这一点必须照着来，
+> 混用会重演 `docs/11` §5.6 那个缺口：
+>
+> | 消费方 | `<role>` 展开成 |
+> |---|---|
+> | H3 写路径 | 写入者自己（角色 R 可写 `05-impl/R.md`，当且仅当 `R ∈ producers`） |
+> | 阶段推进判据 `isStageDone` | `roster ∩ producers`（这一趟实际派到的执行角色都交了才算 done） |
+> | 账本比对 `compareArtifacts` | `roster ∩ producers`（与推进判据同集合，否则两者互相打架） |
+> | `validateState` 的 artifacts 键校验 | **全部 `producers`**（账本里记着任何一个合法产者的文件都该被接受） |
+>
+> 单一真源是 `hooks/lib/stages.mjs`。M1 期间 `stages.json` 把这个模式写成了字面量
+> `["05-impl/at-backend.md"]`，后果见 `docs/11` §5.6。
+
 ### 4.1 用户命令面
 
 | 命令 | 作用 |
@@ -184,6 +199,11 @@ PRD 可改，原始需求不可被 agent 改写。防的是十角色链最隐蔽
 S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回同样计数。
 计数写在 `state.json`，不交给模型自己数。参照 aws-samples "Cycle 3 is terminal"。
 
+**写时强制由 H6 承担（M2a 补）**：`validateState` 只能在事后报出「计数与 `history` 对不上」，
+拦不住那一次写入——要看到改之前那一版，而 `PostToolUse` 看不到。H6 挂在 `PreToolUse` 的
+写路径 matcher 上：触发时磁盘上还是旧版、`tool_input` 里是新版，两边都在手上。
+`validateState` 的同名校验降为第二道。
+
 **④ never_invoked 追踪**
 
 `state.json` 记录本趟未被调用的角色，`/at-status` 与 `08-delivery.md` 均列出。
@@ -198,6 +218,11 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
 | 实现错 | 对应执行角色 | S5 → S8 |
 
 唯一升级情形：驳回暴露 `00-contract.md` 自身存在内在矛盾——非执行错误，只有用户能裁。
+
+**本表的单一真源是 `hooks/lib/state.mjs` 的 `rejectTo(kind)`（M2a 补）。**
+`REJECTION_KINDS` 四类：`requirement` / `design` / `implementation` / `contract-conflict`，
+前三类分别回到 S2 / S3 / S5，`contract-conflict` 返回 `null`——它不由代码决定回哪，
+走 §5.1 的升级路径（`ESCALATION_KINDS` 已含 `contract-conflict`）。
 
 ### 4.4 状态文件
 
@@ -283,6 +308,7 @@ S5 重做，所以 S5 在 `history` 里出现两次、`rework.S5` 是 1，而 S6
 | H3 | PreToolUse / Edit\|Write | per-role 写路径隔离（**只管阶段产物与项目路径；控制文件不走这套判据，见 §6.2.1**） | deny | deny（fail closed） |
 | H4 | PreToolUse / Edit\|Write | 契约保护：subagent 写契约 | deny | deny（fail closed） |
 | H5 | `SubagentStop`（真拦截）+ `PostToolUse` / Agent（权威记录） | 交付物校验：声明产出却未写文件 | `SubagentStop`：deny（exit 2 附理由，约 8 次补救机会）；`PostToolUse`：记 warning，不 block | `SubagentStop`：allow（fail open，流程辅助）；`PostToolUse`：记 warning |
+| H6 | 返工预算 | `PreToolUse` / `^(Edit\|Write\|NotebookEdit)$` | **fail closed** | 只对 `runs/*/state.json` 生效。只拦**减少**（`history` 变短、某阶段出现次数变少、`rework` 低于派生值、`rework` 超 `REWORK_LIMIT`），不碰增加——PM 每推进一个阶段都要正常重写这个文件 |
 
 **H5 为什么要两道**（M1 · U5 实测补，见 `docs/07-U5-U6-U8-实测结论.md`）：`SubagentStop`
 返回 exit 2 确实能阻止 subagent 停止、逼它补交付物，但平台的重试有上限——实测约 9 次，
@@ -653,3 +679,7 @@ at-pm / at-product / at-architect / at-backend / at-frontend。
 加 at-ui / at-ios / at-android / at-qa / at-acceptance，
 补返工预算、驳回路由、`never_invoked`、升级条件、S6–S8。
 到这里才是完整产品，也才具备发布条件（README 双语、LICENSE、marketplace 清单）。
+
+> **M2 拆分（M2a 设计时补）**：上面这一段是好几个独立子系统，按 M1a/M1b/M1c 的先例拆成
+> 三轮——M2a 阶段链与返工闭环、M2b 五个角色真正文、M2c 发布。各自的设计文档在
+> `docs/superpowers/specs/`。
