@@ -13,7 +13,7 @@
 // validateState 一次报全部问题而不是遇到第一个就返回：调用方是 ledger，它把 problems
 // 一次性交给 PM；分次报会让 PM 改一条、再撞一条，来回好几轮。
 
-import { producedNames } from './stages.mjs'
+import { producedNames, stageRoles, expandProduces } from './stages.mjs'
 
 const SHA_RE = /^sha256:[0-9a-f]{64}$/
 const RUN_ID_RE = /^\d{8}-\d{4}-[a-z0-9][a-z0-9-]*$/
@@ -80,11 +80,20 @@ export function nextStage(stages, current) {
  * ledger.test.mjs 的 `base` 里写死是 `false`，不受这里怎么算的影响）。抽成这里
  * 之后能用一份完全合成的、有多个 produces 元素的 stages 夹具单测，不再受仓库根
  * 真实 stages.json 「每个阶段只有一个产物」这个形状限制。
+ *
+ * M2a：加可选 roster。S5 的产物集合取决于这一趟派了谁（producers × roster），静态列全
+ * 五个执行角色会让只派了两个角色的 run 永远不 done、整条链卡死。roster 缺省时退回全部
+ * producers——S1–S4/S6–S8 没有 producers，行为完全不变，tests/state.test.mjs 现有的
+ * isStageDone 测试因此不需要改签名、必须仍然全绿。
  */
-export function isStageDone({ stage, stages, artifactExists }) {
+export function isStageDone({ stage, stages, artifactExists, roster }) {
   const current = isPlainObject(stages) ? stages[stage] : undefined
-  if (!current || !Array.isArray(current.produces) || current.produces.length === 0) return false
-  return current.produces.every((p) => artifactExists(p))
+  if (!current) return false
+  const roles = stageRoles(current)
+  const scoped = Array.isArray(roster) ? roles.filter((r) => roster.includes(r)) : roles
+  const names = expandProduces(current, scoped)
+  if (names.length === 0) return false
+  return names.every((p) => artifactExists(p))
 }
 
 export function validateState(state, { stages } = {}) {

@@ -184,3 +184,33 @@ test('isStageDone：stage 在 stages 里查不到、或 stages 本身不是对�
   assert.equal(isStageDone({ stage: 'S2', stages: null, artifactExists: have() }), false)
   assert.equal(isStageDone({ stage: undefined, stages: MULTI, artifactExists: have() }), false)
 })
+
+// M2a：roster 可选参数。S5 这种多产者阶段，「齐了」取决于这一趟实际派了谁——
+// 上面五条都不传 roster，走的是「退回全部 producers」那条兼容路径，不受这里影响。
+const S5_MULTI = {
+  S5: { role: 'at-backend', producers: ['at-backend', 'at-frontend'], produces: ['05-impl/<role>.md'] },
+}
+
+test('isStageDone：S5 只按 roster 里的执行角色判——没派到的角色不拖住推进', () => {
+  const done = isStageDone({
+    stage: 'S5', stages: S5_MULTI, roster: ['at-backend'],
+    artifactExists: have('05-impl/at-backend.md'),
+  })
+  assert.equal(done, true)
+})
+
+test('isStageDone：roster 里有两个执行角色而只交了一个时为 false', () => {
+  const done = isStageDone({
+    stage: 'S5', stages: S5_MULTI, roster: ['at-backend', 'at-frontend'],
+    artifactExists: have('05-impl/at-backend.md'),
+  })
+  assert.equal(done, false)
+})
+
+test('isStageDone：roster 缺省时按全部 producers 判——不传 roster 不等于不判', () => {
+  const done = isStageDone({
+    stage: 'S5', stages: S5_MULTI,
+    artifactExists: have('05-impl/at-backend.md'),
+  })
+  assert.equal(done, false)
+})

@@ -26,16 +26,60 @@ function isPlainObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
 }
 
-/** stages 里所有阶段 produces 的并集，忽略形状不对的阶段条目。stages 本身形状不对
- * （不是对象）时返回空集合——调用方各自决定"没有可判定的产物集合"该怎么处理，这里
- * 不表态、也不抛。 */
+// M2a：规格 §4 阶段表写的是 `05-impl/<role>.md`——一个**模式**。M1 期间 stages.json 把它
+// 写成了字面量 ["05-impl/at-backend.md"]，后果是执行角色干完活写不进自己的实现记录
+// （docs/11 §5.6，2026-09-19 的真实 run 里逼 PM 代笔）。这里把模式恢复成模式。
+//
+// ⚠️ producedNames 与 expectedArtifacts 答的是**不同的问题**，别合并：
+//   - producedNames：这个名字是不是**任何一个**合法产者的产物（validateState 校验
+//     artifacts 的键用它——账本里记着 05-impl/at-frontend.md 必须算合法）
+//   - expectedArtifacts：**这一趟**该有哪些（compareArtifacts 与 isStageDone 用它）
+// 混用会重演 docs/11 §5.6 那个缺口。设计 §1.1 的表里写死了四个消费方各自的集合。
+const ROLE_TOKEN = '<role>'
+
+/** 这一阶段允许的产出角色。有 producers 用 producers，否则退回 [role]。 */
+export function stageRoles(stage) {
+  if (!isPlainObject(stage)) return []
+  if (Array.isArray(stage.producers)) return stage.producers.filter((r) => typeof r === 'string')
+  return typeof stage.role === 'string' ? [stage.role] : []
+}
+
+/** produces 里的 <role> 按 roles 展开。不含占位符的条目原样保留**一次**——否则 S1 的
+ * 00-contract.md 会随角色数量翻倍。 */
+export function expandProduces(stage, roles) {
+  const out = []
+  if (!isPlainObject(stage) || !Array.isArray(stage.produces)) return out
+  const list = Array.isArray(roles) ? roles.filter((r) => typeof r === 'string') : []
+  for (const p of stage.produces) {
+    if (typeof p !== 'string') continue
+    if (!p.includes(ROLE_TOKEN)) { out.push(p); continue }
+    for (const r of list) out.push(p.split(ROLE_TOKEN).join(r))
+  }
+  return out
+}
+
+/** 这一趟**该有**的产物名。<role> 只按 roster ∩ producers 展开；不含占位符的条目不受
+ * roster 影响（S1 的产物与谁被派了无关）。roster 缺省时退回全部 producers。 */
+export function expectedArtifacts(stages, roster) {
+  const out = new Set()
+  if (!isPlainObject(stages)) return out
+  const inRun = Array.isArray(roster) ? new Set(roster.filter((r) => typeof r === 'string')) : null
+  for (const s of Object.values(stages)) {
+    const roles = stageRoles(s)
+    const scoped = inRun === null ? roles : roles.filter((r) => inRun.has(r))
+    for (const n of expandProduces(s, scoped)) out.add(n)
+  }
+  return out
+}
+
+/** stages 里所有阶段 produces 的并集（<role> 按全部 stageRoles 展开），忽略形状不对的
+ * 阶段条目。stages 本身形状不对（不是对象）时返回空集合——调用方各自决定"没有可判定的
+ * 产物集合"该怎么处理，这里不表态、也不抛。 */
 export function producedNames(stages) {
   const out = new Set()
   if (!isPlainObject(stages)) return out
   for (const s of Object.values(stages)) {
-    if (isPlainObject(s) && Array.isArray(s.produces)) {
-      for (const p of s.produces) out.add(p)
-    }
+    for (const n of expandProduces(s, stageRoles(s))) out.add(n)
   }
   return out
 }
