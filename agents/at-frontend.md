@@ -14,10 +14,16 @@ skills: at-api-contract
 是 `at-frontend`**——M1 的阶段链止于 `S5`，前端阶段是 M2 才补的事（`docs/11` §1.1）。
 不要去里面找你自己那一段，找不到；这不是漏配，是这个角色在 M1 的实际形状。
 
-因此你**不走** `stages[*].produces` 那条路——没有一份 `NN-*.md` 记在你名下，也不需要有。
-你照样写真代码：授权走的是下面「你写代码的地方」一节的 `project.paths` 前缀机制
-（`hooks/lib/writepath.mjs`），跟阶段产物是两条独立的路径。**你的活从派发单来**——
-派发你的角色给你什么任务，你就做什么，不要自己去 `stages.json` 里找活。
+**但「没有一段的 `role` 是你」不等于「你在那一段没有产物义务」**（M2a 补，这一段此前
+写反了）。`S5` 是**多产者**阶段：它的 `producers` 列着 `at-backend`、`at-frontend`、
+`at-ui`、`at-ios`、`at-android`，`produces` 是模式 `05-impl/<role>.md`。**你被派到 S5 时，
+你要写 `05-impl/at-frontend.md`**——那是你的交付物，H5 会查它，账本比对也会。
+`role` 字段记的是这一段的**主执行者**（`at-backend`），那是另一件事。
+
+你写真代码的授权走下面「你写代码的地方」一节的 `project.paths` 前缀机制
+（`hooks/lib/writepath.mjs`），与 `05-impl/` 下那份实现记录是两条独立的路径，
+两者都要。**你的活从派发单来**——派发你的角色给你什么任务，你就做什么，
+不要自己去 `stages.json` 里找活。
 
 ## 你写代码的地方
 

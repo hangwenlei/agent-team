@@ -185,3 +185,58 @@ test('M2a：reason 文案里点名的也是展开后的文件名', () => {
   })
   assert.match(r.reason, /05-impl\/at-backend\.md/)
 })
+
+// M2a Task 9 实测发现的第九处 <role> 消费方：归属判据。
+//
+// Task 4 把 S5 改成多产者（producers: at-backend/at-frontend/at-ui/at-ios/at-android）
+// 并修了 produces 的展开，但归属判据仍是 `stage.role !== role`（单数）。后果两条：
+//   1. H5 从不检查 at-frontend/at-ui/at-ios/at-android 在 S5 的交付物——它们是合法产者，
+//      却在归属判据这一步就被判成「没有交付义务」，下面的 expandProduces 永远走不到
+//   2. H5a 对它们发假告警（「不是执行者、而且派不到那个执行者」——第二句拓扑上为真，
+//      结论却是错的）
+//
+// 改成 stageRoles(stage).includes(role) 之后，producers 里每一个都被正常检查。
+const S5_PRODUCERS = {
+  S5: {
+    role: 'at-backend',
+    producers: ['at-backend', 'at-frontend', 'at-ui'],
+    requires: [],
+    produces: ['05-impl/<role>.md'],
+  },
+}
+
+test('S5 多产者：at-frontend 交了自己的实现记录 → ok，不再被判成「没有交付义务」', () => {
+  const r = decideDeliverable({
+    role: 'at-frontend', stageId: 'S5', stages: S5_PRODUCERS,
+    artifactExists: (p) => p === '05-impl/at-frontend.md',
+  })
+  assert.equal(r.ok, true)
+})
+
+test('S5 多产者：at-frontend 没交时 H5 要报它缺自己那份，不是沉默跳过', () => {
+  const r = decideDeliverable({
+    role: 'at-frontend', stageId: 'S5', stages: S5_PRODUCERS,
+    artifactExists: () => false,
+  })
+  assert.deepEqual(r.missing, ['05-impl/at-frontend.md'])
+})
+
+test('S5 多产者：at-frontend 没交时不是 skipped —— skipped 会让 H5a 发那条假告警', () => {
+  const r = decideDeliverable({
+    role: 'at-frontend', stageId: 'S5', stages: S5_PRODUCERS,
+    artifactExists: () => false,
+  })
+  assert.equal(r.skipped, undefined)
+})
+
+test('S5 多产者：不在 producers 里的角色仍然是 role-not-in-stage（at-architect 是派发发起者，不是产者）', () => {
+  const r = decideDeliverable({
+    role: 'at-architect', stageId: 'S5', stages: S5_PRODUCERS,
+    artifactExists: () => true,
+  })
+  assert.equal(r.skipped, 'role-not-in-stage')
+})
+
+test('前置条件：S5_PRODUCERS 的 producers 确实有三个且 at-architect 不在其中——上一条不是空转', () => {
+  assert.deepEqual(S5_PRODUCERS.S5.producers, ['at-backend', 'at-frontend', 'at-ui'])
+})

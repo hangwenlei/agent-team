@@ -24,8 +24,11 @@
 // 推进阶段。两条对策缺一不可，改这里之前先读它们。
 //
 // 【M2a 补】S5 的 produces 是 `<role>` 模式（`["05-impl/<role>.md"]`），单一真源见
-// hooks/lib/stages.mjs 头部。上面 `stage.role !== role` 那条判过之后，走到这里的
-// role 必然等于 stage.role——但 `stage.produces` 本身仍然是那份**字面量**（含占位
+// hooks/lib/stages.mjs 头部。（下面这段写于 Task 4，当时归属判据还是 `stage.role !== role`，
+// 所以原话是「走到这里的 role 必然等于 stage.role」——**Task 9 把归属判据改成
+// `stageRoles(stage).includes(role)` 之后这句不再成立**：走到这里的 role 是 producers
+// 里的任意一个。下面的分析不受影响，expandProduces(stage, [role]) 本来就是按「这一个
+// 已经匹配上的角色」展开的。）但 `stage.produces` 本身仍然是那份**字面量**（含占位
 // 符，不是展开过的路径），如果直接拿它去问 artifactExists，永远问的是字面意义上
 // 名叫 "05-impl/<role>.md" 的文件，这个文件不可能存在。后果：H5b 会把 at-backend
 // 永久拦在 S5 完不成的状态（stop-gate 一律 exit 2），H5a 永远报"缺 05-impl/<role>.md"
@@ -39,7 +42,7 @@
 // 对没有 producers 的单产者阶段（S1–S4、S6–S8），expandProduces 对不含 <role> 的
 // 条目原样保留一次，逐字等价于原来的 stage.produces，这条改动对它们是零行为差异
 // （tests/deliverable.test.mjs 现有各条据此必须仍然全绿，不改签名）。
-import { expandProduces } from './stages.mjs'
+import { expandProduces, stageRoles } from './stages.mjs'
 
 export function decideDeliverable({ role, stageId, stages, artifactExists }) {
   if (!stages || typeof stages !== 'object') return { ok: true, skipped: 'unknown-stage' }
@@ -54,7 +57,18 @@ export function decideDeliverable({ role, stageId, stages, artifactExists }) {
   // 这个角色不是当前阶段的执行者。同样不表态，但同样要带出原因：
   // 「派了一个在当前阶段没有交付义务的角色」本身是一件值得看一眼的事，而且它也是
   // 「state.stage 停在旧阶段」这个失效的表征——见 gate.mjs 的 H5a 分支。
-  if (stage.role !== role) return { ok: true, skipped: 'role-not-in-stage' }
+  // M2a Task 9 实测发现：这里原本写的是 `stage.role !== role`（单数 role），而 S5 自 Task 4
+  // 起是**多产者**阶段（producers: at-backend/at-frontend/at-ui/at-ios/at-android）。
+  // 后果有两条，都不是理论推演：
+  //   1. H5 **从不检查** at-frontend/at-ui/at-ios/at-android 在 S5 的交付物——它们是合法
+  //      产者，却在这里就被判成「没有交付义务」直接跳过，下面那段 expandProduces
+  //      对它们永远走不到
+  //   2. H5a 会对它们发一条**假告警**：「刚返回的 X 不是当前阶段的执行者，而且它也派不到
+  //      那个执行者」——第二句在拓扑上是真的（它们 reachableRoles 为空），但结论是错的，
+  //      它们本来就该在这一段产出
+  // Task 4 修了 produces 的展开（下面那行 expandProduces），漏了这道归属判据——与
+  // 规格 §4 注记里记的「消费方不是四个是八个」同一族，这是第九处。
+  if (!stageRoles(stage).includes(role)) return { ok: true, skipped: 'role-not-in-stage' }
 
   const produces = expandProduces(stage, [role])
   const missing = produces.filter((p) => !artifactExists(p))
