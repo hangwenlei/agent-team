@@ -977,3 +977,150 @@ for (const [f, claim] of Object.entries(DISABLE_CLAIM)) {
     )
   })
 }
+
+// ---------------------------------------------------------------------------
+// 九、两份 README 里的命令行互为镜像 —— 真源是**两份自己**
+// ---------------------------------------------------------------------------
+//
+// M2d 定向评审 F6 下的那一刀：把英文那份安装说明里的 `--scope local` 改成
+// **`--scope user`**（**本项目明令禁止的作用域**——两份 README 的收场那一段正是为它写的），
+// 段内别处仍留着 `--scope local`、退役原话一句没写回来 —— **整套 624 / 0，一条没红。**
+//
+// 缺口是结构性的，不是第七、八节写窄了：在这一节之前，**两份 README 之间唯一被机械
+// 比对的结构性镜像是小节标题**（第一节那张 `HEADING_PAIRS`）。正文各自被各自的真源钉着
+// （角色数钉 `agents/`、阶段链钉 `stages.json`、CLI 原话钉 `docs/11` §5.5），
+// **唯独没有任何一条把两份的命令行放在一起看**——于是中英两份可以就「装的时候用哪个
+// 作用域」**互相矛盾**，而套件不响。
+//
+// 这与 M2c 的头号发现同一类：那次是 `at-pm` 的工具面**在安全那一节**被说小了
+// （本文件头部记着）。这次是**安装命令里可能写着被禁的作用域**。
+// 两次都是「一条安全相关、且可机械核的断言没有守卫」。
+//
+// ⚠️ **范围上有一处与裁定的字面不同，写在这里**：裁定说的是「**围栏代码块内**的命令行」。
+// 实测两份 README 的围栏块里**各只有一行** `claude --plugin-dir …`；
+// 而 `--scope local` 那几条命令**全都住在行内反引号里**，评审那一刀砍中的正是行内的一条。
+// **只扫围栏块的判据会从出生起就打不红那一刀。** 所以这里扫**两处**：围栏块 + 行内 code。
+// 这不是扩范围，是让判据真的盖住裁定点名要盖的那件事。
+//
+// ⚠️ **真源是「两份互相之间一致」，不是某个字面量。** 不要把它改写成「命令行必须等于
+// 某某字面串」——那会在仓库里造出**第三份拷贝**，而三份拷贝要维护的不变量比两份更多。
+// 下面变异第 3 刀（两份同时改成同一个新值，**不该红**）钉的就是这一点。
+
+// 抠出两份里的 claude 命令行，**按文档顺序**，围栏块与行内 code 两处都要。
+// 顺序是有意义的：两份是逐段镜像的，某一条被挪到别处也是一种分叉。
+// ⚠️ 行内 code 的正则不跨行（`[^`\n]+`）——两份 README 今天没有跨行的反引号 span，
+// 将来若有，这里会漏掉它；漏掉的表现是两份的清单长度对不上，**那会红，不会静默**。
+function commandLinesOf(text) {
+  const out = []
+  let inFence = false
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence) {
+      out.push(line.trim())
+      continue
+    }
+    for (const m of line.matchAll(/`([^`\n]+)`/g)) out.push(m[1].trim())
+  }
+  return out.filter((s) => /^claude(\s|$)/.test(s))
+}
+
+// 归一化：丢掉**操作数**，留下**子命令与参数**。
+//
+// 为什么要丢：两份里合法地写着不同的操作数——英文 `<plugin>@<marketplace>`，
+// 中文 `<插件>@<市场>`；路径两份都写 `/path/to/agent-team`，但它是示例、不是断言。
+// **它们的不同是翻译，不是矛盾。**
+//
+// 为什么参数值要留：`--scope local` 与 `--scope user` 的差别**不是翻译**，
+// 它是两份 README 在教人做两件不同的事，而其中一件是本项目明令禁止的。
+// 参数值留着，那一刀才红。
+function normalizeCommand(cmd) {
+  return cmd
+    .split(/\s+/)
+    .filter((t) => t.length > 0)
+    .filter((t) => !t.startsWith('<')) // 占位符操作数
+    .filter((t) => !/[\\/]/.test(t)) // 示例路径
+    .filter((t) => !/[^ -]/.test(t)) // 非 ASCII 的 token：中文占位符的第二道网
+    .join(' ')
+}
+
+// 主判据与锚**共用这一份**——`docs/16` §3.2：锚要钉在判据真正进入 assert 的那一层。
+// 下面三条自检与最后那条主判据调用的都是 `commandShapeOf`，不是它的某个半成品。
+const commandShapeOf = (text) => commandLinesOf(text).map(normalizeCommand)
+
+// ⭐ 正向自检锚之一：钉抽取器**两处都抠**，且不把非命令的 code span 当成命令。
+test('自检：commandLinesOf() 围栏块与行内 code 两处都抠得出，且不把非命令的 code span 当成命令', () => {
+  const sample = ['正文 `claude plugin list` 正文', '```sh', 'claude --plugin-dir /x', '```', '一个 `tools:` 不是命令'].join(
+    '\n',
+  )
+  assert.deepEqual(commandLinesOf(sample), ['claude plugin list', 'claude --plugin-dir /x'])
+})
+
+// ⭐ 正向自检锚之二：钉归一化**丢的是操作数、留的是参数值**。
+// 两半一起钉：占位符与路径必须被丢掉（否则中英两份永远对不上，判据变成恒红），
+// 参数值必须被留下（否则 `--scope user` 那一刀打不红，判据变成恒绿）。
+test('自检：normalizeCommand() 丢掉占位符与路径操作数，保留子命令与参数值', () => {
+  assert.equal(
+    normalizeCommand('claude plugin uninstall <plugin>@<marketplace> --scope local'),
+    'claude plugin uninstall --scope local',
+  )
+  assert.equal(normalizeCommand('claude plugin uninstall <插件>@<市场> --scope local'), 'claude plugin uninstall --scope local')
+  assert.equal(normalizeCommand('claude --plugin-dir /path/to/agent-team'), 'claude --plugin-dir')
+})
+
+// ⭐ 已知违规样本：判据必须**判不通过**。样本取的就是评审那一刀的形状。
+// 光证明它在今天这两份真文件上是绿的，证不了它认得出违规（那正是 F6 之前的状态）。
+test('自检：判据认得出已知违规——一份写 --scope local、另一份写 --scope user 不算镜像', () => {
+  assert.notDeepEqual(
+    commandShapeOf('装的时候用 `claude plugin install x --scope user`'),
+    commandShapeOf('装的时候用 `claude plugin install x --scope local`'),
+  )
+})
+
+test('前置条件：两份 README 都抠得出非空的命令清单——否则下面那条在两个空数组上恒绿', () => {
+  assert.ok(
+    commandShapeOf(read(README_EN)).length > 0 && commandShapeOf(read(README_ZH)).length > 0,
+    '有一份 README 里一条 claude 命令都抠不到。两个空数组 deepEqual 是通过的，' +
+      '所以下面那条主判据会在「命令全被删光」这个最该红的场景下恒绿——先修这里',
+  )
+})
+
+test('两份 README 里的命令行互为镜像——同一组命令、同一组参数、同一个顺序', () => {
+  assert.deepEqual(
+    commandShapeOf(read(README_EN)),
+    commandShapeOf(read(README_ZH)),
+    '两份 README 教人敲的命令对不上了。**真源是两份互相之间一致**，不是这条断言里的某个' +
+      '字面量——所以修法是去看那次改动动了哪一份，把另一份跟上，**不要**把命令抄进这个文件。\n' +
+      '  ⚠️ 最贵的一种触发：一份写 `--scope local`、另一份写 `--scope user`。' +
+      '后者是本项目明令禁止的作用域（两份 README 的收场那一段正是为它写的），' +
+      '而读中文那份和读英文那份的人会装出两种波及面完全不同的东西。\n' +
+      '  （操作数不比：`<plugin>@<marketplace>` 与 `<插件>@<市场>`、以及示例路径，' +
+      '两份合法地不同——那是翻译，不是矛盾。比的是子命令与参数，含参数值。）',
+  )
+})
+
+// ⚠️ **盖不住的那一半，按 `docs/16` §3 开头那三样写齐。**
+//
+// **先说这条判据自己最容易被误读的地方**：它钉的是**镜像**，不是**正确**。
+// **两份一起写错仍然全绿**——两份都改成 `--scope user`，这一条一声不响。
+// 这不是漏，是它的定义：镜像判据的真源是两份自己。**「两份一致」与「两份对」是两件事。**
+//
+// **① 我拒绝写的那条更强判据（X）长什么样**：README 里的安装命令必须与 `docs/17`
+// 实测过的那几条一致——把真源从「另一份 README」换成「那份实测记录」。
+// 那样连「两份一起写错」都会红。
+//
+// **② X 打不红的那一刀**：`docs/17` 本身也是散文。它里面的命令是**当时实际敲的那几条的
+// 记录**，不是**推荐给用户的那几条**——§3.1 引的是
+// `claude plugin marketplace add "<...>/m2d-probe-plugin" --scope local`（带探针路径与引号），
+// §5.6 还讨论着一条**明确不推荐**的 `--scope project`。所以 X 必须先回答
+// 「`docs/17` 里哪几条算推荐」，**而那个清单本身就是一次判断**——它会以「在 `docs/17` 里
+// 标记哪几条」的形式变成**第三份拷贝**，只是换了个住处。
+// 更直接的一刀：**同一次改动把 `docs/17` 和两份 README 一起改了**，X 全绿。
+// 这就是 §3.9 记的那个形状——**把真源钉在一份没有机械形状保证的文档上**。
+//
+// **③ 什么会让答案改变**：如果仓库将来长出一份**机器可读的命令清单**——
+// 比如一个装机脚本、或者一份两份 README 都从中生成（或都对它核）的命令 manifest——
+// 那 X 的真源就落了地，**这一条就该从「两份互比」升级成「两份各自对那份 manifest 比」**。
+// 在那之前，两份互比是**能拿到的最强的那一条**，不是**足够强的那一条**。
