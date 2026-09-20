@@ -76,7 +76,7 @@ stageRolesInRun(stage, roster))`；要知道「某个名字是不是任何一个
 
 ⚠️ **最后两行是 M2b 终审 B5 补的。** 那两条命令是正文层**唯一被要求自己展开 `produces`**
 的地方，此前既不在这张表里、也没有指向 `expandProduces`——**它们没有任何口径**。
-两份正文当时写的是「把 `produces` 逐个去磁盘上 `Glob` 一遍」，而八段里有两段的
+两份正文当时写的是「把 `produces` 逐个去磁盘上 `Glob` 一遍」，而有些阶段的
 `produces` 不是字面文件名的扁平数组（S2 是对象形式，S5 是含 `<role>` 的模式）。
 照字面执行，S5 会去 `Glob` 字符串 `05-impl/<role>.md`，永远查不到 → `/at-resume` 判
 「产物不齐」→ **重跑一段已经做完的 S5**。两份正文现在都指向 `expandProduces`。
