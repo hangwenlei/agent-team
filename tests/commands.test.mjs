@@ -399,3 +399,88 @@ test('commands/at.md 与 commands/at-init.md 的正文必须引用受信前缀�
     )
   }
 })
+
+// ⭐ Ruling 13（M2b Task 4 补轮，2026-09-20）：`/at-init` 正文里「不要给某某角色建 paths
+// 键」这类禁令，必须对**每一个故意不认领路径的角色**都点到名。
+//
+// 为什么需要这条：既有那句「不要给 `at-pm` 建键」**从写下来那天起就没有任何测试钉着**
+// ——正是 docs/11 §5.13 记的那个形状（一个不变量从来没被写下来，在套件里和一个不变量被
+// 写错了长得一模一样，都是全绿）。本轮要往同一处再加一句禁令（at-qa / at-acceptance），
+// 不能再加一条同样没人守的指示。
+//
+// 为什么这条规则本身重要（docs/11 §5.14）：hooks/lib/writepath.mjs 的 decideWritePath
+// 对**没有 paths 条目**的角色，在 run 目录之外整段早退放行——「没有登记 paths」被当成
+// 「没有可用判据、不表态」，而不表态就是放行。agents/at-qa.md 与 agents/at-acceptance.md
+// 的红线据此如实写着「写路径隔离连拒都不会拒你，那里只剩你自己的克制」。某个项目一旦给
+// 它们建了 paths 键，那句话对那一趟当场变假——**而正文是插件自带的，改不了那一趟的
+// project.json**。「允许但要求同步改正文」在结构上不可能执行，所以裁定是硬禁止。
+//
+// ⚠️ 清单**从数据派生，不在这里硬编码角色名**：templates/project.json 的 available_roles
+// 减去 paths 的键，就是「故意不认领路径」的那几个（tests/templates.test.mjs 已有一条钉住
+// 这个差集恰好是 ['at-acceptance','at-qa']）；再加上 at-pm——它连 available_roles 都不在
+// （同一份文件里另有一条钉着）。清单漂移时这条测试跟着漂，不会变成又一个「写下来的名单
+// 是错的」（本分支已经数到第六个）。
+const projectTemplate = readJson('templates/project.json')
+const ROLES_WITHOUT_PATHS = projectTemplate.available_roles.filter(
+  (r) => !Object.hasOwn(projectTemplate.paths, r),
+)
+const ROLES_FORBIDDEN_AS_PATH_KEYS = [...new Set(['at-pm', ...ROLES_WITHOUT_PATHS])].sort()
+
+// 判据：把「不要给 …… 建键」这类禁令子句里被反引号点名的角色抠出来。只认「不要给」与
+// 「建键」夹起来的那一段，**且不跨行**——正文别处提到某个角色名（比如解释它是干什么的）
+// 不算「点名禁止给它建键」，下面第三条自检钉住这个区别。
+//
+// 主判据与两条自检调的是**同一个函数**，不另写一份逐字相同的正则：tests/agents.test.mjs
+// 的 hasBoundary() 为此开过一轮循环——两份判据一旦不同步，自检等于给自己发了张通行证。
+function pathKeyBans(text) {
+  const out = new Set()
+  for (const clause of text.matchAll(/不要给([^\n]*?)建键/g)) {
+    for (const m of clause[1].matchAll(/`(at-[a-z][a-z0-9-]*)`/g)) out.add(m[1])
+  }
+  return out
+}
+
+// ⭐ 正向自检锚一（docs/11 §3.3 第 2 条）。
+// ⚠️ 锚钉的是**派生出来的那一半**，不是 ROLES_FORBIDDEN_AS_PATH_KEYS 整体——后者含字面量
+// 'at-pm'，`.length > 0` 对它**恒真**，那样的锚什么都证不了：available_roles/paths 哪天让
+// 差集塌成空，下面那条会安安静静地只检查 at-pm 一个角色，而「锚」照样绿。这正是本分支
+// 栽过三次的「锚钉错了集合」（M2b Task 2 的数组形式锚、Task 3 的花名册边锚各一次）。
+test('锚：ROLES_FORBIDDEN_AS_PATH_KEYS 里真的有从 templates/project.json 派生出来的成员——只剩字面量 at-pm 时下面那条就只在检查它一个', () => {
+  assert.ok(
+    ROLES_WITHOUT_PATHS.length > 0,
+    'templates/project.json 的 available_roles 减去 paths 的键算出来是空集合——下面那条' +
+      '禁令检查会退化成只检查硬编码的 at-pm 一个角色，而它自己不会有任何提示',
+  )
+})
+
+// ⭐ 正向自检锚二：判据认得出「点名了」。抽取器若恒返回空集合，下面那条主判据会红（不是
+// 绿），但红的原因会指向「正文缺禁令」而不是「抽取器坏了」——这条把两种成因分开。
+test('自检：pathKeyBans() 从一条已知的禁令子句里抠得出被点名的角色', () => {
+  const sample = '  - **不要给 `at-sample-one` 与 `at-sample-two` 建键**：理由写在这里。\n'
+  assert.deepEqual([...pathKeyBans(sample)].sort(), ['at-sample-one', 'at-sample-two'])
+})
+
+// ⭐ 正向自检锚三：判据**不**把「正文里提到过这个角色」当成点名禁止。没有这条，一个退化成
+// 「正文里出现过这个名字就算」的抽取器会让主判据恒绿——而 at-init.md 的正文本来就会提到
+// 这些角色名。
+test('自检：pathKeyBans() 不把「正文提到过这个角色」当成点名禁止给它建键', () => {
+  const sample =
+    '  - `at-sample-one` 负责跑测试，它的产出是自己那份 run 产物。\n' +
+    '  - 不要给 `at-sample-two` 建键。\n'
+  assert.deepEqual([...pathKeyBans(sample)], ['at-sample-two'])
+})
+
+test('commands/at-init.md 必须逐个点名禁止给「不认领路径的角色」建 paths 键（Ruling 13）', () => {
+  const banned = pathKeyBans(textOf('at-init.md'))
+  for (const role of ROLES_FORBIDDEN_AS_PATH_KEYS) {
+    assert.ok(
+      banned.has(role),
+      `commands/at-init.md 的 paths 那一节没有点名禁止给 ${role} 建键——实际点名的是 ` +
+        `${JSON.stringify([...banned].sort())}，应当覆盖 ` +
+        `${JSON.stringify(ROLES_FORBIDDEN_AS_PATH_KEYS)}（= templates/project.json 的 ` +
+        'available_roles 减去 paths 的键，再加上 at-pm）。给一个「故意不认领路径」的角色' +
+        '建了 paths 键，会让 agents/ 下那份正文里「写路径隔离连拒都不会拒你」当场变假，' +
+        '而正文是插件自带的、改不了那一趟的 project.json（docs/11 §5.14 / Ruling 13）。',
+    )
+  }
+})
