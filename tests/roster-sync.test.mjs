@@ -90,6 +90,63 @@ test('每一份带 Agent(...) 白名单的正文，剥前缀后的每一项都�
   }
 })
 
+// ⚠️ M2b Task 3 补：**这条不变量此前从来不存在。**
+//
+// 上面四条各守一面——白名单项是不是 roster.json 的键、是不是全限定名、含不含
+// at-outsider、at-pm 的白名单盖不盖得住整个派发宇宙——**但没有一条问过「某份正文的
+// 白名单有没有盖住这个角色自己在花名册里的那几条边」**。于是 M1c Task 6/7 给
+// at-product.md / at-architect.md 加上 Agent(...) 白名单之后，这两份与 roster.json
+// 分叉了整整一轮而全程绿：M2b Task 3 把 at-product 的边从 at-backend 换成 at-ui、
+// 给 at-architect 加了 at-ui/at-ios/at-android 三条之后，at-product.md 的白名单仍然只
+// 写着 at-backend（**正是这一轮被删掉的那条边**），at-architect.md 仍然少三个，而
+// `node --test` 是 544/0。发现它的不是测试，是派下一个任务之前的人工扫描
+// （docs/11 §5.13：「一个不变量从来没被写下来」和「一个不变量被写错了」在测试套件里
+// 长得一模一样——都是全绿）。
+//
+// 后果不是「白名单写得不够全」这种整洁问题，是**那条花名册边是死的**：H1 查花名册，
+// 放行；平台按白名单过滤 agent 注册表，解析不到那个名字，报 not found——而那条错误
+// 信息指向**被派的那一方**，排查的人会去翻被派角色的正文找原因（docs/04 §7 记的
+// 失效形状，本文件开头 U4 那段记的是同一个机制的另一面）。
+//
+// 判据用 ⊇ 不用 ==：at-pm.md 的白名单是整个会话的 agent **宇宙**（主规格 §3.3 U2，
+// 见本文件开头），而 at-pm 自己的 can_delegate_to 只是其中一部分——这是故意的，
+// == 会把它判红。
+const ROSTER = JSON.parse(readFileSync(new URL('../roster.json', import.meta.url), 'utf8'))
+const roleOf = (f) => f.replace(/\.md$/, '')
+const edgesOf = (f) => ROSTER[roleOf(f)]?.can_delegate_to ?? []
+
+test('每一份带 Agent(...) 白名单的正文，白名单必须覆盖该角色在 roster.json 里的每一条 can_delegate_to', () => {
+  for (const f of EXPECTED_DELEGATORS) {
+    const allowed = new Set(allowlistOf(f).map(stripPluginPrefix))
+    for (const target of edgesOf(f)) {
+      assert.ok(
+        allowed.has(target),
+        `roster.json 里 ${roleOf(f)} → ${target} 这条边存在，但 agents/${f} 的 Agent(...) ` +
+          `白名单里没有 ${target}——**这条边是死的**：H1 查花名册会放行，而平台按白名单` +
+          '过滤 agent 注册表、解析不到这个名字，报 not found，错误信息指向**被派的那一方**' +
+          '（docs/04 §7 记的失效形状）。判据是 ⊇ 不是 ==：白名单可以比自己的边多' +
+          '（at-pm 的白名单是整个会话的 agent 宇宙），但一条都不能少。',
+      )
+    }
+  }
+})
+
+// ⭐ 正向自检锚（docs/11 §3.3 第 2 条）：上面那条的**内层**循环跑几圈，完全取决于
+// EXPECTED_DELEGATORS 里那几个角色的 can_delegate_to 有没有东西。三份全空时内层零圈，
+// 那条测试恒绿而一个白名单都没检查过。
+//
+// ⚠️ 锚必须钉在**那条不变量真正迭代的那个集合**上——EXPECTED_DELEGATORS 对应角色的边，
+// **不是** Object.values(ROSTER) 的全部边。用后者的话，把这三份 delegator 的边全清空、
+// 只留 __main__ 那几条，锚照样绿，而不变量已经在空转、没人知道。M2b Task 2 的数组形式
+// 锚栽的正是「锚钉错了集合」这一步，不在这里重演。
+test('锚：EXPECTED_DELEGATORS 这三份正文对应的角色，在 roster.json 里确实有边——否则上面那条内层零圈空转', () => {
+  assert.ok(
+    EXPECTED_DELEGATORS.flatMap(edgesOf).length > 0,
+    `EXPECTED_DELEGATORS（${JSON.stringify(EXPECTED_DELEGATORS)}）对应的角色在 roster.json ` +
+      '里一条 can_delegate_to 都没有——上面那条「白名单必须覆盖每一条边」的内层循环一圈' +
+      '都不会跑，它是恒绿的，没有检查任何东西',
+  )
+})
 // at-outsider 是测试替身，roster.json 里所有角色的 can_delegate_to 都不含它
 // （tests/roster-closure.test.mjs 守着那一侧），但 tools: Agent(...) 白名单是
 // 另一份独立的数据源，两者不会自动保持一致——这条测试补上白名单这一侧。
