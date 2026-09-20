@@ -135,19 +135,57 @@ test('前置条件：命令正文里确实有**排除命令名之后**仍要对�
 // 两次都命中豁免——它对 at.md **一个非豁免行都没判过**。
 // 两个裸字直接删掉，只留不会被常用词误命中的四项：「派不动」「只能派」已经覆盖了
 // 「说明为什么不能直接派」这类行本身的措辞，正文不需要靠「经/转」来豁免。
-test('/at 不得指示 PM 直接派 at-pm 派不动的角色', () => {
-  const t = textOf('at.md')
+// ⭐ Ruling 17（M2b Task 4 收尾轮）：这条判据**收窄三次**，而此前**没有任何正向锚**。
+//
+// 它已经因为同一类原因接近空转**两次**：
+//   第一次 M1b 终审 I3（上面那段注释记着）——豁免表被「经/转」两个裸字击穿，它对 at.md
+//   **一个非豁免行都没判过**；那次的修法是收紧豁免表，**没有补锚**。
+//   第二次是本里程碑**自己**推的：第一次收窄是 `reachable.has(name) → continue`，而
+//   M2b Task 3 刚把 `at-pm` 的 can_delegate_to 从 2 条加到 4 条——**at-pm 的边越多，
+//   被跳过的名字就越多**。落到今天，真正进入 assert 的只剩 `at-backend`/`at-frontend`
+//   两次，而且两次来自 commands/at.md 里的**同一行散文**。
+//
+// ⚠️ 锚必须钉**三次收窄都做完之后**、真正进入 assert 的那一层（不可达的名字 ∩ 命中行）。
+// 只钉「不可达的名字非空」不够：那两行散文一旦被改写成不含「派/dispatch/Agent」的说法，
+// 名字集合照样非空，而命中行是空的、主判据零次迭代——那正是两条清零路径之一（变异
+// R17-a2 复现了它）。判据与锚共用同一个函数，不各写一份。
+//
+// 第三次收窄是本轮新加的 COMMAND_NAMES：`at-init`/`at-status` 既不是 `at-pm`、也不在它的
+// 可达集里，此前是靠「那几行恰好不含派/dispatch/Agent」才没被判——一个等着发生的假阳性
+// （正文哪天写出「跑 `/agent-team:at-init` 之后再**派**……」就会要求那行带豁免词）。
+// 命令名不是角色名，这件事的单一真源是 tests/helpers/command-names.mjs（Ruling 15/16）。
+function unreachableDispatchLines(text) {
   const reachable = new Set(roster['at-pm'].can_delegate_to)
-  for (const name of new Set(t.match(/\bat-[a-z][a-z0-9-]*\b/g) ?? [])) {
-    if (name === 'at-pm' || reachable.has(name)) continue
-    const lines = t.split(/\r?\n/).filter((l) => l.includes(name) && /派|dispatch|Agent/.test(l))
-    for (const line of lines) {
-      assert.ok(
-        /at-architect|at-product|派不动|只能派/.test(line),
-        `commands/at.md 有一行像是让 PM 直接派 ${name}：「${line.trim()}」——` +
-          `at-pm 的 can_delegate_to 只有 ${[...reachable].join('、')}，H1 会拒`,
-      )
+  const out = []
+  for (const name of new Set(text.match(/\bat-[a-z][a-z0-9-]*\b/g) ?? [])) {
+    if (name === 'at-pm' || reachable.has(name) || COMMAND_NAMES.has(name)) continue
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.includes(name)) continue
+      if (!/派|dispatch|Agent/.test(line)) continue
+      out.push({ name, line })
     }
+  }
+  return out
+}
+
+test('前置条件：commands/at.md 里确实有**三次收窄之后**仍要判的「像是让 PM 直接派不可达角色」的行——否则下面那条恒绿', () => {
+  assert.ok(
+    unreachableDispatchLines(textOf('at.md')).length > 0,
+    'commands/at.md 里没有任何一行同时满足「提到一个 at-pm 派不动的角色」与「带 ' +
+      '派/dispatch/Agent」——下面那条测试一圈都不会跑，它是恒绿的。两条路都会把它清零：' +
+      'roster.json 里 at-pm 的 can_delegate_to 又长了一条边（M2b Task 3 刚长过两条），' +
+      '或者那行散文被改写成不含那三个词的说法。',
+  )
+})
+
+test('/at 不得指示 PM 直接派 at-pm 派不动的角色', () => {
+  const reachable = new Set(roster['at-pm'].can_delegate_to)
+  for (const { name, line } of unreachableDispatchLines(textOf('at.md'))) {
+    assert.ok(
+      /at-architect|at-product|派不动|只能派/.test(line),
+      `commands/at.md 有一行像是让 PM 直接派 ${name}：「${line.trim()}」——` +
+        `at-pm 的 can_delegate_to 只有 ${[...reachable].join('、')}，H1 会拒`,
+    )
   }
 })
 
@@ -319,17 +357,40 @@ const STATE_JSON_BLOCK_NON_FIELDS = new Set([
   'produces',
   'available_roles',
 ])
-test('/at 与 /at-resume 提到的 state.json 字段都在模板里', () => {
-  const known = new Set(Object.keys(stateTemplate))
-  for (const f of ['at.md', 'at-resume.md', 'at-status.md']) {
+// ⭐ Ruling 17：这条同样**收窄两次**（按空行切段后 `block.includes('state.json')` 这个
+// 跳过条件，以及 STATE_JSON_BLOCK_NON_FIELDS 这个豁免集），而此前同样没有正向锚。
+// 它今天离空转还远（31 次断言，只读探测实测），但形状与上面那条逐字相同：两次收窄里
+// 任何一次的口径变了——段落切分规则、或者跳过条件不再命中——它都会安静地变成 0。
+// 判据与锚共用同一个函数。
+const FILES_WITH_STATE_JSON = ['at.md', 'at-resume.md', 'at-status.md']
+
+function stateFieldMentions(files) {
+  const out = []
+  for (const f of files) {
     for (const block of textOf(f).split(/\r?\n\s*\r?\n/)) {
       if (!block.includes('state.json')) continue
       for (const m of block.matchAll(/`([a-z_]+)`/g)) {
-        const name = m[1]
-        if (STATE_JSON_BLOCK_NON_FIELDS.has(name)) continue
-        assert.ok(known.has(name), `commands/${f} 提到 state.json 的 ${name}，但模板里没有这个字段`)
+        if (STATE_JSON_BLOCK_NON_FIELDS.has(m[1])) continue
+        out.push({ f, name: m[1] })
       }
     }
+  }
+  return out
+}
+
+test('前置条件：命令正文的 state.json 段落里确实有**两次收窄之后**仍要对模板查的字段名——否则下面那条恒绿', () => {
+  assert.ok(
+    stateFieldMentions(FILES_WITH_STATE_JSON).length > 0,
+    '三条命令正文里，含 state.json 的段落中一个待查字段名都没抠出来——下面那条测试一圈' +
+      '都不会跑，它是恒绿的。可能是段落切分规则变了、`block.includes(\'state.json\')` ' +
+      '这个跳过条件不再命中、或者 STATE_JSON_BLOCK_NON_FIELDS 吞掉了一切。',
+  )
+})
+
+test('/at 与 /at-resume 提到的 state.json 字段都在模板里', () => {
+  const known = new Set(Object.keys(stateTemplate))
+  for (const { f, name } of stateFieldMentions(FILES_WITH_STATE_JSON)) {
+    assert.ok(known.has(name), `commands/${f} 提到 state.json 的 ${name}，但模板里没有这个字段`)
   }
 })
 
