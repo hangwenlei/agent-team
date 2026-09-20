@@ -3,6 +3,7 @@
   "stage": "S1",
   "contract_sha": "PENDING",
   "roster": [],
+  "trimmed": {},
   "artifacts": {},
   "rework": {},
   "never_invoked": [],

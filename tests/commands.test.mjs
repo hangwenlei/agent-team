@@ -365,10 +365,14 @@ const STATE_JSON_BLOCK_NON_FIELDS = new Set([
 // 判据与锚共用同一个函数。
 const FILES_WITH_STATE_JSON = ['at.md', 'at-resume.md', 'at-status.md']
 
+// 按空行切段。抽成一处是因为下面「模板的键都被点名」那条要用同一套切法却换一个块筛选
+// 条件——两处各写一遍切段正则，就是同一份知识的第二处拷贝，改走样了谁都不会提示。
+const blocksOf = (f) => textOf(f).split(/\r?\n\s*\r?\n/)
+
 function stateFieldMentions(files) {
   const out = []
   for (const f of files) {
-    for (const block of textOf(f).split(/\r?\n\s*\r?\n/)) {
+    for (const block of blocksOf(f)) {
       if (!block.includes('state.json')) continue
       for (const m of block.matchAll(/`([a-z_]+)`/g)) {
         if (STATE_JSON_BLOCK_NON_FIELDS.has(m[1])) continue
@@ -393,6 +397,55 @@ test('/at 与 /at-resume 提到的 state.json 字段都在模板里', () => {
   for (const { f, name } of stateFieldMentions(FILES_WITH_STATE_JSON)) {
     assert.ok(known.has(name), `commands/${f} 提到 state.json 的 ${name}，但模板里没有这个字段`)
   }
+})
+
+// ——— 反方向：模板的键 ⊆ /at 那段列举 ———
+//
+// 上面那条是 at.md → 模板（防的是 at.md 教 PM 写一个模板里没有的字段）。
+// 这一条是模板 → at.md（防的是模板加了一个键，而 at.md 那段「照模板写」的列举没跟上，
+// 于是 PM 建 run 时漏写一个字段，账本回传当场报状态不合法）。**两条必须成对**：
+// 单有任何一条，另一个方向都是静默的。
+//
+// 这条为什么今天才有：at.md 那句原来写的是「模板有**九个顶层键**，一个都不能少」，
+// 紧跟着就是列举。那个数字**当时为真**——而 M3a 给模板加 trimmed 的那一刻它就变成假的，
+// **全仓没有任何东西会响**。不是当年写错了，是它到期了。数字已经按本仓库那条
+// 「列举，不报总数」删掉，只留列举；而「列举，不报总数」的后半句是
+// **清单本身要可核，得写下判据**——这条就是那份列举的判据。
+//
+// ⚠️ 判据从 templates/state.json 派生，**不在测试里抄一份「模板有哪些键」**。抄一份就是
+// 第二处真源：往模板加键的人只会同时改模板和那份拷贝，这条判据永远不会红，
+// 它守的恰恰是「加键的人忘了改另一处」。
+//
+// ⚠️ 已知收窄：点名要认得出来，靠的是反引号里是纯 `[a-z_]+`（与上面那条同一套形状）。
+// 哪天模板出现一个带连字符或数字的顶层键，at.md 里写了它这条也会红——那时该改的是
+// 这个形状，不是把这条删掉。
+const MAKE_RUN_BLOCK_MARK = 'templates/state.json'
+
+const makeRunBlocks = () => blocksOf('at.md').filter((b) => b.includes(MAKE_RUN_BLOCK_MARK))
+
+// 锚钉在判据真正迭代的那一层：判据读的不是整份 at.md，是「提到 templates/state.json 的
+// 那一段」。段落切分规则或那句话的写法一变，定位就可能命中 0 段（下面 named 变空集、
+// missing 变成全部键，主判据会红）或命中 2 段（口径悄悄变宽，主判据可能被别处的词喂绿）。
+// 这条把「恰好一段」钉死，两个方向都不让它无声变形。
+test('前置条件：at.md 里提到 templates/state.json 的段落恰好一段——否则下面那条定位的不是那份列举', () => {
+  assert.equal(
+    makeRunBlocks().length,
+    1,
+    `按空行切段后，commands/at.md 里含 ${MAKE_RUN_BLOCK_MARK} 的段落不是一段。` +
+      '可能是段落切分规则变了，或者正文改成了在别处也提这个路径。',
+  )
+})
+
+test('templates/state.json 的每个顶层键都在 /at 那段「照模板写」的列举里被点名', () => {
+  const named = new Set([...makeRunBlocks()[0].matchAll(/`([a-z_]+)`/g)].map((m) => m[1]))
+  const missing = Object.keys(stateTemplate).filter((k) => !named.has(k))
+  assert.deepEqual(
+    missing,
+    [],
+    `templates/state.json 有 ${missing.join('、')}，但 commands/at.md 建 run 那一段没点名它——` +
+      'PM 照着那段写出来的 state.json 会缺字段，账本回传会报状态不合法。' +
+      '往模板加键，那段列举要跟着加。',
+  )
 })
 
 // docs/04 §9 ②：H3/H4/H5b 的拒绝父级只有转述，没有硬证据。PM 判断「这一段完成

@@ -22,11 +22,11 @@ $ARGUMENTS
   （例：`20260917-1430-login-sso`）。
 - 建目录 `.agent-team/runs/<run_id>/`。
 - 照 `${CLAUDE_PLUGIN_ROOT}/templates/state.json` 写 `.agent-team/runs/<run_id>/state.json`。
-  模板有**九个顶层键，一个都不能少**（少了会被账本回传报成状态不合法）：
+  模板的顶层键**一个都不能少**（少了会被账本回传报成状态不合法），逐个填法如下：
   `run_id` 填你上面生成的那个 run id（**必须与目录名逐字相同**），`stage` 填 `S1`，
   `history` 填一条 `{ "stage": "S1", "at": "<ISO 时间>" }`，`contract_sha` 保持
-  `PENDING`，`roster` 与 `never_invoked` 先留空数组，`artifacts` 与 `rework` 先留空对象
-  ——`artifacts` 会在每段产物写完之后按回传逐条补上，`escalations` 先留空数组。
+  `PENDING`，`roster` 与 `never_invoked` 先留空数组，`artifacts`、`rework` 与 `trimmed`
+  先留空对象——`artifacts` 会在每段产物写完之后按回传逐条补上，`escalations` 先留空数组。
 - 写 `.agent-team/current-run`，内容就是 run id 本身，**不带换行以外的任何东西，
   不含路径分隔符**。
 

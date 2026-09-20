@@ -136,6 +136,71 @@ test('不给 stages 时跳过这条键名校验', () => {
   assert.equal(validateState(good({ artifacts: { '不是产物.md': SHA } }), {}).ok, true)
 })
 
+// ——— trimmed：M3a 新加的字段 ———
+//
+// 它记「这一趟主动裁掉了谁、在哪一段」。背景与为什么不要求写理由，见
+// hooks/lib/state.mjs 里 validateState 的 trimmed 那一段注释。
+//
+// ⚠️ validateState 里 trimmed 的那几条形状判据，**今天在真实数据上一次也不迭代**：
+// templates/state.json 的 trimmed 是 {}，Object.entries 零次，「不是对象」那一条也走不到。
+// 按本仓库那条「零覆盖不等于有缺口，但零有三种」——这属于「今天零次迭代、将来会有
+// 输入」那一种，锚**不能**用「派生集合非空」那一款（今天那个集合就是空的），要用
+// **已知违规样本**那一款。所以下面每一条都自带一个已知违规样本，样本就是锚本身：
+// 不是对象（`['at-ui']`）、值不是阶段 id（`'S9'`）、值不是字符串（`3`）、
+// 键不是任何阶段的产者（`'at-outsider'`）。
+//
+// 这几条同时是「trimmed 缺失时不报错」那条空集合断言的正向自检锚：那一条断的是
+// problems 为空，光有它时，把整段校验删掉它照样绿；有了这几条，删掉其中任何一条
+// 都有东西会红（变异验证逐条跑过）。
+
+test('trimmed 合法时通过——键是某阶段的产者，值是 stages 里存在的阶段', () => {
+  const r = validateState(good({ trimmed: { 'at-architect': 'S3' } }), { stages: STAGES })
+  assert.deepEqual(r.problems, [], r.problems.join('\n'))
+})
+
+// 向后兼容：M3a 之前落盘的 state.json 里根本没有这个字段，而 /agent-team:at-resume
+// 会去读它们。缺失必须**不**报错——这一条红了就意味着老 run 一打开就被判成状态不合法。
+test('trimmed 缺失时不报错——M3a 之前落盘的 state.json 没有这个字段', () => {
+  assert.ok(!Object.hasOwn(good(), 'trimmed'), 'good() 夹具里不该有 trimmed，否则下面那句断的不是「缺失」')
+  assert.deepEqual(validateState(good(), { stages: STAGES }).problems, [])
+})
+
+test('trimmed 不是对象时报出来', () => {
+  const r = validateState(good({ trimmed: ['at-ui'] }), { stages: STAGES })
+  assert.ok(r.problems.some((x) => /trimmed 不是对象/.test(x)), r.problems.join('\n'))
+})
+
+test('trimmed 的值不是 stages 里的阶段时报出来', () => {
+  const r = validateState(good({ trimmed: { 'at-architect': 'S9' } }), { stages: STAGES })
+  assert.ok(r.problems.some((x) => /trimmed\["at-architect"\]/.test(x) && /S9/.test(x)), r.problems.join('\n'))
+})
+
+test('trimmed 的值不是字符串时报出来——阶段 id 不能写成数字或 true', () => {
+  const r = validateState(good({ trimmed: { 'at-architect': 3 } }), { stages: STAGES })
+  assert.ok(r.problems.some((x) => /trimmed\["at-architect"\] 不是字符串/.test(x)), r.problems.join('\n'))
+})
+
+// 键的合法集合是「stages 里全部阶段 stageRoles 的并集」，不是 roster.json 的键集合。
+// at-outsider 在 roster.json 里真实存在，却不是任何阶段的产者——按 roster.json 校验
+// 会放它过去，而裁掉一个本来就什么都不产出的角色不构成任何交代。理由见
+// hooks/lib/state.mjs 那一段注释。
+test('trimmed 的键不是任何阶段的产者时报出来——at-outsider 在花名册里，但它不产出任何东西', () => {
+  const r = validateState(good({ trimmed: { 'at-outsider': 'S2' } }), { stages: STAGES })
+  assert.ok(r.problems.some((x) => /trimmed 里有 "at-outsider"/.test(x)), r.problems.join('\n'))
+})
+
+// 与上面 artifacts 键名校验那一条同一个口径：stages 缺省时，凡是要拿 stages 当判据的
+// 归属检查一律不表态。下面两条拆开，因为它们守的是两件相反的事（跳过 / 照查）。
+test('不给 stages 时跳过 trimmed 的两条归属校验——键与值的归属都拿 stages 当判据', () => {
+  assert.equal(validateState(good({ trimmed: { 'at-outsider': 'S9' } }), {}).ok, true)
+})
+
+// 上一条是「不表态」，光有它时把整段 trimmed 校验删掉它照样绿。这条钉住不表态的边界：
+// **形状检查不在此列**——trimmed 不是对象，与有没有给 stages 无关。
+test('不给 stages 时 trimmed 的形状校验照查——不是对象仍然报', () => {
+  assert.equal(validateState(good({ trimmed: ['at-ui'] }), {}).ok, false)
+})
+
 test('nextStage 按 stages 的书写顺序走，不按 id 字符串排序', () => {
   assert.equal(nextStage(STAGES, 'S1'), 'S2')
   assert.equal(nextStage(STAGES, 'S3'), null)

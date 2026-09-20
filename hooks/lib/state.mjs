@@ -15,7 +15,9 @@
 // 一次性交给 PM；分次报会让 PM 改一条、再撞一条，来回好几轮。
 
 // isPlainObject 也从这里来（M2b 终审 A2），原先是本模块的私有拷贝。
-import { producedNames, expandProduces, stageRolesInRun, isPlainObject } from './stages.mjs'
+// stageRoles 是 M3a 的 trimmed 键校验用的——「这一段的产者」的单一真源就是它，
+// 这里不另写一份角色集合（理由与下面 trimmed 那一段的注释同源）。
+import { producedNames, expandProduces, stageRoles, stageRolesInRun, isPlainObject } from './stages.mjs'
 
 const SHA_RE = /^sha256:[0-9a-f]{64}$/
 const RUN_ID_RE = /^\d{8}-\d{4}-[a-z0-9][a-z0-9-]*$/
@@ -179,6 +181,57 @@ export function validateState(state, { stages } = {}) {
   }
   if (!isStringArray(state.roster)) p('roster 不是字符串数组')
   if (!isStringArray(state.never_invoked)) p('never_invoked 不是字符串数组')
+
+  // ——— trimmed（M3a 新加的字段，与 roster 是一对）———
+  //
+  // roster 答的是「这一趟叫到了谁」，trimmed 答的是「这一趟**主动不叫**谁，在哪一段」。
+  // 两个字段合起来才覆盖得住一个阶段的全部产者：M2b 的真实 run 里 at-product 自决不派
+  // at-ui、PM 复核后同意并把裁决写进了 04-dispatch.md——那是一份磁盘文件，一条**已经
+  // 存在**的决定，只是没有任何判据读得到它，于是 at-ui 那两份产物整趟缺席，而当时在场的
+  // 判据一条都没响。trimmed 把那个决定变成可机器读的。
+  //
+  // ⚠️ 不要求写理由。理由已经在 04-dispatch.md 里，再要一份就是同一份知识的第二处。
+  // trimmed 只回答「谁、在哪一段」。
+  //
+  // ⚠️ 缺失不报错，这是**向后兼容**：M3a 之前落盘的 state.json 没有这个字段，而
+  // /agent-team:at-resume 会去读它们。模板里有，此后每一趟新 run 都带着。
+  //
+  // ⚠️ 这里只校验形状，**没有写时强制**（H6 rework-guard 那一档）。M3a 设计明写排除：
+  // 先让这个字段存在、被判据读到，写时强制要等下一次真实 run 的误报率数据。
+  //
+  // ⚠️ 键的合法集合取的是「stages 里全部阶段 stageRoles 的并集」，**不是 roster.json 的
+  // 键集合**——这一条与 Task 1 brief 的字面措辞（「花名册里的角色名」）不同，两个理由：
+  //   1. validateState 的签名是 (state, { stages })，它手上没有 roster.json；要把它传进来
+  //      就得改 hooks/gate.mjs 的调用点，而那是本轮另一条任务的文件。
+  //   2. 更要紧的是**这个集合才是 trimmed 真正被读的那个口径**：读它的判据问的是
+  //      「这一段的产者有没有交代」，一个不产出任何东西的角色被写进 trimmed 是一条没有
+  //      意义的记录，按 roster.json 校验会放它过去。收窄到产者集合是**更紧**的那一条，
+  //      不是更松的。
+  //   今天在 roster.json 里而不是任何阶段产者的，是 `__main__` 与 `at-outsider`
+  //   （重算：roster.json 的键集合减去 stages 全部 stageRoles 的并集）——
+  //   **这是今天的数据，不是理由**，理由是上面那两条。
+  //
+  // stages 缺省时键与值的归属都不表态，与本函数其余按 stages 的检查（stage、artifacts
+  // 的键、rework 的键）同一口径。
+  if (Object.hasOwn(state, 'trimmed')) {
+    if (!isPlainObject(state.trimmed)) {
+      p('trimmed 不是对象——它是 { 角色名: 阶段 id } 的映射，记这一趟主动裁掉了谁')
+    } else {
+      const trimmable = isPlainObject(stages)
+        ? new Set(Object.values(stages).flatMap((s) => stageRoles(s)))
+        : null
+      for (const [role, stage] of Object.entries(state.trimmed)) {
+        if (typeof stage !== 'string') {
+          p(`trimmed["${role}"] 不是字符串——值要写这个角色是在哪一段被裁掉的（阶段 id）`)
+        } else if (isPlainObject(stages) && !Object.hasOwn(stages, stage)) {
+          p(`trimmed["${role}"] 是 ${stage}，但 stages.json 里没有这个阶段`)
+        }
+        if (trimmable && !trimmable.has(role)) {
+          p(`trimmed 里有 "${role}"，但它不是任何阶段的产者——裁掉一个本来就什么都不产出的角色不构成交代`)
+        }
+      }
+    }
+  }
 
   if (!isPlainObject(state.artifacts)) {
     p('artifacts 不是对象')
