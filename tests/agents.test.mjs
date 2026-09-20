@@ -37,14 +37,37 @@ test('agents/ 目录下恰好是 EXPECTED_AGENTS 列出的那些角色文件—�
   assert.deepEqual(
     [...AGENTS].sort(),
     EXPECTED_AGENTS,
-    `agents/ 目录扫描结果是 ${JSON.stringify([...AGENTS].sort())}，与预期的六个角色 ` +
+    `agents/ 目录扫描结果是 ${JSON.stringify([...AGENTS].sort())}，与预期的 ` +
       `${JSON.stringify(EXPECTED_AGENTS)} 不一致——下面所有遍历 AGENTS 的测试的检查范围都` +
       '会跟着变，且不会有任何提示',
   )
 })
 
-// 持有 Bash 的角色（设计 §1.1）。at-product / at-architect 产出的是文档，不跑构建。
-const HAS_BASH = ['at-pm.md', 'at-backend.md', 'at-frontend.md']
+// M2b Task 4：上面这条失败文案原来写的是「与预期的六个角色」，而 M2a Task 2 起
+// agents/ 下就是十一份了——一条**会被打印出来**的活文案报了一个错的总数，真红的时候
+// 会把排查方向带偏。按本分支已经定过的同一条理由（Task 1、Ruling 4、Ruling 6）改成
+// **不报总数**，只印实际扫描结果与 EXPECTED_AGENTS 两个清单：清单可以当场核，数字不能。
+// 注意区分：tests/helpers/expected-agents.mjs 头部那段**叙述性注释**里的「六」是在讲
+// 那一次修复本身，明写了「数字保留原样」，不属于这一类，没有动。
+
+// 持有 Bash 的角色（设计 §1.1 + M2b 设计 §1.3）。
+// M2b Task 4 从三个扩到七个：新增 at-ui / at-ios / at-android（执行角色，与
+// at-backend/at-frontend 同类）与 at-qa（它的工作就是**跑**测试）。
+// 不在这份清单里的四个各有各的理由：at-product / at-architect 产出的是文档，不跑构建；
+// at-acceptance 是业务验收，看的是产出符不符合契约，不跑构建也不改代码（M2b 设计 §1.3）；
+// at-outsider 是测试替身，只有 Read。
+// 这份清单同时是下面三条红线断言的**唯一触发条件**——判据刻意不看正文用了哪个词
+// （修复轮 3 复评抓到过「换个同义词就整份被跳过」），持有 Bash 是 tools: 声明里可独立
+// 核实的事实。
+const HAS_BASH = [
+  'at-pm.md',
+  'at-backend.md',
+  'at-frontend.md',
+  'at-ui.md',
+  'at-ios.md',
+  'at-android.md',
+  'at-qa.md',
+]
 
 test('每个角色文件的 frontmatter name 与文件名一致', () => {
   for (const f of AGENTS) {
@@ -65,7 +88,7 @@ test('每个角色都在 roster.json 里', () => {
 // tests/helpers/agent-tools.mjs 的 toolsDeclarationOf().names——那是解析过的
 // tools: 声明的工具名集合，不含 description 的文本，且认行内与 YAML 块序列两种写法
 // （tests/tool-surface.test.mjs 已经在用同一个解析器，不重写第二份）。
-test('Bash 只发给设计 §1.1 列出的三个角色', () => {
+test('Bash 的授予与 HAS_BASH 逐份一致——多给一份、少给一份都红（设计 §1.1、M2b 设计 §1.3）', () => {
   for (const f of AGENTS) {
     const { names } = toolsDeclarationOf(textOf(f))
     const has = names.includes('Bash')
@@ -361,9 +384,28 @@ function selfCardinalityMatches(f) {
 // at-pm 也对自己的段数表过态（「你负责 S1……与 S4……」），但走的是「你负责 SN」
 // 这种按阶段 id 直接指名的句式，不是「role 是 at-X」这种句式，已经由上面「你负责
 // SN」那对测试管，不出现在这份清单里。at-outsider 完全不提 stages.json。
-const EXPECTED_CARDINALITY_CLAIMERS = ['at-architect.md', 'at-backend.md', 'at-frontend.md', 'at-product.md']
+//
+// M2b Task 4 加进来五份（at-ui / at-ios / at-android / at-qa / at-acceptance）：
+// 这五份的正文本轮才从 M2a 的占位符改写成真正文，都要说清自己在哪一段，于是都用上了
+// 「`role` 是 `at-X`」这个句式——加进清单是**这条身份锚正常工作**的结果，不是回归。
+// 它们各自用的模板与 countOwned：
+//   at-ui / at-ios / at-android → countOwned = 0，用「没有任何一段的 `role` 是 X」
+//   at-qa（S6）/ at-acceptance（S7） → countOwned = 1，用「找到 `role` 是 X 的那一段」
+// ⚠️ **不要为了躲这条红而改措辞**：躲过去的结果是那几份正文对自己的段数完全不表态，
+// 而 docs/11 §5.6 记的 at-frontend 那个洞正是「没说清自己在哪一段」。
+const EXPECTED_CARDINALITY_CLAIMERS = [
+  'at-acceptance.md',
+  'at-android.md',
+  'at-architect.md',
+  'at-backend.md',
+  'at-frontend.md',
+  'at-ios.md',
+  'at-product.md',
+  'at-qa.md',
+  'at-ui.md',
+]
 
-test('agents/ 目录下恰好是这四份对自己 role 段数表过态的正文', () => {
+test('agents/ 目录下恰好是 EXPECTED_CARDINALITY_CLAIMERS 这几份对自己 role 段数表过态的正文', () => {
   const claimers = AGENTS.filter(selfReferencesOwnRole)
   assert.deepEqual(
     [...claimers].sort(),
@@ -462,4 +504,30 @@ test('持有 Bash 的角色，正文必须说明「连 artifacts 一起改也无
         'at-frontend 也拿到了 Bash，两处无痕口子都要点破，不能只让 at-pm 一份正文单独扛着',
     )
   }
+})
+
+// ⭐ M2b Task 4：`model:` 的身份锚。
+//
+// 五个占位符在 M2a Task 2 被显式写成 `model: haiku`（「占位符语义上就是最小成本占位」），
+// M2b 设计 §1.4 裁定五个真角色全部重定为 `sonnet`：at-qa 要读实现、设计测试、判断失败
+// 原因，at-acceptance 要对着契约逐条核验收标准——都是实质判断，不是转写；
+// at-ui/at-ios/at-android 是执行角色，与 at-backend/at-frontend 同类。
+// at-outsider 保持 `haiku`：它是测试替身，被派起来本身就是配置错误。
+//
+// 判据是 `deepEqual` **身份锚**，不是 `length > 0` 这种数量锚——M1c 终审第 1 条发现的
+// 正是「正向锚是数量不是身份」：扫描范围被意外缩小成一个文件时，数量锚照样绿，而真正的
+// 违规完全落在检查范围之外。这里 got 是按 AGENTS 逐份建出来的，AGENTS 少扫到任何一份
+// （或多扫到一份）都会让这条 deepEqual 当场红，缺 `model:` 行则会印成 '(缺)'。
+test('十一份 agent 的 model: 与预期逐份一致——占位符的 haiku 已在 M2b 重定为 sonnet', () => {
+  const got = {}
+  for (const f of AGENTS) {
+    const line = fmOf(f).split(/\r?\n/).find((l) => /^model:/.test(l.trim()))
+    got[f] = line ? line.split(':')[1].trim() : '(缺)'
+  }
+  assert.deepEqual(got, {
+    'at-pm.md': 'sonnet', 'at-product.md': 'sonnet', 'at-architect.md': 'sonnet',
+    'at-backend.md': 'sonnet', 'at-frontend.md': 'sonnet', 'at-ui.md': 'sonnet',
+    'at-ios.md': 'sonnet', 'at-android.md': 'sonnet', 'at-qa.md': 'sonnet',
+    'at-acceptance.md': 'sonnet', 'at-outsider.md': 'haiku',
+  })
 })
