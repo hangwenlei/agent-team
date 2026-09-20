@@ -619,6 +619,12 @@ test('磁盘上有产物但 artifacts 里没记：H5a 报出来（Bash 绕过 H3
   // 对 S2 生效——makeRun 默认的空 roster 会让这一趟在 S2 的产出角色算成空集合，
   // expandProduces 对象分支对任何角色都返回 []，账本比对因此看不见 01-prd.md，
   // 这条测试原本要验证的"磁盘有、账本没记"场景无从触发。显式声明 at-product 在场。
+  // ⚠️ 这条讲的是账本比对（compareArtifacts/expectedArtifacts），空 roster 在这里
+  // 确实是"没人是它的产者"的诚实语义，不受影响，不需要改。它与 H2
+  // （hooks/lib/readiness.mjs 的 decideReadiness）是两码事：那边同样的空 roster
+  // 曾经也会把这一段误判成"已完成"，但那不是同一条诚实语义的体现，是一个独立的
+  // bug，Task 2 修复轮 1 · 修复 1 已经在 readiness.mjs 改掉——别把两者混为一谈
+  // （tests/fixtures/make-run.mjs 头部注释有完整对比）。
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md'], roster: ['at-product'] })
   try {
     const { stdout } = run('deliverable', {
@@ -638,6 +644,12 @@ test('账本比对的措辞不得说成「限制」或「越权」', () => {
   // 对 S2 生效——makeRun 默认的空 roster 会让这一趟在 S2 的产出角色算成空集合，
   // expandProduces 对象分支对任何角色都返回 []，账本比对因此看不见 01-prd.md，
   // 这条测试原本要验证的"磁盘有、账本没记"场景无从触发。显式声明 at-product 在场。
+  // ⚠️ 这条讲的是账本比对（compareArtifacts/expectedArtifacts），空 roster 在这里
+  // 确实是"没人是它的产者"的诚实语义，不受影响，不需要改。它与 H2
+  // （hooks/lib/readiness.mjs 的 decideReadiness）是两码事：那边同样的空 roster
+  // 曾经也会把这一段误判成"已完成"，但那不是同一条诚实语义的体现，是一个独立的
+  // bug，Task 2 修复轮 1 · 修复 1 已经在 readiness.mjs 改掉——别把两者混为一谈
+  // （tests/fixtures/make-run.mjs 头部注释有完整对比）。
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md'], roster: ['at-product'] })
   try {
     const { stdout } = run('deliverable', {
@@ -658,6 +670,12 @@ test('前置条件：上一条那个场景确实产出了非空回传', () => {
   // 对 S2 生效——makeRun 默认的空 roster 会让这一趟在 S2 的产出角色算成空集合，
   // expandProduces 对象分支对任何角色都返回 []，账本比对因此看不见 01-prd.md，
   // 这条测试原本要验证的"磁盘有、账本没记"场景无从触发。显式声明 at-product 在场。
+  // ⚠️ 这条讲的是账本比对（compareArtifacts/expectedArtifacts），空 roster 在这里
+  // 确实是"没人是它的产者"的诚实语义，不受影响，不需要改。它与 H2
+  // （hooks/lib/readiness.mjs 的 decideReadiness）是两码事：那边同样的空 roster
+  // 曾经也会把这一段误判成"已完成"，但那不是同一条诚实语义的体现，是一个独立的
+  // bug，Task 2 修复轮 1 · 修复 1 已经在 readiness.mjs 改掉——别把两者混为一谈
+  // （tests/fixtures/make-run.mjs 头部注释有完整对比）。
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md'], roster: ['at-product'] })
   try {
     const { stdout } = run('deliverable', {

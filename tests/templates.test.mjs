@@ -19,6 +19,20 @@ test('state.json 模板的 contract_sha 是 PENDING——模板里不该有一�
   assert.equal(readJson('templates/state.json').contract_sha, 'PENDING')
 })
 
+// Task 2 修复轮 1 · 修复 1：hooks/lib/readiness.mjs 的 decideReadiness 那条回归
+// （H2 在真实初始状态下对 S2/S5 完全失效）整条推理都建立在这个前提上——
+// commands/at.md 第 4 步在派发**并核实之后**才把 targetRole 累加进 roster，
+// 所以 H2 跑的那一刻，state.json 的 roster 必然还不含正在被派的这个角色，而
+// 这个模板就是每一次新 run 的起点。这条钉住前提本身没有漂移。
+//
+// 哪天有人把这个模板改成预填 roster（比如把发起这一趟的 at-pm 先塞进去），
+// 这条测试会变红——那不是这条测试写错了，是提醒回头重新核一遍 H2 那条修复
+// 的前提是否还成立（尤其是 hooks/lib/readiness.mjs 里那段"roster 必然还不含
+// targetRole"的推导）。
+test('state.json 模板的 roster 是 []——H2 修复 1 那条推理的前提', () => {
+  assert.deepEqual(readJson('templates/state.json').roster, [])
+})
+
 // docs/09 账一驳掉的方向 (b) 就是「在 project.json 模板里把 .agent-team/ 划给
 // at-pm」。控制文件不走角色认领（规格 §6.2.1），划给谁都是同一个概念两套机制。
 test('project.json 模板的 paths 里不得出现 .agent-team', () => {

@@ -58,11 +58,19 @@ test('readiness：ctx.ok 为 true 时，deny 判定真的经 denyAndExit 传到 
   // subagent_type 带插件前缀，顺带验证 stripPluginPrefix 真的在这条路径上跑了。
   //
   // M2b Task 2：S2 从单产者阶段改成对象形式的多产者阶段之后，stageRolesInRun 的
-  // roster ∩ producers 口径第一次对 S2 生效——makeRun 默认的空 roster 会让这一趟
+  // roster ∩ producers 口径第一次对 S2 生效——makeRun 默认的空 roster 曾经会让这一趟
   // 在 S2 的产出角色算成空集合，expandProduces 对象分支对任何角色都返回 []，H2 的
   // done 判定在空数组上 .every() 恒真，把 S2 直接判成"已完成"、requires 检查被跳过，
   // deny 判定从未发生，stdout 变成空——这条测试原本要验证的"前置缺失应当 deny"场景
-  // 无从触发。显式声明 at-product 在场，避免真正要测的东西被这个新引入的旁支吞掉。
+  // 曾经无从触发，只能靠显式声明 at-product 在场绕开。
+  //
+  // Task 2 修复轮 1 · 修复 1：hooks/lib/readiness.mjs 的 decideReadiness 已经改为把
+  // targetRole 并入判定用的角色集合——roster 是否已经记上它，不再影响这里的判定，
+  // 上面那条"空数组恒真"的问题不再存在。这里继续显式传 roster: ['at-product']，
+  // 不是因为还需要靠它绕开 bug，是因为这条测试真正要盯的是另一件事（ctx.ok 为
+  // true 之后 denyAndExit 这条传导链本身有没有接对），不该被 roster 取值的巧合
+  // 决定它红不红。"makeRun() 缺省 roster（与 templates/state.json 逐字相同的
+  // 形状）在子进程门禁层端到端过一遍 deny"这件事由下面新增的兄弟测试覆盖。
   const dirs = makeRun({ runId: 'r1', roster: ['at-product'] })
   try {
     const input = { tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-product' } }
@@ -78,6 +86,29 @@ test('readiness：ctx.ok 为 true 时，deny 判定真的经 denyAndExit 传到 
       /S\d/,
       '理由里必须出现阶段 id——只断言 deny 抓不住 ctx.stages/spec.event 这类传错',
     )
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// Task 2 修复轮 1 · 修复 1（F1 点名"唯一照到它的覆盖被挪走了"的那条）：上面那条
+// 测试为了避开 M2b Task 2 引入的 S2 对象形式回归，改用了显式 roster: ['at-product']，
+// 于是"makeRun() 缺省 roster"——与 templates/state.json 的初始值逐字相同的真实
+// 起点——在子进程门禁层一度失去了任何端到端覆盖。这条把它补回来：不传 roster
+// （走 makeRun 的默认值 []），派 at-product 时 S2 的前置 00-contract.md 缺失，
+// 必须 deny。这是上面那条的新增兄弟条，不是替换——上面那条测的是 ctx.ok →
+// denyAndExit 这条传导链，这条测的是"真实初始 roster 不会让 H2 静默放行"。
+test('readiness：makeRun() 缺省 roster（与 templates/state.json 逐字相同的形状）时，S2 前置缺失仍然 deny——修复 1 的端到端覆盖', () => {
+  const dirs = makeRun({ runId: 'r1' })
+  try {
+    const input = { tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-product' } }
+    const { stdout, status } = run('readiness', input, undefined, dirs.projectDir)
+    const out = decisionOf(stdout)
+
+    assert.equal(status, 0, 'PreToolUse 的 deny 走 stdout JSON + exit 0，不是非零退出码')
+    assert.ok(out, '缺省 roster（[]）不该让 H2 在真实初始状态下静默放行，stdout 不该是空的')
+    assert.equal(out.permissionDecision, 'deny')
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })
