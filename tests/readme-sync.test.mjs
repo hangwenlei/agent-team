@@ -293,32 +293,114 @@ for (const f of [README_EN, README_ZH]) {
 // 两份 README 写的是「一趟完整的 run 沿阶段链从 S1 走到 S8」。M0 写这两份文件
 // 时链止于 S5，M2a 才接到 S8——同一句话在 M0 与今天是两个不同的真值。
 //
-// 只钉端点，不钉中间：README 是对外表面，不该抄一份阶段链（那会是第二份真源，
-// `docs/11` §5.18 C1 就是为这个判的「不补 S6–S8 的逐段正文」）。所以判据取的是
-// 抠出来的阶段编号的**首尾**，中间多提几个阶段不算违规。
-function stageIdsIn(text) {
-  return [...new Set([...text.matchAll(/`(S\d+)`/g)].map((m) => m[1]))]
+// README 是对外表面，不该抄一份阶段链（那会是第二份真源，`docs/11` §5.18 C1 就是为
+// 这个判的「不补 S6–S8 的逐段正文」）。所以这一节钉的是**端点**。
+//
+// ## ⚠️ 这一节被重写过一次，原因值得逐字记下来——它是本任务照出来的一个新形状
+//
+// **第一版判据把整份文件收敛成一个去重序列，只取首尾**：
+//
+//     function stageIdsIn(text) {
+//       return [...new Set([...text.matchAll(/`(S\d+)`/g)].map((m) => m[1]))]
+//     }
+//     assert.deepEqual([named[0], named.at(-1)], [STAGE_IDS[0], STAGE_IDS.at(-1)])
+//
+// 它在**只有一句话提阶段编号**的时候是对的。M2c 后来往 `Status:` 那一行里又写了一次
+// `S1`–`S8`——**那是一句真话**，而它正好把序列的尾巴顶回 `S8`。从那一刻起，标语那一句
+// 里的 `S8` 改成 `S5`（**M0 当年真实的过期值，也正是这个任务存在的理由**）
+// **整套全绿**：那个 `S5` 既不是首个新编号、也不是最后一个，落在中间被静默。
+//
+// 时间旅行核过（评审用 `git show` 逐版本跑的同一刀）：`Status:` 还是 `M0 — …`
+// （不含任何阶段编号）的那个版本上，同一刀抠出 `['S1','S5']`，**红**；
+// 加进那句真话之后抠出 `['S1','S8']`，**绿**。
+//
+// > **不是「散文过期了」，不是「锚钉错了半边」，是「加进去一句真话，让一句假话变得
+// > 测不出来」——因为判据是收敛的，不是迭代的。**
+//
+// 为什么隔壁那条角色数（第二节 B）没被同样弄坏：**B 遍历抠出来的每一条断言，
+// 这一条取首尾**。第一版的注释里已经写出了这个区别，**但没有把它推到「所以 D 会被
+// 第二份拷贝掩盖」这一步**。
+//
+// ## 重写之后的形状：逐行迭代，不收敛
+//
+// 抽取器**按行**返回，整份文件不再被压成一个序列。两条主判据各迭代一层：
+//
+//   · 「出现的每一个编号都得是端点之一」—— 迭代**每一个编号**（与 B 同款）；
+//   · 「每一句跨度话的首尾都得是那两个端点」—— 迭代**每一行**。
+//
+// ⚠️ 「每一个编号都得是端点之一」比第一版**严**：README 里从此提不了中间的阶段。
+// 这是**有意的**——要在对外表面上写 `S3` 的那一天，这条会红，而那正是该停下来想
+// 「要不要在这里造第二份阶段链」的时刻（`docs/11` §5.18 C1）。
+//
+// ⚠️ **判据盖不住的那一半**：有人把标语那句整个改写成不提任何阶段编号（比如把
+// 「走到 `S8`」换成「走到独立的验收轨道」），这两条都不会红——判据管的是「**说了的
+// 对不对**」与「两个端点在这份文件里都出现过」，管不到「**有没有说**」。要管住后者
+// 只能钉「第几行必须怎么写」，那是按位置定位，`docs/16` §3.1 那三条细则判死的那一族。
+function stageIdLines(text) {
+  return text
+    .split(/\r?\n/)
+    .map((line, i) => ({
+      no: i + 1,
+      ids: [...new Set([...line.matchAll(/`(S\d+)`/g)].map((m) => m[1]))],
+    }))
+    .filter((r) => r.ids.length > 0)
 }
 
-// ⭐ 正向自检锚：钉抽取器本身。顺带钉住「去重之后仍保持出现顺序」——这条如果失效，
-// 首尾两个就不是文中写的那两个了。
-test('自检：stageIdsIn() 按出现顺序抠出去重后的阶段编号', () => {
-  assert.deepEqual(stageIdsIn('从 `S1` 走到 `S8`，中途经过 `S4`，再提一次 `S1`；没有反引号的 S9 不算'), [
-    'S1',
-    'S8',
-    'S4',
+// ⭐ 正向自检锚：钉抽取器本身，而且**专门钉住「逐行、不跨行收敛」**——这次重写的
+// 全部要害就在这一点上。样本里两行各有一个端点、第三行是一句完整的跨度话：收敛式
+// 的实现会把它们揉成一个序列，逐行式的不会。
+test('自检：stageIdLines() 逐行返回，不把整份文件收敛成一个序列', () => {
+  const sample = ['从 `S1` 开始', '中途 `S4`', '完整跨度：`S1` 到 `S8`', '没有反引号的 S9 不算'].join('\n')
+  assert.deepEqual(stageIdLines(sample), [
+    { no: 1, ids: ['S1'] },
+    { no: 2, ids: ['S4'] },
+    { no: 3, ids: ['S1', 'S8'] },
   ])
 })
 
+const CHAIN_ENDPOINTS = [STAGE_IDS[0], STAGE_IDS.at(-1)]
+
 for (const f of [README_EN, README_ZH]) {
-  test(`${f} 写的阶段链端点与 stages.json 的首尾两个键一致`, () => {
-    const named = stageIdsIn(read(f))
+  // ⭐ 锚：钉在两条主判据真正迭代的那一层上。文件里一个阶段编号都没有时，两条主判据
+  // 都零次迭代、恒绿——而那恰恰意味着「阶段链从 S1 走到 S8」这句话被整个删掉了。
+  test(`${f} 里 stages.json 的两个端点都出现过——否则下面两条零次迭代恒绿`, () => {
+    const seen = new Set(stageIdLines(read(f)).flatMap((r) => r.ids))
     assert.deepEqual(
-      [named[0] ?? null, named.at(-1) ?? null],
-      [STAGE_IDS[0], STAGE_IDS.at(-1)],
-      `${f} 写的阶段链端点与 stages.json 对不上——阶段链在 M2a 从 S5 接到了 S8，` +
-        '这句话是随那一次改动过期的那一族之一',
+      CHAIN_ENDPOINTS.filter((id) => !seen.has(id)),
+      [],
+      `${f} 里没有提到 ${JSON.stringify(CHAIN_ENDPOINTS)} 全部两个端点——` +
+        '下面那两条判据会在一个不完整的集合上跑，而「这支团队的链走到哪」是对外表面' +
+        '最基本的一条事实',
     )
+  })
+
+  test(`${f} 里出现的每一个阶段编号都是 stages.json 的端点之一`, () => {
+    for (const { no, ids } of stageIdLines(read(f))) {
+      for (const id of ids) {
+        assert.ok(
+          CHAIN_ENDPOINTS.includes(id),
+          `${f} 第 ${no} 行写了 ${id}，而 stages.json 的端点是 ` +
+            `${JSON.stringify(CHAIN_ENDPOINTS)}。两种可能：① 它是一个**过期值**` +
+            '（M0 写这两份文件时链止于 S5，M2a 才接到 S8——这正是 M2c 存在的理由）；' +
+            '② 你想在对外表面上提一段中间阶段，那等于在这里造第二份阶段链，先想清楚' +
+            '要不要（docs/11 §5.18 C1）。⚠️ 这条判据是**逐个编号**跑的，不是把整份' +
+            '文件收敛成首尾一对——第一版就是收敛的，结果另一句真话把这句假话盖住了',
+        )
+      }
+    }
+  })
+
+  test(`${f} 里每一句声称跨度的话，首尾都是 stages.json 的端点`, () => {
+    for (const { no, ids } of stageIdLines(read(f))) {
+      if (ids.length < 2) continue // 只提一个编号的行不是跨度话
+      assert.deepEqual(
+        [ids[0], ids.at(-1)],
+        CHAIN_ENDPOINTS,
+        `${f} 第 ${no} 行是一句跨度话（同一行里有不止一个阶段编号），但它的首尾 ` +
+          `${JSON.stringify([ids[0], ids.at(-1)])} 不是 stages.json 的端点 ` +
+          `${JSON.stringify(CHAIN_ENDPOINTS)}——方向写反了，或者端点过期了`,
+      )
+    }
   })
 }
 
@@ -386,7 +468,16 @@ test('Development 那一节的前提今天仍然成立：node --test tests/ 发�
   // ⚠️ `NODE_TEST_CONTEXT` 必须从子进程环境里拿掉：`node --test` 给每个测试文件
   // 的进程都设着它，而子进程一旦继承到，Node 会判定「在测试文件内部递归调用
   // run()」，打印一行 warning 之后**跳过收集文件**——那样这条断言量的就不是
-  // `node --test tests/` 的收集行为，而是 Node 的递归保护，恒绿且毫无意义。
+  // `node --test tests/` 的收集行为，而是 Node 的递归保护。
+  //
+  // ⚠️ **这句话的后半截曾经写成「恒绿且毫无意义」，那是假的，已改。** 实测（评审
+  // 复现、本轮再核）：`NODE_TEST_CONTEXT=child node --test tests/` 只打印一行
+  // recursion warning，**一条 pass / fail 行都不打印**，所以下面那两条 `assert.match`
+  // 必然失败——**去掉这个 `delete`，这条判据是红的，不是绿的。**
+  // 「恒绿」是它的**对偶**才会有的毛病：同一个形状下，一条写成「断言输出里**不含**
+  // 某某」的判据会拿着一段 warning 文本判通过。`delete` 本身依然是必需的，
+  // 理由不是「否则恒绿」，是**否则量的是 Node 的递归保护、不是收集行为**——
+  // 红得对不对，和红不红是两件事。
   const env = { ...process.env, [SELFTEST_CHILD]: '1' }
   delete env.NODE_TEST_CONTEXT
   const r = spawnSync(process.execPath, ['--test', 'tests/'], {
@@ -421,13 +512,20 @@ test('Development 那一节的前提今天仍然成立：node --test tests/ 发�
 //   · 仅在 `--plugin-dir` 下实测 —— 下面这条，依据是 `docs/15` §8.1。
 //
 // 前两条**不需要在这里重复**：B 与 D 扫的是整份文件，`Status:` 行里那一份「十角色」
-// 与那两个阶段编号自动落进它们的判据里（B 的主判据遍历的是抠出来的**每一条**断言，
-// D 取的是首尾）。这一节只补后两条——它们断言的不是仓库里的数据，是**一次实测**。
+// 与那两个阶段编号自动落进它们的判据里，**因为 B 与 D 都是逐条迭代的**。
+//
+// ⚠️ **这段话原来写的是「无条件被 B/D 覆盖」，当时对 D 是假的，已改。** 写下它的那个
+// commit（也就是新增这一整节的那个）里，D 还是**收敛式**的——把整份文件抠成一个去重
+// 序列只取首尾。`Status:` 这一行新加的 `S1`–`S8` 是一句真话，而它正好把序列的尾巴顶回
+// `S8`，于是标语那一句里的过期值被静默。**一句真话把一句假话盖住了。** D 已经在第四节
+// 重写成逐行迭代，那一节的注释里记着完整经过；这里只留更正本身：**「无条件」这个词当时
+// 不该写，它断言的是一个没有核过的性质。**
 //
 // ⚠️ **判据盖不住的那一半，写清楚**：没有任何东西阻止有人把这一行整个换成一个档位词。
 // 这是**有意的边界**，不是漏掉——档位词是开放集合，按词形穷举它有结构性上限
-// （`docs/16` §3.4）。盖住的是两件具体的事：那一行里的角色数与阶段端点无条件被 B/D
-// 覆盖；而 `--plugin-dir` 这个限定不能被悄悄删掉（下面第二条）。
+// （`docs/16` §3.4）。盖住的是两件具体的事：那一行里的角色数与阶段编号由 B/D 逐条覆盖
+// （**凡是写出来的都得对**，但没人强制它一定要写出来）；而 `--plugin-dir` 这个限定
+// 不能被悄悄删掉（下面第二条）。
 //
 // ⚠️ 中文那份的标签这一轮也翻了（`**Status:**` → `**状态：**`），两份是镜像。
 // 判据认两种标签，靠合成样本自检钉住「两种都认得」。
@@ -489,17 +587,28 @@ test('自检：measuredChainEndpoints() 抠得出去重后的端点对，且不�
   )
 })
 
-test('Status: 那句「真实环境完整跑通过一趟」今天仍然成立——docs/15 记的端点与 stages.json 的首尾一致', () => {
+// ⚠️ 判据是「**含**」，不是「恰好只有一个」。第一版写的是
+// `deepEqual(measuredChainEndpoints(DOCS15), [expected])`，那等于要求
+// **`docs/15` 里永远只许出现一个向前箭头**——往那份文档里新增一句「另一趟探针只跑到
+// `S1→S4` 就停了」就会当场变红，而那是一次完全正常的补记。更糟的是失败文案在那个触发
+// 下会说「Status 那句话的前提变了」「不要改 docs/15」，**把唯一正确的修法堵死了**。
+// 这一条要问的只有一件事：**那趟跑完整条链的 run，它的端点还是今天的端点吗**。
+test('Status: 那句「真实环境完整跑通过一趟」今天仍然成立——docs/15 里仍有一趟跑到今天这两个端点的 run', () => {
   const expected = `${STAGE_IDS[0]}→${STAGE_IDS.at(-1)}`
-  assert.deepEqual(
-    measuredChainEndpoints(DOCS15),
-    [expected],
-    '两份 README 的 Status: 行声称「真实环境完整跑通过一趟」，而它的真源是 ' +
-      'docs/15-M2b-实测结论.md 记的那趟 run。⚠️ **这条红了不代表 docs/15 写错了**——' +
-      '那是一份冻结的实测记录，它记的是当时跑完的是哪一段，永远为真（docs/16 §3.5：' +
-      '豁免的是「记录当时的事实」）。红的含义是 **Status: 那句话的前提变了**：' +
-      '阶段链的端点已经不是那趟 run 跑完的那两个了，「完整」二字不再成立。' +
-      '要么重新跑一趟并补一份实测记录，要么把 Status: 那一行改成实话。**不要改 docs/15。**',
+  const found = measuredChainEndpoints(DOCS15)
+  assert.ok(
+    found.includes(expected),
+    '两份 README 的 Status: 行声称「真实环境完整跑通过一趟」，真源是 ' +
+      `docs/15-M2b-实测结论.md 记的那趟 run。今天从它里面抠出来的向前跨度是 ` +
+      `${JSON.stringify(found)}，里面没有 ${expected}。**两个触发，修法相反，先分清是哪一个：**\n` +
+      `  ① stages.json 的端点变了（现在是 ${expected}），而 docs/15 记的那趟 run 跑的是别的——` +
+      '**Status: 那句话的前提变了**，「完整」二字不再成立。改 README，或者重新跑一趟并补一份' +
+      '实测记录。⚠️ **不要去改 docs/15**：它是冻结的实测记录，记的是当时跑完的是哪一段，' +
+      '永远为真（docs/16 §3.5：豁免的是「记录当时的事实」）。\n' +
+      '  ② stages.json 没变，是 docs/15 里那几处跨度被改动了——那就去核对那次改动是不是误改，' +
+      '**该改回去的是 docs/15**。\n' +
+      '  （判据只问「含不含」，所以往 docs/15 里新增别的跨度记录不会红——那条过严的写法' +
+      '已经改掉了。）',
   )
 })
 
@@ -532,3 +641,157 @@ test('Status: 那句「仅 --plugin-dir」的依据仍在——docs/15 仍把正
       '这一条就是那个方向上唯一的守卫——它红了，回去改的是 README，不是这条断言',
   )
 })
+
+// ---------------------------------------------------------------------------
+// 八、安装说明里那两条 CLI 行为 —— 真源是实测记录的原文
+// ---------------------------------------------------------------------------
+//
+// M2c 评审 F5 指出的缺口：第一节到第七节钉住的都是「数据 ↔ 散文」这一类，而安装说明
+// 里还有两条断言的是**一次实测观察到的 CLI 行为**——
+//
+//   · `claude --resume` 不继承 `--plugin-dir`，README 里**逐字引了 CLI 打印的那句话**；
+//   · `claude plugin disable` **不**把工具面还回来。
+//
+// 它们与被钉住的那几条写在同一节、**读起来同等可靠**，而在 F5 之前是零守卫的散文：
+// 实测过——把中文那份的 `--resume` 那一段**整段删掉**全绿；把 `disable` 那段**说成
+// 反面**（「用 disable 就能把工具面还回来」）也全绿。
+//
+// 手法与第七节那条（`docs/15` 的端点）同一个：**README 的引述 ↔ 实测记录的原文**。
+// 两份 README 各一半，真源各自是 `docs/11` §5.5 与 `docs/04` §9 ③。
+const DOCS11 = read('docs/11-M1b-遗留与已知边界.md')
+const DOCS04 = read('docs/04-本机实测结论.md')
+
+// 归一化：去掉强调星号、反引号、引用块前缀，再把所有空白压成一个空格。
+// 三份文件里这句 CLI 原话的排版各不相同——`docs/11` 把它写成跨两行的引用块并且在
+// 句中加了 `**`，README 把它整句塞进一对反引号里。**排版不同不等于引述不同**，
+// 判据不该被换行位置绊倒（`docs/11` §5.19 记过同族的一次：`.` 默认不跨行造成假红）。
+function normalizeQuote(s) {
+  return s
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/[*`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// CLI 那句原话：从 `Continuing with the default tools` 起，到第一个 `apply.` 为止。
+// 认头尾两个锚点、不认中间——中间那半截正是这条引述唯一承重的部分
+// （`the agent's tool restrictions no longer apply`），它变了就该红。
+const CLI_QUOTE_HEAD = 'Continuing with the default tools'
+const CLI_QUOTE_TAIL = 'apply.'
+
+function resumeQuoteOf(text) {
+  const flat = normalizeQuote(text)
+  const i = flat.indexOf(CLI_QUOTE_HEAD)
+  if (i < 0) return null
+  const j = flat.indexOf(CLI_QUOTE_TAIL, i)
+  if (j < 0) return null
+  return flat.slice(i, j + CLI_QUOTE_TAIL.length)
+}
+
+// ⭐ 正向自检锚：钉抽取器本身，钉在合成样本上。三件事一起钉：跨行能拼起来、强调星号
+// 与引用块前缀被吃掉、找不到时返回 null（而不是返回空串——空串会让下面那条
+// `assert.equal` 在两边都抠不到时**两个空串相等而恒绿**）。
+test('自检：resumeQuoteOf() 跨行与强调排版都能归一化，抠不到时返回 null', () => {
+  const asDoc = '> Continuing with the default tools and system prompt — **the agent restrictions\n> no longer apply.**\n'
+  const asReadme = '正文里 `Continuing with the default tools and system prompt — the agent restrictions no longer apply.` 后面还有话。'
+  const expected = 'Continuing with the default tools and system prompt — the agent restrictions no longer apply.'
+  assert.equal(resumeQuoteOf(asDoc), expected)
+  assert.equal(resumeQuoteOf(asReadme), expected)
+  assert.equal(resumeQuoteOf('这一段里没有那句 CLI 原话。'), null)
+})
+
+// ⭐ 锚二：真源那一侧必须真的有这句话。它是空的时候，下面那条 `assert.equal` 会变成
+// 「两边都是 null」——**恒绿**。这条锚就是防这个（`docs/16` §3.2：锚要钉在判据真正
+// 进入 assert 的那一层）。
+test('锚：docs/11 §5.5 里仍然有那句 CLI 原话——否则下面两条会拿两个 null 相等而恒绿', () => {
+  assert.ok(
+    resumeQuoteOf(DOCS11),
+    'docs/11-M1b-遗留与已知边界.md 里抠不出 CLI 打印的那句 ' +
+      `${JSON.stringify(CLI_QUOTE_HEAD)}…${JSON.stringify(CLI_QUOTE_TAIL)}——` +
+      '它是两份 README 安装说明里那条 --resume 警告的真源，真源没了，下面两条就没有基准',
+  )
+})
+
+for (const f of [README_EN, README_ZH]) {
+  test(`${f} 逐字引的那句 CLI 原话与 docs/11 §5.5 记的一致`, () => {
+    assert.equal(
+      resumeQuoteOf(read(f)),
+      resumeQuoteOf(DOCS11),
+      `${f} 安装说明里引的那句 CLI 原话与 docs/11 §5.5 记的对不上（抠出 null 就是那一段` +
+        '被删掉了）。这一条是对外表面上**唯一**一处逐字引用平台原文的地方，而它承重的是' +
+        '「续一次会话就能让整套工具面隔离静默消失」这件事——引述漂了、或者整段没了，' +
+        '读的人不会有任何提示。要改就两边一起改，并回去确认 docs/13 §5.6 的完整经过',
+    )
+  })
+}
+
+// ---- `claude plugin disable` 不把工具面还回来 ----
+//
+// 这一条没有可逐字比对的平台原文（`docs/04` §9 ③ 记的是中文结论），所以钉法换成
+// `tests/agents.test.mjs` 的 `statesPathsEscape()` 那一款：**前提与结论两半都要**，
+// 并配一条**已知违规样本**自检——保留前提、把结论说反，判据必须判不通过。
+// 评审实测过的那一刀正是这个形状（「用 disable 就能把工具面还回来」）。
+//
+// ⚠️ 两份 README 措辞不同语，所以这张表有两行。它不是「同一份知识的两份拷贝」——
+// 跨语言的措辞本来就没有可派生的单一真源，与本文件第一节的 HEADING_PAIRS 同理。
+const DISABLE_CLAIM = {
+  [README_EN]: {
+    premise: /tool surface is fixed for its lifetime/,
+    negation: /disabling was measured not to hand it back/,
+    flipped:
+      'Do not reach for claude plugin disable — a session tool surface is fixed for its lifetime, and disabling hands it back.',
+  },
+  [README_ZH]: {
+    premise: /工具面在它的生命周期内是固定的/,
+    negation: /disable\s*不会把它还回来/,
+    flipped: '不要去用 claude plugin disable——一个会话的工具面在它的生命周期内是固定的，而 disable 会把它还回来。',
+  },
+}
+
+function disableLineOf(text) {
+  return text.split(/\r?\n/).find((l) => l.includes('claude plugin disable')) ?? null
+}
+
+function statesDisableDoesNotRestore(line, claim) {
+  const flat = normalizeQuote(line)
+  return claim.premise.test(flat) && claim.negation.test(flat)
+}
+
+// ⭐ 正向自检锚（已知违规样本那一款）：判据必须认得出「保留前提、把结论说反」。
+// 没有它，判据被放宽成只查前提时主判据会恒绿——而那正是这条要防的失效方向。
+test('自检：statesDisableDoesNotRestore() 对「保留前提、把结论说反」的样本判不通过', () => {
+  for (const [f, claim] of Object.entries(DISABLE_CLAIM)) {
+    assert.ok(
+      !statesDisableDoesNotRestore(claim.flipped, claim),
+      `${f} 那一行的判据对着一个已知违规样本（保留「工具面在会话生命周期内固定」这个前提、` +
+        '把「disable 不会还回来」这个结论说反）算出了「通过」——判据认不出这类违规，回去检查它',
+    )
+  }
+})
+
+// ⭐ 锚二：真源那一侧。`docs/04` §9 ③ 是这条结论的唯一出处，也是本项目「绝不用
+// plugin enable / disable，一律 --plugin-dir」这条纪律的依据。
+test('锚：docs/04 §9 ③ 仍然记着「disable 之后工具面没有恢复」——README 那一段的依据', () => {
+  assert.match(
+    normalizeQuote(DOCS04),
+    /plugin disable 之后同一会话的工具面没有恢复/,
+    'docs/04-本机实测结论.md 里找不到「plugin disable 之后同一会话的工具面没有恢复」。' +
+      '两份 README 的安装说明拿它当「用完怎么收场」那一段的依据，本项目「绝不用 plugin ' +
+      'enable、一律 --plugin-dir」这条纪律也压在它上面。如果这条后来被推翻了，' +
+      '要改的是 README 与纪律，不是把这条断言删掉',
+  )
+})
+
+for (const [f, claim] of Object.entries(DISABLE_CLAIM)) {
+  test(`${f} 的收场那一段两半都在：工具面在会话生命周期内固定，且 disable 不会还回来`, () => {
+    const line = disableLineOf(read(f))
+    assert.ok(line, `${f} 里找不到提到 claude plugin disable 的那一段——brief 第二节点名必须写的四条之一`)
+    assert.ok(
+      statesDisableDoesNotRestore(line, claim),
+      `${f} 那一段没有同时说清两半：**前提**（一个会话的工具面在它的生命周期内是固定的）` +
+        '与**结论**（实测确认 disable 不会把它还回来，docs/04 §9 ③）。只留前提、或者把结论' +
+        '说反（「用 disable 就能把工具面还回来」），读的人会照着一个本项目自己已经禁用的' +
+        '做法去收场——而那个做法不起作用，他不会收到任何提示',
+    )
+  })
+}
