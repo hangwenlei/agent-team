@@ -40,7 +40,7 @@ import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
-import { computeReach } from '../hooks/lib/reach.mjs'
+import { REAL_STAGES, whoCanReach } from './helpers/stage-role-reach.mjs'
 
 // ---- H5b（stop-gate，SubagentStop）----
 
@@ -630,15 +630,10 @@ test('前置条件：上面三条的夹具互不相同——否则三条测的�
 // 期望值是 computeReach 对改完之后的真实数据跑出来的输出，一行对一行；改 roster.json 的
 // 任何一条边都会让对应的行变红，改的人必须回到 stages.README.md 的「H5a 的静默集合」
 // 那一节把表一起更新——形状照 tests/reach.test.mjs 的拓扑锚。
-const REAL_ROSTER = JSON.parse(readFileSync(new URL('../roster.json', import.meta.url), 'utf8'))
-const REAL_STAGES = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
-
-// 判据只问拓扑可达性，paths 传 {}——与 hooks/gate.mjs 的 isCoordinatorFor 逐字一致。
-function whoCanReach(stageId) {
-  const reach = computeReach({ roster: REAL_ROSTER, paths: {} })
-  const stageRole = REAL_STAGES[stageId]?.role
-  return Object.keys(REAL_ROSTER).filter((k) => (reach[k]?.reachableRoles ?? []).includes(stageRole))
-}
+// M2b 终审 A4：REAL_ROSTER / REAL_STAGES / whoCanReach 搬去
+// tests/helpers/stage-role-reach.mjs。理由：这一轮给 stages.README.md 那张表本身也补了
+// 守卫（tests/stages-readme.test.mjs），两个测试文件需要同一个推导——在第二个文件里把
+// computeReach 那三行再拼一遍就是第二份知识。
 
 // stages.README.md「H5a 的静默集合」那张表的第二、三列，八行。顺序与 computeReach 的
 // 输出顺序（Object.keys(roster) 的顺序）一致，deepEqual 连顺序一起钉。

@@ -27,6 +27,15 @@
 // && !Array.isArray(p)` 等），拼法还彼此不一样。判据与它的自检锚不能是同一份知识的
 // 第二份拷贝（docs/11 §3 点名过这条）——那样两处一旦改走样，谁都不会提示。让测试
 // import 这里同一份，不是让它们各自再拼一次。
+//
+// M2b 终审 A2：上面那一轮**只接了测试那一侧**——导出了单一真源，却把 hooks/ 下的五份
+// 私有拷贝原样留着（artifact-drift.mjs / reach.mjs / rework-guard.mjs / state.mjs 四份
+// 逐字相同，hooks/gate.mjs 第五份叫 isValidInput、形参名 input，函数体形状等价）。
+// 这与本分支 Task 2 修复轮 1 ③ 的裁定正面对照：那次判过「Array.isArray 是单一谓词、
+// 没有第二种正确拼法可漂移，不值得抽；**而 isPlainObject 是手写的多条件布尔表达式，
+// 那才有变体空间**」。按那条理由，该抽的恰恰是这几份。合并前逐份 md5 比对过：四份
+// 私有拷贝声明逐字相同，五份（连同 gate.mjs 那份）函数体形状 md5 相同。
+// 现在全部 import 这一份。本模块**不 import 任何东西**，所以没有环。
 export function isPlainObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
 }

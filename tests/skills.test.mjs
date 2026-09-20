@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { producedNames } from '../hooks/lib/stages.mjs'
+import { COMMAND_NAMES } from './helpers/command-names.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const SKILLS = ['at-contract-format', 'at-handoff-package', 'at-api-contract']
@@ -72,11 +73,46 @@ test('前置条件：每个 SKILL.md 都有实质正文（≥ 20 行）', () => 
 const roster = JSON.parse(readFileSync(url('roster.json'), 'utf8'))
 const stages = JSON.parse(readFileSync(url('stages.json'), 'utf8'))
 
+// 判据：把 skill 正文里**当成角色名用**的那些 `at-*` 抠出来。两层豁免：
+//
+// 1. **skill 自己的名字**——三个 skill 全都叫 `at-*`（at-contract-format /
+//    at-handoff-package / at-api-contract），与角色名形状相同。
+// 2. **命令名**——at-init / at-resume / at-status 同样撞形状。这一层原先没有：
+//    tests/commands.test.mjs 在 M2a Task 9 解决过，tests/agents.test.mjs 在 M2b
+//    Task 4 补轮抽成了 tests/helpers/command-names.mjs，**skill 侧是最后一处**。
+//    不在这里自己 readdirSync 一遍——那会是第三份派生（Ruling 16 命名的形状：先解决
+//    问题的那一侧，最容易在问题的第二半上留缺口）。
+//
+// ⚠️ **今天这条判据真正执行 0 次断言**：三份 SKILL.md 里 at-* 形状总共命中 3 个，
+// 全是 skill 自己的名字，第一层豁免之后就没有了——一个角色名都没提。这是**事实，不是
+// 缺陷**：本分支已定的界是「零覆盖不等于有缺口」。这条是 fail-open 的**前瞻守卫**，
+// 防的是将来哪份 skill 正文写进一个角色名。所以下面那条锚**不能**用「派生集合非空」
+// 那一款——今天那个集合就是空的，那种锚一上线就红。用的是**已知违规样本**那一款，
+// 与 tests/commands.test.mjs 的「自检：pathKeyBans() 从一条已知的禁令子句里抠得出被
+// 点名的角色」同一手法。把一个看不见的零，变成一个有人守着的零。
+//
+// **不要为了喂饱这条判据去改 skill 正文**，也不要因为它今天是零就删掉它。
+function skillRoleMentions(text) {
+  const out = new Set()
+  for (const name of new Set(text.match(/\bat-[a-z][a-z0-9-]*\b/g) ?? [])) {
+    if (SKILLS.includes(name)) continue // skill 自己的名字也是 at- 开头
+    if (COMMAND_NAMES.has(name)) continue // 命令名与角色名是两个命名空间，恰好同形
+    out.add(name)
+  }
+  return out
+}
+
+// ⭐ 正向自检锚（docs/11 §3.3 第 2 条）。钉的是**判据函数本身**，不是它今天算出来的
+// 集合——那个集合就是空的。判据被放宽成「豁免一切」时这条会红；主判据今天不会红，
+// 因为它今天一次都不跑。
+test('自检：skillRoleMentions() 让一个既不是 skill 名也不是命令名的 at-* 活过两层豁免', () => {
+  assert.deepEqual([...skillRoleMentions('照 `at-nosuchrole` 那一段的口径写。')], ['at-nosuchrole'])
+})
+
 test('skill 正文里出现的每个 at-* 角色名都在花名册里', () => {
   for (const s of SKILLS) {
     const t = readFileSync(url(`skills/${s}/SKILL.md`), 'utf8')
-    for (const name of new Set(t.match(/\bat-[a-z][a-z0-9-]*\b/g) ?? [])) {
-      if (SKILLS.includes(name)) continue // skill 自己的名字也是 at- 开头
+    for (const name of skillRoleMentions(t)) {
       assert.ok(Object.hasOwn(roster, name), `skills/${s} 提到 ${name}，但它不在 roster.json 里`)
     }
   }

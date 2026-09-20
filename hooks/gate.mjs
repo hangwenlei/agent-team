@@ -26,6 +26,7 @@ import { sha256OfContract } from './lib/contract-hash.mjs'
 import { buildLedgerNotices } from './lib/ledger.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { norm, underDir } from './lib/path-norm.mjs'
+import { isPlainObject } from './lib/stages.mjs'
 import { TRUSTED_PREFIX, trustedBlock } from './lib/trusted.mjs'
 
 const CHECK = process.argv[2]
@@ -48,8 +49,14 @@ function readStdin() {
 // null、数组、字符串、数字这些"能被 JSON.parse 解析但取不出字段"的输入，
 // 语义上跟"读不到输入"是同一类坏——继续往下走只会在某次属性访问上悄悄
 // 拿到 undefined，而不是被明确地拒绝。
+//
+// M2b 终审 A2：这里原来是逐字重拼的第五份判别式（形参名 input，函数体形状与
+// hooks/lib/stages.mjs 的 isPlainObject 的 md5 相同）。改成调那一份。
+// **名字留着**：`isValidInput` 说的是「hook 入口这一层对输入的要求」，与「什么叫
+// 平凡对象」不是同一件事，而且 tests/writepath.test.mjs 的一段注释按名字指着它——
+// 删名字会把那条指引变成悬空引用。留的是名字，不是第二份知识：判别式只剩一处。
 function isValidInput(input) {
-  return input !== null && typeof input === 'object' && !Array.isArray(input)
+  return isPlainObject(input)
 }
 
 // docs/11 §1.4：roster.json 是插件自带文件，读坏概率低，但 isCoordinatorFor 与

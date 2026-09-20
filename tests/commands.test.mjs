@@ -457,14 +457,18 @@ test('命令正文里的斜杠命令引用必须带插件命名空间', () => {
   }
 })
 
+// M2b 终审 A3：这里原本是 `new Set(FILES.map((f) => f.replace(/\.md$/, '')))`——
+// 「命令名集合」的**第二份派生**，而单一真源 COMMAND_NAMES 就在本文件第 8 行 import
+// 着。**这正是 Ruling 16 命名的形状**：先解决问题的那一侧，最容易在问题的第二半上
+// 留缺口，因为它看起来已经处理过这件事了。命令侧是先做排除集的那一侧（M2a Task 9），
+// 抽真源那一轮反而没回去接它自己。改走真源。
 test('命令正文引用的每条斜杠命令都真的存在于 commands/', () => {
-  const known = new Set(FILES.map((f) => f.replace(/\.md$/, '')))
   for (const f of FILES) {
     for (const [, token] of textOf(f).matchAll(slashTokenRe())) {
       if (!token.startsWith(PLUGIN_PREFIX)) continue // 缺前缀由上一条报，这里只查名字
       const name = token.slice(PLUGIN_PREFIX.length)
       assert.ok(
-        known.has(name),
+        COMMAND_NAMES.has(name),
         `commands/${f} 引用了 \`/${token}\`，但 commands/ 下没有 ${name}.md——` +
           `跨文件引用指向了一个不存在的命令`,
       )

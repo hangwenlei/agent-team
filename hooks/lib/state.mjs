@@ -14,12 +14,32 @@
 // validateState 一次报全部问题而不是遇到第一个就返回：调用方是 ledger，它把 problems
 // 一次性交给 PM；分次报会让 PM 改一条、再撞一条，来回好几轮。
 
-import { producedNames, expandProduces, stageRolesInRun } from './stages.mjs'
+// isPlainObject 也从这里来（M2b 终审 A2），原先是本模块的私有拷贝。
+import { producedNames, expandProduces, stageRolesInRun, isPlainObject } from './stages.mjs'
 
 const SHA_RE = /^sha256:[0-9a-f]{64}$/
 const RUN_ID_RE = /^\d{8}-\d{4}-[a-z0-9][a-z0-9-]*$/
 
 export const REWORK_LIMIT = 3
+
+// 「返工计数是个合法的数」——H6 写时闸（hooks/lib/rework-guard.mjs 判据④）与下面
+// validateState 的事后校验**共用这一份**。
+//
+// M2b 终审 A5：两边原本各拼各的，而且方向是反的——写时闸先 `Number(raw)` 再判，
+// `Number(true) === 1`、`Number(' 1 ') === 1`，于是 `rework: {"S5": true}` 与
+// `{"S5": " 1 "}` 被**放行**，落盘之后 validateState 对同一份 state 报「不是非负整数」。
+// **fail-closed 的写时闸比 fail-open 的事后告警宽松**，与本模块自己已经修过一次的
+// 那条不对称（判据④缺下界、`rework:{"S5":-1}` 被放行）完全同族，只是换了个入口。
+// 不是预算绕过（`Number('4') = 4 > 3` 仍然 deny），但方向错了就是错了。
+//
+// 只抽「非负整数」这一半，**不把 `v > REWORK_LIMIT` 一起包进来**：那一边两处都是
+// 拿同一个导出常量 REWORK_LIMIT 做的单次比较，没有第二种正确拼法可漂移——正是
+// Task 2 修复轮 1 ③ 判过「不值得抽」的那一类。有变体空间的是这个手写的多条件布尔
+// 表达式，抽的就是它。validateState 还要靠这一半把两种认知状态分开报（「不是非负
+// 整数」/「超过硬上限」），合成一个谓词会把那个区分抹平。
+export function isNonNegativeInteger(v) {
+  return Number.isInteger(v) && v >= 0
+}
 
 // 与规格 §5.1 的五类必须升级条件一一对应，顺序也照它：
 // 1 敏感与不可逆 / 2 契约冲突 / 3 取舍 / 4 契约有洞 / 5 预算耗尽。
@@ -30,10 +50,6 @@ export const ESCALATION_KINDS = [
   'contract-hole',
   'budget-exhausted',
 ]
-
-function isPlainObject(v) {
-  return v !== null && typeof v === 'object' && !Array.isArray(v)
-}
 
 function isStringArray(v) {
   return Array.isArray(v) && v.every((x) => typeof x === 'string')
@@ -200,7 +216,7 @@ export function validateState(state, { stages } = {}) {
     p('rework 不是对象')
   } else {
     for (const [k, v] of Object.entries(state.rework)) {
-      if (!Number.isInteger(v) || v < 0) p(`rework["${k}"] 不是非负整数`)
+      if (!isNonNegativeInteger(v)) p(`rework["${k}"] 不是非负整数`)
       else if (v > REWORK_LIMIT) p(`rework["${k}"] 是 ${v}，超过硬上限 ${REWORK_LIMIT}（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级）`)
       if (isPlainObject(stages) && !Object.hasOwn(stages, k)) p(`rework 里有 ${k}，但 stages.json 里没有这个阶段`)
     }

@@ -156,6 +156,32 @@ test('rework 写成负数、且该阶段没有返工史（判据③管不到）�
   assert.equal(r.ok, false)
 })
 
+// M2b 终审 A5：判据④原来先 `Number(raw)` 再验，于是 `Number(true) === 1` 与
+// `Number(' 1 ') === 1` 这两种形状从写时闸溜了过去——而事后的 validateState 对同一份
+// state 报「rework["S5"] 不是非负整数」。**fail-closed 的写时闸比 fail-open 的事后告警
+// 宽松**，与上面那条下界缺口完全同族。两条各占一个 test()：`true` 走的是 JS 的布尔→
+// 数字转换，`' 1 '` 走的是带空格字符串→数字转换，是两种不同的溜法，一条红了不该把另一
+// 条的结论一起埋掉。
+//
+// ⚠️ 两条都刻意选在 history 派生值 = 1 的状态上：判据③（`Number(raw) < n`）在这里算出
+// 的是 `1 < 1` = false，管不到——**红只能来自判据④**。派生值取别的数会让判据③先返回，
+// 这两条就锚不到要钉的那一层了。
+test('rework 写成布尔 true（Number(true) === 1，判据③管不到）：拒', () => {
+  const r = decideRework({
+    before: st(H('S5', 'S5'), { S5: 1 }),
+    after: st(H('S5', 'S5'), { S5: true }),
+  })
+  assert.equal(r.ok, false)
+})
+
+test('rework 写成带空格的字符串 " 1 "（Number(" 1 ") === 1，判据③管不到）：拒', () => {
+  const r = decideRework({
+    before: st(H('S5', 'S5'), { S5: 1 }),
+    after: st(H('S5', 'S5'), { S5: ' 1 ' }),
+  })
+  assert.equal(r.ok, false)
+})
+
 // Minor 6 点名的那一格：rework 改小 × Write。此前 history 删短只走 Write、
 // rework 改小只走 Edit，2×2 矩阵缺这一格。纯函数层与工具无关，这条补的是对称性。
 test('rework 改小、走 Write 路径的那一格：拒（与 Edit 路径同判据）', () => {

@@ -11,12 +11,14 @@
 // 越容易互相拆台）。这里缺的不是拦截，是**可见性**：没人算过这个数，所以没人发现
 // 它变了。
 //
-// 纯数据推导，不 import 任何东西、不碰文件系统——跟 decideDelegation /
-// decideWritePath 同一层，能脱离 Claude Code 单测。
-
-function isPlainObject(v) {
-  return v !== null && typeof v === 'object' && !Array.isArray(v)
-}
+// 纯数据推导，不碰文件系统——跟 decideDelegation / decideWritePath 同一层，能脱离
+// Claude Code 单测。
+//
+// ⚠️ 这一段原本写的是「**不 import 任何东西**、不碰文件系统」。M2b 终审 A2 把本模块
+// 私有的那份 isPlainObject 换成了 import，那半句当场变假，所以一并改掉——不留一句
+// 「活过了自己的更正」的旧话（本分支为这个形状开过六轮）。换来的性质没有变：
+// stages.mjs 自己不 import 任何东西、也不碰文件系统，这里仍然是纯数据推导。
+import { isPlainObject } from './stages.mjs'
 
 export function computeReach({ roster, paths }) {
   const out = {}

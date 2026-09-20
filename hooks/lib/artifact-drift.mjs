@@ -24,11 +24,10 @@
 // 假漂移。两份逐字相同的哈希实现真的会分叉，这个仓库为此开过好几轮循环（见 path-norm.mjs
 // 头部）。
 import { sha256OfContract } from './contract-hash.mjs'
-import { expectedArtifacts } from './stages.mjs'
-
-function isPlainObject(v) {
-  return v !== null && typeof v === 'object' && !Array.isArray(v)
-}
+// isPlainObject 也走 stages.mjs 同一份（M2b 终审 A2）——它原来是这里的私有拷贝，与
+// reach.mjs / rework-guard.mjs / state.mjs / gate.mjs 共五份。理由与上面那段哈希实现
+// 一字不差：手写的多条件布尔表达式有变体空间，两份逐字相同的实现真的会分叉。
+import { expectedArtifacts, isPlainObject } from './stages.mjs'
 
 export function compareArtifacts({ artifacts, stages, artifactBytes, roster }) {
   const empty = { drifted: [], missing: [], unrecorded: [] }

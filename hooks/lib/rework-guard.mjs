@@ -14,11 +14,10 @@
 // ⚠️ 不豁免任何调用者。H3 只让 PM 写得了 state.json，但「能写」不等于「能把计数改小」——
 // 这条要拦的恰恰是 PM 自己，规格 §4.2 ③「不可重置」没有对写者身份留口子，跟 H4 那种
 // 「PM 自己不受约束」的豁免不是同一回事。
-import { reworkFromHistory, REWORK_LIMIT } from './state.mjs'
-
-function isPlainObject(v) {
-  return v !== null && typeof v === 'object' && !Array.isArray(v)
-}
+// isNonNegativeInteger 与 validateState 共用同一份（M2b 终审 A5）。
+import { reworkFromHistory, REWORK_LIMIT, isNonNegativeInteger } from './state.mjs'
+// isPlainObject 走 stages.mjs 同一份（M2b 终审 A2），原先是这里的私有拷贝。
+import { isPlainObject } from './stages.mjs'
 
 function counts(history) {
   const c = {}
@@ -48,14 +47,21 @@ export function decideRework({ before, after }) {
     }
   }
 
-  // 修复轮 1 Major 1：这两条判据都要先把 rework[stage] 强制转成数字再比，不能只信
-  // typeof。`<` 与 `>` 在两边类型不同的时候会各玩各的把戏——`'4' < 4` 走的是数值比较
-  // （字符串先被转成数字，为 false，逃过判据③的"低于派生值"检查）；`typeof v ===
-  // 'number'` 对字符串/数组/对象一律为 false，直接跳过判据④，硬上限形同虚设。两个
-  // 洞合起来：把 rework 写成字符串或数组就能把第 4 轮返工也放行。Number() 统一转换
-  // 之后，"转不成数字"本身（NaN）与"转成了但超上限"都在判据④一次性拦住，不再区分
-  // 类型——规格 §4.2 ③要的是"第 3 轮终局"这个数值事实，不是"这个字段恰好是 number
-  // 类型"这个 JS 实现细节。
+  // 修复轮 1 Major 1：判据③要先把 rework[stage] 强制转成数字再比，不能只信 typeof。
+  // `<` 与 `>` 在两边类型不同的时候会各玩各的把戏——`'4' < 4` 走的是数值比较（字符串
+  // 先被转成数字，为 false，逃过判据③的"低于派生值"检查）；而判据④原来的
+  // `typeof v === 'number'` 对字符串/数组/对象一律为 false，直接跳过，硬上限形同虚设。
+  // 两个洞合起来：把 rework 写成字符串或数组就能把第 4 轮返工也放行。
+  //
+  // ⚠️ M2b 终审 A5 改了判据④那一半，**这段话的后半句也跟着改了**（原文写的是
+  // 「Number() 统一转换之后…判据④不再区分类型」——那句话现在是假的，不留着让它活过
+  // 自己的更正）：判据④现在**先验类型**，与 validateState 共用 state.mjs 导出的
+  // isNonNegativeInteger。理由见那个函数上方——`Number(true) === 1`、
+  // `Number(' 1 ') === 1` 让写时闸比事后告警宽松，方向反了。
+  //
+  // 判据③**保留 Number()**，这是有意的：它问的是"这个计数低不低于派生值"这个数值
+  // 事实，强制转换在这里是**收紧**（NaN 之外的怪形状照样被它算出一个数来比），而且
+  // 它先返回、给出的是"不可重置"这条更贴题的理由。类型本身由紧随其后的判据④兜。
   const derived = reworkFromHistory(ha)
   const rw = isPlainObject(after.rework) ? after.rework : {}
   for (const [stage, n] of Object.entries(derived)) {
@@ -66,12 +72,13 @@ export function decideRework({ before, after }) {
     }
   }
   for (const [stage, raw] of Object.entries(rw)) {
-    const v = Number(raw)
-    // 下界 `v < 0` 是修复轮复评补的：原来这里只有上界，而第二道 validateState
-    // （state.mjs，事后告警）写的是 `!Number.isInteger(v) || v < 0`——**fail-closed
-    // 的写时闸比 fail-open 的事后告警更宽松，方向是反的**。实测 rework:{"S5":-1}
-    // 在该阶段没有返工史时被这里放行、被 validateState 报出来。
-    if (!Number.isInteger(v) || v < 0 || v > REWORK_LIMIT) {
+    // 下界是修复轮复评补的：原来这里只有上界，而第二道 validateState（state.mjs，
+    // 事后告警）连类型带下界一起查——**fail-closed 的写时闸比 fail-open 的事后告警
+    // 更宽松，方向是反的**。实测 rework:{"S5":-1} 在该阶段没有返工史时被这里放行、
+    // 被 validateState 报出来。M2b 终审 A5 把这道不对称的**剩下半边**也补上了：
+    // 判据从 `Number(raw)` 改成直接验 raw 的类型，两边共用同一个谓词，
+    // `{"S5": true}` 与 `{"S5": " 1 "}` 不再从这里溜过去。
+    if (!isNonNegativeInteger(raw) || raw > REWORK_LIMIT) {
       return { ok: false, reason: `rework["${stage}"] 是 ${JSON.stringify(raw)}，不是 0 到 ${REWORK_LIMIT} 之间的整数（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级）。` }
     }
   }
