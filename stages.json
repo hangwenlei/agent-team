@@ -1,7 +1,13 @@
 {
   "S1": { "role": "at-pm",         "requires": [],                                "produces": ["00-contract.md"] },
-  "S2": { "role": "at-product",    "requires": ["00-contract.md"],                "produces": ["01-prd.md"] },
-  "S3": { "role": "at-architect",  "requires": ["00-contract.md", "01-prd.md"],   "produces": ["03-arch.md"] },
+  "S2": { "role": "at-product",
+          "producers": ["at-product", "at-ui"],
+          "requires": ["00-contract.md"],
+          "produces": {
+            "at-product": ["01-prd.md"],
+            "at-ui": ["02-ui-spec.md", "02-wireframe.html"]
+          } },
+  "S3": { "role": "at-architect",  "requires": ["00-contract.md", "01-prd.md"],   "produces": ["03-arch.md", "03-alignment.md"] },
   "S4": { "role": "at-pm",         "requires": ["01-prd.md", "03-arch.md"],       "produces": ["04-dispatch.md"] },
   "S5": { "role": "at-backend",
           "producers": ["at-backend", "at-frontend", "at-ui", "at-ios", "at-android"],

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { CONTROL_FILES } from '../hooks/lib/control-files.mjs'
 import { validateState } from '../hooks/lib/state.mjs'
+import { producedNames } from '../hooks/lib/stages.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const readJson = (p) => JSON.parse(readFileSync(url(p), 'utf8'))
@@ -133,7 +134,10 @@ test('模板里不得再抄一份控制文件清单', () => {
 })
 
 test('templates/ 下每个 .md 都对应 stages.json 的某个 produces', () => {
-  const produced = new Set(Object.values(stages).flatMap((s) => s.produces ?? []))
+  // M2b Task 2：produces 现在有数组/对象两种形式（S2 是对象），flatMap 对对象值
+  // 不展平，原地重算会静默产出一个混进对象的 Set，导致 has() 恒为 false。改用
+  // producedNames(stages)（单一真源，已经走 expandProduces 认两种形式）。
+  const produced = producedNames(stages)
   for (const f of readdirSync(url('templates')).filter((f) => f.endsWith('.md'))) {
     assert.ok(
       produced.has(f),

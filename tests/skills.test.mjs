@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
+import { producedNames } from '../hooks/lib/stages.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const SKILLS = ['at-contract-format', 'at-handoff-package', 'at-api-contract']
@@ -82,7 +83,10 @@ test('skill 正文里出现的每个 at-* 角色名都在花名册里', () => {
 })
 
 test('skill 正文里出现的每个 NN-*.md 产物名都是某个阶段的 produces', () => {
-  const produced = new Set(Object.values(stages).flatMap((x) => x.produces ?? []))
+  // M2b Task 2：produces 现在有数组/对象两种形式（S2 是对象），flatMap 对对象值
+  // 不展平，原地重算会静默产出一个混进对象的 Set，导致 has() 恒为 false。改用
+  // producedNames(stages)（单一真源，已经走 expandProduces 认两种形式）。
+  const produced = producedNames(stages)
   for (const s of SKILLS) {
     const t = readFileSync(url(`skills/${s}/SKILL.md`), 'utf8')
     for (const a of new Set(t.match(/\b\d{2}-[a-z][a-z0-9-]*\.md\b/g) ?? [])) {

@@ -614,7 +614,12 @@ test('H5b 在角色与当前阶段对不上时不拦——fail open，不发 exi
 // ---- 账本比对（Task 4，规格 §6.2 的内容比对补偿，并入 deliverable/H5a）----
 
 test('磁盘上有产物但 artifacts 里没记：H5a 报出来（Bash 绕过 H3 的表征）', () => {
-  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md'] })
+  // M2b Task 2：S2 从单产者阶段改成对象形式的多产者阶段（producers:
+  // ['at-product','at-ui']）之后，stageRolesInRun 的 roster ∩ producers 口径第一次
+  // 对 S2 生效——makeRun 默认的空 roster 会让这一趟在 S2 的产出角色算成空集合，
+  // expandProduces 对象分支对任何角色都返回 []，账本比对因此看不见 01-prd.md，
+  // 这条测试原本要验证的"磁盘有、账本没记"场景无从触发。显式声明 at-product 在场。
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md'], roster: ['at-product'] })
   try {
     const { stdout } = run('deliverable', {
       tool_name: 'Agent', agent_type: 'at-pm', tool_input: { subagent_type: 'agent-team:at-product' },
@@ -628,7 +633,12 @@ test('磁盘上有产物但 artifacts 里没记：H5a 报出来（Bash 绕过 H3
 })
 
 test('账本比对的措辞不得说成「限制」或「越权」', () => {
-  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md'] })
+  // M2b Task 2：S2 从单产者阶段改成对象形式的多产者阶段（producers:
+  // ['at-product','at-ui']）之后，stageRolesInRun 的 roster ∩ producers 口径第一次
+  // 对 S2 生效——makeRun 默认的空 roster 会让这一趟在 S2 的产出角色算成空集合，
+  // expandProduces 对象分支对任何角色都返回 []，账本比对因此看不见 01-prd.md，
+  // 这条测试原本要验证的"磁盘有、账本没记"场景无从触发。显式声明 at-product 在场。
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md'], roster: ['at-product'] })
   try {
     const { stdout } = run('deliverable', {
       tool_name: 'Agent', agent_type: 'at-pm', tool_input: { subagent_type: 'agent-team:at-product' },
@@ -643,7 +653,12 @@ test('账本比对的措辞不得说成「限制」或「越权」', () => {
 
 // ⚠️ 正向锚点：上一条是否定断言，additionalContext 为空串时天然满足。
 test('前置条件：上一条那个场景确实产出了非空回传', () => {
-  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md'] })
+  // M2b Task 2：S2 从单产者阶段改成对象形式的多产者阶段（producers:
+  // ['at-product','at-ui']）之后，stageRolesInRun 的 roster ∩ producers 口径第一次
+  // 对 S2 生效——makeRun 默认的空 roster 会让这一趟在 S2 的产出角色算成空集合，
+  // expandProduces 对象分支对任何角色都返回 []，账本比对因此看不见 01-prd.md，
+  // 这条测试原本要验证的"磁盘有、账本没记"场景无从触发。显式声明 at-product 在场。
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md'], roster: ['at-product'] })
   try {
     const { stdout } = run('deliverable', {
       tool_name: 'Agent', agent_type: 'at-pm', tool_input: { subagent_type: 'agent-team:at-product' },

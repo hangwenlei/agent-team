@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { CONTROL_FILES } from '../hooks/lib/control-files.mjs'
 import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
+import { producedNames } from '../hooks/lib/stages.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const readJson = (p) => JSON.parse(readFileSync(url(p), 'utf8'))
@@ -203,7 +204,10 @@ test('命令正文引用插件自带的文件时必须带 ${CLAUDE_PLUGIN_ROOT} 
 })
 
 test('命令正文里出现的每个 NN-*.md 产物名都是 stages.json 的 produces', () => {
-  const produced = new Set(Object.values(stages).flatMap((s) => s.produces ?? []))
+  // M2b Task 2：produces 现在有数组/对象两种形式（S2 是对象），flatMap 对对象值
+  // 不展平，原地重算会静默产出一个混进对象的 Set，导致 has() 恒为 false。改用
+  // producedNames(stages)（单一真源，已经走 expandProduces 认两种形式）。
+  const produced = producedNames(stages)
   for (const f of FILES) {
     for (const a of new Set(textOf(f).match(/\b\d{2}-[a-z][a-z0-9-]*\.md\b/g) ?? [])) {
       assert.ok(produced.has(a), `commands/${f} 提到产物 ${a}，但它不是 stages.json 里任何阶段的 produces`)
@@ -212,7 +216,10 @@ test('命令正文里出现的每个 NN-*.md 产物名都是 stages.json 的 pro
 })
 
 test('命令正文里出现的每个 .agent-team 路径都是控制文件或 run 目录下的产物', () => {
-  const produced = new Set(Object.values(stages).flatMap((s) => s.produces ?? []))
+  // M2b Task 2：produces 现在有数组/对象两种形式（S2 是对象），flatMap 对对象值
+  // 不展平，原地重算会静默产出一个混进对象的 Set，导致 has() 恒为 false。改用
+  // producedNames(stages)（单一真源，已经走 expandProduces 认两种形式）。
+  const produced = producedNames(stages)
   const ok = (rel) =>
     CONTROL_FILES.some((c) => new RegExp(`^${c.replace('*', '[^/]+')}$`).test(rel)) ||
     /^runs\/[^/]+\/?$/.test(rel) ||

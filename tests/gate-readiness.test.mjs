@@ -56,7 +56,14 @@ test('readiness：ctx.ok 为 true 时，deny 判定真的经 denyAndExit 传到 
   // at-product 是仓库根真实 stages.json 里 S2 的角色，S2 requires
   // ['00-contract.md']——不造这个产物（artifacts 默认空），前置必然缺失。
   // subagent_type 带插件前缀，顺带验证 stripPluginPrefix 真的在这条路径上跑了。
-  const dirs = makeRun({ runId: 'r1' })
+  //
+  // M2b Task 2：S2 从单产者阶段改成对象形式的多产者阶段之后，stageRolesInRun 的
+  // roster ∩ producers 口径第一次对 S2 生效——makeRun 默认的空 roster 会让这一趟
+  // 在 S2 的产出角色算成空集合，expandProduces 对象分支对任何角色都返回 []，H2 的
+  // done 判定在空数组上 .every() 恒真，把 S2 直接判成"已完成"、requires 检查被跳过，
+  // deny 判定从未发生，stdout 变成空——这条测试原本要验证的"前置缺失应当 deny"场景
+  // 无从触发。显式声明 at-product 在场，避免真正要测的东西被这个新引入的旁支吞掉。
+  const dirs = makeRun({ runId: 'r1', roster: ['at-product'] })
   try {
     const input = { tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-product' } }
     const { stdout, status } = run('readiness', input, undefined, dirs.projectDir)

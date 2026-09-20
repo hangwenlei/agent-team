@@ -44,12 +44,34 @@ export function stageRoles(stage) {
   return typeof stage.role === 'string' ? [stage.role] : []
 }
 
-/** produces 里的 <role> 按 roles 展开。不含占位符的条目原样保留**一次**——否则 S1 的
- * 00-contract.md 会随角色数量翻倍。 */
+/** produces 的两种形式（规格 §4 的 M2b 注记）：
+ *
+ *   数组 `["05-impl/<role>.md"]`  —— 所有产者交同一个模式的东西（S5）。
+ *                                    <role> 按 roles 逐个展开；不含占位符的条目
+ *                                    原样保留**一次**（否则 S1 的 00-contract.md
+ *                                    会随角色数量翻倍）。
+ *   对象 `{"at-ui": ["02-ui-spec.md", ...]}` —— 各交各的（S2）。按 roles 取它们
+ *                                    各自那几份，不在映射里的角色不产出。
+ *
+ * ⚠️ 这个函数是全部消费方的单一真源（清单见规格 §4 那张表）。两种形式都要有变异验证
+ * 各自钉住——只钉一种的话，另一种可以被改坏而全绿。 */
 export function expandProduces(stage, roles) {
   const out = []
-  if (!isPlainObject(stage) || !Array.isArray(stage.produces)) return out
+  if (!isPlainObject(stage)) return out
   const list = Array.isArray(roles) ? roles.filter((r) => typeof r === 'string') : []
+
+  // 对象形式：按角色取各自的产物。
+  if (isPlainObject(stage.produces)) {
+    for (const r of list) {
+      const own = stage.produces[r]
+      if (!Array.isArray(own)) continue
+      for (const p of own) if (typeof p === 'string') out.push(p)
+    }
+    return out
+  }
+
+  // 数组形式：<role> 模式展开。
+  if (!Array.isArray(stage.produces)) return out
   for (const p of stage.produces) {
     if (typeof p !== 'string') continue
     if (!p.includes(ROLE_TOKEN)) { out.push(p); continue }

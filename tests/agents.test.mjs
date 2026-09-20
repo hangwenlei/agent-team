@@ -18,6 +18,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 import { EXPECTED_AGENTS } from './helpers/expected-agents.mjs'
+import { producedNames } from '../hooks/lib/stages.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const roster = JSON.parse(readFileSync(url('roster.json'), 'utf8'))
@@ -155,7 +156,14 @@ test('角色正文里出现的每个 at-* 角色名都在花名册里', () => {
 })
 
 test('角色正文里出现的每个 NN-*.md 产物名都是某个阶段的 produces', () => {
-  const produced = new Set(Object.values(stages).flatMap((x) => x.produces ?? []))
+  // M2b Task 2：produces 现在有数组/对象两种形式（S2 是对象），原地
+  // flatMap((x) => x.produces ?? []) 对对象值不展平——Object.values 会把整个
+  // produces 对象当成 flatMap 回调的返回值塞进结果数组（flatMap 只展平一层
+  // 数组，非数组返回值原样保留），产出的 Set 里混进一个对象而不是字符串，
+  // 于是 produced.has('01-prd.md') 恒为 false，agents/at-pm.md 提到它就会
+  // 被误判成「不是任何阶段的 produces」。改用 producedNames(stages)：它已经
+  // 走 expandProduces(s, stageRoles(s))，两种形式都认得，是单一真源。
+  const produced = producedNames(stages)
   for (const f of AGENTS) {
     for (const a of new Set(bodyOf(f).match(/\b\d{2}-[a-z][a-z0-9-]*\.md\b/g) ?? [])) {
       assert.ok(produced.has(a), `agents/${f} 提到产物 ${a}，但它不是任何阶段的 produces`)
