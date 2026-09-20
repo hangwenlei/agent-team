@@ -20,6 +20,7 @@ import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 import { EXPECTED_AGENTS } from './helpers/expected-agents.mjs'
 import { producedNames } from '../hooks/lib/stages.mjs'
 import { COMMAND_NAMES } from './helpers/command-names.mjs'
+import { ROLES_WITHOUT_PATHS } from './helpers/roles-without-paths.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const roster = JSON.parse(readFileSync(url('roster.json'), 'utf8'))
@@ -315,7 +316,13 @@ test('正文里「找到 role 是 at-X 的」这条指令声称的阶段，必�
     assert.ok(
       stageRoles.has(role),
       `agents/${f} 正文里指示去找「role 是 ${role}」的那一段，但 stages.json 里没有任何一段的 ` +
-        `role 是 ${role}——这句话指示的查找字面上会落空（M1 阶段链目前只到 S5，见 docs/11 §1.1）`,
+        // 修复轮 1（评审发现 4）：这一句原来结尾写着「M1 阶段链目前只到 S5，见 docs/11
+        // §1.1」——**它是 assert 的第三参，真红的时候会被打印出来**，而 stages.json 的链
+        // 早已是 S1–S8，这个「目前」是假的、会把排查方向带偏。与 addendum §6 改掉本文件
+        // 第一条失败文案、以及 tests/tool-surface.test.mjs 那条，是逐字同一条理由，
+        // 只是隔了不到 300 行没被一起看见。改成不报阶段链的范围，只印这次对不上的事实。
+        `role 是 ${role}——这句话指示的查找字面上会落空。去 stages.json 里核一遍这个名字` +
+          `是不是某一段的 role；不是的话，正文该写的是它在哪一段的 producers 里（docs/11 §5.6）`,
     )
   }
 })
@@ -564,4 +571,62 @@ test('十一份 agent 的 model: 与预期逐份一致——占位符的 haiku �
     'at-ios.md': 'sonnet', 'at-android.md': 'sonnet', 'at-qa.md': 'sonnet',
     'at-acceptance.md': 'sonnet', 'at-outsider.md': 'haiku',
   })
+})
+
+// ⭐ 修复轮 1（评审发现 2，本轮最该补的一条）：**Ruling 13 的禁令此前没有依据守着。**
+//
+// `tests/commands.test.mjs` 强制 `commands/at-init.md` 保留「不要给 at-qa / at-acceptance
+// 建 paths 键」这条禁令，它的失败文案里白纸黑字写着理由是「会让 agents/ 下那份正文里
+// 『写路径隔离连拒都不会拒你』当场变假」——**可是没有任何东西强制那份正文保留那句话**。
+// 评审实测：把 agents/at-qa.md 与 agents/at-acceptance.md 里那一段整段删掉，裸
+// `node --test` 仍然 558 / 0，**零红**（两份各验一次）。两边可以静默分叉成
+// **禁令留着，它的依据消失**——而这两个角色恰恰是全仓**唯一**两个写路径隔离对其完全
+// 失效的角色（docs/11 §5.14）。
+//
+// 为什么此前零红：`at-qa` 靠与别人共享的那段红线**碰巧**还能过 `管不到` 那条判据；
+// `at-acceptance` 不在 HAS_BASH 里，那三条红线判据一条都不作用于它。
+//
+// 清单与 Ruling 13 **共用同一个派生数组**（tests/helpers/roles-without-paths.mjs），
+// 不在这里自己再算一次 available_roles − paths：一边动，另一边必然跟着动。
+//
+// 判据两半都要，且两半都只出现在这一段里（不是共享红线里的措辞）：
+//   前提「paths 里没有你的条目」 + 结论「早退放行」。
+// 保留前提、把结论说反（「写路径隔离照样挡得住你」）不会同时具备这两半——下面第二条
+// 自检拿一个这样的样本钉住这件事。主判据与两条自检调的是**同一个函数**。
+function statesPathsEscape(body) {
+  return /`?paths`?\s*里没有你的条目/.test(body) && /早退放行/.test(body)
+}
+
+// ⭐ 正向锚一：钉的是**判据真正迭代的那个集合**。ROLES_WITHOUT_PATHS 是派生出来的，
+// 差集塌成空时下面那条零次迭代、恒绿，而它自己不会有任何提示。
+test('锚：templates/project.json 里真的有「故意不认领 paths」的角色——否则下面那条零次迭代恒绿', () => {
+  assert.ok(
+    ROLES_WITHOUT_PATHS.length > 0,
+    'templates/project.json 的 available_roles 减去 paths 的键算出来是空集合——下面那条' +
+      '「正文必须写明 H3 对它早退放行」一圈都不会跑，它是恒绿的，没有检查任何东西',
+  )
+})
+
+// ⭐ 正向锚二：判据认得出「保留前提、把结论说反」这一类违规。没有它，判据被放宽成
+// 只查前提（或只查某个高频词）时，主判据会恒绿——而那正是这条不变量要防的失效方向。
+test('自检：statesPathsEscape() 认得出一个已知违规样本——保留「paths 里没有你的条目」但把结论说反后不应判定为通过', () => {
+  const flipped = '`paths` 里没有你的条目，但写路径隔离照样会挡住你写别人的代码目录。'
+  assert.ok(
+    !statesPathsEscape(flipped),
+    'statesPathsEscape() 对着一个已知违规样本（保留前提、把「早退放行」的结论说反）算出了' +
+      '「通过」——说明判据认不出这类违规，回去检查它本身',
+  )
+})
+
+test('故意不认领 project.paths 的角色，正文里必须写明写路径隔离对它早退放行这件事', () => {
+  for (const role of ROLES_WITHOUT_PATHS) {
+    assert.ok(
+      statesPathsEscape(bodyOf(`${role}.md`)),
+      `agents/${role}.md 是 templates/project.json 里故意不认领 paths 的角色（available_roles ` +
+        '减去 paths 的键），而 hooks/lib/writepath.mjs 的 decideWritePath 对没有 paths 条目的' +
+        '角色在 run 目录之外整段早退放行——它的正文必须如实写出这件事（前提「paths 里没有你' +
+        '的条目」+ 结论「早退放行」两半都要）。commands/at-init.md 那条禁令的理由正是这句话，' +
+        '两边由同一个派生数组驱动，不能只剩禁令而依据消失（docs/11 §5.14）。',
+    )
+  }
 })

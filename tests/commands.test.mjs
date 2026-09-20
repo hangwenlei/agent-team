@@ -6,6 +6,7 @@ import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { producedNames } from '../hooks/lib/stages.mjs'
 import { COMMAND_NAMES } from './helpers/command-names.mjs'
+import { ROLES_WITHOUT_PATHS } from './helpers/roles-without-paths.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const readJson = (p) => JSON.parse(readFileSync(url(p), 'utf8'))
@@ -524,10 +525,12 @@ test('commands/at.md 与 commands/at-init.md 的正文必须引用受信前缀�
 // 这个差集恰好是 ['at-acceptance','at-qa']）；再加上 at-pm——它连 available_roles 都不在
 // （同一份文件里另有一条钉着）。清单漂移时这条测试跟着漂，不会变成又一个「写下来的名单
 // 是错的」（本分支已经数到第六个）。
-const projectTemplate = readJson('templates/project.json')
-const ROLES_WITHOUT_PATHS = projectTemplate.available_roles.filter(
-  (r) => !Object.hasOwn(projectTemplate.paths, r),
-)
+// 修复轮 1（评审发现 2）：这个派生**搬到了 tests/helpers/roles-without-paths.mjs**，
+// 不在这里自己算一次。理由是这一轮刚发生的事：这条禁令的失败文案写着它存在的理由是
+// 「会让 agents/ 下那份正文里『写路径隔离连拒都不会拒你』当场变假」，而**当时没有任何
+// 东西强制那份正文保留那句话**——两边可以静默分叉成「禁令留着，它的依据消失」。
+// 现在禁令（这一条）与依据（tests/agents.test.mjs 里那条）由**同一个数组**驱动。
+// at-pm 那个字面量留在这里：它连 available_roles 都不在，不属于那份派生。
 const ROLES_FORBIDDEN_AS_PATH_KEYS = [...new Set(['at-pm', ...ROLES_WITHOUT_PATHS])].sort()
 
 // 判据：把「不要给 …… 建键」这类禁令子句里被反引号点名的角色抠出来。只认「不要给」与

@@ -34,8 +34,11 @@ export function decideReadiness({ targetRole, stages, artifactExists, roster }) 
   // localeCompare）——"S10".localeCompare("S2") < 0，字典序会把 S10 排到
   // S2 前面，S10 requires 一旦是空的就会被提前判定成"已完成"，漏过 S2
   // 真正缺失的前置。stages.json 里各阶段的书写顺序（Object.entries 的
-  // 插入序）本来就是流水线顺序，直接用它，不重新排序。当前到 S5、规格
-  // §4 的阶段链到 S8，届时同样成立，因为插入序不取决于数值宽度。
+  // 插入序）本来就是流水线顺序，直接用它，不重新排序。这条与阶段链有几段无关，
+  // 因为插入序不取决于数值宽度——S10 那天同样成立。
+  // （修复轮 1：这里原来写「当前到 S5、规格 §4 的阶段链到 S8，届时同样成立」，
+  // 而 stages.json 的链早已是 S1–S8，那个「当前」是假的。改成不报范围：范围可以
+  // 读 stages.json 核，写下来的数字不能。）
   //
   // 已知边界（Task 3 评审 Minor 3，与下面 produces 那条同类）：某个阶段条目
   // 手误漏写 role（s.role 是 undefined）时，这个 filter 会让它匹配不上任何
