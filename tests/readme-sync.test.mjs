@@ -693,35 +693,125 @@ test('Status: 那句「真实环境完整跑通过一趟」今天仍然成立—
   )
 })
 
-// 第二条的依据：`docs/15` §8.1 那个小节标题本身就是结论（「正式安装……环境不允许」）。
-// 判据只认那一行标题，两半都要：点名「正式安装」，且标着「环境不允许」。
-function formalInstallUntestedHeading(text) {
-  return (
-    text
-      .split(/\r?\n/)
-      .find((l) => l.startsWith('#') && l.includes('正式安装') && l.includes('环境不允许')) ?? null
-  )
+// 第二条：两份 README 不得再把**正式安装路径**说成没实测过。
+//
+// ⚠️ **这一条换过真源，而换掉它的理由本身比它守的东西更值钱。**
+//
+// 它原来断言的是「`docs/15` 里还找得到『正式安装……环境不允许』那个小节标题」，
+// 失败文案写着自己是「那个方向上唯一的守卫」，红了就回去改 README。
+//
+// **它红不了。** `docs/15` 是冻结的实测记录（`docs/16` §3.5：豁免的是「记录当时的
+// 事实」），那个标题永远不会消失，所以那条断言**恒为真**。M2d 把正式安装路径实测掉
+// （`docs/17`）、把两份 README 里三处过期表述整段改写之后，**整套仍然全绿，
+// 包括它自己**——它声称守着的那件事当场发生了，而它一声没吭。
+//
+// 这同时是两个已记形状的实物：`docs/11` §5.13（「一个不变量被写错了」和「它从来
+// 没被写下来」在套件里长得一模一样，都是全绿）与 §5.19 的第三问（「同一刀砍下去，
+// 还有谁本该说话？」）。**成因是一句可以直接照做的话**：一条判据如果把真源选在
+// **不会变的文件**上，它就不是判据，是一句注释。冻结文档能当**历史**的锚，
+// 不能当**现状**的锚。
+//
+// 换成活的那一侧——两份 README 自己，`docs/17` 当锚。三条各问一件事：
+//   · 锚：`docs/17` 在，而且它记的确实是 `--scope local` 那条路；
+//   · 正向：两份 README 的安装那一节都写着那条实测过的第二条路；
+//   · 反向：本轮退役的那几句原话不许原样回来。
+//
+// ⚠️ **盖不住的那一半，写清楚**：反向那条钉的是**一张退役原话清单**，不是
+// 「任何把正式安装说成没测过的写法」。后者是开放集合，按词形穷举它有结构性上限
+// （`docs/16` §3.4）。换一种措辞把同一件事说回去，反向这条不会红；只有那个人
+// **同时**把 `--scope local` 从安装那一节删掉，正向那条才会红。两条都绕开的写法
+// 确实存在，这里不假装盖住了它。
+const DOCS17 = 'docs/17-正式安装路径实测.md'
+
+// M2d 之前两份 README 里的原话，逐字抄下来。它们描述的状态已经不成立了
+// （`docs/17` §2 的七条全部有结论），原样写回去就是把已经做到的说成没做到。
+const RETIRED_CLAIMS = [
+  'the formally installed path is untested',
+  '正式安装的路径没测',
+  'The only load path this project has ever measured is `--plugin-dir`',
+  '本项目唯一实测过的加载方式是 `--plugin-dir`',
+  'a properly installed plugin (`claude plugin install`) rather than `--plugin-dir`',
+  '正式安装的插件（`claude plugin install`）而非 `--plugin-dir`',
+]
+
+function retiredClaimsIn(text) {
+  return RETIRED_CLAIMS.filter((c) => text.includes(c))
 }
 
-// ⭐ 正向自检锚：钉判据函数本身——两半都要，只有一半的标题不算数。
-test('自检：formalInstallUntestedHeading() 两半都要——只点名「正式安装」而没标「环境不允许」的标题不算', () => {
-  assert.equal(formalInstallUntestedHeading('### 8.1 「正式安装的插件」——**没验**'), null)
-  assert.equal(
-    formalInstallUntestedHeading('### 8.1 「正式安装的插件」——**环境不允许**'),
-    '### 8.1 「正式安装的插件」——**环境不允许**',
+// 安装那一节的正文：从配对表里那一对标题起，到下一个 `## ` 止。标题不硬编码，
+// 从 HEADING_PAIRS 取——中英两份的标题文字不同，而那张表已经是它们的真源。
+function installSectionOf(text, heading) {
+  const lines = text.split(/\r?\n/)
+  const start = lines.findIndex((l) => l.trim() === heading)
+  if (start < 0) return null
+  const rest = lines.slice(start + 1)
+  const end = rest.findIndex((l) => /^##\s/.test(l))
+  return (end < 0 ? rest : rest.slice(0, end)).join('\n')
+}
+
+// ⭐ 正向自检锚：钉两个抽取器本身，钉在合成样本上。
+// `installSectionOf` 要证明它**停在下一个小节**（否则「安装那一节里写着 X」会退化成
+// 「整份文件里某处写着 X」，判据当场变宽）；`retiredClaimsIn` 要证明它**逐条返回命中**
+// 而不是只答一个布尔。
+test('自检：installSectionOf() 抠得到那一节且停在下一个小节，retiredClaimsIn() 逐条返回命中', () => {
+  const sample = ['# 标题', '## 安装', '正文甲', '', '## 已知边界', '正文乙'].join('\n')
+  assert.equal(installSectionOf(sample, '## 安装'), '正文甲\n')
+  assert.equal(installSectionOf(sample, '## 没有这一节'), null)
+  assert.deepEqual(retiredClaimsIn('前面 正式安装的路径没测 后面'), ['正式安装的路径没测'])
+  assert.deepEqual(retiredClaimsIn('一句都没有'), [])
+})
+
+test('前置条件：RETIRED_CLAIMS 非空——空清单会让下面那条反向判据零次迭代恒绿', () => {
+  assert.ok(RETIRED_CLAIMS.length > 0, 'RETIRED_CLAIMS 被清空了，反向那条判据什么都不再拦')
+})
+
+test('锚：docs/17 在，且它记的就是 --scope local 那条正式安装路径', () => {
+  let text
+  try {
+    text = read(DOCS17)
+  } catch {
+    assert.fail(
+      `读不到 ${DOCS17}。下面两条判据的全部依据是「正式安装路径已经实测过」，而那份实测` +
+        '记录就是它。如果这份文档是被有意删掉/改名的，那两条判据要跟着重新想一遍——' +
+        '不要只把这里的文件名改掉了事',
+    )
+  }
+  assert.ok(
+    text.includes('--scope local'),
+    `${DOCS17} 里找不到 --scope local。它记的是「用 local 作用域把插件正式装上」这条路，` +
+      '两份 README 的安装那一节引的就是它；这个词不在了，说明那份记录已经不是原来那件事',
   )
 })
 
-test('Status: 那句「仅 --plugin-dir」的依据仍在——docs/15 仍把正式安装路径记为未测', () => {
-  assert.ok(
-    formalInstallUntestedHeading(DOCS15),
-    'docs/15-M2b-实测结论.md 里找不到「正式安装……环境不允许」那个小节标题。' +
-      '两份 README 的 Status: 行与安装说明里那段「有意不写，因为没有实测过」都压在它上面：' +
-      '如果正式安装那条后来真的验过了，那两处限定就是**把已经做到的说成没做到**' +
-      '（docs/16 §3.7：这一族没有任何测试会因此变红，代价是下一个人照着它白做工）。' +
-      '这一条就是那个方向上唯一的守卫——它红了，回去改的是 README，不是这条断言',
-  )
-})
+for (const [i, f] of [README_EN, README_ZH].entries()) {
+  const heading = HEADING_PAIRS[1][i]
+  test(`${f} 的安装那一节写着那条实测过的第二条路（--scope local）`, () => {
+    const section = installSectionOf(read(f), heading)
+    assert.ok(section, `${f} 里找不到 ${heading} 那一节`)
+    assert.ok(
+      section.includes('--scope local'),
+      `${f} 的安装那一节里没有 --scope local。docs/17 把正式安装路径逐条实测过了：` +
+        '加载、at-pm 接管、命令与角色解析、九个可派发角色的工具面（与 --plugin-dir 逐字一致）、' +
+        '六道门禁、续会话、卸载。**把这条路从安装说明里删掉，等于把已经做到的说成没做到**' +
+        '（docs/16 §3.7：这一族没有任何测试会因此变红，代价是下一个人照着它白做工）。\n' +
+        '  如果真的是要删——比如那条路后来被发现不可靠——那要先改 docs/17 或者补一份新的' +
+        '实测记录，再回来改这一条，不要只删 README',
+    )
+  })
+
+  test(`${f} 里没有本轮退役的那几句原话`, () => {
+    const hit = retiredClaimsIn(read(f))
+    assert.deepEqual(
+      hit,
+      [],
+      `${f} 里又出现了 M2d 退役掉的原话：${JSON.stringify(hit)}。\n` +
+        '  这几句描述的是「正式安装路径没实测过」，而 docs/17 §2 那张表七条全部有结论。\n' +
+        '  ⚠️ 这一条钉的是一张**退役原话清单**，不是任何把正式安装说成没测的写法——' +
+        '它红了说明有人把旧句子原样写了回来，多半是一次回滚或一次复制粘贴，' +
+        '去看那次改动是不是误改',
+    )
+  })
+}
 
 // ---------------------------------------------------------------------------
 // 八、安装说明里那两条 CLI 行为 —— 真源是实测记录的原文
