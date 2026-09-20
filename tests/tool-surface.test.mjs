@@ -134,6 +134,87 @@ test('前置条件：agents/ 下每个 .md 都解得出至少一个工具名—�
   }
 })
 
+// ⭐ `tools:` 的**身份锚**（M2c 补轮）。
+//
+// **这一层此前是空的。** 逐条核过今天守着 `tools:` 的都是什么：
+//
+//   · `Skill` / `SendMessage` / `ListAgents` 一律不得出现 —— 本文件下面那条；
+//   · `Bash` 的逐份授予（多给一份、少给一份都红）—— `tests/agents.test.mjs` 的
+//     「Bash 的授予与 HAS_BASH 逐份一致」；
+//   · `Agent(...)` 白名单（谁有、内容、全限定名、⊇ 自己的边、⊆ 花名册、不含
+//     at-outsider）—— `tests/roster-sync.test.mjs` 那一组；
+//   · 每份都解得出至少一个工具名 —— 上面那条前置。
+//
+// **剩下的全部没人守**：`Read` / `Glob` / `Write` / `Edit` / `AskUserQuestion`，
+// 以及**任何一个上面四行都没点到名的工具**。往任意一份 `tools:` 里加一个 `Grep`、
+// `WebFetch`、`NotebookEdit`，整套测试零红。
+//
+// ⚠️ **为什么 `at-pm` 那一行尤其要紧**：主线程 agent 的 `tools:` 是**整个会话的能力
+// 天花板**，被所有子代理、孙代理继承（主规格 §3.3 U2 实测；下面那条禁授工具的失败
+// 文案引的 `Skill is disabled for this session, in subagents as well as here` 就是
+// 同一件事的记录级证据）。**给 `at-pm` 悄悄加一个工具，等于给整棵子树加。**
+//
+// ⚠️ **这条缺口不是读出来的，是一次为别的目的做的变异顺带照出来的。** M2c 给两份
+// README 补「`at-pm` 工具面」判据时，变异「往 `agents/at-pm.md` 的 `tools:` 里加一个
+// `Grep`」跑出来的结果是：**整套里只有那两条新加的 README 判据会红，别的一条都没有。**
+// 本分支已经有过一次同样的发现方式——`tests/commands.test.mjs` 那条角色名闭包判据
+// 根本没有正向锚，是做**角色侧**变异时同一把刀顺带照出来的：一边报警一边沉默，
+// 那个沉默就是答案。**两次都不是读代码读出来的。**
+//
+// 形状照 `tests/agents.test.mjs` 的 `model:` 身份锚：`deepEqual` 一份逐份期望值，
+// 不是 `length > 0` 那种数量锚——「正向锚是数量不是身份」正是 M1b 终审第 1 条栽过的
+// 那一步。`got` 按 `AGENT_FILES` 逐份建出来，少扫一份 / 多扫一份都会让它当场红。
+//
+// ## 三条取舍
+//
+// 1. **`Agent(...)` 括号里那一长串不钉。** `toolsDeclarationOf().names` 给出的就是
+//    裸名 `Agent`（那个 helper 的 `toolNameOf` 明写「括号里的角色名不是工具名」），
+//    正合适：那份名字清单已经由 `tests/roster-sync.test.mjs` 那一组守着，而且它是
+//    **从 `roster.json` 派生**的——在这里再钉一份字面量就是第二份拷贝，花名册一动
+//    就得回来改两处，正是本仓库开过好几轮循环的那个形状。这里只钉「谁有 `Agent`、
+//    谁没有」这一层，与那一组不重叠。
+// 2. **排序之后比，不比声明顺序。** 要抓的是「多了 / 少了一个工具」；纯粹调换次序
+//    是无害编辑，让它红只会制造噪声。排序不削弱任何方向：加一个、删一个、写重了
+//    一个，排序后仍然红。
+// 3. **用现成的解析器**，不另写一份行扫描——M1b 终审 C2 的成因就是两份逐字相同的
+//    行扫描只改了一份。
+//
+// ⚠️ 这条与 `tests/agents.test.mjs` 的 `HAS_BASH` **有意在 `Bash` 这一格上重叠**，
+// 不是冗余：那一条驱动的是「持有 `Bash` 的正文必须写哪几条红线」，这一条钉的是整条
+// 声明。两者从相反方向夹着同一个事实——`HAS_BASH` 停在旧值时这条红，这份期望值停在
+// 旧值时那条红。
+const EXPECTED_TOOLS = {
+  'at-acceptance.md': ['Glob', 'Read', 'Write'],
+  'at-android.md': ['Bash', 'Edit', 'Glob', 'Read', 'Write'],
+  'at-architect.md': ['Agent', 'Glob', 'Read', 'Write'],
+  'at-backend.md': ['Bash', 'Edit', 'Glob', 'Read', 'Write'],
+  'at-frontend.md': ['Bash', 'Edit', 'Glob', 'Read', 'Write'],
+  'at-ios.md': ['Bash', 'Edit', 'Glob', 'Read', 'Write'],
+  'at-outsider.md': ['Read'],
+  'at-pm.md': ['Agent', 'AskUserQuestion', 'Bash', 'Edit', 'Glob', 'Read', 'Write'],
+  'at-product.md': ['Agent', 'Glob', 'Read', 'Write'],
+  'at-qa.md': ['Bash', 'Glob', 'Read', 'Write'],
+  'at-ui.md': ['Bash', 'Edit', 'Glob', 'Read', 'Write'],
+}
+
+test('十一份 agent 的 tools: 声明与预期逐份一致——加一个工具、少一个工具都红', () => {
+  const got = {}
+  for (const file of AGENT_FILES) {
+    got[file] = [...declarationOf(file).names].sort()
+  }
+  assert.deepEqual(
+    got,
+    EXPECTED_TOOLS,
+    '某个角色的 tools: 声明变了，而这份期望值没跟着变。**不要先改这份期望值**——先回答：' +
+      '这个工具为什么要授予（或为什么要收回）？规格 §6.1 把角色工具面定为**按需白名单**，' +
+      '多一个就是多一份触达面。⚠️ 如果动的是 at-pm.md，代价还要乘一层：主线程 agent 的 ' +
+      'tools: 是**整个会话的能力天花板**，被所有子代理、孙代理继承（主规格 §3.3 U2 实测）' +
+      '——给 at-pm 加一个工具，等于给整棵子树加。改对了再回来同步这份清单，并确认 ' +
+      'tests/agents.test.mjs 的 HAS_BASH、tests/roster-sync.test.mjs 的 Agent(...) 那一组、' +
+      '以及两份 README 已知边界里 at-pm 的工具面（tests/readme-sync.test.mjs）是不是也要一起动。',
+  )
+})
+
 test('没有任何角色的 tools: 包含 Skill / SendMessage / ListAgents', () => {
   for (const file of AGENT_FILES) {
     const { text, names } = declarationOf(file)
