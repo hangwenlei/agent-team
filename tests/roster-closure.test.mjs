@@ -64,3 +64,50 @@ test('没有任何角色能把 at-pm 当作派发目标——H4 的 at-pm 豁免
     )
   }
 })
+
+// ---- `__main__` 与 `at-pm` 必须镜像（M2b Task 3 修复轮 1，评审发现 6）----
+//
+// M2b Task 3 的裁定 B 给 `at-pm` 加 at-qa / at-acceptance 两条边时，**同时**给
+// `__main__` 加了一模一样的两条。评审指出：改完之后确实有三条测试会在 `__main__`
+// 被改回旧值时变红（静默表 S6/S7 两行 + tests/reach.test.mjs 的拓扑锚），**但那三条
+// 守的是当前的具体值，不是「这两个键必须一致」这条规则本身**。下一次改花名册时拓扑锚
+// 会红，有人照着新值更新完期望值之后，两个键悄悄分叉就再没有东西说话了。
+//
+// 这正是 docs/11 §5.13 刚立的那条教训：「一个不变量从来没被写下来」和「一个不变量被
+// 写错了」在套件里长得一模一样——都是全绿。所以把规则本身写下来。
+//
+// 为什么必须镜像（docs/05-M0-结论.md 的实测结论）：**主会话就是 PM**。被 settings.json
+// 的 `agent` 键钉住的主会话带 agent_type: at-pm，**未钉住的主会话按 `__main__` 处理**
+// ——钉没钉住只影响它报哪个名字，不该影响它能派谁。两个键都要保留（不能合并），但内容
+// 必须一致。让它们分叉的后果是 **H1 是 fail closed 的**：钉丢了的那种会话（本仓库已记录
+// `claude --resume` 不继承 `--plugin-dir`、会丢掉工具面，见 docs/11 §5.5）里派 at-qa /
+// at-acceptance 会被直接拒，而拒绝理由指向花名册，排查的人要翻到 docs/05 才知道是
+// 「钉没钉住」的问题。
+const MIRROR_KEYS = ['__main__', 'at-pm']
+
+// ⭐ 正向自检锚：下面那条是 deepEqual，而 `assert.deepEqual(undefined, undefined)` 是
+// **通过**的——两个键一起从 roster.json 里消失（或被改成没有 can_delegate_to 的形状）时，
+// 它会在两个 undefined 上空转着变绿。锚钉的正是那条不变量真正读的那两个键。
+test('锚：roster.json 里 __main__ 与 at-pm 两个键都在，且各自的 can_delegate_to 非空——否则下面那条在两个 undefined 上空转', () => {
+  assert.ok(
+    MIRROR_KEYS.every((k) => Array.isArray(roster[k]?.can_delegate_to) && roster[k].can_delegate_to.length > 0),
+    `roster.json 里 ${JSON.stringify(MIRROR_KEYS)} 至少有一个不存在、或它的 can_delegate_to ` +
+      '不是非空数组——下面那条「两个键必须逐字相同」是 deepEqual，两边同时取到 undefined 时' +
+      '它照样通过，等于没有检查任何东西',
+  )
+})
+
+test('roster.json 的 __main__ 与 at-pm 的 can_delegate_to 必须逐字相同——主会话就是 PM，钉没钉住不该影响它能派谁', () => {
+  assert.deepEqual(
+    roster.__main__?.can_delegate_to,
+    roster['at-pm']?.can_delegate_to,
+    '__main__ 与 at-pm 的 can_delegate_to 分叉了。主会话就是 PM：被 settings.json 的 agent ' +
+      '键钉住的主会话带 agent_type: at-pm，未钉住的按 __main__ 处理（docs/05-M0-结论.md 的' +
+      '实测结论），**钉没钉住只影响它报哪个名字，不该影响它能派谁**。两个键都要保留、不能' +
+      '合并，但内容必须一致。分叉的后果是 H1 fail closed：钉丢了的那种会话里派那几个只写进' +
+      '一侧的角色会被直接拒，而拒绝理由指向花名册，排查的人要翻到 docs/05 才知道根因是' +
+      '「钉没钉住」。⚠️ 这条与 tests/reach.test.mjs 的拓扑锚**不是一回事**：那条说的是' +
+      '「拓扑变了，回来确认触达有没有被放大」，改边时它本来就该红、更新期望值是正常动作；' +
+      '这条说的是「这两个键彼此不一致」，任何时候都不该红。',
+  )
+})

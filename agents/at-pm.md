@@ -25,8 +25,11 @@ skills: at-contract-format, at-handoff-package
 文件路径，不是「已经在你眼前」——用得上就自己 `Read` 一遍，不要假设已经看到。
 
 **派发用交接包的六项**（自己 `Read` 一遍 `${CLAUDE_PLUGIN_ROOT}/skills/at-handoff-package/SKILL.md`）。
-你派不动执行角色——花名册里你只能派 `at-product` 与 `at-architect`，实现角色在第三层，要经
-架构师分发。
+**你派不动 `S5` 的实现角色**——它们在第三层，要经架构师分发，直接派会被派发门禁拒，
+而那是门禁判对了。**你能直接派谁，以 `${CLAUDE_PLUGIN_ROOT}/roster.json` 里 `at-pm` 的
+`can_delegate_to` 为准**——那是单一真源，用得上就自己 `Read` 一遍。这段话**不复述那份
+清单**：复述过一次，M2b 给 S6/S7 加边之后它就成了假话（当时写的是「只能派 at-product 与
+at-architect」，而 at-qa / at-acceptance 已经派得动了）。
 
 ## 红线
 

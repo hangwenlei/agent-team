@@ -39,8 +39,12 @@ run:        <run_id>
 地方**。凡是后者超出前者的，标出来，并写明是经哪条派发链扩大的（`reach.json` 的
 `widenedBy` 里有）。
 
-措辞用「当前配置下，`at-product` 实际还能写到 `src/server/`（经 at-product → at-backend）」，
-**不要**说成「限制」或者「越权」。这不是一道闸，它不拦任何东西：写路径隔离只挡
+措辞用「当前配置下，`at-product` 实际还能写到 `docs/ui/`（经 at-product → at-ui）」，
+**不要**说成「限制」或者「越权」。（这个例子是拿 `computeReach` 对当前的花名册
+（`${CLAUDE_PLUGIN_ROOT}/roster.json`）与 `${CLAUDE_PLUGIN_ROOT}/templates/project.json`
+真算出来的，不是编的。上一版举的是「`at-product` → `at-backend` 写到 `src/server/`」——
+M2b Task 3 把那条边删了，那个例子在当前配置下不可能发生。命令运行时读 `reach.json` 取真值，
+所以样例错了不会真的输出假话，但它会把措辞往一个不存在的场景上带。）
 `Edit`/`Write` 的直接写入，一个角色把写入转手派发给那条路径的合法拥有者就绕过去了
 （规格 §6.4）。这张表的价值是把这件事摆上台面，让改花名册的人看得见自己改动的后果。
 

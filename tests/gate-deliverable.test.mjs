@@ -568,7 +568,11 @@ test('H5a：协调者返回但当前阶段已经 done —— 报（这正是「�
       tool_input: { subagent_type: 'agent-team:at-architect' },
     }, GATE, projectDir)
 
-    assert.match(stdout, /停在旧阶段/)
+    // ⚠️ 修复轮 1：这里原来钉的是 /停在旧阶段/——**两支文案都含这四个字**（非协调者那支
+    // 写的是「state.stage 停在旧阶段没推进」），所以它证不了走的是协调者那支。改钉
+    // 「这正是**停在旧阶段**」这个**协调者独有**的完整说法，同一条测试守的东西没变、
+    // 甄别力补上了。两支措辞的完整对照见下面「H5a 告警的两支措辞」那一组。
+    assert.match(stdout, /这正是\*\*停在旧阶段\*\*/)
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })
@@ -734,6 +738,10 @@ function runH5a(f, { ledger = null } = {}) {
   }
 }
 
+// coordinatorDoneViaUi 那份夹具配套的账本：与磁盘内容对齐（哈希对得上），让钉「协调者
+// 那支文案」的那几条测试不夹带账本比对的 unrecorded 噪音。三条测试读同一份，不各抄一遍。
+const LEDGER_UI = { '05-impl/at-ui.md': sha256OfContract('fixture 05-impl/at-ui.md\n') }
+
 test('H5a：at-product 在 S5 返回——现在照报（M2b Task 3 去掉 at-product → at-backend 之前是静默的）', () => {
   const stdout = runH5a(H5A_TOPOLOGY_BEHAVIOUR.productNoLongerCoordinator)
   assert.match(
@@ -757,15 +765,60 @@ test('H5a：at-architect 在 S2 返回——单数 .role 口径下不是协调�
   )
 })
 
-test('H5a：协调者返回、而这一趟的产者 at-ui 已把 S5 交齐——报「停在旧阶段」（stageDone 那半）', () => {
+// ---- H5a 告警的**两支措辞**：协调者那支与非协调者那支必须真的不同 ----
+//
+// ⚠️ 修复轮 1（评审发现）：`hooks/gate.mjs` 里那个 `const notice = coordinator ? A : B`
+// 的**两支文案此前零覆盖**。两支都含「停在旧阶段」，而钉它的两条测试（M2a Task 6 那条、
+// 以及 M2b Task 3 新加的「产者 at-ui 已把 S5 交齐」那条）都只写 `/停在旧阶段/`——
+// 于是把 `const notice = coordinator` 改成 `const notice = false`（后面的 `? A : B` 会被
+// JS 接着解析成条件表达式，恒取**非协调者**那支，等价于**让两支共用同一份文案**），
+// `node --test` 546 / 546 **全绿**。
+//
+// 而那段代码上方三行的注释自己写着：「两支措辞不能共用同一份文案：『而且它也派不到那个
+// 执行者』在 coordinator 为真时**是假话**」。**写代码的人知道两支必须不同，写测试的人
+// 没有钉住它**——docs/11 §3 那个招牌形状的又一例。
+//
+// 两支各自独有的措辞是跑出来的，不是读代码估的（临时脚本把两支都跑一遍再 diff）：
+//   协调者独有  ：合法的层级协调 / 产物已经全部齐备 / 这正是**停在旧阶段** / 推进到正确的阶段
+//   非协调者独有：派不到那个执行者 / 没有意见 / 不是它查过了没问题 / 两种可能
+//   两支都有    ：停在旧阶段  ← 原来两条测试钉的就是这个，所以区分不了
+//
+// 下面三条共用同一份夹具（coordinatorDoneViaUi）与同一次子进程调用的输出形状：
+// 第一条钉协调者独有的措辞**在**，第二条是它的正向自检锚（换一个协调者独有的措辞，
+// 证明这条 notice 真的发出来了），第三条才是否定断言——**没有前两条，「另一支的话没
+// 出现」可能只是因为整条 notice 根本没发**。
+
+test('H5a：协调者那支的文案必须含它独有的措辞「产物已经全部齐备」——两支共用一份文案时这条红', () => {
   const f = H5A_TOPOLOGY_BEHAVIOUR.coordinatorDoneViaUi
   // 账本记录与磁盘内容对齐，让这条只钉 stageDone 分支的措辞，不夹带账本比对的
   // unrecorded 噪音（两者谁报不报是分开的问题，见 docs/11 §5.8）。
-  const stdout = runH5a(f, { ledger: { '05-impl/at-ui.md': sha256OfContract('fixture 05-impl/at-ui.md\n') } })
   // 直接匹配原始 stdout，不先 JSON.parse：删掉 `|| stageDone` 之后这里会静默、
   // stdout 变成空字符串，match 在空字符串上干净地失败，不会被 JSON.parse('') 的
   // 异常掩盖真实的失败原因。
-  assert.match(stdout, /停在旧阶段/)
+  assert.match(runH5a(f, { ledger: LEDGER_UI }), /产物已经全部齐备/)
+})
+
+// ⭐ 正向自检锚：同一份夹具、同一支文案，换一个**协调者独有**的措辞再钉一次。它证明
+// 的是「这条 notice 确实发出来了，而且走的确实是协调者那支」——下面那条否定断言全靠
+// 它兜底：notice 为空时这条会红，否定断言却会绿。
+test('锚：同一条输出里协调者独有的「合法的层级协调」确实出现——否则下面的否定断言可能只是因为 notice 根本没发', () => {
+  assert.match(runH5a(H5A_TOPOLOGY_BEHAVIOUR.coordinatorDoneViaUi, { ledger: LEDGER_UI }), /合法的层级协调/)
+})
+
+// 非协调者那支独有的措辞。放在模块级常量里，测试与失败文案读同一份，不各抄一遍。
+const NON_COORDINATOR_ONLY = ['派不到那个执行者', '没有意见']
+
+test('H5a：协调者那支的文案里不得出现非协调者那支独有的措辞——那几句在 coordinator 为真时是假话', () => {
+  const stdout = runH5a(H5A_TOPOLOGY_BEHAVIOUR.coordinatorDoneViaUi, { ledger: LEDGER_UI })
+  for (const phrase of NON_COORDINATOR_ONLY) {
+    assert.doesNotMatch(
+      stdout,
+      new RegExp(phrase),
+      `协调者那支的 H5a 文案里出现了「${phrase}」——这句只属于非协调者那支，在 coordinator ` +
+        '为真时是假话（hooks/gate.mjs 里 notice 三元表达式上方的注释正是这么写的）。' +
+        '最可能的原因：两支被改成了共用同一份文案。',
+    )
+  }
 })
 
 // 三份夹具的锚，同上面 M2a Task 6 那条：三条如果其实是同一个场景，改一处实现可能让
@@ -776,6 +829,7 @@ test('前置条件：上面三条行为测试的夹具互不相同——否则�
   assert.notDeepEqual(quads[0], quads[2])
   assert.notDeepEqual(quads[1], quads[2])
 })
+
 test('H5b 在角色与当前阶段对不上时不拦——fail open，不发 exit 2', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2' })
   try {

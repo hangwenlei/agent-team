@@ -69,9 +69,10 @@ $ARGUMENTS
 - **S4 裁决**：这一段是你自己做。照 `${CLAUDE_PLUGIN_ROOT}/templates/04-dispatch.md` 写 `04-dispatch.md`：
   本趟班底、分工、你自决的事、以及已经升级给用户的事。
 - **S5 实现**：**派 `at-architect`，由它去分发执行角色。**
-  你派不动 `at-backend` / `at-frontend`——花名册里 `at-pm` 只能派 `at-product` 与
-  `at-architect`，执行角色在第三层。直接派会被派发门禁拒，而那是门禁判对了。
-  架构师可以在一条消息里并发派多个执行角色。
+  你派不动 `at-backend` / `at-frontend`——执行角色在第三层。直接派会被派发门禁拒，而那是
+  门禁判对了。架构师可以在一条消息里并发派多个执行角色。
+  **你能直接派谁，以 `${CLAUDE_PLUGIN_ROOT}/roster.json` 里 `at-pm` 的 `can_delegate_to`
+  为准**，这里不复述那份清单：复述过一次，M2b 给 S6/S7 加边之后它就成了假话。
 
 ## 4. 什么时候必须停下来问用户
 
