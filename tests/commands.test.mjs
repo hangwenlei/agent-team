@@ -509,6 +509,96 @@ test('commands/at.md 与 commands/at-init.md 的正文必须引用受信前缀�
   }
 })
 
+// ⭐ M2b 终审 B3 的守卫（2026-09-20）：触达表措辞的**两半都必须在**。
+//
+// 这一条为什么存在：M2b 的某一刀把 `commands/at-status.md` 触达表那一节的
+// 「**这不是一道闸，它不拦任何东西：写路径隔离只挡**」整句替换掉了，紧跟的下一行
+// （`Edit`/`Write` 的直接写入……）原样留着，变成一个没有主语也没有谓语的断句——
+// **而整套测试全绿**。丢掉的不只是语法：那句话是 `hooks/lib/reach.mjs` 头部与
+// `docs/09` 账二**强制要求的措辞**（「这是审计产物，不是安全边界……不该被说成『限制』」）。
+// 删完之后正文里只剩「不要说成限制」这个**禁令**，**理由没了**——而没有理由的禁令，
+// 下一个改这段话的人会觉得它可有可无，再删一次。
+//
+// 与本轮 B1 同族：一句别处强制要求的话，在正文层没有任何机械对账。B3 原本只补了正文，
+// 控制方裁定「补回一句话而不给它守卫，下一次同样删得掉」，所以有了这一条。
+//
+// 两半各自怎么认：
+//   ① **理由**——`不拦任何东西`。两份正文与 `reach.mjs` 头部**逐字相同**，认字面量。
+//      这是**承重的那一半**，也正是被删掉的那一半。
+//   ② **禁令**——只认 `限制` 这个词本身。⚠️ **这一半是弱的，写下来而不是假装它强**：
+//      两份正文的句式不同（`at-status.md` 是「不要说成「限制」」，`at-init.md` 是
+//      「它**不是限制**」），没有共同的长片段可认；而 `限制` 是常用词，一段碰巧用到
+//      它的散文也能让这一半通过。它挡得住「整段措辞被删光」，挡不住「换个说法把它
+//      说成限制」。真正的保证在 ① 那一半。
+const REACH_WORDING_HALVES = [
+  { half: '理由（它不拦任何东西）', frag: '不拦任何东西' },
+  { half: '禁令（别把它说成「限制」）', frag: '限制' },
+]
+
+// 判据抽成具名函数——主判据与下面两条锚**共用同一份**，不各写一份正则。
+// （`tests/agents.test.mjs` 的 hasBoundary() 为「判据与自检锚是同一份知识的两份拷贝」
+// 开过一轮循环：两处一旦不同步，自检等于给自己发了张通行证。）
+function reachWordingProblems(text) {
+  return REACH_WORDING_HALVES.filter((h) => !text.includes(h.frag)).map((h) => h.half)
+}
+
+// ⚠️ 遍历的是这份**字面清单**，不是派生集合——形状照同文件的
+// FILES_WITH_TRUSTED_PREFIX 与 tests/agents.test.mjs 的 EXPECTED_CARDINALITY_CLAIMERS。
+//
+// **控制方的 brief 说「今天只钉 at-status.md 那一份（它是渲染触达表的那条命令）」，
+// 核过之后是两份**：`commands/at-init.md` 的「3. 落盘触达表」一节同样在描述触达表是
+// 什么，而且同样带着两半措辞。brief 给的扩展条件是「别的地方也开始描述触达表时」——
+// 那个条件**今天已经满足了**，所以直接钉两份，不留一份裸着。
+//
+// `agents/at-pm.md` 与 `agents/at-product.md` 也出现过「触达表」三个字，但都是**顺带
+// 提及**（一个在列举账本回传有哪几类，一个在列举不得写的控制文件），没有描述它是什么，
+// 没有这两半措辞的义务，所以不在这份清单里——下面那条锚只从 commands/ 派生，正是为了
+// 不把那种顺带提及算进来。
+const REACH_WORDING_FILES = ['at-init.md', 'at-status.md']
+
+// ⭐ 身份锚：什么时候要扩，由它来说，不靠这段注释提醒人。第三条命令一旦开始讲触达表，
+// 这条红——而不是悄悄多出一份没人钉的正文。
+test('锚：commands/ 下描述触达表的正文恰好是 REACH_WORDING_FILES 这几份——下面那条只遍历它们', () => {
+  const describing = FILES.filter((f) => textOf(f).includes('触达')).sort()
+  assert.deepEqual(
+    describing,
+    [...REACH_WORDING_FILES].sort(),
+    `commands/ 下提到「触达」的是 ${JSON.stringify(describing)}，与 ` +
+      `${JSON.stringify(REACH_WORDING_FILES)} 不一致。多出来的那份**不会被下面那条检查**` +
+      '（它只遍历这份清单）——把它加进来，或者说清为什么它只是顺带提及、没有措辞义务。',
+  )
+})
+
+// ⭐ 正向自检锚一（已知违规样本那一款，与 tests/skills.test.mjs 的 skillRoleMentions()
+// 锚同款）：构造一份**只留禁令、删掉理由**的样本——正是 B3 那一刀造成的形状——断言判据
+// 认得出它违规。判据被放宽成「只查禁令」时，这条会红。
+test('自检：reachWordingProblems() 认得出「只留禁令、删掉理由」这种样本', () => {
+  const sample = '措辞用「当前配置下，at-x 实际还能写到 docs/」，**不要**说成「限制」或者「越权」。\n'
+  assert.deepEqual(reachWordingProblems(sample), ['理由（它不拦任何东西）'])
+})
+
+// ⭐ 正向自检锚二：证明这两个片段**真的是措辞真源自己的话**，不是我在测试里编的两个词。
+// hooks/lib/reach.mjs 头部那句「它不拦任何东西，也不该被说成「限制」」两半都含。
+// 真源哪天改了措辞，这条红——逼人同时看真源与两份正文，而不是让正文单独漂走。
+test('锚：措辞真源 hooks/lib/reach.mjs 头部自己就两半都在——判据认的是它的话', () => {
+  const src = readFileSync(url('hooks/lib/reach.mjs'), 'utf8')
+  assert.deepEqual(reachWordingProblems(src), [])
+})
+
+test('描述触达表的命令正文必须两半都在：禁令**和**理由——只剩禁令时，下一个人会觉得它可有可无', () => {
+  for (const f of REACH_WORDING_FILES) {
+    const missing = reachWordingProblems(textOf(f))
+    assert.deepEqual(
+      missing,
+      [],
+      `commands/${f} 的触达表那一节缺了 ${JSON.stringify(missing)}。措辞的真源是 ` +
+        'hooks/lib/reach.mjs 头部与 docs/09 账二：触达表是**审计产物，不是安全边界**，' +
+        '它不拦任何东西，也不该被说成「限制」。**两半要一起在**——M2b 有一刀只删了理由' +
+        '那半（顺带把句子砍成了一个没有主语的断句），而当时没有任何测试红。',
+    )
+  }
+})
+
 // ⭐ Ruling 13（M2b Task 4 补轮，2026-09-20）：`/at-init` 正文里「不要给某某角色建 paths
 // 键」这类禁令，必须对**每一个故意不认领路径的角色**都点到名。
 //
