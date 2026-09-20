@@ -151,7 +151,14 @@ function isProjectJson(filePath, agentTeamDir) {
 //
 // ⚠️ 下面读的是 `stages[stageId].role`（**单数**）。M2b Task 3 实测过另一种口径
 // （「派得到该段任意一个 producer」）：两者在当前拓扑下**不等价**，S2 与 S5 两段的
-// 协调者集合会变。这条尚未裁定，代码没有动；测量数据见 docs/11 §5.12。
+// 协调者集合都会变。**Ruling 8 裁定保留单数写法，这里不动**——这条判据问的不是「谁能
+// 让这一段的产物出现」，是「这次返回的角色有没有可能就是跑这一段的那个人」；
+// at-product → at-ui 这条边是为 S2 存在的（委托 UI 规格），不是 S5 的实现分发，而
+// can_delegate_to 里没有阶段这一维、分不清一条边是为哪一段存在的。借 computeReach 来算
+// 只是实现上的便利，不是在主张这条判据与规格 §6.4 的触达语义是同一个问题——§6.4 答的是
+// 「这个角色实际能写到哪」（reach.mjs 开头写明是审计产物、不是安全边界），两者问的不同。
+// 失效条件不是「有人派得到某个 producer 却派不到该段 role」（那就是被否掉的那种口径），
+// 而是：**某一段的真协调者派不到那一段的 role**。今天八段都不满足。完整裁定见 docs/11 §5.12。
 function isCoordinatorFor(ctx, role) {
   const stageId = ctx.state?.stage
   const stages = ctx.stages
