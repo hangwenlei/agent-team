@@ -69,8 +69,11 @@ $ARGUMENTS
 - **S4 裁决**：这一段是你自己做。照 `${CLAUDE_PLUGIN_ROOT}/templates/04-dispatch.md` 写 `04-dispatch.md`：
   本趟班底、分工、你自决的事、以及已经升级给用户的事。
 - **S5 实现**：**派 `at-architect`，由它去分发执行角色。**
-  你派不动 `at-backend` / `at-frontend`——执行角色在第三层。直接派会被派发门禁拒，而那是
+  **你派不动 `S5` 的实现角色**——它们在第三层，要经架构师分发。直接派会被派发门禁拒，而那是
   门禁判对了。架构师可以在一条消息里并发派多个执行角色。
+  （这里原先写的是「你派不动 `at-backend` / `at-frontend`」——句子不假，但它只点了 M1 那一对；
+  M2b 之后 S5 的 `producers` 里还有别人，而实测里 PM 认错的恰恰是没被点名的 `at-ui`
+  （`docs/15` §5.2）。改成不枚举的说法，与 `agents/at-pm.md` 一致——**出事的是新来的**。）
   **你能直接派谁，以 `${CLAUDE_PLUGIN_ROOT}/roster.json` 里 `at-pm` 的 `can_delegate_to`
   为准**，这里不复述那份清单：复述过一次，M2b 给 S6/S7 加边之后它就成了假话。
 

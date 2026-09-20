@@ -20,8 +20,18 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 `state.json` 记的是**上一次有人记账时**的样子，磁盘才是现在的样子。两者会脱节。
 
-对照插件的 `${CLAUDE_PLUGIN_ROOT}/stages.json`，把 `state.json` 的 `stage` 那一段的 `produces` 逐个去磁盘上
-`Glob` 一遍：
+对照插件的 `${CLAUDE_PLUGIN_ROOT}/stages.json`，把 `state.json` 的 `stage` 那一段**这一趟
+该有的产物**逐个去磁盘上 `Glob` 一遍。
+
+⚠️ **不要直接拿 `produces` 字段当文件名清单用。** 它有两种形式（数组 / 对象），而且数组
+形式里可能是**模式**（含 `<role>` 占位符）而不是字面文件名——照字面 `Glob` 一个
+`05-impl/<role>.md` 永远查不到，结果是把一段已经做完的 S5 判成「产物不齐」、白白重跑。
+正确的口径是 `hooks/lib/stages.mjs` 的
+`expandProduces(stage, stageRolesInRun(stage, roster))`——`roster` 取 `state.json` 里这一趟
+派了谁。展开规则**只在那一处**，这里不复述（复述就是第二份）；要看它说了什么，
+读 `${CLAUDE_PLUGIN_ROOT}/stages.README.md` 的「`produces` 的两种形式」。
+
+展开之后：
 
 - **产物齐了** → 这一段其实已经做完，只是没记账。把 `stage` 推到下一段并往 `history`
   追加一条，然后从那一段继续。

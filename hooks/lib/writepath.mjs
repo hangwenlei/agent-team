@@ -52,9 +52,16 @@ function underAny(target, prefixes, base) {
 //
 // M2a：<role> 逐个角色展开，返回的 role 是**匹配上的那个具体产者**，不是 s.role。
 // H3 要回答的是「这条路径归谁」，S5 的 05-impl/at-frontend.md 归 at-frontend，
-// 不归 s.role（at-backend）。单产者阶段没有 producers，stageRoles 退回 [s.role]，
-// 这条对 S1–S4/S6–S8 是逐字不变的行为——expandProduces 对不含 <role> 的条目原样
-// 保留一次，不随 roles 列表长度变化。
+// 不归 s.role（at-backend）。**没有 producers 的阶段** stageRoles 退回 [s.role]，
+// 这条对它们是逐字不变的行为——expandProduces 对不含 <role> 的条目原样保留一次，
+// 不随 roles 列表长度变化。
+//
+// ⚠️ M2b 终审 B2（2026-09-20）：上面那句原来写的是「单产者阶段没有 producers……这条对
+// **S1–S4/S6–S8** 是逐字不变的行为」——**假**。M2b 把 S2 改成了多产者阶段
+// （producers: ["at-product","at-ui"] + 对象形式 produces），而 S2 就在枚举的「S1–S4」
+// 里面：`stageRoles(S2)` 今天返回两个人，`expandProduces` 走的是对象分支。
+// 改成按条件说、不枚举阶段号——哪些阶段没有 producers 去 stages.json 看。
+// 同族的另外三处（deliverable.mjs / artifact-drift.mjs / state.mjs）一并改了。
 export function stageOwnerOfRunPath(stages, rd, target) {
   if (!stages || typeof stages !== 'object') return null
   for (const [stageId, s] of Object.entries(stages)) {

@@ -55,9 +55,25 @@
 // 发起者、不是产者，tests/deliverable.test.mjs 的「S5 多产者：不在 producers 里的角色
 // 仍然是 role-not-in-stage」那条钉着这一侧。
 // （H5 的静默集合另见 gate.mjs 的 isCoordinatorFor 与 stages.README.md。）
-// 对没有 producers 的单产者阶段（S1–S4、S6–S8），expandProduces 对不含 <role> 的
-// 条目原样保留一次，逐字等价于原来的 stage.produces，这条改动对它们是零行为差异
+// ⚠️ M2b 终审 B2（2026-09-20）：**紧挨着上面那段的这一行，就是上面那段诊断的东西本身。**
+// 它原来写的是「对没有 producers 的单产者阶段（S1–S4、S6–S8），expandProduces 对不含
+// <role> 的条目原样保留一次，逐字等价于原来的 stage.produces，这条改动对它们是零行为
+// 差异」——**对 S2 三句全假**：M2b 把 S2 改成了 producers: ["at-product","at-ui"] + 对象
+// 形式的 produces，它既不是单产者、producers 也不缺省、更不「逐字等价于原来的
+// stage.produces」。而 S2 就在那句话枚举的「S1–S4」里面。
+//
+// 上面那段是 Task 4 自己写的，写的就是「更正只作用到了它逐字点名的那一句上，同一个说法
+// 在同一段注释里活过了自己的更正」——**然后把紧接着下一行的失效枚举原封不动留着**。
+// 本分支该形状的第六次复演，发生在诊断该形状的那段注释里。测试侧其实知道
+// （tests/fixtures/make-run.mjs、tests/gate-deliverable.test.mjs、
+// tests/gate-readiness.test.mjs 的注释都写着「S2 从单产者阶段改成对象形式的多产者
+// 阶段」），只有文档和注释没跟。
+//
+// 改成**按条件说，不枚举阶段号**（枚举会在下一次改形状时再假一次，条件不会）：
+// 对**没有 producers 的阶段**，expandProduces 走数组分支、对不含 <role> 的条目原样保留
+// 一次，结果逐字等于 stage.produces 本身——这条改动对那些阶段是零行为差异
 // （tests/deliverable.test.mjs 现有各条据此必须仍然全绿，不改签名）。
+// 哪些阶段属于这一类，去 stages.json 看，不要在这里抄一份清单。
 import { expandProduces, stageRoles } from './stages.mjs'
 
 export function decideDeliverable({ role, stageId, stages, artifactExists }) {

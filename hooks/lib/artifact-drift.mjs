@@ -40,8 +40,15 @@ export function compareArtifacts({ artifacts, stages, artifactBytes, roster }) {
   // 答的是不同的问题，见 stages.mjs 头部；用错会让没派到的角色的产物被报成
   // missing——S5 只派了 at-backend 一个人的 run，账本比对不该因为
   // 05-impl/at-frontend.md 不存在就报它 missing，那个角色这一趟压根没被派。
-  // roster 缺省时 expectedArtifacts 退回全部 producers，与旧行为（producedNames）
-  // 一致——S1–S4/S6–S8 没有 producers，不受这次改动影响。
+  // roster 缺省时 expectedArtifacts 退回全部 producers，与旧行为（producedNames）一致；
+  // **没有 producers 的阶段**在任何 roster 下都不受这次改动影响。
+  //
+  // ⚠️ M2b 终审 B2（2026-09-20）：上面那半句原来写的是「**S1–S4/S6–S8** 没有 producers，
+  // 不受这次改动影响」——**假**，而且是承重的假。M2b 给 S2 加了
+  // producers: ["at-product","at-ui"]，S2 就在枚举的「S1–S4」里面：roster 一旦真的传进来，
+  // S2 的产物集合当场变成 roster ∩ producers 驱动的。M2b Task 2 报告记着这件事的实物
+  // ——makeRun() 的 roster 缺省值 [] 让四条测试当场变红，正是因为 S2 不再「不受影响」。
+  // 改成按条件说、不枚举阶段号。同族另外三处（deliverable/writepath/state）一并改了。
   const produced = expectedArtifacts(stages, roster)
 
   const out = { drifted: [], missing: [], unrecorded: [] }

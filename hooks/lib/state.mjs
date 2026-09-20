@@ -127,8 +127,14 @@ export function rejectTo(kind) {
  *
  * M2a：加可选 roster。S5 的产物集合取决于这一趟派了谁（producers × roster），静态列全
  * 五个执行角色会让只派了两个角色的 run 永远不 done、整条链卡死。roster 缺省时退回全部
- * producers——S1–S4/S6–S8 没有 producers，行为完全不变，tests/state.test.mjs 现有的
+ * producers；**没有 producers 的阶段**行为完全不变，tests/state.test.mjs 现有的
  * isStageDone 测试因此不需要改签名、必须仍然全绿。
+ *
+ * ⚠️ M2b 终审 B2（2026-09-20）：上面那半句原来写的是「**S1–S4/S6–S8** 没有 producers，
+ * 行为完全不变」——**假**。M2b 给 S2 加了 producers: ["at-product","at-ui"] 与对象形式的
+ * produces，而 S2 就在枚举的「S1–S4」里面：传了 roster 的那一趟，S2 的 isStageDone 走的
+ * 正是 roster ∩ producers。改成按条件说、不枚举阶段号——哪些阶段没有 producers，
+ * 去 stages.json 看。同族另外三处（deliverable/writepath/artifact-drift）一并改了。
  */
 export function isStageDone({ stage, stages, artifactExists, roster }) {
   const current = isPlainObject(stages) ? stages[stage] : undefined

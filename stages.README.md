@@ -2,7 +2,8 @@
 
 `stages.json` 是阶段链的唯一真源：每个阶段的执行角色（`role`）、允许的产出角色
 （`producers`，可选）、需要的前置产物（`requires`）、必须产出的文件（`produces`）。
-它同时喂两道门禁，路径都在 `hooks/lib/` 下：
+它同时喂下面这些门禁，路径都在 `hooks/lib/` 下（M2b 终审 B6：这里原先写的是「**两道**」
+而紧跟的表是三行——与本文件下面自己立的「列举，不报总数」正面冲突，非本轮造成，一并改）：
 
 | 读它的人 | 问的问题 | 实现 |
 |---|---|---|
@@ -12,9 +13,20 @@
 
 JSON 写不了注释，所以下面这条**扩链之前必读**的结论放在这里。
 
-## `producers` 与 `<role>`（M2a 补）
+## `producers` 与 `<role>`（M2a 补，M2b 改）
 
-`role` 字段的语义是「这一阶段的主执行者」，单产者阶段（S1–S4、S6–S8）只写它就够。
+`role` 字段的语义是「这一阶段的主执行者」。**没有 `producers` 的阶段只写它就够**。
+
+> ⚠️ **这一句上一版写的是「单产者阶段（S1–S4、S6–S8）只写它就够」，M2b 终审改掉
+> （2026-09-20）。** M2b 把 S2 改成了 `producers: ["at-product","at-ui"]` + 对象形式的
+> `produces`，那句话的三层意思对 S2 **全假**：S2 不是单产者、`producers` 不缺省、
+> 「只写 `role` 就够」不成立。**改成按条件说（「没有 `producers` 的阶段」），不再枚举
+> 阶段号**——枚举会在下一次扩链或改形状时再假一次，而条件不会。
+>
+> 这一节此前**从头到尾没有一个字提到 `produces` 的对象形式**——那是 M2b 唯一的机制
+> 改动，而这份文件自称是「扩链之前必读」。主规格 §4 补了两种形式的对照表、
+> `expandProduces` 的 docstring 也写了，只有这份专职说明书没跟。下面补上。
+
 S5（实现）不一样：`at-backend`/`at-frontend`/`at-ui`/`at-ios`/`at-android` 都要各自
 在 S5 产出自己的实现记录，`produces` 因此写成一个**模式**——`["05-impl/<role>.md"]`
 ——而不是五个字面量。`stages.json` 用 `producers` 字段列出这一阶段允许的产出角色：
@@ -28,6 +40,25 @@ S5（实现）不一样：`at-backend`/`at-frontend`/`at-ui`/`at-ios`/`at-androi
 }
 ```
 
+### `produces` 的两种形式（M2b 补）
+
+多产者阶段有两种形状，`produces` 跟着有两种形式：
+
+| 形式 | 写法 | 用在 |
+|---|---|---|
+| 数组 | `["05-impl/<role>.md"]` | 所有产者交**同一个模式**的东西 |
+| 对象 | `{"at-product": ["01-prd.md"], "at-ui": [...]}` | 各交各的，产物名互不相同 |
+
+S5 是第一种（一个模式配 N 个角色），S2 是第二种（`at-product` 交 `01-prd.md`，
+`at-ui` 交 `02-ui-spec.md` 与 `02-wireframe.html`）。完整对照与理由见主规格 §4 阶段表
+下方「注记（M2b 补）」那一条。
+
+⚠️ **两种形式的展开都收在 `hooks/lib/stages.mjs` 的 `expandProduces` 一处**——它是全部
+消费方的单一真源，**不要在任何调用点另写分支**，也不要在正文里复述展开规则（那会是
+第二份）。要知道「某一阶段这一趟该有哪些产物」，走 `expandProduces(stage,
+stageRolesInRun(stage, roster))`；要知道「某个名字是不是任何一个合法产者的产物」，走
+`producedNames`。两者答的是不同的问题，见 `stages.mjs` 头部。
+
 **`<role>` 的展开按消费方不同而不同**，完整表格与理由见主规格 §4 阶段表下方
 「注记（M2a 补）」那一条——这里不重复抄一遍，防的正是 `docs/11` §1.5 第 2 点点名的
 那种漂移（同一份清单在两处各抄一份，改一处另一处不会有任何提示地继续用旧口径）。
@@ -40,6 +71,15 @@ S5（实现）不一样：`at-backend`/`at-frontend`/`at-ui`/`at-ios`/`at-androi
 | `isStageDone`（推进判据） | `roster ∩ producers` |
 | 账本比对 `compareArtifacts` | `roster ∩ producers` |
 | `validateState` 的 artifacts 键校验 | 全部 `producers` |
+| `/at-resume` 的「产物齐没齐」核盘（`commands/at-resume.md`） | `roster ∩ producers` |
+| `/at-status` 的产物那一栏（`commands/at-status.md`） | `roster ∩ producers` |
+
+⚠️ **最后两行是 M2b 终审 B5 补的。** 那两条命令是正文层**唯一被要求自己展开 `produces`**
+的地方，此前既不在这张表里、也没有指向 `expandProduces`——**它们没有任何口径**。
+两份正文当时写的是「把 `produces` 逐个去磁盘上 `Glob` 一遍」，而八段里有两段的
+`produces` 不是字面文件名的扁平数组（S2 是对象形式，S5 是含 `<role>` 的模式）。
+照字面执行，S5 会去 `Glob` 字符串 `05-impl/<role>.md`，永远查不到 → `/at-resume` 判
+「产物不齐」→ **重跑一段已经做完的 S5**。两份正文现在都指向 `expandProduces`。
 
 单一真源是 `hooks/lib/stages.mjs`（`stageRoles`/`expandProduces`/`stageRolesInRun`/
 `expectedArtifacts`/`producedNames`）。混用两个集合会重演 `docs/11` §5.6 那个缺口

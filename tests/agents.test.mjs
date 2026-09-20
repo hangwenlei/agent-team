@@ -391,6 +391,65 @@ test('角色正文里「你负责 SN」这种自称写法，那个阶段的 role
   }
 })
 
+// ⚠️ M2b 终审 B1 —— **上面那条是单向的**，这是本轮真正要修的那一半。
+//
+// 它只问「**声称的** SN 是不是真的归我」，不问「**真的归我的**段有没有都被声称」。
+// at-pm.md 的正文写着「你负责 S1（录入契约）与 S4（派发裁决）两段，其余各段由你派发给
+// 相应角色」，而 countOwned('at-pm') = 3——S1 / S4 / **S8**（交付收口，产物
+// 08-delivery.md）。S8 就是从这个方向漏掉的：它既不在声称里、又不可能被「派给相应角色」
+// （没有任何角色的 can_delegate_to 含 at-pm，tests/roster-closure.test.mjs 钉着），
+// 照那句话做只会撞 H1。
+//
+// **它还逃过了本轮为这件事专门建的另一道守卫**：下面 CARDINALITY_TEMPLATES 那组的触发
+// 条件是正文里出现「`role` 是 `at-<自己>`」，而 at-pm.md 用的是「你负责 SN」句式，四条
+// 模板一条都认不出，于是它整份被 EXPECTED_CARDINALITY_CLAIMERS 排除在外——那份清单里
+// 唯独少了**唯一一份自称有错**的文件。当时的注释写着 at-pm「已经由上面『你负责 SN』那对
+// 测试管」，而那对测试正是这条单向判据。两道守卫各自都以为对方管着。
+//
+// 补上反方向：countOwned 算出来归自己的每一段，正文里都必须自称负责。
+const selfClaimIdiomUsers = () => AGENTS.filter((f) => selfClaimedStageIds(f).length > 0)
+
+// 下面那条判据**遍历这份字面清单**，不遍历从正文里抽出来的集合——形状照同文件的
+// EXPECTED_CARDINALITY_CLAIMERS。两种退化各归各管，分清楚：
+//
+//   - **某份正文不再用这个句式**（比如有人把 at-pm.md 那句话改写掉）→ 它仍在清单里，
+//     claimed 算出空集合，判据**当场红**。这是响的那一半。
+//   - **新出现一份用这个句式的正文、却没进清单** → 判据根本不看它，**静默漏掉**。
+//     这是不响的那一半，由下面那条锚接住。
+//
+// 所以锚钉的是「派生集合 === 这份字面清单」，而不是「清单非空」——后者对字面量恒真，
+// 什么都证不了（本分支为「锚钉错了集合」栽过三次，commands.test.mjs 里那条
+// ROLES_FORBIDDEN_AS_PATH_KEYS 的锚注释记着同一条）。
+const EXPECTED_SELF_CLAIM_IDIOM_USERS = ['at-pm.md']
+
+test('锚：用「你负责 SN」句式的正文恰好是 EXPECTED_SELF_CLAIM_IDIOM_USERS 这几份——下面那条只遍历它们', () => {
+  assert.deepEqual(
+    selfClaimIdiomUsers().sort(),
+    [...EXPECTED_SELF_CLAIM_IDIOM_USERS].sort(),
+    `实际用这种句式的是 ${JSON.stringify(selfClaimIdiomUsers().sort())}，与预期的 ` +
+      `${JSON.stringify(EXPECTED_SELF_CLAIM_IDIOM_USERS)} 不一致。` +
+      '多出来的那份**不会被下面那条检查**（它只遍历这份清单）——把它加进来，' +
+      '或者说清为什么它不该被查。',
+  )
+})
+
+test('反方向：stages.json 里 role 归这份正文自己的每一段，正文都必须自称负责——漏一段等于正文少说了一段活', () => {
+  for (const f of EXPECTED_SELF_CLAIM_IDIOM_USERS) {
+    const own = f.replace(/\.md$/, '')
+    const claimed = new Set(selfClaimedStageIds(f))
+    for (const [id, s] of Object.entries(stages)) {
+      if (s.role !== own) continue
+      assert.ok(
+        claimed.has(id),
+        `stages.json 里 ${id} 的 role 是 ${own}，但 agents/${f} 的「你负责 SN」那句话没提 ` +
+          `${id}（它声称的是 ${JSON.stringify([...claimed].sort())}）——上面那条单向判据` +
+          '看不见这个方向：它只查「声称的对不对」，不查「真的有没有都被声称」。' +
+          '照 Ruling 6/10/11：把缺的那一段列进去，不要改成报总数。',
+      )
+    }
+  }
+})
+
 // 评审发现 4（修复轮 2 判断「不值当为『不止一次/各段』这类复数措辞建判据」，被
 // 修复轮 3 复评推翻）：at-architect 曾经的「你在里面出现不止一次……找到 role 是
 // at-architect 的各段」是一句不成立的话——stages.json 里 role === 'at-architect'
@@ -435,9 +494,16 @@ function selfCardinalityMatches(f) {
   return hits
 }
 
-// at-pm 也对自己的段数表过态（「你负责 S1……与 S4……」），但走的是「你负责 SN」
-// 这种按阶段 id 直接指名的句式，不是「role 是 at-X」这种句式，已经由上面「你负责
-// SN」那对测试管，不出现在这份清单里。at-outsider 完全不提 stages.json。
+// at-pm 也对自己的段数表过态，但走的是「你负责 SN」这种按阶段 id 直接指名的句式，
+// 不是「role 是 at-X」这种句式，四条模板一条都认不出，所以不出现在这份清单里。
+// at-outsider 完全不提 stages.json。
+//
+// ⚠️ M2b 终审 B1：这段话原本写的是 at-pm「**已经由上面『你负责 SN』那对测试管**」——
+// **那句话当时就是假的**，而且正是它让 at-pm.md 的错误活了下来。那对测试是**单向**的
+// （只查「声称的对不对」，不查「真的有没有都被声称」），at-pm.md 写「你负责 S1 与 S4
+// 两段」而实际是三段（S8 归它），两道守卫各自都以为对方管着，谁都没查段数。
+// 反方向的判据已经补在上面（「反方向：stages.json 里 role 归这份正文自己的每一段……」）。
+// **这份清单仍然不收 at-pm**，因为它用的确实不是模板那种句式；收它的是上面那条。
 //
 // M2b Task 4 加进来五份（at-ui / at-ios / at-android / at-qa / at-acceptance）：
 // 这五份的正文本轮才从 M2a 的占位符改写成真正文，都要说清自己在哪一段，于是都用上了
