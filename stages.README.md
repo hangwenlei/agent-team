@@ -48,17 +48,33 @@ S5（实现）不一样：`at-backend`/`at-frontend`/`at-ui`/`at-ios`/`at-androi
 **H2（`readiness.mjs`）与 H5（`deliverable.mjs`）不在上表**：这两道闸问的是「`role`
 这一个角色」的问题（H2 问它接下来要做哪一段、H5 问它交付了没有），不是「`<role>`
 展开成哪些人」的问题，`role` 字段本身不变。但 H5 内部判定「交付了没有」时要拿
-`role`（此刻已经等于 `stage.role`，前一步刚判过相等）去展开 `stage.produces`——
+**这一次被判的那个 `role`** 去展开 `stage.produces`——
 `decideDeliverable` 直接用字面量 `stage.produces`（`["05-impl/<role>.md"]`）去比
 `artifactExists` 会永远比不出来，等于让 H5b 永久拦截 `at-backend` 完成 S5、H5a
 永久报「产物缺失」，不管磁盘上是否真的写出了 `05-impl/at-backend.md`。这是
 Task 4 落地 `<role>` 模式时随手发现、brief 与设计文档都没提到的一处必须一起改的
 地方（`decideDeliverable` 现在用 `expandProduces(stage, [role])` 而不是
 `stage.produces` 本身），完整论证见 `hooks/lib/deliverable.mjs` 头部注释与
-`tests/deliverable.test.mjs`。**这不是给「谁被 H5 判」这件事扩大范围**——其它
-producers（`at-frontend`/`at-ui`/`at-ios`/`at-android`）返回时仍然落进
-`skipped: 'role-not-in-stage'`，H5 的判定范围仍然只有 `role` 那一个角色，改动
-只是让「`role` 自己」这唯一被判的一支不再恒假。
+`tests/deliverable.test.mjs`。
+
+⚠️ **这一段上一版有两句是假的，M2b Task 4 改掉（2026-09-20）。** 原文写着 H5 拿到的
+`role`「此刻已经等于 `stage.role`，前一步刚判过相等」，以及「**这不是给「谁被 H5 判」
+这件事扩大范围**——其它 producers（`at-frontend`/`at-ui`/`at-ios`/`at-android`）返回时
+**仍然落进** `skipped: 'role-not-in-stage'`，H5 的判定范围仍然只有 `role` 那一个角色」。
+
+**两句自 M2a Task 9 起都不成立**：Task 9 把 `decideDeliverable` 的归属判据从
+`stage.role !== role`（单数）改成了 `!stageRoles(stage).includes(role)`（含 `producers`），
+**走到展开那一步的 `role` 从此是 `producers` 里的任意一个**。真实行为是：`S5` 的五个
+producer **各自返回时各自被判一次**，每次只展开自己那一份 `05-impl/<自己>.md`。
+「一次调用只判一个角色」是真的，「只判 `role` 字段那一个角色」是假的——上一版把前者
+写成了后者。真正走 `skipped: 'role-not-in-stage'` 的是**不在 `producers` 里**的角色
+（`at-architect` 在 `S5` 是派发发起者、不是产者），`tests/deliverable.test.mjs` 里
+「S5 多产者：不在 producers 里的角色仍然是 role-not-in-stage」那条钉着这一侧。
+
+`hooks/lib/deliverable.mjs` 的头部注释里有**逐字同族的一份，而且它活在那段注释自己做的
+更正下面**（注释开头就更正过「走到这里的 `role` 必然等于 `stage.role`」，随后又写
+「那些人走的是上面的 `role-not-in-stage` 分支」），已一并改掉：**更正只作用到了它逐字
+点名的那一句上，同一个说法在同一段注释里活过了自己的更正。**
 
 ## H5 按 `state.stage` 判定（M1b 改，原先的坑已填）
 

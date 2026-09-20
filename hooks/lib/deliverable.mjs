@@ -33,12 +33,28 @@
 // 名叫 "05-impl/<role>.md" 的文件，这个文件不可能存在。后果：H5b 会把 at-backend
 // 永久拦在 S5 完不成的状态（stop-gate 一律 exit 2），H5a 永远报"缺 05-impl/<role>.md"
 // ——跟磁盘上是否真的写出了 05-impl/at-backend.md 完全无关。这不是"多一个产者没被
-// 照顾到"的边界情形，是**唯一被这个函数判定的那个角色**（role，此刻已等于
-// stage.role）自己的交付也判不对，S5 本身就完不成。brief/设计文档都没提到这处
+// 照顾到"的边界情形，是**这一次被判的那个角色**（Task 4 当时那必然是 stage.role 本人）
+// 自己的交付也判不对，S5 本身就完不成。brief/设计文档都没提到这处
 // 必须跟着 stages.json 的 <role> 模式一起改的地方，是 Task 4 落地时发现并补上的。
-// 用 expandProduces(stage, [role]) 只展开这一个已经匹配上的角色——不展开
-// producers 里的其它人，那些人走的是上面的 role-not-in-stage 分支，本函数不对
-// 他们表态（H5 的静默集合另见 gate.mjs 的 isCoordinatorFor 与 stages.README.md）。
+// 用 expandProduces(stage, [role]) 只展开这一个已经匹配上的角色，不展开 producers
+// 里的其它人。
+//
+// ⚠️ M2b Task 4 改（2026-09-20）：这里原来接着写「那些人走的是上面的 role-not-in-stage
+// 分支，本函数不对他们表态」——**那句话在本段开头那条更正之后就不成立了**。Task 9 之后
+// producers 里的每一个各自返回时都会通过归属判据、各自被判一次，各自展开各自那一份
+// 05-impl/<自己>.md。「一次调用只展开一个角色」是真的，「其它 producers 走
+// role-not-in-stage」是假的——上一版把两者写成了同一句话。
+//
+// 值得单独记一笔的是它是怎么活下来的：**本段开头刚更正过「走到这里的 role 必然等于
+// stage.role」，而同一个旧模型的第二句就活在那条更正下面**——更正只作用到了它逐字点名
+// 的那一句上，同一个说法在同一段注释里活过了自己的更正（stages.README.md 那一侧有逐字
+// 同族的一份，已一并改掉）。这与 docs/11 §3「错的注释活得比代码久」是同一族，但更难
+// 发现：这一份的隔壁就摆着正确的说法。
+//
+// 真正走 role-not-in-stage 的是**不在 producers 里**的角色——at-architect 在 S5 是派发
+// 发起者、不是产者，tests/deliverable.test.mjs 的「S5 多产者：不在 producers 里的角色
+// 仍然是 role-not-in-stage」那条钉着这一侧。
+// （H5 的静默集合另见 gate.mjs 的 isCoordinatorFor 与 stages.README.md。）
 // 对没有 producers 的单产者阶段（S1–S4、S6–S8），expandProduces 对不含 <role> 的
 // 条目原样保留一次，逐字等价于原来的 stage.produces，这条改动对它们是零行为差异
 // （tests/deliverable.test.mjs 现有各条据此必须仍然全绿，不改签名）。
