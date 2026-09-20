@@ -128,6 +128,14 @@ U4 与 U7 是同一个机制的两个观测面，只是分别撞在「agent 宇�
 是它能派生出的整棵子树。配置 `at-pm.md` 的 `tools:` 行时，必须同时用这个模型去想：
 这一行既决定了「谁能被派发」（U4），也决定了「整棵树里能用哪些工具」（U7）。
 
+**M2b 补**：宇宙从四个角色扩到**九个**（加 `at-ui` / `at-ios` / `at-android` / `at-qa` /
+`at-acceptance`）。`at-outsider` **仍然不在里面**——它是「任何角色都不应能派发它」
+这条不变量的测试替身，进了宇宙就失去意义。
+
+**扩宇宙必须先于加花名册边**：`tests/roster-sync.test.mjs` 要求花名册全部
+`can_delegate_to` 的并集 ⊆ 这个宇宙。M2a Task 2 把五个新角色做成孤立叶子
+（`can_delegate_to: []`）正是为了在宇宙还没扩时不违反这条。
+
 ## 4. 阶段链
 
 | # | 阶段 | 执行者 | 产物 |
@@ -161,14 +169,34 @@ U4 与 U7 是同一个机制的两个观测面，只是分别撞在「agent 宇�
 > `["05-impl/<role>.md"]`。`<role>` 的展开**按消费方不同而不同**，这一点必须照着来，
 > 混用会重演 `docs/11` §5.6 那个缺口：
 >
-> **消费方不是四个，是八个调用点、散在五个模块里。** 这份清单是 M2a 落地时穷举 `grep`
-> 出来的——设计阶段只列了四个，漏掉的三处**每一处都是真故障**（见本表下方的注记）：
+> **`<role>` 的消费方散在五个模块里，逐个列在下表。** 这份清单是一路撞出来的——设计阶段
+> 只列了四个，而**每一次「穷举完了」之后都还有**。不写总数：这条注记的数字曾经从写下那一刻
+> 起就是错的（把一个同一天早些时候刚被删掉的 `producesOf` 当成独立一项数了进去），此后又
+> 被「修正」过两次而没有回去核基数。**清单可以 `grep` 核，数字不能。**
 >
-> | 展开成 | 调用点 |
+> 下表记的是**发现顺序**，不是普查。`hooks/lib/deliverable.mjs` 与 `hooks/lib/readiness.mjs`
+> 的代码注释里写的「这是第九处」「第十处」指的就是这个顺序——**它们是序数，不是计数**，
+> 不要拿它们去和下面清单的行数对账。
+>
+> | 何时 | 谁发现 | 第几处 |
+> |---|---|---|
+> | 设计阶段 | — | 声称 4 个 |
+> | M2a Task 4 | 实现者照 Step 1 改完 `stages.json` 后立刻撞上 | +2 |
+> | Task 4 之后 | 控制方穷举 `grep .produces` | +3（改注记为「八个」） |
+> | M2a Task 9 | 真实环境验证 | **第 9 处** |
+> | M2a 整分支终审 | 评审 | **第 10 处** |
+>
+> **第 9、10 处都是归属判据**（`deliverable.mjs` 与 `readiness.mjs` 里的
+> `stage.role !== role` / `s.role === targetRole`），两处都读 `.role` 而不是 `.produces`
+> ——**所以那次 `grep .produces` 的穷举结构上照不到它们**。两处都是真故障、都零测试覆盖：
+> 前者让 H5 从不检查 S5 的非 `role` 产者，后者让它们**完全绕过 H2**。
+>
+> | 展开成 | 决策点 |
 > |---|---|
-> | **写入者自己** | `writepath.mjs` 的 `stageOwnerOfRunPath`（H3 归属判定；`ledger` 的 `produce` 回传**与它共用同一份**，`gate.mjs` 从 `writepath.mjs` import，不是两个改动点）<br>`writepath.mjs` 的 `producesOf`（H3「这是不是我的产物」）<br>`deliverable.mjs` 的 `decideDeliverable`（H5 交付物校验，展开的是刚返回的那个角色） |
-> | **`roster ∩ producers`** | `state.mjs` 的 `isStageDone`（阶段推进判据）<br>`artifact-drift.mjs` 的 `compareArtifacts`（账本比对，经 `expectedArtifacts`）<br>`readiness.mjs` 的 `done`（H2「这一段是不是已经完成、可以跳过」） |
-> | **全部 `producers`** | `state.mjs` 的 `validateState`（artifacts 键校验，经 `producedNames`）<br>`readiness.mjs` 的 `producerOf`（「这个产物名归哪一段」，用于缺失项的错误文案） |
+> | **写入者自己** | `writepath.mjs` 的 `stageOwnerOfRunPath`（H3 归属；`ledger` 的 `produce` 回传**与它共用同一份**）<br>`deliverable.mjs` 的 `expandProduces(stage, [role])`（H5 交付物展开） |
+> | **`roster ∩ producers`** | `state.mjs` 的 `isStageDone`<br>`artifact-drift.mjs` 的 `compareArtifacts`（经 `expectedArtifacts`）<br>`readiness.mjs` 的 `done` |
+> | **全部 `producers`** | `state.mjs` 的 `validateState`（经 `producedNames`）<br>`readiness.mjs` 的 `producerOf` |
+> | **归属判据（「这一段归不归我」）** | `deliverable.mjs`：`stageRoles(stage).includes(role)`<br>`readiness.mjs`：`stageRoles(s).includes(targetRole)` |
 >
 > 「`roster ∩ producers`」这一组的单一真源是 `stages.mjs` 的 `stageRolesInRun(stage, roster)`——
 > **不要在调用点自己再 filter 一遍**。M2a 期间这段逻辑一度被写了两份，评审抓出后收敛。
@@ -181,6 +209,22 @@ U4 与 U7 是同一个机制的两个观测面，只是分别撞在「agent 宇�
 >
 > 单一真源是 `hooks/lib/stages.mjs`。M1 期间 `stages.json` 把这个模式写成了字面量
 > `["05-impl/at-backend.md"]`，后果见 `docs/11` §5.6。
+
+> **注记（M2b 补）：S2 是多产者阶段，但它的形状与 S5 不同。**
+>
+> S5 是「**一个模式配 N 个角色**」：`produces` 是数组 `["05-impl/<role>.md"]`，每个
+> `producers` 成员交同一个模式的东西。S2 是「**每个角色产物各不相同**」：at-product 交
+> `01-prd.md`，at-ui 交 `02-ui-spec.md` 与 `02-wireframe.html`。
+>
+> 所以 `produces` 有**两种形式**，`stages.json` 按阶段的真实形状选：
+>
+> | 形式 | 写法 | 用在 |
+> |---|---|---|
+> | 数组 | `["05-impl/<role>.md"]` | 所有产者交同一模式（S5） |
+> | 对象 | `{"at-product": ["01-prd.md"], "at-ui": [...]}` | 各交各的（S2） |
+>
+> 两种形式的展开都收在 `hooks/lib/stages.mjs` 的 `expandProduces` **一处**——它是全部
+> 消费方的单一真源，**不要在任何调用点另写分支**。
 
 ### 4.1 用户命令面
 
@@ -354,6 +398,10 @@ H1/H3/H4 是安全边界，坏了要挡住；H2 是流程辅助，坏了不该�
 因此 H5 落地时应当**拆成 H5a（`PostToolUse`，权威记录）与 H5b（`SubagentStop`，真拦截）
 两条独立注册**，各自有自己的输入契约，不要共用 `PreToolUse` 那套前置校验。
 本节表格把它们写在同一行是为了表达「两道一起才成立」这个设计意图，不是实现形态。
+
+**H5a 的静默集合已经重算过三次**（`docs/11` §1.1 提出、M2a Task 6 第一次实做、
+M2b 加 `at-pm → at-qa` 边第二次实做）。**每一次都是被扩链或加边逼出来的**，
+唯一落点是 `stages.README.md` 那张表——**改花名册边不改那张表，就是下一个漂移点**。
 
 ### 6.0 派发门禁 H1 的五条规则（M0 实施时补；前三条来自安全评审，第 4 条来自 U3 实测，第 5 条来自整分支复审）
 
