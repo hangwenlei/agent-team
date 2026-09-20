@@ -5,6 +5,7 @@ import { CONTROL_FILES } from '../hooks/lib/control-files.mjs'
 import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { producedNames } from '../hooks/lib/stages.mjs'
+import { COMMAND_NAMES } from './helpers/command-names.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const readJson = (p) => JSON.parse(readFileSync(url(p), 'utf8'))
@@ -57,7 +58,12 @@ test('命令的 frontmatter 不得声明 Skill / SendMessage / ListAgents', () =
 // 互相提「跑 /at-init」「回到 /at 的第 3 节」这类合法的命令间引用，那不是角色名，
 // 是命令名——两个命名空间形状恰好相同，但花名册只收角色。命令自己的名字不该被当成
 // 角色名去对花名册查——排除掉这个集合。
-const COMMAND_NAMES = new Set(FILES.map((f) => f.replace(/\.md$/, '')))
+//
+// Ruling 15（M2b Task 4 补轮）：这个排除集原来是本文件里的一行
+// `new Set(FILES.map(...))`，而 tests/agents.test.mjs 的「角色正文里出现的每个 at-*
+// 角色名都在花名册里」用着**逐字相同的正则却没有任何排除**——同一份知识，一边有、一边
+// 压根不知道另一边解决过这个问题。现在抽成 tests/helpers/command-names.mjs，两边都
+// import 它；它从 commands/ 目录读，不硬编码名字。完整理由在那个文件的头部。
 test('命令正文里出现的每个 at-* 角色名都在花名册里', () => {
   for (const f of FILES) {
     for (const name of new Set(textOf(f).match(/\bat-[a-z][a-z0-9-]*\b/g) ?? [])) {

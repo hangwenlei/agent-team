@@ -19,6 +19,7 @@ import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 import { EXPECTED_AGENTS } from './helpers/expected-agents.mjs'
 import { producedNames } from '../hooks/lib/stages.mjs'
+import { COMMAND_NAMES } from './helpers/command-names.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const roster = JSON.parse(readFileSync(url('roster.json'), 'utf8'))
@@ -169,10 +170,32 @@ test('前置条件：hasBoundary() 认得出一个已知违规样本——保留
   )
 })
 
+// ⭐ Ruling 15（M2b Task 4 补轮，2026-09-20）：`/\bat-[a-z][a-z0-9-]*\b/` 这个形状同时
+// 匹配得到**命令名**（at / at-init / at-resume / at-status）。命令名与角色名是两个命名
+// 空间、恰好形状相同，而花名册只收角色。`tests/commands.test.mjs` 早在 M2a Task 9 就撞上
+// 并解决过（它从自己的 FILES 派生了一个排除集），**而这一条用着逐字相同的正则却没有任何
+// 排除**——不是分叉，是一边压根不知道另一边解决过这个问题。代价是具体的：角色正文因此
+// 写不了 `/agent-team:at-init`，只能绕成「写 .agent-team/project.json 的那条勘察命令」
+// 这种描述特征的说法（docs/11 §5.15）。排除集现在是 tests/helpers/command-names.mjs
+// 的单一真源，从 commands/ 目录读出来，两个测试文件共用。
+//
+// skill 名那一组豁免直接用下面的 EXPECTED_SKILLS，不在这里再抄一份字面量数组——同一个
+// 文件里摆两份逐字相同的清单，正是这条 Ruling 在治的那个形状。前向引用是安全的：
+// EXPECTED_SKILLS 是模块顶层的 const，而下面这个函数只在 test() 回调里被调用，回调跑在
+// 模块求值完成之后。
+//
+// ⚠️ 判据抽成具名函数，主判据与它的正向锚**共用同一份**——两处各写一遍「形状匹配再减去
+// 豁免」的代价，hasBoundary() 那一轮已经实测过：只放宽其中一份，另一份照样绿，自检等于
+// 给自己发了张通行证。
+function roleNamesCheckedIn(body) {
+  return [...new Set(body.match(/\bat-[a-z][a-z0-9-]*\b/g) ?? [])].filter(
+    (n) => !EXPECTED_SKILLS.includes(n) && !COMMAND_NAMES.has(n),
+  )
+}
+
 test('角色正文里出现的每个 at-* 角色名都在花名册里', () => {
   for (const f of AGENTS) {
-    for (const name of new Set(bodyOf(f).match(/\bat-[a-z][a-z0-9-]*\b/g) ?? [])) {
-      if (['at-contract-format', 'at-handoff-package', 'at-api-contract'].includes(name)) continue
+    for (const name of roleNamesCheckedIn(bodyOf(f))) {
       assert.ok(Object.hasOwn(roster, name), `agents/${f} 提到 ${name}，但它不在 roster.json 里`)
     }
   }
@@ -232,8 +255,19 @@ test('每个 skill 至少被一个角色预加载——没人读的 skill 是死
 // （「多条检验不同侧面的固定断言要拆开」），本轮不豁免 brief 给的测试代码。
 const ALL_BODIES = AGENTS.map(bodyOf).join('\n')
 
-test('前置条件：角色正文里确实提到了角色名——否则「提到的角色名都在花名册里」那条闭包测试在空转', () => {
-  assert.ok((ALL_BODIES.match(/\bat-[a-z][a-z0-9-]*\b/g) ?? []).length > 0, '没有任何角色正文提到角色名')
+// ⚠️ Ruling 15 同时改了这条锚：它原来数的是 `ALL_BODIES.match(/\bat-.../g).length`
+// ——**排除之前**的计数。接上排除集之后那个数字就钉不住东西了：排除集一旦退化成「排除
+// 一切」（比如 commands/ 扫描出问题、或者豁免判据写反），主判据零次迭代、恒绿，而这条
+// 锚照样绿，因为正文里当然还有一堆 at-* 形状的 token。
+// 锚必须钉**判据真正迭代的那个集合**——排除之后仍然要去对花名册查的那些名字。
+// 这与本轮 tests/commands.test.mjs 里 Ruling 13 那条锚（钉派生出来的那一半，不钉含
+// 字面量 at-pm 的整个清单）是同一个形状，本分支已经在这上面栽过三次。
+test('前置条件：角色正文里确实有**排除 skill 名与命令名之后**仍要对花名册查的角色名——否则「提到的角色名都在花名册里」那条闭包测试在空转', () => {
+  assert.ok(
+    roleNamesCheckedIn(ALL_BODIES).length > 0,
+    '十一份正文里的每一个 at-* token 都被豁免掉了（skill 名或命令名）——上面那条闭包' +
+      '测试一圈都不会跑，它是恒绿的，没有检查任何东西',
+  )
 })
 
 test('前置条件：角色正文里确实提到了产物名——否则「提到的产物名都是某阶段 produces」那条闭包测试在空转', () => {
