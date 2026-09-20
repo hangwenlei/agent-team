@@ -54,8 +54,15 @@ test('写了 project.json：回传触达表，含 reach.json 落盘指示', () =
     }, GATE, projectDir)
     const ctx = ctxOf(stdout)
     assert.match(ctx, /reach\.json/)
-    // 仓库根真实 roster.json：at-product → at-backend 这条边存在。
-    assert.ok(ctx.includes('at-product → at-backend'))
+    // 仓库根真实 roster.json：at-architect → at-backend 这条边存在。
+    // ⚠️ M2b Task 3 之前这里钉的是 at-product → at-backend。那条边在本任务被**移除**
+    // 了：规格 §4 的 S2 写的是「at-product → at-ui」，S5 的分发是 at-architect 的事，
+    // 所以 at-product 的 can_delegate_to 从 ["at-backend"] 改成了 ["at-ui"]。这条断言
+    // 正是 docs/11 §2 已知边界第 5 条（四个月前）预言过的那一类「断言钉在真实
+    // roster.json 的一条边上」——换成 at-architect → at-backend 不是为了让它变绿，是
+    // 因为触达表这一行的事实变了：at-product 现在派不到 at-backend，src/server/ 只剩
+    // at-architect 这一条链能把它带进别人的触达里。
+    assert.ok(ctx.includes('at-architect → at-backend'))
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })
@@ -272,8 +279,15 @@ test('没有 run 时写 project.json：仍然回传触达表——/at-init 按�
         'stdout 为空意味着 .agent-team/reach.json 在全新项目上永远建不出来。',
     )
     assert.match(ctx, /reach\.json/)
-    // 仓库根真实 roster.json：at-product → at-backend 这条边存在。
-    assert.ok(ctx.includes('at-product → at-backend'))
+    // 仓库根真实 roster.json：at-architect → at-backend 这条边存在。
+    // ⚠️ M2b Task 3 之前这里钉的是 at-product → at-backend。那条边在本任务被**移除**
+    // 了：规格 §4 的 S2 写的是「at-product → at-ui」，S5 的分发是 at-architect 的事，
+    // 所以 at-product 的 can_delegate_to 从 ["at-backend"] 改成了 ["at-ui"]。这条断言
+    // 正是 docs/11 §2 已知边界第 5 条（四个月前）预言过的那一类「断言钉在真实
+    // roster.json 的一条边上」——换成 at-architect → at-backend 不是为了让它变绿，是
+    // 因为触达表这一行的事实变了：at-product 现在派不到 at-backend，src/server/ 只剩
+    // at-architect 这一条链能把它带进别人的触达里。
+    assert.ok(ctx.includes('at-architect → at-backend'))
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })

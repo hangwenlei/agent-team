@@ -1,8 +1,8 @@
 {
-  "__main__":       { "can_delegate_to": ["at-product", "at-architect"] },
-  "at-pm":          { "can_delegate_to": ["at-product", "at-architect"] },
-  "at-product":     { "can_delegate_to": ["at-backend"] },
-  "at-architect":   { "can_delegate_to": ["at-backend", "at-frontend"] },
+  "__main__":       { "can_delegate_to": ["at-product", "at-architect", "at-qa", "at-acceptance"] },
+  "at-pm":          { "can_delegate_to": ["at-product", "at-architect", "at-qa", "at-acceptance"] },
+  "at-product":     { "can_delegate_to": ["at-ui"] },
+  "at-architect":   { "can_delegate_to": ["at-backend", "at-frontend", "at-ui", "at-ios", "at-android"] },
   "at-backend":     { "can_delegate_to": [] },
   "at-frontend":    { "can_delegate_to": [] },
   "at-ui":          { "can_delegate_to": [] },

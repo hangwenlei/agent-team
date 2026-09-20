@@ -167,10 +167,10 @@ test('花名册的派发边拓扑没有变——变了就必须回来确认触�
   assert.deepEqual(
     edges,
     {
-      __main__: ['at-architect', 'at-product'],
-      'at-pm': ['at-architect', 'at-product'],
-      'at-product': ['at-backend'],
-      'at-architect': ['at-backend', 'at-frontend'],
+      __main__: ['at-acceptance', 'at-architect', 'at-product', 'at-qa'],
+      'at-pm': ['at-acceptance', 'at-architect', 'at-product', 'at-qa'],
+      'at-product': ['at-ui'],
+      'at-architect': ['at-android', 'at-backend', 'at-frontend', 'at-ios', 'at-ui'],
       'at-backend': [],
       'at-frontend': [],
       'at-ui': [],
@@ -182,12 +182,26 @@ test('花名册的派发边拓扑没有变——变了就必须回来确认触�
     },
     // M2a Task 2：五个新角色（at-ui/at-ios/at-android/at-qa/at-acceptance）加进
     // roster.json 时都是孤立叶子——can_delegate_to 是空数组，也没有任何既有角色的
-    // can_delegate_to 指向它们。用 computeReach 比对新旧两版拓扑：既有七个节点的边
-    // 一条没变，新五个节点各自的 reach 只等于它们自己在 project.paths 里认领的路径
-    // （目前是空，见 templates/project.json），不放大任何人的触达。brief 原稿建议把
-    // at-ui 等四个直接接进 at-architect/at-product 的 can_delegate_to，但那样会让
-    // roster-sync.test.mjs 的「at-pm 白名单必须覆盖整个派发宇宙」变红——at-pm.md 的
-    // Agent(...) 白名单本任务不改（真正接线是 M2b 的事），所以这轮全部留成孤立节点。
+    // can_delegate_to 指向它们，所以那一轮不放大任何人的触达。
+    //
+    // M2b Task 3 把它们接上了线，这条断言因此第一次真的变红。按这条测试自己下面那段
+    // 失败文案的要求，改断言之前先拿 computeReach 对 templates/project.json 的 paths
+    // 算了新旧两版，差是：
+    //   at-pm / __main__  + docs/ui/、src/ios/、src/android/（经 at-architect 那一跳）
+    //   at-architect      + docs/ui/、src/ios/、src/android/（新增的三条直接边）
+    //   at-product        + docs/ui/，**− src/server/、src/shared/**
+    //   其余角色（含五个新角色自己）reach 一条不变
+    // 三处放大都是有意的：S5 的实现分发本来就是 at-architect 的事（规格 §4），
+    // at-ui/at-ios/at-android 是它要分发的执行角色，不接线它们就是永远派不动的孤立叶子。
+    //
+    // at-product 那一行是唯一一处**收窄**：at-product → at-backend 这条边在本任务被
+    // 移除了（规格 §4 的 S2 是「at-product → at-ui」），它因此不再经 at-backend 摸到
+    // src/server/ 与 src/shared/。这条去边还动到了 H5a 的静默集合（at-product 不再是
+    // S5 的协调者）与 docs/11 §2 已知边界第 5 条预言过的那两条 gate-ledger 断言。
+    //
+    // at-qa / at-acceptance 拿到入边之后 reach 仍然是空：templates/project.json 的
+    // paths 里没有它们的条目，它们不认领任何路径，也就没有东西可以被带进别人的触达里。
+    // 这两条边真正改变的是 H1 能不能放行「PM 派 at-qa/at-acceptance」，不是触达。
     'roster.json 的派发边变了。这不是让你改这条断言了事：一条 can_delegate_to 的变动' +
       '会改变各角色的**实际写入触达**（规格 §6.4 / docs/09 账二）——先用 computeReach ' +
       '算一遍新旧两版，确认哪个角色的触达被放大、放大到谁的地盘，确认这是有意的之后再' +

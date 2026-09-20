@@ -40,6 +40,7 @@ import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
+import { computeReach } from '../hooks/lib/reach.mjs'
 
 // ---- H5b（stop-gate，SubagentStop）----
 
@@ -343,12 +344,20 @@ test('state.stage 与被派角色对不上时 H5a 发 warning，而不是静默�
 // 不是同一个断言形状遍历互不耦合的数据点。都是子进程级：isCoordinatorFor 活在
 // gate.mjs 里，decideDeliverable 这个纯函数从不知道花名册长什么样。
 //
-// ⚠️ **下面第一条用 at-architect，但被静默的不止它。** 当前花名册下 at-product 在
-// state.stage === 'S5' 时同样静默（它的 can_delegate_to 含 at-backend，落在协调者
-// 一侧）。那是这条判定的固有代价而不是漏网——按规格 §6.4 的触达语义 at-product 确实
-// 有能力让 at-backend 交付——但读这两条测试的人很容易以为静默面只有 at-architect
-// 一个，所以在这里点明。判据是「能传递派到 stages[state.stage].role」，扩链到
-// S6–S8 时要回来重算这个集合（stages.README.md 记了）。
+// ⚠️ **M2b Task 3 之后，S5 的静默面真的只剩 at-architect 了。** 这段注释上一版写的是
+// 「被静默的不止它——当前花名册下 at-product 在 state.stage === 'S5' 时同样静默（它的
+// can_delegate_to 含 at-backend，落在协调者一侧）」。那句话现在**整段不成立**：本任务
+// 按规格 §4 把 at-product 的 can_delegate_to 从 ["at-backend"] 改成了 ["at-ui"]（S2 是
+// 「at-product → at-ui」，S5 的分发是 at-architect 的事），at-product 因此不再传递派得到
+// at-backend，也就不再落在协调者一侧。
+//
+// 这段改动不会让任何测试变红——它是注释。留着它就是留一句假话，而这个仓库里错的注释
+// 活得比代码久（docs/11 里好几条教训都是这么来的），所以手动改掉。
+//
+// 上一版最后一句「扩链到 S6–S8 时要回来重算这个集合（stages.README.md 记了）」——那一天
+// 就是 M2b Task 3。重算过了：判据仍然是「能传递派到 stages[state.stage].role」，新的
+// 八行静默表在 stages.README.md 的「H5a 的静默集合」一节，tests/gate-deliverable.test.mjs
+// 下面那组「静默表逐行」测试逐行钉着它。
 test('S5 派 at-architect 去分发（正路）：H5a 不发 warning——它是合法的协调者', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S5' })
   try {
@@ -600,6 +609,167 @@ test('前置条件：上面三条的夹具互不相同——否则三条测的�
   assert.notDeepEqual(triples[1], triples[2])
 })
 
+// ---- H5a 静默表第三次重算（M2b Task 3）：逐行钉住 stages.README.md 那八行 ----
+//
+// 这张表被重算过三次（M1b 终审提出、M2a Task 6 第一次实做、M2b Task 3 本次），每一次
+// 都是被扩链或加边逼出来的，而前两次之后**没有任何测试钉着它**——上一版表里 S5 那一行
+// 的「谁派得到它」写的是「at-architect、at-product（两个都会，不止 at-architect）」，
+// 漏了 at-pm/__main__，还报了一个错的总数，从写下来那天起全绿到本任务。这一组补的就是
+// 那个缺口：表的第三列（谁能传递派到该段的 role）逐行对着**真实 roster.json + stages.json**
+// 算一遍。
+//
+// 判据的两个半边（`!coordinator || stageDone`）不在这一组里——它们是行为，由下面
+// H5A_TOPOLOGY_BEHAVIOUR 那三条子进程级测试钉。这一组只钉拓扑事实，所以删掉
+// `|| stageDone` 不会让这一组里任何一条变红（这是有意的：Step 8 变异 3 要求「只有钉那半
+// 的那条红」）。
+//
+// 期望值是 computeReach 对改完之后的真实数据跑出来的输出，一行对一行；改 roster.json 的
+// 任何一条边都会让对应的行变红，改的人必须回到 stages.README.md 的「H5a 的静默集合」
+// 那一节把表一起更新——形状照 tests/reach.test.mjs 的拓扑锚。
+const REAL_ROSTER = JSON.parse(readFileSync(new URL('../roster.json', import.meta.url), 'utf8'))
+const REAL_STAGES = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
+
+// 判据只问拓扑可达性，paths 传 {}——与 hooks/gate.mjs 的 isCoordinatorFor 逐字一致。
+function whoCanReach(stageId) {
+  const reach = computeReach({ roster: REAL_ROSTER, paths: {} })
+  const stageRole = REAL_STAGES[stageId]?.role
+  return Object.keys(REAL_ROSTER).filter((k) => (reach[k]?.reachableRoles ?? []).includes(stageRole))
+}
+
+// stages.README.md「H5a 的静默集合」那张表的第二、三列，八行。顺序与 computeReach 的
+// 输出顺序（Object.keys(roster) 的顺序）一致，deepEqual 连顺序一起钉。
+const H5A_SILENCE_TABLE = [
+  { stage: 'S1', role: 'at-pm', reachedBy: [] },
+  { stage: 'S2', role: 'at-product', reachedBy: ['__main__', 'at-pm'] },
+  { stage: 'S3', role: 'at-architect', reachedBy: ['__main__', 'at-pm'] },
+  { stage: 'S4', role: 'at-pm', reachedBy: [] },
+  { stage: 'S5', role: 'at-backend', reachedBy: ['__main__', 'at-pm', 'at-architect'] },
+  { stage: 'S6', role: 'at-qa', reachedBy: ['__main__', 'at-pm'] },
+  { stage: 'S7', role: 'at-acceptance', reachedBy: ['__main__', 'at-pm'] },
+  { stage: 'S8', role: 'at-pm', reachedBy: [] },
+]
+
+const tableFailHint = (stage) =>
+  `静默表 ${stage} 行的「谁派得到它」与真实 roster.json/stages.json 算出来的对不上。` +
+  '这不是让你改这条断言了事：这一列的变动会改变 H5a 判据第 1 条在这一段成不成立，' +
+  '而那正是这张表存在的理由。先用 computeReach 对新花名册重算八行，确认差在哪一段、' +
+  '是哪条边造成的，再同步更新 stages.README.md 的「H5a 的静默集合」那一节——' +
+  '那里是这张表的单一真源，这组测试只是它的守卫。'
+
+for (const row of H5A_SILENCE_TABLE) {
+  test(`静默表 ${row.stage} 行（role = ${row.role}）：谁能传递派到它`, () => {
+    assert.deepEqual(whoCanReach(row.stage), row.reachedBy, tableFailHint(row.stage))
+  })
+}
+
+// ⭐ 锚一（钉在判据真正迭代的那个集合上）：上面八条各自只看自己那一行，**少一行不会有
+// 任何人红**——S1/S4/S8 三行的期望值还是空数组，抽取/遍历退化成空集合时它们照样绿。
+// 所以单独钉「这张表盖住的阶段集合恰好是 stages.json 的全部阶段」，迭代的是
+// Object.keys(REAL_STAGES)（判据取 stages[stageId] 时迭代的正是这个集合），不是表自己。
+test('锚：静默表盖住的阶段恰好是 stages.json 的全部阶段——少一段不会有任何一行变红', () => {
+  assert.deepEqual(
+    H5A_SILENCE_TABLE.map((r) => r.stage),
+    Object.keys(REAL_STAGES),
+    '静默表的阶段集合与 stages.json 对不上：扩链加了一段而表没跟上时，上面那组' +
+      '「每行一条」一条都不会红，新那一段的静默与否于是从没有被算过',
+  )
+})
+
+// ⭐ 锚二（正向自检）：S1/S4/S8 三行的期望值是空数组——whoCanReach 若因为任何原因恒返回
+// 空集合（reach 结构改名、stageRole 取错字段、roster 读成空对象），那三行会空转着变绿。
+// 这条证明同一个 whoCanReach 在真实数据上确实算得出非空的东西，并把八行的并集本身钉死。
+test('锚：八行 reachedBy 的并集恰好是这三个角色——证明 whoCanReach 不是恒返回空集合', () => {
+  const union = [...new Set(H5A_SILENCE_TABLE.flatMap((r) => whoCanReach(r.stage)))].sort()
+  assert.deepEqual(union, ['__main__', 'at-architect', 'at-pm'])
+})
+
+// ⭐ 锚三：上面八行的 role 列是抄的，抄错了（比如 S6 写成 at-acceptance）上面那组仍然
+// 全绿——whoCanReach 自己去 stages.json 取 role，根本不看表里抄的这一列。这条把抄的那
+// 一列跟真源对上。
+test('锚：静默表每一行抄的 role 与 stages.json 里那一段的 role 一致', () => {
+  assert.deepEqual(
+    H5A_SILENCE_TABLE.map((r) => [r.stage, r.role]),
+    Object.entries(REAL_STAGES).map(([id, s]) => [id, s.role]),
+  )
+})
+
+// ---- 新拓扑下的三条行为：判据两个半边各自还在不在 ----
+//
+// 上面那组是拓扑事实，下面这三条是行为，走真实子进程。三份夹具的关键字段集中声明在
+// 这里，测试与末尾那条「夹具互不相同」的锚读同一份数据（M2a Task 6 的形状）。
+const H5A_TOPOLOGY_BEHAVIOUR = {
+  // M2b Task 3 造成的**新行为**：at-product 在 S5 返回，从「静默」变成「报」。
+  // 去掉 at-product → at-backend 之后它不再是 S5 的协调者，走 !coordinator 那半。
+  productNoLongerCoordinator: { stage: 'S5', returns: 'at-product', roster: [], diskArtifacts: [] },
+  // 现状口径（stages[stageId].role，单数）在 S2 的答案：at-architect 派得到 at-ui
+  // （本任务新加的边），而 at-ui 是 S2 的 producer 之一——但 S2.role 是 at-product，
+  // 单数口径下它**不是**协调者，照报。docs/11 §5.12 记着另一种口径在这一段会给出
+  // 相反的答案；这条钉的是现在真的在跑的那一种。
+  architectAtS2: { stage: 'S2', returns: 'at-architect', roster: [], diskArtifacts: [] },
+  // stageDone 那半：协调者返回、但这一趟的产者（at-ui）已经把 S5 的产物交齐了。
+  // 产者用 at-ui 而不是 at-backend，与上面 M2a Task 6 那三份夹具区分开。
+  coordinatorDoneViaUi: { stage: 'S5', returns: 'at-architect', roster: ['at-ui'], diskArtifacts: ['05-impl/at-ui.md'] },
+}
+
+function runH5a(f, { ledger = null } = {}) {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: f.stage, artifacts: f.diskArtifacts })
+  try {
+    const statePath = join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8'))
+    state.roster = f.roster
+    if (ledger) state.artifacts = ledger
+    writeFileSync(statePath, JSON.stringify(state), 'utf8')
+    return run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm',
+      tool_input: { subagent_type: `agent-team:${f.returns}` },
+    }, GATE, projectDir).stdout
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+}
+
+test('H5a：at-product 在 S5 返回——现在照报（M2b Task 3 去掉 at-product → at-backend 之前是静默的）', () => {
+  const stdout = runH5a(H5A_TOPOLOGY_BEHAVIOUR.productNoLongerCoordinator)
+  assert.match(
+    JSON.parse(stdout).hookSpecificOutput.additionalContext,
+    /派不到/,
+    'at-product 的 can_delegate_to 现在是 ["at-ui"]，它派不到 at-backend，不是 S5 的' +
+      '协调者——这条走 !coordinator 那半。上一版花名册里它含 at-backend，同一个场景是静默的，' +
+      'hooks/gate.mjs 的 isCoordinatorFor 上方曾经用整整一段解释这笔"固有代价"，那段已随本任务作废',
+  )
+})
+
+test('H5a：at-architect 在 S2 返回——单数 .role 口径下不是协调者，照报', () => {
+  const stdout = runH5a(H5A_TOPOLOGY_BEHAVIOUR.architectAtS2)
+  assert.match(
+    JSON.parse(stdout).hookSpecificOutput.additionalContext,
+    /派不到/,
+    'S2.role 是 at-product，at-architect 派不到它（它派得到的是 at-ui）。at-ui 同时也是 ' +
+      'S2 的 producer 之一，所以换成"派得到任意一个 producer"那种口径时这条的答案会反过来' +
+      '——两种口径的逐阶段 diff 见 docs/11 §5.12，这条钉的是现在真的在跑的那一种',
+  )
+})
+
+test('H5a：协调者返回、而这一趟的产者 at-ui 已把 S5 交齐——报「停在旧阶段」（stageDone 那半）', () => {
+  const f = H5A_TOPOLOGY_BEHAVIOUR.coordinatorDoneViaUi
+  // 账本记录与磁盘内容对齐，让这条只钉 stageDone 分支的措辞，不夹带账本比对的
+  // unrecorded 噪音（两者谁报不报是分开的问题，见 docs/11 §5.8）。
+  const stdout = runH5a(f, { ledger: { '05-impl/at-ui.md': sha256OfContract('fixture 05-impl/at-ui.md\n') } })
+  // 直接匹配原始 stdout，不先 JSON.parse：删掉 `|| stageDone` 之后这里会静默、
+  // stdout 变成空字符串，match 在空字符串上干净地失败，不会被 JSON.parse('') 的
+  // 异常掩盖真实的失败原因。
+  assert.match(stdout, /停在旧阶段/)
+})
+
+// 三份夹具的锚，同上面 M2a Task 6 那条：三条如果其实是同一个场景，改一处实现可能让
+// 三条一起绿而什么都没守住。三次比较是同一种断言形状遍历三对互不耦合的数据点。
+test('前置条件：上面三条行为测试的夹具互不相同——否则三条测的是同一个场景', () => {
+  const quads = Object.values(H5A_TOPOLOGY_BEHAVIOUR).map((f) => [f.stage, f.returns, f.roster, f.diskArtifacts])
+  assert.notDeepEqual(quads[0], quads[1])
+  assert.notDeepEqual(quads[0], quads[2])
+  assert.notDeepEqual(quads[1], quads[2])
+})
 test('H5b 在角色与当前阶段对不上时不拦——fail open，不发 exit 2', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2' })
   try {

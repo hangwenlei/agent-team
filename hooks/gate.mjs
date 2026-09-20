@@ -133,17 +133,25 @@ function isProjectJson(filePath, agentTeamDir) {
 // 就整条删掉**。这里排掉的只是「它其实是一次合法的层级协调」这一类，剩下的两类
 // 照发。
 //
-// ⚠️⚠️ **被静默的不止 at-architect。** 当前花名册下，`state.stage === 'S5'` 时
-// `at-product` 返回同样落在协调者一侧（它的 can_delegate_to 含 at-backend）。这是
-// 这条判据的**固有代价，不是漏网**：按规格 §6.4 自己的触达语义，at-product 确实
-// **有能力**让 at-backend 交付，说它「不是协调者」会与 §6.4 自相矛盾。
-// 代价要认下来：PM 在 S5 误派 at-product 时，H1（花名册里 at-pm → at-product 这条边
-// 存在）与 H2 都零输出，H5a 原本是唯一的机械信号，现在也没了——准确地说，是「在这一
-// 阶段产物还没有全部齐备之前」也没了：一旦齐了，调用点的 stageDone 那半会把它重新
-// 报出来（M2a 补，见下面调用点与 docs/11 §5.8）。
+// ⚠️⚠️ **M2b Task 3 之后，S5 的静默面只剩 at-architect。** 这段上一版写的是「被静默的
+// 不止 at-architect——`state.stage === 'S5'` 时 at-product 返回同样落在协调者一侧（它的
+// can_delegate_to 含 at-backend），这是判据的固有代价、不是漏网」。那段话**整段不再
+// 成立**：M2b Task 3 按规格 §4 把 at-product 的 can_delegate_to 从 ["at-backend"] 改成
+// ["at-ui"]（S2 是「at-product → at-ui」，S5 的分发是 at-architect 的事），at-product
+// 因此不再传递派得到 at-backend。**这不是判据变了，是花名册变了**——判据一个字没动，
+// 同一条判据在新拓扑上算出的集合小了一个角色。
+//
+// 「PM 在 S5 误派 at-product」这个场景现在由 H5a 正常报出来（at-product 不是协调者，
+// 走 !coordinator 那半）。曾经要认下来的那笔代价，随那条边一起没了。
+//
 // 判据是「返回角色能传递派到 stages[state.stage].role」——这只是 M2a 新判据的一半，
-// 另一半（当前阶段是否已经 done）在调用点算，不在这个函数里。扩链到 S6–S8 之后重算
-// 出的静默集合见 stages.README.md。
+// 另一半（当前阶段是否已经 done）在调用点算，不在这个函数里。
+// 扩链到 S6–S8 之后重算出的静默集合（M2b Task 3 第三次重算，八行逐段）见
+// stages.README.md 的「H5a 的静默集合」一节，tests/gate-deliverable.test.mjs 逐行钉着它。
+//
+// ⚠️ 下面读的是 `stages[stageId].role`（**单数**）。M2b Task 3 实测过另一种口径
+// （「派得到该段任意一个 producer」）：两者在当前拓扑下**不等价**，S2 与 S5 两段的
+// 协调者集合会变。这条尚未裁定，代码没有动；测量数据见 docs/11 §5.12。
 function isCoordinatorFor(ctx, role) {
   const stageId = ctx.state?.stage
   const stages = ctx.stages

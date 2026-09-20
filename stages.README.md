@@ -80,7 +80,7 @@ H5 问的问题（「它刚做完的那一段交付了吗」）是错的：多�
 同一条结论也写在 `hooks/lib/deliverable.mjs` 的头部注释里（改代码的人从那边进来，改
 阶段链的人从这边进来）。
 
-## H5a 的「静默集合」（M2a Task 6 重算，原 M1b 终审记的坑已填）
+## H5a 的「静默集合」（M2b Task 3 第三次重算；前两次：M1b 终审提出、M2a Task 6 第一次实做）
 
 `gate.mjs` 的 H5a 在 `skipped === 'role-not-in-stage'` 时，会先排掉「返回的是一个合法的
 层级协调者，**且当前阶段确实还没做完**」再发 warning——否则它会在 S5 正路上必然误报（`/at`
@@ -104,19 +104,51 @@ H5 问的问题（「它刚做完的那一段交付了吗」）是错的：多�
 
 | `state.stage` | 该段 `role` | 谁派得到它 | 第 1 条会成立吗 | 会被静默吗 |
 |---|---|---|---|---|
-| S1 / S4 | `at-pm` | 没有角色派得到 `at-pm`（`tests/roster-closure.test.mjs` 钉着） | 不会 | 不会——不看第 2 条，第 1 条已经否了 |
-| S2 | `at-product` | 只有 `at-pm`/`__main__` | 实际上不会——返回的角色不会是它们 | 不会 |
-| S3 | `at-architect` | 同上 | 同上 | 不会 |
-| S5 | `at-backend` | `at-architect`、`at-product`（两个都会，不止 `at-architect`） | **会** | **看第 2 条**：这一趟派的执行角色都交了 → 报（停在旧阶段）；没交齐 → 静默（合法协调） |
-| S6 | `at-qa` | 没有角色派得到 `at-qa`（当前花名册） | 不会 | 不会 |
-| S7 | `at-acceptance` | 没有角色派得到 `at-acceptance`（当前花名册） | 不会 | 不会 |
-| S8 | `at-pm` | 同 S1/S4 | 不会 | 不会 |
+| S1 | `at-pm` | 没有角色派得到 `at-pm`（`tests/roster-closure.test.mjs` 钉着） | 不会 | 不会——不看第 2 条，第 1 条已经否了 |
+| S2 | `at-product` | `__main__`、`at-pm` | 实际上不会——返回的角色不会是它们 | 不会 |
+| S3 | `at-architect` | `__main__`、`at-pm` | 实际上不会——返回的角色不会是它们 | 不会 |
+| S4 | `at-pm` | 没有角色派得到 `at-pm` | 不会 | 不会——同 S1 |
+| S5 | `at-backend` | `__main__`、`at-pm`、`at-architect` | **会**——靠的是 `at-architect`；`at-pm`/`__main__` 虽然也派得到，但返回的角色不会是它们 | **看第 2 条**：这一趟派的执行角色都交了 → 报（停在旧阶段）；没交齐 → 静默（合法协调） |
+| S6 | `at-qa` | `__main__`、`at-pm` | 实际上不会——返回的角色不会是它们 | 不会 |
+| S7 | `at-acceptance` | `__main__`、`at-pm` | 实际上不会——返回的角色不会是它们 | 不会 |
+| S8 | `at-pm` | 没有角色派得到 `at-pm` | 不会 | 不会——同 S1 |
+
+「谁派得到它」这一列是拿 `computeReach` 对**改完之后**的真实 `roster.json` 逐阶段跑出来的，
+不是手推的，也不是照着上一版改的（上一版的 S5 行本身就是错的，见本节末尾）。
 
 **S5 是当前花名册下唯一一段第 1 条会成立的阶段**，所以 M2a 补的第 2 条也只在这一段真正
 改变行为——`state.stage` 停在 S6/S7/S8 时，第 1 条已经否了，第 2 条不影响结论（`isStageDone`
 仍然会算，只是短路：`false || 不管什么` 恒为 `true`，一样报）。**这不是巧合，是当前花名册的
-拓扑决定的**：`at-qa`/`at-acceptance`/`at-pm` 三个角色都没有任何人能传递派到，花名册变了
-（比如哪天有角色能派到 `at-qa`）这张表要跟着重算，判据本身（上面两条充要条件）不用改。
+拓扑决定的**——但 M2b Task 3 之后，拓扑决定它的方式有**两种**，不再只有一种：
+
+- **第一类：真的没有任何人派得到。** 只有 `at-pm` 属于这一类（`tests/roster-closure.test.mjs`
+  钉着），S1 / S4 / S8 三段靠它。
+- **第二类：只有 `at-pm`/`__main__` 派得到，而返回的角色不会是它们**——没有任何角色派得到
+  `at-pm`，`__main__` 则根本不是一个能被派出去的 agent（它是「没被 `settings.json` 的 `agent`
+  键钉住的主会话」这一种身份，见 `docs/05-M0-结论.md`）。S2 / S3 / S6 / S7 四段靠它。
+
+**S6 / S7 在 M2b Task 3 里从第一类换到了第二类。** 上一版这张表给 S6/S7 写的理由是「没有
+角色派得到 `at-qa`（当前花名册）」；本任务给花名册加上 `at-pm`/`__main__` → `at-qa` 与
+`at-acceptance` 两条边之后，那句话不再成立。**结论（不会被静默）没变，理由变了**——只把
+结论抄过来、不改理由，就是把一句已经失效的话继续留着。上一版表底下那句「花名册变了（比如
+哪天有角色能派到 `at-qa`）这张表要跟着重算」预言的正是本任务：**已经重算过了**，上面这张表
+记的是重算之后的结果，不再是一条预言。判据本身（上面两条充要条件）不用改。
+
+**S5 行还掉了一个角色：`at-product`。** M2b Task 3 按规格 §4 把 `at-product` 的
+`can_delegate_to` 从 `["at-backend"]` 改成 `["at-ui"]`（S2 是「at-product → at-ui」，S5 的
+分发是 `at-architect` 的事），于是 `at-product` 不再传递派得到 `at-backend`，也就不再落在 S5
+的协调者一侧。`hooks/gate.mjs` 的 `isCoordinatorFor` 上方与 `tests/gate-deliverable.test.mjs`
+里那两段「被静默的不止 `at-architect`」的说明都是讲这条边的，已随本次改动一并更新。
+
+**顺带修掉的一处事实错误**：上一版 S5 行写的是「`at-architect`、`at-product`（两个都会，
+不止 `at-architect`）」，漏了 `at-pm`/`__main__`——它们经 `at-pm → at-architect → at-backend`
+同样传递派得到，而 S2/S3 两行本来就老老实实列了它们，只有 S5 这一行漏了；括号里那个「两个」
+还明确报了一个没人核过的总数。**列举，不报总数：清单可以用 `computeReach` 核，数字不能。**
+
+⚠️ **这张表算的是判据第 1 条的现状口径（`stages[stageId].role`，单数）。** M2b Task 3 实测
+发现：改成「派得到该段任意一个 `producer`」之后，S2 与 S5 两段的协调者集合会变（不是等价
+改写）。这条尚未裁定，现状口径没有动；测量数据与两种口径的逐阶段 diff 记在
+`docs/11-M1b-遗留与已知边界.md` §5.12。
 
 `isStageDone` 在这里的调用**新增**在 `hooks/gate.mjs` 的 `CHECK === 'deliverable'` 分支，
 与 `CHECK === 'ledger'` 分支里那处（阶段推进提示用）是两个独立调用点，互不共享——两处都要

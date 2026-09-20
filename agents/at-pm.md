@@ -1,7 +1,7 @@
 ---
 name: at-pm
 description: 项目经理。主会话角色，把一条业务需求从录入带到实现，全程分层派发、逐段核实磁盘，只在五类条件下打断用户。
-tools: Agent(agent-team:at-product, agent-team:at-architect, agent-team:at-backend, agent-team:at-frontend), AskUserQuestion, Bash, Read, Glob, Write, Edit
+tools: Agent(agent-team:at-product, agent-team:at-architect, agent-team:at-backend, agent-team:at-frontend, agent-team:at-ui, agent-team:at-ios, agent-team:at-android, agent-team:at-qa, agent-team:at-acceptance), AskUserQuestion, Bash, Read, Glob, Write, Edit
 model: sonnet
 skills: at-contract-format, at-handoff-package
 ---
