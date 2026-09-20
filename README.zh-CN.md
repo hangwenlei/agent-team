@@ -1,23 +1,35 @@
 # agent-team
 
-agent-team 是一支十角色软件开发 agent team：项目经理为主会话，分层派发任务，执行顺序由门禁强制，业务验收独立成线。
+agent-team 是一支十角色软件开发 agent team：项目经理为主会话，分层派发任务，执行顺序由门禁强制，业务验收独立成线。一趟完整的 run 沿阶段链从 `S1` 走到 `S8`。
 
 **Status:** M0 — foundation validation, not yet usable.
 
 ## 安装
 
-尚未发布到市场。插件进入可用状态后（M0 之后）补充安装说明。
+尚未发布到任何市场。本项目唯一实测过的加载方式是 `--plugin-dir`，所以这里只写这一种。指向你自己那份仓库克隆，在你想让这支团队干活的那个项目目录下执行：
+
+```sh
+claude --plugin-dir /path/to/agent-team
+```
+
+**插件自带的 `settings.json` 里那个 `agent` 键会把主会话钉成 `at-pm`。** 这是设计如此——项目经理**就是**主会话——而且在 `--plugin-dir` 下实测确认过：会话转录里每一条都带 `"agentSetting":"agent-team:at-pm"`。它的实际含义是：你刚起的这个会话不再是一个通用会话，而它同样不是一个窄会话。把它指向一个你在乎的项目之前，先读「已知边界」。
+
+**续会话也要每次都带 `--plugin-dir`——`claude --resume` 不继承它。** CLI v2.1.276 实测：续一个由 `--plugin-dir` 起的会话而不带这个参数，CLI 会打印 `Continuing with the default tools and system prompt — the agent's tool restrictions no longer apply.`，插件的 `/agent-team:*` 命令随之全部解析不到，主会话回落到默认工具面。这个插件的全部隔离能力都压在角色的 `tools:` 声明上，所以一次忘带就把它们整体卸掉了。注意 `/agent-team:at-resume` 与 `claude --resume` 不是一回事：前者是插件命令，恢复的是 run 的**状态**；后者是 CLI 参数，恢复的是**会话**本身。
+
+**用完就把会话结束掉，下一个会话不带 `--plugin-dir` 起。** 不要去用 `claude plugin disable`——一个会话的工具面在它的生命周期内是固定的，而实测确认 `disable` **不会**把它还回来。`claude plugin enable` 是镜像的另一半问题：它会接管已经在跑的会话。本项目把这两条都给自己禁了，它拿到的每一份实测数据都是用 `--plugin-dir` 取的。
+
+**下面这些有意不写，因为没有实测过**：正式安装的插件（`claude plugin install`）而非 `--plugin-dir`，以及由它引出的一切——那边的接管、续会话行为与角色工具面是不是同一个样子。实测也都是在后台（`--bg`）会话里取的，不是交互终端。下面每一条都请当成关于 `--plugin-dir` 的断言，不是关于这个插件本身的断言。
 
 ## 已知边界
 
-> 写路径隔离对 `Edit`/`Write` 是硬约束，对 `Bash` 是软约束。执行角色保留 Bash 以运行构建与测试，而 Bash 可以写文件（`echo >`、`sed -i`）。本插件不是沙箱。
+> 写路径隔离对 `Edit`/`Write`/`NotebookEdit` 是硬约束——但**只对在 `project.json` 里认领了路径的角色**。一个路径都不认领的那两个，`at-qa` 与 `at-acceptance`，整段跳过这道检查：在 run 目录之外它直接早退放行，于是它们可以把文件建到任何地方。而 `Bash` 根本没有任何 hook 看着：执行角色保留它是为了跑构建与测试，而 `Bash` 可以写文件（`echo >`、`sed -i`）。`at-qa` 两半都占。本插件不是沙箱。
 
-> 启用本插件会把 `settings.json` 的 `agent` 键接管**这台机器上此后开的每一个新会话**，不分项目，只要插件保持启用状态——不仅限于本仓库里的会话。每个新会话都会变成 `at-pm`，而它的工具面只有 `Agent(...)`、`Read`、`Glob`，在无关项目里干不了正常工作。用完实验立刻停用插件：`claude plugin disable agent-team@skills-dir`（裸写 `agent-team`、不带 `@skills-dir` 会报 `not found in any editable settings scope`）。
+> 加载本插件会把主会话交给 `at-pm`——而 `at-pm` 不是一个窄角色。它的工具面是 `Bash`、`Write`、`Edit`、`Read`、`Glob`、`AskUserQuestion` 以及 `Agent(...)` 那份派发白名单，所以一个被接管的会话能干一个普通会话能干的一切事，不分它此刻指着哪个项目。这个接管不是自限的：把它挡在目标项目之内的是角色正文，不是它的工具面。`--plugin-dir` 之下，波及面至少被限定在你自己用那个参数起的那些会话里。把插件按机器全局启用是另一回事——那会作用到**这台机器上此后开的每一个新会话，不分项目**，只要它保持启用状态——而本项目不那么做（见「安装」）。
 
-## Development
+## 开发
 
 跑测试一律用裸 `node --test`，从仓库根目录执行，不带任何路径参数。本机实测：`node --test tests/` **不会发现** `tests/` 下的测试文件，而是静默报一个 `pass 0 / fail 1` 的幻影失败，且无论被测代码是修好了还是还坏着，这个失败都一模一样——接手排查的人会去找一个根本不存在的 bug。
 
-## License
+## 许可
 
 MIT — 见 [LICENSE](./LICENSE)。
