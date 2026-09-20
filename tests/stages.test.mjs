@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { stageRoles, expandProduces, producedNames, expectedArtifacts } from '../hooks/lib/stages.mjs'
+import { stageRoles, expandProduces, producedNames, expectedArtifacts, isPlainObject } from '../hooks/lib/stages.mjs'
 
 const S5 = { role: 'at-backend', producers: ['at-backend', 'at-frontend', 'at-ui'], produces: ['05-impl/<role>.md'] }
 const S1 = { role: 'at-pm', produces: ['00-contract.md'] }
@@ -80,10 +80,21 @@ test('不变量：带 producers 的阶段，若 produces 是数组，每一条�
 // 正向自检锚：上一条在「stages.json 里没有任何带 producers 的数组形式阶段」时会零次
 // 迭代、空转恒绿——这条证明真的有这样的阶段（S5——S2 虽然也带 producers，但是对象
 // 形式，上面那条对它是显式 continue，不是没查到），上一条不是在空集合上通过。
-test('前置条件：stages.json 里确实有带 producers 的阶段——上一条不是空转', () => {
+//
+// Task 2 修复轮 1 · 修复 2：这条锚原来的判据只看 producers（`Array.isArray(stages[id]
+// .producers)`），不看 produces 的形式，于是把 S2 也算了进去，期望值写成
+// ['S2', 'S5']——但上一条不变量真正迭代的集合是「producers 是数组 **且** produces
+// 也是数组」（S2 在 :74 那行被显式 continue 掉，从不进入 for-of），锚判据与它钉的
+// 那条不变量实际迭代的集合对不上。评审把 S5 也临时改成对象形式实测：上一条不变量
+// 零次迭代、恒绿，这条锚的判据不受影响、照样把 S2 算进去、照样绿——锚没有报警，
+// 名字却在说「不是空转」，这时不变量其实已经空转。改成钉「producers 与 produces
+// 都是数组」这个不变量真正迭代的集合，期望值只剩 ['S5']。
+test('前置条件：stages.json 里确实有「producers 与 produces 都是数组」的阶段——上一条（数组形式的不变量）不是空转', () => {
   const stages = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
-  const withProducers = Object.keys(stages).filter((id) => Array.isArray(stages[id].producers))
-  assert.deepEqual(withProducers, ['S2', 'S5'])
+  const withProducers = Object.keys(stages).filter(
+    (id) => Array.isArray(stages[id].producers) && Array.isArray(stages[id].produces),
+  )
+  assert.deepEqual(withProducers, ['S5'])
 })
 
 // M2b Task 2 补的对称不变量：带 producers 的阶段，若 produces 是**对象**，每个 key
@@ -94,7 +105,10 @@ test('不变量：带 producers 的阶段，若 produces 是对象，每个 key 
   const stages = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
   const bad = []
   for (const [id, s] of Object.entries(stages)) {
-    if (!s.produces || Array.isArray(s.produces) || typeof s.produces !== 'object') continue
+    // Task 2 修复轮 1 · 修复 3：改调 hooks/lib/stages.mjs 导出的 isPlainObject，
+    // 不再自己拼一遍等价判据——判据与它的自检锚（下面那条测试）不能是同一份
+    // 知识的两份拷贝，各拼各的拼法还不一样，改走样了不会有提示。
+    if (!isPlainObject(s.produces)) continue
     const producers = new Set(Array.isArray(s.producers) ? s.producers : [])
     for (const key of Object.keys(s.produces)) if (!producers.has(key)) bad.push(`${id}:${key}`)
   }
@@ -105,10 +119,9 @@ test('不变量：带 producers 的阶段，若 produces 是对象，每个 key 
 // 迭代、空转恒绿——这条证明真的有这样的阶段（S2），上一条不是在空集合上通过。
 test('前置条件：stages.json 里确实有对象形式 produces 的阶段——上一条不是空转', () => {
   const stages = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
-  const objectForm = Object.keys(stages).filter((id) => {
-    const p = stages[id].produces
-    return p !== null && typeof p === 'object' && !Array.isArray(p)
-  })
+  // Task 2 修复轮 1 · 修复 3：同样改调 isPlainObject——这条是上面那条不变量的
+  // 正向自检锚，锚不能用判据的第二份手写拷贝，得是同一份判别式。
+  const objectForm = Object.keys(stages).filter((id) => isPlainObject(stages[id].produces))
   assert.deepEqual(objectForm, ['S2'])
 })
 
@@ -150,6 +163,15 @@ test('对象形式：roles 为空数组时一个都不产出', () => {
 test('对象形式：映射的值不是数组时跳过它，不抛', () => {
   const bad = { producers: ['a'], produces: { a: 'not-an-array' } }
   assert.deepEqual(expandProduces(bad, ['a']), [])
+})
+
+// Task 2 修复轮 1 · 修复 4：正向自检锚。上一条是否定式断言（值不合法 → 输出为
+// 空），但全套里没有一条用**同一个夹具形状**证明「值合法时真的会产出非空结果」——
+// 上一条的绿有可能是 expandProduces 对这个夹具形状本身处理错了、恰好也吐出 []
+// 这类原因造成的假绿。同形状、把值换成合法数组 `['x']`，期望产出 `['x']`。
+test('对象形式：同一夹具形状换成合法值（数组）时，真的会产出——上一条的空不是这个夹具形状本身空转', () => {
+  const good = { producers: ['a'], produces: { a: ['x'] } }
+  assert.deepEqual(expandProduces(good, ['a']), ['x'])
 })
 
 // 这两条钉的是数组那一半：没有它们，只要对象分支写对了，整条函数的数组路径可以被

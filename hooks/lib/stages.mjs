@@ -22,7 +22,12 @@
 // 抽法（hooks/lib/path-norm.mjs、hooks/lib/control-files.mjs、
 // tests/helpers/agent-tools.mjs、tests/helpers/expected-agents.mjs）同一手法：多处
 // 需要同一份知识时，只留一份，其余全部 import。
-function isPlainObject(v) {
+// Task 2 修复轮 1 · 修复 3：导出它——tests/stages.test.mjs 里判据「produces 是对象
+// 形式」与它自己的正向自检锚各拼了一遍等价条件（`p !== null && typeof p === 'object'
+// && !Array.isArray(p)` 等），拼法还彼此不一样。判据与它的自检锚不能是同一份知识的
+// 第二份拷贝（docs/11 §3 点名过这条）——那样两处一旦改走样，谁都不会提示。让测试
+// import 这里同一份，不是让它们各自再拼一次。
+export function isPlainObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v)
 }
 
