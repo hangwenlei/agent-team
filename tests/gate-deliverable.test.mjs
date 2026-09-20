@@ -699,14 +699,14 @@ test('锚：静默表每一行抄的 role 与 stages.json 里那一段的 role �
 const H5A_TOPOLOGY_BEHAVIOUR = {
   // M2b Task 3 造成的**新行为**：at-product 在 S5 返回，从「静默」变成「报」。
   // 去掉 at-product → at-backend 之后它不再是 S5 的协调者，走 !coordinator 那半。
-  // ⚖️ 这条同时钉住 Ruling 8：换成「派得到该段任意一个 producer」那种口径，at-product
+  // ⚖️ 这条同时钉住裁定「保留 .role 单数」：换成「派得到该段任意一个 producer」那种口径，at-product
   // 会经 at-ui（S5 的 producer 之一）原路走回协调者集合、这个场景重新变静默——而
-  // 「PM 停在 S5、at-product 返回」正是 H5a 存在的理由那个形状。Ruling 8 因此保留
+  // 「PM 停在 S5、at-product 返回」正是 H5a 存在的理由那个形状。裁定「保留 .role 单数」因此保留
   // 单数 .role：at-product → at-ui 是为 S2 存在的边，不是 S5 的实现分发。
   productNoLongerCoordinator: { stage: 'S5', returns: 'at-product', roster: [], diskArtifacts: [] },
-  // Ruling 8 定的口径（stages[stageId].role，单数）在 S2 的答案：at-architect 派得到
+  // 裁定「保留 .role 单数」定的口径（stages[stageId].role，单数）在 S2 的答案：at-architect 派得到
   // at-ui（本任务新加的边），而 at-ui 是 S2 的 producer 之一——但 S2.role 是 at-product，
-  // 单数口径下它**不是**协调者，照报。另一种口径在这一段会给出相反的答案，被 Ruling 8
+  // 单数口径下它**不是**协调者，照报。另一种口径在这一段会给出相反的答案，被裁定「保留 .role 单数」
   // 否掉了（它有两个假阴性，而单数口径今天一个假阳性都没有：S2 的真协调者 at-product
   // 本身就是 producer，根本走不到 role-not-in-stage 这条分支）。完整裁定见 docs/11 §5.12。
   architectAtS2: { stage: 'S2', returns: 'at-architect', roster: [], diskArtifacts: [] },
@@ -755,7 +755,7 @@ test('H5a：at-architect 在 S2 返回——单数 .role 口径下不是协调�
     /派不到/,
     'S2.role 是 at-product，at-architect 派不到它（它派得到的是 at-ui）。at-ui 同时也是 ' +
       'S2 的 producer 之一，所以换成"派得到任意一个 producer"那种口径时这条的答案会反过来' +
-      '——Ruling 8 查过两种口径的逐阶段 diff（docs/11 §5.12）之后裁定保留单数 .role，' +
+      '——控制方查过两种口径的逐阶段 diff（docs/11 §5.12）之后裁定保留单数 .role，' +
       '这条钉的就是那条已裁定的判据，不是一个悬而未决的现状',
   )
 })

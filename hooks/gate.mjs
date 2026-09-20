@@ -158,7 +158,7 @@ function isProjectJson(filePath, agentTeamDir) {
 //
 // ⚠️ 下面读的是 `stages[stageId].role`（**单数**）。M2b Task 3 实测过另一种口径
 // （「派得到该段任意一个 producer」）：两者在当前拓扑下**不等价**，S2 与 S5 两段的
-// 协调者集合都会变。**Ruling 8 裁定保留单数写法，这里不动**——这条判据问的不是「谁能
+// 协调者集合都会变。**裁定「保留 .role 单数」，这里不动**——这条判据问的不是「谁能
 // 让这一段的产物出现」，是「这次返回的角色有没有可能就是跑这一段的那个人」；
 // at-product → at-ui 这条边是为 S2 存在的（委托 UI 规格），不是 S5 的实现分发，而
 // can_delegate_to 里没有阶段这一维、分不清一条边是为哪一段存在的。借 computeReach 来算

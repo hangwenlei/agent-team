@@ -106,7 +106,7 @@ test('前置条件：agents/ 目录下恰好是 EXPECTED_AGENTS 列出的那些�
     // M2b Task 4：这段文案原来写的是「与预期的六个角色」，而 agents/ 下自 M2a Task 2
     // 起就是十一份——一条会被打印出来的活文案报了一个错的总数，真红的时候会把排查方向
     // 带偏。与 tests/agents.test.mjs 那条同源同因，两边一起改成**不报总数**（本分支
-    // Task 1 / Ruling 4 / Ruling 6 定过的同一条理由）：只改一份，就是本仓库反复踩过的
+    // Task 1 起「列举，不报总数」那一族定过的同一条理由（docs/16 §3.1））：只改一份，就是本仓库反复踩过的
     // 「同一份知识两份拷贝、日后只改一份」当场复演。
     `agents/ 目录扫描结果是 ${JSON.stringify([...AGENT_FILES].sort())}，与预期的 ` +
       `${JSON.stringify(EXPECTED_AGENTS)} 不一致——下面所有对 AGENT_FILES 的检查` +

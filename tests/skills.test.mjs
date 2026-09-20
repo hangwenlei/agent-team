@@ -80,7 +80,7 @@ const stages = JSON.parse(readFileSync(url('stages.json'), 'utf8'))
 // 2. **命令名**——at-init / at-resume / at-status 同样撞形状。这一层原先没有：
 //    tests/commands.test.mjs 在 M2a Task 9 解决过，tests/agents.test.mjs 在 M2b
 //    Task 4 补轮抽成了 tests/helpers/command-names.mjs，**skill 侧是最后一处**。
-//    不在这里自己 readdirSync 一遍——那会是第三份派生（Ruling 16 命名的形状：先解决
+//    不在这里自己 readdirSync 一遍——那会是第三份派生（裁定「先解决的那一侧留缺口」命名的形状：先解决
 //    问题的那一侧，最容易在问题的第二半上留缺口）。
 //
 // ⚠️ **今天这条判据真正执行 0 次断言**：三份 SKILL.md 里 at-* 形状总共命中 3 个，

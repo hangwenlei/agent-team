@@ -452,8 +452,8 @@ test('writepath：被钉成主线程的 at-pm 写 S4 的产物 04-dispatch.md �
       stdout.trim(),
       '',
       // M2b 终审 B1：原文写的是「at-pm 是 S1 与 S4 两段的执行者」——**报了个总数，而且
-      // 是错的**（S8 的 role 也是 at-pm）。这是会被打印出来的活文案，与 Ruling 10 处理
-      // agents.test.mjs 那条「六个角色」同一类。按 Ruling 6/10/11：列举，不报总数。
+      // 是错的**（S8 的 role 也是 at-pm）。这是会被打印出来的活文案，与裁定「活文案不报总数」处理
+      // agents.test.mjs 那条「六个角色」同一类。按「列举，不报总数」那一族（docs/16 §3.1）。
       'at-pm 是 S1、S4、S8 各段的执行者，这些段的产物都该能写——只放行 S1 等于 S4 永远交不出来',
     )
   } finally {
