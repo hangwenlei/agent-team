@@ -64,13 +64,50 @@ test('命令的 frontmatter 不得声明 Skill / SendMessage / ListAgents', () =
 // 角色名都在花名册里」用着**逐字相同的正则却没有任何排除**——同一份知识，一边有、一边
 // 压根不知道另一边解决过这个问题。现在抽成 tests/helpers/command-names.mjs，两边都
 // import 它；它从 commands/ 目录读，不硬编码名字。完整理由在那个文件的头部。
+//
+// ⭐ Ruling 16（M2b Task 4 最后一轮）：这一条**此前没有任何正向锚**。
+// 它是本仓库两侧里**先**解决排除集的那一侧（M2a Task 9），而正因为它看起来已经处理过
+// 「命令名不是角色名」这件事，没有人回去问它的锚——**它解决了排除，没解决排除带来的锚
+// 缺口**。排除集一旦退化成「排除一切」，这条判据零次迭代、恒绿，而这个文件里没有任何
+// 东西看得见（docs/11 §5.15）。
+//
+// 发现它的方式也记一笔：不是读出来的，是**角色侧的变异顺带照出来的**——Ruling 15 的
+// 变异 R15-2（把排除集改成 `{ has: () => true }`）里两侧同时零次迭代，而只有角色侧
+// 有一条新锚说话。**同一把刀砍下去，一边报警一边沉默，那个沉默就是答案。**
+//
+// 判据抽成具名函数，主判据与下面那条锚**共用同一份**——两处各写一遍「形状匹配再减去
+// 豁免」的代价，tests/agents.test.mjs 的 hasBoundary() 那一轮已经实测过。
+//
+// ⚠️ 这一份与 tests/agents.test.mjs 的同名函数**不合并**，虽然形状几乎一样：角色正文
+// 还要额外豁免 skill 名（`at-api-contract` 这些），命令正文不需要——核过，四条命令正文
+// 里一个 skill 名都没出现（排除命令名之后要查的 12 个全是真角色名）。合并会把一个只在
+// 一侧成立的豁免带到另一侧，那是**放宽**，而放宽在这里是静默的。两边真正共用的那一份
+// 知识（命令名有哪些）已经抽在 tests/helpers/command-names.mjs 里了。
+function roleNamesCheckedIn(text) {
+  return [...new Set(text.match(/\bat-[a-z][a-z0-9-]*\b/g) ?? [])].filter((n) => !COMMAND_NAMES.has(n))
+}
+
 test('命令正文里出现的每个 at-* 角色名都在花名册里', () => {
   for (const f of FILES) {
-    for (const name of new Set(textOf(f).match(/\bat-[a-z][a-z0-9-]*\b/g) ?? [])) {
-      if (COMMAND_NAMES.has(name)) continue
+    for (const name of roleNamesCheckedIn(textOf(f))) {
       assert.ok(Object.hasOwn(roster, name), `commands/${f} 提到 ${name}，但它不在 roster.json 里`)
     }
   }
+})
+
+// ⭐ 正向锚（Ruling 16）。⚠️ 钉的是**排除之后**那一半——不是 `text.match(...).length > 0`
+// 那种排除之前的计数：排除集退化成「排除一切」时，正文里当然还有一堆 at-* 形状的 token，
+// 排除之前的计数照样非空，锚照样绿，而主判据已经一圈都不跑了。
+// 这与 tests/agents.test.mjs 那条同款锚是同一个判断，本分支已经在「锚钉错了那一半」上
+// 栽过四次（docs/11 §5.15 末尾记着那四次）。
+const ALL_COMMAND_TEXT = FILES.map(textOf).join('\n')
+
+test('前置条件：命令正文里确实有**排除命令名之后**仍要对花名册查的角色名——否则「提到的角色名都在花名册里」那条闭包测试在空转', () => {
+  assert.ok(
+    roleNamesCheckedIn(ALL_COMMAND_TEXT).length > 0,
+    '四条命令正文里的每一个 at-* token 都被当成命令名豁免掉了——上面那条闭包测试一圈' +
+      '都不会跑，它是恒绿的，没有检查任何东西',
+  )
 })
 
 // M1a ⑦：at-backend / at-frontend 这些实现角色在第三层，at-pm 派不动它们。清单写
