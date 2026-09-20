@@ -2,7 +2,7 @@
 
 agent-team is a ten-role software development agent team: the project manager runs as the main session, dispatches work through a layered role hierarchy, sequencing is enforced by gates, and business acceptance runs as an independent track. A full run walks the stage chain from `S1` to `S8`.
 
-**Status:** M0 — foundation validation, not yet usable.
+**Status:** a ten-role team on an `S1`–`S8` stage chain, run end to end once on real infrastructure — measured under `--plugin-dir` only; the formally installed path is untested.
 
 ## Installation
 

@@ -403,3 +403,132 @@ test('Development 那一节的前提今天仍然成立：node --test tests/ 发�
   assert.match(out, /\bpass 0\b/, `node --test tests/ 的 pass 数不再是 0${hint}`)
   assert.match(out, /\bfail 1\b/, `node --test tests/ 的 fail 数不再是 1${hint}`)
 })
+
+// ---------------------------------------------------------------------------
+// 七、`Status:` 那一行 —— 它写的每一条都要有判据钉着
+// ---------------------------------------------------------------------------
+//
+// M0 写的是 `Status: M0 — foundation validation, not yet usable.`，到 M2b 收口时
+// 它已经与现状对不上了；而用户这次定下来的做法**不是换一个更新的档位词**，是
+// **换掉档位词这种写法本身**——`alpha` / `beta` / `usable` / `production-ready`
+// 这类词**没有真源，没有人能核**（`docs/16` §3.1 判死的那一族）。
+//
+// 新的那一行只陈述四件事，每一件都有判据：
+//
+//   · 十角色              —— 本文件第二节（B），真源是 `agents/*.md` 减去测试替身；
+//   · 阶段链 `S1`–`S8`     —— 本文件第四节（D），真源是 `stages.json` 的首尾两个键；
+//   · 真实环境完整跑通过一趟 —— 下面这条，真源是 `docs/15-M2b-实测结论.md`；
+//   · 仅在 `--plugin-dir` 下实测 —— 下面这条，依据是 `docs/15` §8.1。
+//
+// 前两条**不需要在这里重复**：B 与 D 扫的是整份文件，`Status:` 行里那一份「十角色」
+// 与那两个阶段编号自动落进它们的判据里（B 的主判据遍历的是抠出来的**每一条**断言，
+// D 取的是首尾）。这一节只补后两条——它们断言的不是仓库里的数据，是**一次实测**。
+//
+// ⚠️ **判据盖不住的那一半，写清楚**：没有任何东西阻止有人把这一行整个换成一个档位词。
+// 这是**有意的边界**，不是漏掉——档位词是开放集合，按词形穷举它有结构性上限
+// （`docs/16` §3.4）。盖住的是两件具体的事：那一行里的角色数与阶段端点无条件被 B/D
+// 覆盖；而 `--plugin-dir` 这个限定不能被悄悄删掉（下面第二条）。
+//
+// ⚠️ 中文那份的标签这一轮也翻了（`**Status:**` → `**状态：**`），两份是镜像。
+// 判据认两种标签，靠合成样本自检钉住「两种都认得」。
+function statusLineOf(text) {
+  return text.split(/\r?\n/).find((l) => /^\*\*(Status:|状态：)\*\*/.test(l)) ?? null
+}
+
+// ⭐ 正向自检锚：钉抽取器本身——两种标签都认得，而且不把正文里别的加粗开头行当成它。
+test('自检：statusLineOf() 认得出英文与中文两种标签，且不把别的加粗行当成 Status 行', () => {
+  assert.equal(statusLineOf('# 标题\n\n**Status:** 英文那行\n\n**Note:** 别的加粗行\n'), '**Status:** 英文那行')
+  assert.equal(statusLineOf('# 标题\n\n**状态：** 中文那行\n\n**注意：** 别的加粗行\n'), '**状态：** 中文那行')
+  assert.equal(statusLineOf('# 标题\n\n**Note:** 只有别的加粗行\n'), null)
+})
+
+for (const f of [README_EN, README_ZH]) {
+  test(`${f} 的 Status: 行带着「仅 --plugin-dir」这个限定`, () => {
+    const line = statusLineOf(read(f))
+    assert.ok(line, `${f} 里找不到 Status: 那一行——它是最多人只读这一行就走的位置`)
+    assert.ok(
+      line.includes('--plugin-dir'),
+      `${f} 的 Status: 行里没有 --plugin-dir 这个限定。这个插件的全部实测都是在 ` +
+        '--plugin-dir 下取的（docs/15 §1 的四条操作纪律第 1 条：全程未使用 claude plugin ' +
+        'enable），而 docs/15 §8.1 明写正式安装下的结论「没验」。Status 这一行比正文更容易' +
+        '被当成对插件本身的断言，限定不能在这里被悄悄删掉',
+    )
+  })
+}
+
+// 真源：`docs/15-M2b-实测结论.md`。两条判据各问一件事，各占一个 test()。
+const DOCS15 = read('docs/15-M2b-实测结论.md')
+
+// 那趟真实 run 跑完的链写成 `S<数字>→S<数字>`，文中出现多处（§0 的一句话结论、
+// §3.0 的会话表、§3.8 的小节标题、§6.3 之前那句）。判据把**每一处**都抠出来，
+// 不挑其中一处——挑一处就是按位置定位，`docs/16` §3.1 那三条细则判死的那一族。
+//
+// ⚠️ **一次收窄，它是实测逼出来的**：第一版判据只认 `S\d+→S\d+` 这个形状，在真文档
+// 上当场多抠出一个 `S6→S5`——那是**阶段回退**（`docs/15` §6.1 记的「`stage` 回退过
+// 两次」），不是链端点。同一个箭头形状承载着两种完全不同的意思。收窄成**只认向前
+// 的那一种**（后一个编号更大），回退天然落在外面。
+//
+// 按 `docs/16` §3.2 第 2 条（判据每加一次收窄，锚就跟着往里挪一层），下面那条自检
+// **必须带一个回退样本**：光证明它抠得出 `S1→S8` 证不了这次收窄还在。
+function measuredChainEndpoints(text) {
+  return [
+    ...new Set(
+      [...text.matchAll(/\b(S(\d+))→(S(\d+))\b/g)]
+        .filter((m) => Number(m[4]) > Number(m[2]))
+        .map((m) => `${m[1]}→${m[3]}`),
+    ),
+  ]
+}
+
+// ⭐ 正向自检锚：钉抽取器本身，钉在合成样本上——不抄真文档的内容，免得自检自己
+// 变成 docs/15 的第二份拷贝。三件事一起钉：去重、不认没有箭头的编号、**不认回退**。
+test('自检：measuredChainEndpoints() 抠得出去重后的端点对，且不把阶段回退算成一趟跑完的链', () => {
+  assert.deepEqual(
+    measuredChainEndpoints('这一趟 S1→S8 跑完了，再提一次 S1→S8；单独的 S4 不算；stage 回退过（S6→S5）也不算'),
+    ['S1→S8'],
+  )
+})
+
+test('Status: 那句「真实环境完整跑通过一趟」今天仍然成立——docs/15 记的端点与 stages.json 的首尾一致', () => {
+  const expected = `${STAGE_IDS[0]}→${STAGE_IDS.at(-1)}`
+  assert.deepEqual(
+    measuredChainEndpoints(DOCS15),
+    [expected],
+    '两份 README 的 Status: 行声称「真实环境完整跑通过一趟」，而它的真源是 ' +
+      'docs/15-M2b-实测结论.md 记的那趟 run。⚠️ **这条红了不代表 docs/15 写错了**——' +
+      '那是一份冻结的实测记录，它记的是当时跑完的是哪一段，永远为真（docs/16 §3.5：' +
+      '豁免的是「记录当时的事实」）。红的含义是 **Status: 那句话的前提变了**：' +
+      '阶段链的端点已经不是那趟 run 跑完的那两个了，「完整」二字不再成立。' +
+      '要么重新跑一趟并补一份实测记录，要么把 Status: 那一行改成实话。**不要改 docs/15。**',
+  )
+})
+
+// 第二条的依据：`docs/15` §8.1 那个小节标题本身就是结论（「正式安装……环境不允许」）。
+// 判据只认那一行标题，两半都要：点名「正式安装」，且标着「环境不允许」。
+function formalInstallUntestedHeading(text) {
+  return (
+    text
+      .split(/\r?\n/)
+      .find((l) => l.startsWith('#') && l.includes('正式安装') && l.includes('环境不允许')) ?? null
+  )
+}
+
+// ⭐ 正向自检锚：钉判据函数本身——两半都要，只有一半的标题不算数。
+test('自检：formalInstallUntestedHeading() 两半都要——只点名「正式安装」而没标「环境不允许」的标题不算', () => {
+  assert.equal(formalInstallUntestedHeading('### 8.1 「正式安装的插件」——**没验**'), null)
+  assert.equal(
+    formalInstallUntestedHeading('### 8.1 「正式安装的插件」——**环境不允许**'),
+    '### 8.1 「正式安装的插件」——**环境不允许**',
+  )
+})
+
+test('Status: 那句「仅 --plugin-dir」的依据仍在——docs/15 仍把正式安装路径记为未测', () => {
+  assert.ok(
+    formalInstallUntestedHeading(DOCS15),
+    'docs/15-M2b-实测结论.md 里找不到「正式安装……环境不允许」那个小节标题。' +
+      '两份 README 的 Status: 行与安装说明里那段「有意不写，因为没有实测过」都压在它上面：' +
+      '如果正式安装那条后来真的验过了，那两处限定就是**把已经做到的说成没做到**' +
+      '（docs/16 §3.7：这一族没有任何测试会因此变红，代价是下一个人照着它白做工）。' +
+      '这一条就是那个方向上唯一的守卫——它红了，回去改的是 README，不是这条断言',
+  )
+})

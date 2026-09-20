@@ -2,7 +2,7 @@
 
 agent-team 是一支十角色软件开发 agent team：项目经理为主会话，分层派发任务，执行顺序由门禁强制，业务验收独立成线。一趟完整的 run 沿阶段链从 `S1` 走到 `S8`。
 
-**Status:** M0 — foundation validation, not yet usable.
+**状态：** 十角色，阶段链 `S1`–`S8`，真实环境完整跑通过一趟——仅在 `--plugin-dir` 下实测过，正式安装的路径没测。
 
 ## 安装
 
