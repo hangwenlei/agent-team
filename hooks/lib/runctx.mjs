@@ -102,8 +102,9 @@
 // 的那一刻，pointer 还没写，而 runs/ 已经非空，**那次写入落在这一格里**。
 // 所以这一格**对 PM 必须是通的**，而它通：那几次写入都是 PM 做的（/agent-team:at
 // 第 1 节，主会话），H3 在 unreadable 那一支有 I2 豁免（谓词 isContractWriter），
-// H4 的短路排在读 ctx 之前。**这不是推的**——tests/gate-writepath.test.mjs 里
-// 「第一趟 run 的建立顺序」那两条子进程级用例照 commands/at.md 第 1 节逐步走了一遍。
+// H4 的短路排在读 ctx 之前。**这不是推的**——tests/gate-writepath.test.mjs 的
+// 「丢指针 · 正路瞬态：照 commands/at.md 第 1 节建第一趟 run，PM 的每一步都放行」
+// 那条子进程级用例照那个顺序逐步走了一遍。
 // **代价照付、不含糊过去**：非 PM 在这一格里连自己认领的地盘都写不了（unreadable
 // 的 deny 发生在**看路径之前**），与既有的每一个 unreadable 状态同一个爆炸半径。
 // 完整实测数据与那次反例表在 docs/11 §5.27，不在这里抄第二份。

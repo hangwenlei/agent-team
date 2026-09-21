@@ -136,29 +136,46 @@ test('自举边界：runs/ 存在但是空目录——仍然 no-run，仍然放�
 })
 
 // ⚠️ readdirSync 抛的时候落哪一支，是这一刀要自己裁的那一条边（理由三条，逐条写在
-// hooks/lib/runctx.mjs 那个 catch 上方）。这条同时钉住两件事：**归 unreadable**，
-// 以及**带 agentTeamDir**——后者是「不让它落到最外层兜底 catch」的那一半，漏掉它
-// ledger 那条缝（/at-init 的触达表靠 ctx.agentTeamDir 认路）会在这里静默倒退。
-// 造法用「runs 是个文件而不是目录」：readdirSync 当场 ENOTDIR，不依赖权限或并发。
-test('runs/ 读不出来（它是个文件）时 kind 是 unreadable，而且带 agentTeamDir', () => {
+// hooks/lib/runctx.mjs 那个 catch 上方）。要钉的是**两件事**：归 unreadable，以及
+// 带 agentTeamDir。**拆成两条**：写在一个 test() 里的话，kind 判错会让第二句断言
+// 根本跑不到，两个变异（改 kind / 删 agentTeamDir）打出来的红清单逐字相同，
+// 看不出丢的是哪一样——本轮的变异验证当场撞到了这个，才拆的。
+// 两条共用同一个夹具帮手：造法是「runs 是个文件而不是目录」，readdirSync 当场
+// ENOTDIR，不依赖权限也不依赖并发。
+const makeUnreadableRunsDir = () => {
   const dirs = makeRun({ runId: 'r1', stages: STAGES })
+  rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+  rmSync(join(dirs.projectDir, '.agent-team', 'runs'), { recursive: true, force: true })
+  writeFileSync(join(dirs.projectDir, '.agent-team', 'runs'), '不是目录', 'utf8')
+  return dirs
+}
+
+test('runs/ 读不出来（它是个文件）时 kind 是 unreadable——判不出空不空，就判不出这是自举还是丢了指针', () => {
+  const dirs = makeUnreadableRunsDir()
   try {
-    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
-    rmSync(join(dirs.projectDir, '.agent-team', 'runs'), { recursive: true, force: true })
-    writeFileSync(join(dirs.projectDir, '.agent-team', 'runs'), '不是目录', 'utf8')
     const ctx = readRunContext(dirs.projectDir, dirs.pluginDir)
     assert.equal(ctx.ok, false)
-    assert.equal(ctx.kind, 'unreadable', '判不出 runs/ 空不空，就判不出这是自举还是丢了指针')
+    assert.equal(ctx.kind, 'unreadable')
+    // 连理由一起锚：光断言 kind 的话，这个 unreadable 由别的分支发出（比如异常
+    // 一路落到最外层兜底 catch）也照样绿，而那正是下一条要排除的那件事。
+    assert.match(ctx.reason, /读不出来/)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('runs/ 读不出来时的返回**带 agentTeamDir**——这一支必须自己接住异常，不能落到最外层兜底 catch', () => {
+  const dirs = makeUnreadableRunsDir()
+  try {
+    const ctx = readRunContext(dirs.projectDir, dirs.pluginDir)
     assert.equal(
       ctx.agentTeamDir,
       join(dirs.projectDir, '.agent-team'),
-      '这一支必须自己接住 readdirSync 的异常：落到最外层兜底 catch 的话返回里没有 ' +
-        'agentTeamDir，而那一支没有它是因为 base 压根没算出来——这里 base 是算出来的',
+      '最外层兜底 catch 那一支没有 agentTeamDir，是因为 base 压根没算出来——这里 base ' +
+        '是算出来的。丢掉它，ledger 那条缝（/at-init 的触达表靠 ctx.agentTeamDir 认路）' +
+        '会在这里静默倒退成照原路 fail open',
     )
-    assert.match(ctx.reason, /读不出来/)
   } finally {
-    // mkdirSync 在这条用例里只为了保证 cleanup 走的是同一条路；runs 是文件，
-    // rmSync recursive 照样删得掉。
     cleanup(dirs)
   }
 })
