@@ -265,34 +265,57 @@ function hasPathScopeLine(body) {
   return body.split(/\r?\n/).some((l) => l.includes('paths') && l.includes('只有那些'))
 }
 
-// ⚠️ **这是记录在案的缺口，不是漏写。** `at-product` 与 `at-architect` 在模板里各认领了
-// 一条 `paths`（`docs/product/`、`docs/arch/`），也都持有 `Write`，H3 对它们照管不误
-// ——**而它们的正文里一个字都没提这件事**。本轮只读 `agents/`、不改它（要改角色正文
-// 得先报协调方），所以这两个名字作为已知缺口写在这里，归属规则在 `docs/11` §5.31。
+// ⚠️ **M3i：本条从「缺口清单」翻成了有内容的全称。**
+// 上一轮这里是一条 `deepEqual(missing, PATH_SCOPE_LINE_MISSING)`，清单逐字是
+// `['at-architect', 'at-product']`——那两份正文在模板里各认领了一条 `paths`
+// （`docs/product/`、`docs/arch/`）、也都持有 `Write`，而正文里一个字都没提这件事。
+// **M3i 把那句话补进了这两份**（各自「你写东西的地方」一节），缺口清单因此空了。
 //
-// 下面那条 deepEqual **两个方向都钉**：缺口长大（有人删了某一份的那一节）红；
-// 缺口缩小（有人把那句话补进这两份之一）也红——后者的正确做法是把名字从这份清单里
-// 划掉，**不是**改判据的期望值。钉的是身份不是数量（`docs/16` §3.1）。
-const PATH_SCOPE_LINE_MISSING = ['at-architect', 'at-product']
-
-test('锚：认领了 project.paths、却没写「只有那些」这条第一道的，恰好是 at-architect 与 at-product——记录在案的缺口', () => {
-  const missing = ROLES_WITH_PATHS.filter(
-    (r) => !hasPathScopeLine(existsSync(url(`agents/${r}.md`)) ? bodyOf(`${r}.md`) : ''),
-  ).sort()
-  assert.deepEqual(
-    missing,
-    [...PATH_SCOPE_LINE_MISSING].sort(),
-    '「认领了 paths、却没写『只有那些』」的集合变了。\n' +
-      '  它是派生的：templates/project.json 的 paths 键，减去正文里有那条限定的。\n' +
-      `  期望的那份缺口清单是 ${JSON.stringify([...PATH_SCOPE_LINE_MISSING].sort())}` +
-      `，实际算出来是 ${JSON.stringify(missing)}。\n` +
-      '  多出一份 = 有人把某份正文里「你写代码的地方」那一节删了或改松了——H3 在那个\n' +
-      '  角色身上从此只剩门禁一道，**这正是本条要拦的那一刀**；\n' +
-      '  少一份 = 有人把那句话补进了缺口里的某一份，**那是好事**：把名字从\n' +
-      '  PATH_SCOPE_LINE_MISSING 里划掉，不要改判据；\n' +
-      '  出现一个 agents/ 下没有对应文件的名字 = 模板里多了一个不存在角色的 paths 键。\n' +
-      '  背景与归属规则在 docs/11 §5.31。',
+// **为什么不是把清单改成 `[]` 了事**：`deepEqual(missing, [])` 的分量全压在
+// `ROLES_WITH_PATHS` 非空上——把 `templates/project.json` 的 `paths` 整个掏空，
+// 它照样绿（`docs/11` §5.20 第四节那一族：一条按形状看得见、实际上守不住东西的断言）。
+// 而清单空了之后，那个常量的名字还写着「缺口」，内容却是「没有缺口」，
+// 下一个读它的人得先读完整段注释才知道它不是漏了。所以改写成
+// 「每一份认领了 `paths` 的正文都写着那句话」这个全称，
+// 并把「遍历的集合读得到、不是空的」单独钉成下面那条锚（`docs/11` §3.3 第 2 条）。
+//
+// ⚠️ **翻成全称之后仍然只有一条 `hasPathScopeLine()` 判据。** §5.31 二.2 判过
+// 「补集上的 `deepEqual` 与逐份循环是同一个谓词，写两条就是同一份知识两份」——
+// 那条裁定继续有效：下面那条锚问的是**模板那一侧**（谁认领了 `paths`、
+// 它在 `agents/` 下有没有正文），与 `hasPathScopeLine()` 不是同一个谓词。
+// ⚠️ **非空那半句不是第二份知识。** `tests/templates.test.mjs` 里确实也有一条
+// 「前置条件：paths 非空」，它守的是那个文件自己的否定断言。这一条留在这里，是因为
+// 它还问了一件那边不问的事——**每个 `paths` 键在 `agents/` 下有没有对应正文**。
+// 上一轮那条 deepEqual 的失败文案里逐字列着这一种失效（「出现一个 agents/ 下没有
+// 对应文件的名字」），翻成全称之后它没有别的地方可去。
+test('锚：模板里认领了 paths 的角色，每一个在 agents/ 下都有正文，而且这份集合不是空的——否则下面那条在空集合上恒绿', () => {
+  assert.ok(
+    ROLES_WITH_PATHS.length > 0,
+    'templates/project.json 的 paths 一个键都没有，下面那条全称判据会在空集合上恒绿。\n' +
+      '  而它是 H3 写路径隔离在角色正文侧第一道的唯一观测面（docs/11 §5.31）。',
   )
+  const noBody = ROLES_WITH_PATHS.filter((r) => !existsSync(url(`agents/${r}.md`))).sort()
+  assert.deepEqual(
+    noBody,
+    [],
+    `paths 里这些键在 agents/ 下没有对应正文：${JSON.stringify(noBody)}。\n` +
+      '  要么模板里多了一个不存在角色的 paths 键，要么某份角色正文被改名或删掉了。\n' +
+      '  这条红了不代表那句限定丢了，代表**下面那条判据已经不知道自己该读哪些文件**。',
+  )
+})
+
+test('每一份在 templates/project.json 里认领了 paths 的角色正文里，都写着「只有那些」这条限定——它是 H3 真正的第一道', () => {
+  for (const r of ROLES_WITH_PATHS) {
+    assert.ok(
+      hasPathScopeLine(bodyOf(`${r}.md`)),
+      `agents/${r}.md 在 templates/project.json 里认领了 paths，但正文里没有一行同时\n` +
+        '  写着 paths 与「只有那些」。\n' +
+        '  H3 那一格量到的真拒绝，撞上去的恰恰是**正文里没有这一节**的那个角色\n' +
+        '  （docs/19 §11.4.3）——删掉它，H3 在这个角色身上就只剩门禁一道。\n' +
+        '  **不要为了让它绿而把限定改成「默认落点」或者给它加上例外**；要改这段正文的\n' +
+        '  措辞，连本条一起改，并在 docs/11 §5.31 留痕。',
+    )
+  }
 })
 
 // 正向锚（`docs/11` §3.3 第 2 条）：拿已知违规样本证明 hasPathScopeLine() 认得出违规。
@@ -388,6 +411,104 @@ test('前置条件：hasDoneClaimRedLine() 认得出被整条删掉、被改松�
   assert.ok(
     !hasDoneClaimRedLine('- 尽量不要声称做完了没做的事；实在来不及，可以先报完成、随后补上。'),
     '禁令被改写成「尽量不要……可以先报完成」时应判为不通过',
+  )
+})
+
+// ── H6 返工预算的第一道：「返工计数只许增，不许减」 ───────────────────────────
+//
+// ⚠️ **M3i 新增，而上一轮（§5.31 三）把这一格判成「没有那个东西，不是缺判据」。**
+// 那条判断在当时是对的：`agents/` / `commands/` / `templates/` / `skills/` 里确实
+// 没有任何一句禁止把返工计数改小，一条判据写下来当天就是红的，而按设计就红着的
+// 判据人会学会不看它。§5.31 三 H6 ③ 自己写着什么会让答案改变——**「有人往
+// `agents/at-pm.md` 的红线里写下那句禁令」**。M3i 做的正是这件事，所以这一格从
+// 「没有那个东西」翻成了「有那句话、而没有任何东西钉着它」，也就落回 §5.31 二
+// 那条「值得」的判准里。翻转的经过与归因更正在 `docs/11` §5.31 的 M3i 收口块。
+//
+// H6（`hooks/lib/rework-guard.mjs` 的 `decideRework` + `hooks/gate.mjs` 的
+// `CHECK === 'rework'` 分支）在 `PreToolUse` 上拦的是**把返工计数改小**这个写入动作
+// 本身，实测见 `docs/19` §11.4.7（真拒绝，事后磁盘上的值没动）——**而撞上去的是
+// `at-pm`，当时它的正文里没有这句话**，第一道不在场，门禁当场就说了话。
+//
+// ⚠️ **集合是派生的，不写 `'at-pm'` 这个字面量。** H6 本身不豁免任何调用者
+// （`rework-guard.mjs` 头部逐字），但能走 `Edit`/`Write` 摸到 `runs/*/state.json` 的
+// 只有控制文件写者：`hooks/lib/writepath.mjs` 的 `isControlFile` 分支拿
+// `isContractWriter` 放行，别人一律 deny（那段注释逐字写着「谁算 PM」复用它、
+// 不另写一遍 `role === 'at-pm'`）。**于是「这条禁令对谁是可执行的」与「谁算 PM」
+// 是同一个谓词**，这里复用同一份导入。哪天有第二个角色被算进控制文件写者，
+// 它立刻落进「必须有」那一侧，不需要谁记得回来改判据。
+//
+// 钉两半、且要求在**同一行**上（取舍与 hasContractRedLine 逐字同一个）：
+// 「返工计数」（这条禁令管的是哪份数据）**与**「只许增，不许减」（禁令本身）。
+// ⚠️ **后半必须逐字是这个形状，两个方向都要挡住**：
+//   · 「尽量不要改小」这种**改松**——禁令被掏空，与 H4 / H5b 两格同一个方向；
+//   · 「不许改」这种**改严**——H6 只拦减少、不碰增加（`rework-guard.mjs` 头部逐字：
+//     「PM 每推进一个阶段都要正常重写 state.json，拦增加会把整条链锁死」），
+//     写成「不许动」是把一句假话写进正文，正文与门禁就此分叉。**这个方向是本条
+//     特有的**：H4 / H5b 那两格的禁令没有「只拦一半」这回事，改严不会说假话。
+//
+// ⚠️ **钉不住「加一个例外子句」那种更聪明的改松**：「返工计数只许增，不许减——
+// 除非用户明确要求」是**绿的**。与 §5.31 五第二条同一个已知缺口，不在这里重复论证。
+const CONTROL_FILE_WRITERS = AGENTS.filter((f) => isContractWriter(f.replace(/\.md$/, '')))
+
+function hasReworkRedLine(body) {
+  return body.split(/\r?\n/).some((l) => l.includes('返工计数') && l.includes('只许增，不许减'))
+}
+
+test('锚：写得了 runs/*/state.json 的恰好是 at-pm——下面那条返工红线只对它成立', () => {
+  assert.deepEqual(
+    [...CONTROL_FILE_WRITERS].sort(),
+    ['at-pm.md'],
+    '控制文件写者的集合变了。它是派生的：isContractWriter() 认作契约写者的那些\n' +
+      '  （hooks/lib/writepath.mjs 的 isControlFile 分支用的是同一个谓词）。\n' +
+      '  多出一份 = 又有一个角色摸得到 state.json，它的返工红线从此也要有；\n' +
+      '  少一份 = 没有任何角色写得了 state.json，那时下面那条在空集合上恒绿。\n' +
+      '  背景与归属规则在 docs/11 §5.31 的 M3i 收口块。',
+  )
+})
+
+test('每一份写得了 runs/*/state.json 的角色正文里，都有「返工计数只许增，不许减」这条红线——它是 H6 真正的第一道', () => {
+  for (const f of CONTROL_FILE_WRITERS) {
+    assert.ok(
+      hasReworkRedLine(bodyOf(f)),
+      `agents/${f} 写得了控制文件，但正文里没有一行同时写着「返工计数」与「只许增，不许减」。\n` +
+        '  H6 在 PreToolUse 上拦的就是这件事（docs/19 §11.4.7 量到过真拒绝，撞上去的\n' +
+        '  正是这个角色，而它当时的正文里没有这句话）——这句话是它在正文侧的第一道。\n' +
+        '  ⚠️ **两个方向都不要改**：改松成「尽量不要改小」是把禁令掏空；改严成「不许改」\n' +
+        '  是把一句假话写进正文——H6 不碰增加，PM 每推进一个阶段都要正常重写 state.json。\n' +
+        '  要改这段正文的措辞，连本条一起改，并在 docs/11 §5.31 留痕。',
+    )
+  }
+})
+
+test('前置条件：hasReworkRedLine() 认得出被删掉、被改松、被改严的样本，也不被一句无关的返工提及喂饱', () => {
+  const real = '- **返工计数只许增，不许减。** 每推进一个阶段你都要重写 `state.json`，那是常态；'
+  assert.ok(hasReworkRedLine(real), '真实原文形状都认不出来，判据本身坏了')
+
+  // ① 整条删掉。
+  assert.ok(
+    !hasReworkRedLine('## 红线\r\n\r\n- **不得声称做完了没做的事。** 产物没写出来就如实说。'),
+    '红线被整条删掉时应判为不通过',
+  )
+  // ② 说反 / 改松——禁令被掏空，与 H4 / H5b 两格同一个方向。
+  assert.ok(
+    !hasReworkRedLine('- 返工计数尽量不要改小；实在对不上账，可以先改回来再补一条 history。'),
+    '禁令被改写成「尽量不要改小」时应判为不通过',
+  )
+  // ③ 改严成「不许改」——**这个方向是本条特有的**：H6 不碰增加，写成「不许动」
+  //    会与门禁分叉，而分叉的那一侧是正文在说假话。
+  assert.ok(
+    !hasReworkRedLine('- **返工计数不许改。** `state.json` 里的 `rework` 一个字都不要动。'),
+    '禁令被改严成「不许改」时应判为不通过——H6 只拦减少，不碰增加',
+  )
+  // ④ 一句无关的返工提及不能喂饱判据——at-pm 正文里「预算耗尽」那一族正是这一形。
+  assert.ok(
+    !hasReworkRedLine('只有五类：敏感与不可逆、契约冲突、取舍、契约有洞、预算耗尽——返工计数到顶时问用户。'),
+    '一句无关的返工提及不该被当成这条红线',
+  )
+  // ⑤ 两半分在两行——**故意判为不通过**，与 hasContractRedLine 同一个取舍。
+  assert.ok(
+    !hasReworkRedLine('- **返工计数**是 history 的派生量。\r\n  它只许增，不许减。'),
+    '两半分在两行时按设计判为不通过——这条断言红了说明有人放宽了「同一行」那个要求',
   )
 })
 
