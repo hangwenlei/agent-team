@@ -143,6 +143,31 @@ test('readiness：ctx.ok 为 true 但没有可判定的目标角色时，同样�
 // 锚到「检查项名：措辞（」这个位置才有判别力（手法与 tests/gate-writepath.test.mjs
 // 里 no-run 措辞那一条同一份）：ctx.reason 自己不含这两句中的任何一句，单查几个字
 // 会让 failOpenNotice 的三元塌成任一支都照样绿。
+// ——— M3c「丢指针」：这一格在 H2 上与坏指针同一个出口，措辞也一起变 ———
+//
+// 沿着**输入状态**横着走一遍消费方（docs/16 §3.12）时补的那一格。H2 仍然 fail open、
+// 仍然留痕，变的只有那半句话：这一格从「当前没有进行中的 run」变成「读不到运行上下文」
+// ——而 runs/r1/ 就在那里、state.json 完好，说「没有进行中的 run」会把人指向一个
+// 不存在的问题。锚到「检查项名：措辞（」这个位置才有判别力，手法与下面那条同一份。
+test('readiness：丢指针时仍然 fail open，措辞同样说「读不到运行上下文」', () => {
+  const dirs = makeRun({ runId: 'r1' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+    const input = { tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-product' } }
+    const { stdout, stderr, status } = run('readiness', input, undefined, dirs.projectDir)
+
+    assert.equal(status, 0, 'H2 是 fail open：收窄改的是 H3/H4，不该把 H2 也变成拦截')
+    assert.equal(stdout.trim(), '', 'H2 在这里不该 deny')
+    assert.match(
+      stderr,
+      /H2 就绪门禁：读不到运行上下文（/,
+      '指针没了而 runs/ 下的 run 完好，这是「门禁自己判不出来」，不是「没有进行中的 run」',
+    )
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
 test('readiness：坏指针时仍然 fail open，但措辞说「读不到运行上下文」——H2 的行为不随 kind 变，措辞随', () => {
   const dirs = makeRun({ runId: 'r1' })
   try {

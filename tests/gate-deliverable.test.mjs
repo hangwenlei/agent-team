@@ -93,6 +93,27 @@ test('stop-gate：没有 run 时 fail open 并在 stderr 留痕，不是静默�
   }
 })
 
+// ——— M3c「丢指针」：H5 这一列同样只换措辞，行为一个字没变 ———
+//
+// 沿着输入状态横着走一遍消费方（docs/16 §3.12）补的那一格。H5 从头到尾没有 fail closed
+// 的那一半，所以这一格的分类改判对它**只影响那半句话**。这条与上面「没有 run 时」
+// 那条配对：那条走 .agent-team 整个不存在（no-run），这条走指针丢了（unreadable），
+// failOpenNotice 的三元塌成任一支，必有一条变红。
+test('stop-gate：丢指针时 fail open + 留痕，措辞说「读不到运行上下文」——run 就在那里，丢的是指针', () => {
+  const dirs = makeRun({ runId: 'r1' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+    const input = { hook_event_name: 'SubagentStop', agent_type: 'agent-team:at-product' }
+    const { stdout, stderr, status } = run('stop-gate', input, undefined, dirs.projectDir)
+
+    assert.equal(status, 0, 'H5 没有 fail closed 的一半，这一格的改判不该让它开始拦截')
+    assert.equal(stdout, '')
+    assert.match(stderr, /H5b 交付物拦截：读不到运行上下文（/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
 test('stop-gate：run 存在但 state.json 坏了（kind: unreadable）——同样 fail open + 留痕，不按 kind 区别对待', () => {
   // 跟 H3/H4 不一样：H5 从头到尾没有 fail closed 的那一半，不需要像
   // writepath/contract 那样按 ctx.kind 分派——no-run 与 unreadable 在 H5

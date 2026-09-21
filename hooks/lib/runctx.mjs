@@ -14,10 +14,13 @@
 // Task 5 的 H4）作为 fail-closed 的检查项没法区分，只能对两者一视同仁地
 // 拒绝。这两种性质分别是：
 //
-//   kind: 'no-run'     压根没有进行中的 run（没有 .agent-team、没有
-//                       current-run）。**只有「pointer 文件根本不在」这一种**
-//                       ——pointer 在、而内容读不出或指不到东西，一律归下面
-//                       那一格，完整理由见本文件末尾那一段。
+//   kind: 'no-run'     压根没有进行中的 run，**而且从来没有人建过一个**：
+//                       没有 .agent-team、没有 current-run，**并且**
+//                       .agent-team/runs/ 不存在或者是空的。
+//                       **pointer 不在只是必要条件，不是充分条件**（M3c）——
+//                       pointer 在而内容读不出或指不到东西、以及 pointer 不在
+//                       而 runs/ 下躺着 run，一律归下面那一格，完整理由见
+//                       本文件末尾那一段。
 //                       这不是「门禁判不出来」——门禁做出了一个有依据的
 //                       判定：本次调用不归它管。H3/H4 的全部前提是「一个
 //                       run 正在跑，角色各自认领了地盘」；没有 run 就没有
@@ -35,8 +38,9 @@
 //
 //   kind: 'unreadable' run 存在但读不出来，或者输入本身不可信（state.json/
 //                       project.json 坏了、内容不是对象、current-run 是
-//                       空文件、current-run 指向的 run 目录不存在、runId
-//                       含路径穿越字符、两个根传了非字符串、
+//                       空文件、current-run 指向的 run 目录不存在、
+//                       current-run 不在而 .agent-team/runs/ 非空或读不出来、
+//                       runId 含路径穿越字符、两个根传了非字符串、
 //                       以及任何意外异常）。这才是门禁真的判不出来，规格
 //                       §6 fail closed 说的是这种情形，继续拒绝。这条边界
 //                       不能因为上面那条放宽：一个被写坏的 project.json
@@ -53,19 +57,24 @@
 // 就是抛异常的原因（projectDir 不是字符串），base 根本没被算出来、也不在作用域里。
 // ⚠️ 这个字段不改变任何 kind 语义：它只是一条路径，不是「可以继续往下判」的许可。
 //
-// pointer 文件**存在**时的失败一律属于 unreadable 而不是 no-run，是一个有意的
-// 判断。它今天有两个实物，**同一条理由的两半**：
+// 这一族分类真正的那条轴是「**有没有人建过 run**」，pointer 在不在只是它的一个
+// 信号，而且是一个**不完整**的信号。归 unreadable 而不是 no-run 是一个有意的
+// 判断，它今天有三个实物，**同一条理由的三份**：
 //
 //   ① current-run 是空文件；
-//   ② current-run 非空，但它指向的 runs/<id>/ 不存在。
+//   ② current-run 非空，但它指向的 runs/<id>/ 不存在；
+//   ③ current-run 根本不在，而 .agent-team/runs/ 下非空（M3c 加的这一格）。
 //
-// 理由：pointer 文件本身存在（不同于「找不到 pointer」），**指针在 = 有人开过
-// run**。空内容更像是写入过程被打断，指向一个消失的 run 更像是 run 被清掉了
-// 或从没建成——两者都是异常状态，不是「nobody has started a run yet」那种干净
-// 的缺席。分类成 unreadable 更安全：如果算 no-run，任何能改写 current-run 的
-// 手段（哪怕只是 H3 已知边界里那条「Bash 能写文件」）都会被当成「没有 run」而
-// 放行，即便 runs/<真实 id>/ 下还有一个真正在跑的 run——① 是把它截断成空文件，
-// ② 是把它改写成一个不存在的 id，**同一个绕法，差一个字符**。
+// 理由：①② 里 pointer 文件本身存在（不同于「找不到 pointer」），③ 里 runs/ 下
+// 躺着建出来的 run——三者说的是同一件事，**有人开过 run**。空内容更像是写入过程
+// 被打断，指向一个消失的 run 更像是 run 被清掉了或从没建成，指针整个不见了而 run
+// 目录原封不动更像是指针被删掉了或者没跟着一起签出——三者都是异常状态，不是
+// 「nobody has started a run yet」那种干净的缺席。分类成 unreadable 更安全：
+// 如果算 no-run，**任何能让 current-run 指不到一个真实 run 的手段**（哪怕只是 H3
+// 已知边界里那条「Bash 能写文件」）都会被当成「没有 run」而放行，即便
+// runs/<真实 id>/ 下还有一个真正在跑的 run——① 是把它截断成空文件，② 是把它改写成
+// 一个不存在的 id，③ 是把它直接删掉，**同一个绕法，差一个字符**，而 ③ 比 ② 还少
+// 一个参数。
 //
 // ⚠️ ② 起初归的是 no-run，写下的理由只有一句「同样是『没有 run 可管』」。M3b
 // 「坏指针的窗口」把那个分类的代价实测出来了（子进程级探针，记录在 docs/11
@@ -77,17 +86,29 @@
 // 恰恰要 PM 动手」——**而指针指向一个不存在的 run，正是一个坏掉的 run**。自举也不
 // 受影响：建第一个 run 之前 pointer 压根不存在，那仍然是 no-run。
 //
-// ⚠️ **上面「任何能改写 current-run 的手段」那句话底下只枚举了两种，而这一族有第三种：
-// 把 pointer 直接 `rm` 掉，而 runs/<真实 id>/ 原封不动。** 全分支评审实测：那个状态下
-// 本文件返回 no-run，于是 H3 与 H4 对**所有角色**完全失效（非 PM 写得成别人的地盘、
-// 写得成 00-contract.md、写得成 state.json），**而它比 ② 还便宜一个参数**。
-// **本轮没有关它**，本轮只关了 ②；不关的理由不是它不值得关，而是关它要改掉**自举那条边
-// 的判别方式**——今天「自举」与「run 被清理过」靠同一个信号（pointer 不在）分不开，
-// 换成「`runs/` 空不空」是一次新的分类裁定，要自己一轮的实测。
-// 判别它本身很便宜：existsSync(join(base, 'runs')) 加一次 readdirSync 非空。
-// **归属规则**：下一个因为任何理由来动这几格分类的人，负责连它一起裁。
-// 完整实测数据与那次反例表在 docs/11 §5.23 的修复轮 2 收口块里，不在这里抄第二份。
-import { existsSync, readFileSync, statSync } from 'node:fs'
+// ⚠️ ③ 起初也归的是 no-run，M3b 的收尾评审把那个分类的代价实测出来（反例表在
+// docs/11 §5.27：那一格三条全放行，非 PM 写得成别人的地盘、写得成 00-contract.md、
+// 写得成 state.json），M3c 把它挪到这里。**判别只多读一次 runs/**：
+// existsSync(join(base, 'runs')) 加一次 readdirSync 非空。
+//
+// **自举一个字没变，这是这一刀的硬边界**：.agent-team 压根不存在、runs/ 不存在、
+// runs/ 是个空目录——三种形态仍然是 no-run、仍然放行，仍然不会把「建第一个 run」
+// 这个自举动作锁在门外。
+//
+// ⚠️ **而 ③ 与 ①② 有一处不一样，写在这里免得下一个人照着 ①② 那句话往下推**：
+// ①② 在正路上不可达（commands/at.md 第 1 节建 run 的顺序是**先建目录与
+// state.json、最后写 current-run**，正路上不会经过「指针指向一个不存在的 run」），
+// 而 **③ 在正路上可达，就是那个顺序的前半段**——第一趟 run 写 runs/<id>/state.json
+// 的那一刻，pointer 还没写，而 runs/ 已经非空，**那次写入落在这一格里**。
+// 所以这一格**对 PM 必须是通的**，而它通：那几次写入都是 PM 做的（/agent-team:at
+// 第 1 节，主会话），H3 在 unreadable 那一支有 I2 豁免（谓词 isContractWriter），
+// H4 的短路排在读 ctx 之前。**这不是推的**——tests/gate-writepath.test.mjs 的
+// 「丢指针 · 正路瞬态：照 commands/at.md 第 1 节建第一趟 run，PM 的每一步都放行」
+// 那条子进程级用例照那个顺序逐步走了一遍。
+// **代价照付、不含糊过去**：非 PM 在这一格里连自己认领的地盘都写不了（unreadable
+// 的 deny 发生在**看路径之前**），与既有的每一个 unreadable 状态同一个爆炸半径。
+// 完整实测数据与那次反例表在 docs/11 §5.27，不在这里抄第二份。
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 function readJson(path) {
@@ -136,6 +157,44 @@ export function readRunContext(projectDir, pluginDir) {
     const base = join(projectDir, '.agent-team')
     const pointer = join(base, 'current-run')
     if (!existsSync(pointer)) {
+      // 指针不在有两种截然不同的成因，靠 runs/ 空不空分开（M3c，完整论证在文件
+      // 头部 ③ 那一段）：runs/ 不存在或为空 = 从来没有人建过 run，是干净的缺席，
+      // 仍然 no-run、仍然放行（自举那条边一个字没变）；runs/ 非空 = 有人建过 run
+      // 而指针不见了，与空 current-run、坏指针同族，归 unreadable。
+      const runsDir = join(base, 'runs')
+      if (existsSync(runsDir)) {
+        let entries
+        try {
+          entries = readdirSync(runsDir)
+        } catch (err) {
+          // readdirSync 抛（runs 是个文件而不是目录、权限、并发删除……）：判不出
+          // 空不空，就判不出这是自举还是丢了指针。归 unreadable，三条理由：
+          //   ① 这个文件给 unreadable 写下的定义逐字就是「门禁真的判不出来」，
+          //      这正是那种情形，不是「往严的那边靠」这种含糊话；
+          //   ② 归 no-run 的话，`touch .agent-team/runs`（readdirSync 当场 ENOTDIR）
+          //      就是上面那一族的第四种手段，而且和 ③ 一样便宜——本轮关 ③ 的同时
+          //      开一个同样大的口子，等于没关；
+          //   ③ 不在这里接住、让它落到最外层兜底 catch，返回里就**没有
+          //      agentTeamDir**。那一支没有它是因为 base 压根没算出来，而这里 base
+          //      是算出来的；丢掉它会让 ledger 那条缝（/at-init 的触达表，靠
+          //      isProjectJson(filePath, ctx.agentTeamDir) 认路）在这里照原路
+          //      fail open，是一次谁都不会注意到的行为倒退。
+          return {
+            ok: false,
+            kind: 'unreadable',
+            agentTeamDir: base,
+            reason: `找不到 ${pointer}，而 ${runsDir} 读不出来：${err.message}`,
+          }
+        }
+        if (entries.length > 0) {
+          return {
+            ok: false,
+            kind: 'unreadable',
+            agentTeamDir: base,
+            reason: `找不到 ${pointer}，但 ${runsDir} 下非空——有人建过 run 而指针不在，不是没有 run`,
+          }
+        }
+      }
       return {
         ok: false,
         kind: 'no-run',

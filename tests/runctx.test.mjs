@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readProjectConfig, readRunContext } from '../hooks/lib/runctx.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
@@ -70,6 +70,111 @@ test('current-run 是空文件时返回 ok:false，kind 是 unreadable（不是 
     assert.equal(ctx.ok, false)
     assert.match(ctx.reason, /空/)
     assert.equal(ctx.kind, 'unreadable')
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+// ——— M3c 这一格：current-run **根本不在**，而 .agent-team/runs/ 下非空 ———
+//
+// 与上面两条是同一条理由的第三个实物，轴是「有没有人建过 run」而不是「pointer 在不在」
+// （完整论证在 hooks/lib/runctx.mjs 头部 ③ 那一段）。它此前归 no-run，于是 H3/H4 这两个
+// fail-closed 的检查项在这一个输入状态下对**所有角色** fail open——子进程级的前后行为由
+// tests/gate-writepath.test.mjs 与 tests/gate-contract.test.mjs 里那几条「丢指针」用例钉着。
+test('current-run 不在、而 runs/ 下非空时返回 ok:false，kind 是 unreadable（不是 no-run）', () => {
+  const dirs = makeRun({ runId: 'r1', stages: STAGES })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+    const ctx = readRunContext(dirs.projectDir, dirs.pluginDir)
+    assert.equal(ctx.ok, false)
+    assert.equal(ctx.kind, 'unreadable')
+    // 光断言 kind 抓不住「这个 unreadable 其实来自别的分支」：理由必须同时点名
+    // 指针不在**和** runs/ 非空，两件事缺一这一格就不成立。
+    assert.match(ctx.reason, /找不到/)
+    assert.match(ctx.reason, /非空/)
+    assert.equal(ctx.agentTeamDir, join(dirs.projectDir, '.agent-team'))
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+// ⚠️ 下面三条是上面那条的**正向自检锚，也是这一刀的硬边界本身**：收窄的全部前提是
+// 「自举一个字没变」。判据被错改成「指针不在一律 unreadable」时上面那条照样绿，
+// 红的是这三条——而它们红掉的真实后果是建第一个 run 这个自举动作永远做不成。
+// 三种形态各占一个 test()：它们是三个不同的早退点（runs/ 不存在 / runs/ 存在但空 /
+// .agent-team 整个不存在），不是同一个不变量按数据遍历。
+// 「.agent-team 整个不存在」那一条不在这里另写：本文件上面「没有 .agent-team 时返回
+// ok:false 而不是抛异常，kind 是 no-run」就是它。
+test('自举边界：.agent-team 在、runs/ 不存在——仍然 no-run，仍然放行', () => {
+  const dirs = makeRun({ runId: 'r1', stages: STAGES })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs'), { recursive: true, force: true })
+    const ctx = readRunContext(dirs.projectDir, dirs.pluginDir)
+    assert.equal(ctx.ok, false)
+    assert.equal(ctx.kind, 'no-run', '从来没有人建过 run = 干净的缺席，收窄不该碰它')
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('自举边界：runs/ 存在但是空目录——仍然 no-run，仍然放行', () => {
+  const dirs = makeRun({ runId: 'r1', stages: STAGES })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r1'), { recursive: true, force: true })
+    const ctx = readRunContext(dirs.projectDir, dirs.pluginDir)
+    assert.equal(ctx.ok, false)
+    assert.equal(
+      ctx.kind,
+      'no-run',
+      '判据是 runs/ 里有没有东西，不是 runs/ 这个目录在不在——写成 existsSync(runsDir) 就红',
+    )
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+// ⚠️ readdirSync 抛的时候落哪一支，是这一刀要自己裁的那一条边（理由三条，逐条写在
+// hooks/lib/runctx.mjs 那个 catch 上方）。要钉的是**两件事**：归 unreadable，以及
+// 带 agentTeamDir。**拆成两条**：写在一个 test() 里的话，kind 判错会让第二句断言
+// 根本跑不到，两个变异（改 kind / 删 agentTeamDir）打出来的红清单逐字相同，
+// 看不出丢的是哪一样——本轮的变异验证当场撞到了这个，才拆的。
+// 两条共用同一个夹具帮手：造法是「runs 是个文件而不是目录」，readdirSync 当场
+// ENOTDIR，不依赖权限也不依赖并发。
+const makeUnreadableRunsDir = () => {
+  const dirs = makeRun({ runId: 'r1', stages: STAGES })
+  rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+  rmSync(join(dirs.projectDir, '.agent-team', 'runs'), { recursive: true, force: true })
+  writeFileSync(join(dirs.projectDir, '.agent-team', 'runs'), '不是目录', 'utf8')
+  return dirs
+}
+
+test('runs/ 读不出来（它是个文件）时 kind 是 unreadable——判不出空不空，就判不出这是自举还是丢了指针', () => {
+  const dirs = makeUnreadableRunsDir()
+  try {
+    const ctx = readRunContext(dirs.projectDir, dirs.pluginDir)
+    assert.equal(ctx.ok, false)
+    assert.equal(ctx.kind, 'unreadable')
+    // 连理由一起锚：光断言 kind 的话，这个 unreadable 由别的分支发出（比如异常
+    // 一路落到最外层兜底 catch）也照样绿，而那正是下一条要排除的那件事。
+    assert.match(ctx.reason, /读不出来/)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('runs/ 读不出来时的返回**带 agentTeamDir**——这一支必须自己接住异常，不能落到最外层兜底 catch', () => {
+  const dirs = makeUnreadableRunsDir()
+  try {
+    const ctx = readRunContext(dirs.projectDir, dirs.pluginDir)
+    assert.equal(
+      ctx.agentTeamDir,
+      join(dirs.projectDir, '.agent-team'),
+      '最外层兜底 catch 那一支没有 agentTeamDir，是因为 base 压根没算出来——这里 base ' +
+        '是算出来的。丢掉它，ledger 那条缝（/at-init 的触达表靠 ctx.agentTeamDir 认路）' +
+        '会在这里静默倒退成照原路 fail open',
+    )
   } finally {
     cleanup(dirs)
   }
@@ -237,10 +342,15 @@ test('ctx 带 agentTeamDir，等于 <projectDir>/.agent-team', () => {
 // 连「这次写的是不是 .agent-team/project.json」都问不出来，触达表回传在全新项目上
 // 结构性不可达。两条分别钉住 no-run 与 unreadable，各自占一个 test()——它们是两个
 // 不同的返回点，不是同一个不变量按数据遍历。
+// ⚠️ M3c：这条的夹具原来只删 current-run，而那已经不再是 no-run——runs/r1/ 还在时
+// 它是 kind:'unreadable'（判据在 hooks/lib/runctx.mjs 头部 ③）。改的是夹具，不是断言：
+// 这条要钉的不变量（**no-run 的失败返回也带 agentTeamDir**，否则 /at-init 的触达表
+// 在全新项目上结构性不可达）一个字没变，变的是「怎么造一个真的 no-run」。
 test('kind 是 no-run 的失败返回也带 agentTeamDir', () => {
   const { projectDir, pluginDir } = makeRun({ stages: STAGES })
   try {
     rmSync(join(projectDir, '.agent-team', 'current-run'), { force: true })
+    rmSync(join(projectDir, '.agent-team', 'runs'), { recursive: true, force: true })
     const ctx = readRunContext(projectDir, pluginDir)
     assert.equal(ctx.ok, false)
     assert.equal(ctx.kind, 'no-run')
