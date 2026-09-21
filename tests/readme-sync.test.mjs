@@ -766,6 +766,13 @@ const RETIRED_CLAIMS = [
   '尚未发布到任何市场',
   'a GitHub-sourced install may resolve the plugin root somewhere else entirely, and this project has not looked',
   '从 GitHub 源装出来的插件，它的插件根目录解析到哪里，本项目没有去看',
+  // M3c 退役的四句（`docs/19` §8）。前两句是「装上之后会不会更新没量」的两半，
+  // 后两句是「没有量到」那一段里点名 `claude plugin update` 的两半。
+  // 四句在 docs/19 §8.4 做完的那一刻同时变假。
+  'how an existing install behaves once this repository moves past the commit it recorded is an open question',
+  '在本仓库走过它记下的那个 commit 之后会怎么样，今天是一个没答的问题',
+  'what `claude plugin update` does once this repository has moved past the commit an install pinned',
+  '还有 `claude plugin update` 在本仓库走到某次安装钉住的那个 commit 之后会怎么做',
 ]
 
 function retiredClaimsIn(text) {
@@ -851,6 +858,30 @@ for (const [i, f] of [README_EN, README_ZH].entries()) {
         '（docs/16 §3.7：这一族没有任何测试会因此变红，代价是下一个人照着它白做工）。\n' +
         '  如果真的是要删——比如那条路后来被发现不可靠——那要先改 docs/17 或者补一份新的' +
         '实测记录，再回来改这一条，不要只删 README',
+    )
+  })
+
+  // M3c。`docs/19` §8 量到的那条结论是**反直觉**的：`claude plugin update` 比的是
+  // `plugin.json` 里的 `version`，不是 commit——上游推了新 commit 而版本号没变时，
+  // 它回「已经是最新版本」然后什么都不做。而本仓库的 `version` 至今是 `0.1.0`。
+  //
+  // **一个照着安装说明装完的人，下一步最可能敲的就是这条命令**，而它会骗他。
+  // 把这条从安装说明里删掉，不会有任何别的判据变红（`docs/16` §3.7 那一族），
+  // 代价是下一个人以为自己已经更新过了。
+  //
+  // ⚠️ **这条钉的是「这个词出现在安装那一节里」，不是「那一段话说得对」。**
+  // 它拦不住有人把那一段改写成说反话——与第七节那条 `--scope local` 同一个上限，
+  // 理由也同一条：这一族没有更强的、不在仓库里造第三份拷贝的判据。
+  test(`${f} 的安装那一节写着 claude plugin update 这条命令`, () => {
+    const section = installSectionOf(read(f), heading)
+    assert.ok(section, `${f} 里找不到 ${heading} 那一节`)
+    assert.ok(
+      section.includes('claude plugin update'),
+      `${f} 的安装那一节里没有 claude plugin update。docs/19 §8.4.3 实测到的是：` +
+        '这条命令比的是 plugin.json 里的 version 而不是 commit，而本仓库的 version 至今是 0.1.0——' +
+        '**所以跑了它也拿不到今天推的修复**。装完的人下一步最可能敲的就是它。\n' +
+        '  这一节不提它，就等于让每一个照着装的人自己去踩一次。\n' +
+        '  如果真的是要删——比如 CLI 后来改了这个行为——那要先补一份新的实测记录再回来改这一条',
     )
   })
 
