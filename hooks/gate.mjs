@@ -270,16 +270,35 @@ function buildDriftNotice(cmp) {
 // 不点名「这个动作只能由 PM 做」（ledger 的【阶段】与【产物】两条要点名）：这条只在
 // kind === 'state' 时发，而 state.json 是控制文件，H4（writepath）在 PreToolUse 上对
 // 非 PM 一律拒绝——写不成就没有 PostToolUse，这条提示到不了非 PM 手里。
-function buildCoverageNotice(gaps) {
+//
+// ⚠️ Ruling 2：narrowed 为假时文案要**自己说出口径比平时宽**。读的人凭这一句才知道
+// 这批 gap 里可能混着「这个项目根本用不上的角色」与「PM 自己那几段」——不说的话，
+// 同一条提示在两种完全不同的口径下长得一模一样，而这正是本仓库反复栽的那个形状
+// （「静默的放行和门禁彻底坏掉长得一模一样」）。stderr 那一行痕迹是另一半，在调用点。
+function buildCoverageNotice({ gaps, narrowed } = {}) {
   if (!Array.isArray(gaps) || !gaps.length) return null
   const lines = gaps.map((g) => `  - ${g.stage} 的 ${g.role}`)
-  const eg = gaps[0]
+  // ⚠️ 举例只在**收窄成功**时用真实的第一条 gap。没收窄的时候，这批 gap 里混着
+  // 「这个项目根本用不上的角色」与「PM 自己做的那几段」——拿它们举例会把人直接指向
+  // 一个错的修法：实测过，不收窄时第一条常常是 {"at-pm": "S1"}，而 at-pm 写进 trimmed
+  // 是**确确实实错的**（它是每一趟的驱动者，不参与「有没有被叫到」的统计，
+  // commands/at-init.md 明令 available_roles 不写它），偏偏 validateState 会放它过去
+  // ——at-pm 真的是 S1/S4/S8 的产者，形状校验挑不出毛病。所以这一支给形状不给实例。
+  const shape = narrowed ? `{"${gaps[0].role}": "${gaps[0].stage}"}` : '{"<角色名>": "<阶段 id>"}'
+  const widened = narrowed
+    ? ''
+    : `⚠️ 这一批**没能按「这个项目用得上哪些角色」收窄**（读不到 .agent-team/project.json ` +
+      `的 available_roles），所以口径比平时宽：这个项目根本用不上的角色、以及 PM 自己做的` +
+      `那几段（S1/S4/S8 那一类），都会算进来。**先把 available_roles 补上再判这批名字**` +
+      `——它是 /agent-team:at-init 写的那一份；在补上之前不要照着下面两条出路动手，` +
+      `尤其不要把 at-pm 这种本来就不该进这份名单的角色写进 trimmed。\n`
   return (
     `【产者交代】下面这些角色是**已经走过的阶段**的产者，而这一趟既没叫到它们、` +
     `也没声明裁掉它们——它们的缺席今天不会被任何别的判据看见：\n${lines.join('\n')}\n` +
+    widened +
     `两条出路，逐个按事实选一条：\n` +
     `  ① 本来就不打算用它（按需组队的主动裁剪）：把它写进 state.json 的 trimmed，` +
-    `形状是 {"${eg.role}": "${eg.stage}"}——键是角色名，值是它在哪一段被裁掉的。` +
+    `形状是 ${shape}——键是角色名，值是它在哪一段被裁掉的。` +
     `理由不用写在这里，它已经在 04-dispatch.md 里。` +
     `已经写过却还在报的话，先核字段名拼对了没有：state.json 的校验不拒未知键，` +
     `trimmed 拼错了不会有任何别的提示。\n` +
@@ -727,9 +746,29 @@ function main() {
     // 派发并核实之后才累加它），在那里算等于专挑形状 B 那个窗口报，是稳定的误报。
     //
     // ⚠️ 不塞进 buildLedgerNotices：那个函数的入参全是调用方算好的派生值，这一层
-    // 才是持有 ctx.stages / ctx.state 的地方；措辞组装与 buildDriftNotice 同址。
+    // 才是持有 ctx.stages / ctx.state / ctx.project 的地方；措辞组装与 buildDriftNotice 同址。
+    //
+    // ⚠️ Ruling 2：判据的宇宙收窄到 project.json 的 available_roles。ctx.project 在
+    // readRunContext 里已经过 readJson 那一关（null / 数组 / 标量都会被判成读不出来），
+    // 所以这里要么是一个普通对象、要么是 null（文件不在）；available_roles 本身是不是
+    // 可用的一份，由 decideCoverage 自己判并回一个 narrowed。
+    //
+    // ⚠️ 收窄不成时**留痕**，这是本仓库的硬规矩：静默的放行和门禁彻底坏掉长得一模一样。
+    // 这一行与 failOpenNotice 那一族不是同一件事，所以不复用它——那一族说的是「运行上下文
+    // 读不到、本次放行」，而这里运行上下文是好的、判据也照常报了，只是口径比平时宽。
+    // 两件事混用同一句话就是本仓库记过的那种口径分叉（同一个 kind 在不同检查项里被说成
+    // 两个意思）。文案那一半在 buildCoverageNotice 里，两半都要有。
     if (kind === 'state') {
-      const coverage = buildCoverageNotice(decideCoverage({ stages: ctx.stages, state: ctx.state }).gaps)
+      const cov = decideCoverage({
+        stages: ctx.stages, state: ctx.state, availableRoles: ctx.project?.available_roles,
+      })
+      if (!cov.narrowed) {
+        process.stderr.write(
+          `agent-team 产者交代：读不到 .agent-team/project.json 的 available_roles（可用班底），` +
+            `本次判据没能按它收窄，报出来的口径比平时宽。跑 /agent-team:at-init 把它写上。\n`,
+        )
+      }
+      const coverage = buildCoverageNotice(cov)
       if (coverage) notices.push(coverage)
     }
 

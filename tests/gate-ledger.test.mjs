@@ -428,20 +428,26 @@ test('没有 run 时写别的文件：fail open 且留痕，不静默', () => {
   }
 })
 
+
 // ——— M3a Task 2：产者交代判据在真实 gate 上的子进程级验证 ———
 //
 // 纯函数那一层在 tests/coverage.test.mjs。这里钉的是接线：触发点选对了没
 // （kind === 'state' 那一刻，不是每次写）、文案有没有真的到 stdout 上、
-// 以及它有没有经 trustedBlock 包装。
+// 宇宙有没有真的按 project.json 的 available_roles 收窄、收窄不成时留痕了没有。
 //
-// 夹具是 docs/15 §5.1 那一趟的形状：S2 走过了（history 里有、且不是当前阶段），
-// at-ui 是 S2 的产者而 roster 里没有它。gate.mjs 读的是仓库根真实 stages.json
-// （见本文件头部那条已知边界），所以 S2 的 producers 就是 at-product + at-ui。
+// 夹具是 docs/15 §5.1 那一趟的形状，roster 逐字用它记的那一份 ["at-product"]：
+// S2 走过了（history 里有、且不是当前阶段），at-ui 是 S2 的产者而 roster 里没有它。
+// gate.mjs 读的是仓库根真实 stages.json（见本文件头部那条已知边界），所以 S2 的
+// producers 就是 at-product + at-ui。
 //
-// roster 里带 at-pm 是必须的，不是凑数：S1 也走过了，而它的产者是 at-pm 自己。
-// 少了它这份夹具会多报一条 {S1, at-pm}，下面那条 assert.doesNotMatch 就证明不了
-// 「只点名该点的那一个」。这条实测差异记在 tests/coverage.test.mjs 的「实测记录」
-// 那一组里。
+// S1 也走过了，而它的产者是 at-pm 自己——**收窄之后 at-pm 自动退出宇宙**
+// （commands/at-init.md 明令 available_roles 不写 at-pm），所以下面那条
+// assert.doesNotMatch 证明得了「只点名该点的那一个」。不收窄那一组则相反，
+// 它钉的正是「口径比平时宽」这件事被说出来了。
+const M2B_AVAILABLE = [
+  'at-product', 'at-architect', 'at-backend', 'at-frontend', 'at-ui', 'at-qa', 'at-acceptance',
+]
+
 const WALKED_S2 = {
   runId: 'r1',
   stage: 'S3',
@@ -450,7 +456,8 @@ const WALKED_S2 = {
     { stage: 'S2', at: '2026-09-20T10:10:00Z' },
     { stage: 'S3', at: '2026-09-20T10:20:00Z' },
   ],
-  roster: ['at-pm', 'at-product', 'at-architect'],
+  roster: ['at-product'],
+  project: { available_roles: M2B_AVAILABLE, paths: {} },
 }
 
 const stateJsonOf = (projectDir) => join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
@@ -512,15 +519,14 @@ test('产者交代文案明确写出「不要为了让提示消失就写进 rost
 test('产者交代的真实回传以受信前缀开头', () => {
   const { projectDir, pluginDir } = makeRun(WALKED_S2)
   try {
-    const { stdout } = writeState(projectDir)
-    assert.ok(ctxOf(stdout).startsWith(TRUSTED_PREFIX))
+    assert.ok(ctxOf(writeState(projectDir).stdout).startsWith(TRUSTED_PREFIX))
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })
   }
 })
 
-// 正向自检锚在上面那四条：同一份夹具（逐字同一个 WALKED_S2，只多一个 trimmed）
+// 正向自检锚在上面那五条：同一份夹具（逐字同一个 WALKED_S2，只多一个 trimmed）
 // 在 at-ui 没被声明时真的报。这里断言的是**整个 stdout 为空**，不是
 // doesNotMatch——后者在「整条通道被删掉」时同样绿（空输出天然满足否定断言），
 // 而 stdout 严格为空是对整个输出的正面陈述：一条 notice 都没有。
@@ -549,6 +555,116 @@ test('写的不是 state.json 时不报产者交代——触发点是推进出�
     const ctx = ctxOf(stdout)
     assert.ok(ctx.includes(sha256OfContract(readFileSync(p))), '【产物】回传必须照常出现，否则下面那条证明不了任何事')
     assert.doesNotMatch(ctx, /产者交代/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ——— Ruling 2：真实 gate 上的收窄，以及收窄不成时的两半留痕 ———
+
+// S1 走过了、at-pm 是它的产者、roster 里没有 at-pm（docs/15 §5.1 那一刻逐字如此），
+// 而 available_roles 不含 at-pm —— 所以它不该被点名。
+// 正向锚是上面那条「点名 S2 的 at-ui」：同一次输出里该点的那个真的被点了。
+test('Ruling 2：available_roles 不含 at-pm，S1 那一段不被点名', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    const ctx = ctxOf(writeState(projectDir).stdout)
+    assert.doesNotMatch(ctx, /at-pm/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 已知违规样本锚：把 at-pm 塞进 available_roles（正是 commands/at-init.md 禁的那件事）
+// → 同一份 state 上 S1 立刻被点名。没有这条，上一条在「收窄退化成恒不点名」时照样绿。
+test('正向自检锚（Ruling 2）：at-pm 一旦被写进 available_roles，S1 立刻被点名', () => {
+  const { projectDir, pluginDir } = makeRun({
+    ...WALKED_S2, project: { available_roles: [...M2B_AVAILABLE, 'at-pm'], paths: {} },
+  })
+  try {
+    assert.match(ctxOf(writeState(projectDir).stdout), /S1 的 at-pm/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 收窄不成的两半：文案自己说出口径变宽了（这一条），以及 stderr 上的那行痕迹（下一条）。
+// 没有 project.json 时 readRunContext 的 ctx 仍然 ok（project 是 null），所以判据照常跑、
+// 照常报，只是没收窄——这正是「不许因为读不到东西就闭嘴」。
+test('收窄不成：没有 project.json 时文案自己说出口径比平时宽', () => {
+  const { projectDir, pluginDir } = makeRun({ ...WALKED_S2, project: null })
+  try {
+    assert.match(ctxOf(writeState(projectDir).stdout), /没能按「这个项目用得上哪些角色」收窄/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('收窄不成：没有 project.json 时 stderr 上留一行痕迹，不静默', () => {
+  const { projectDir, pluginDir } = makeRun({ ...WALKED_S2, project: null })
+  try {
+    assert.match(writeState(projectDir).stderr, /产者交代：读不到 .*available_roles/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 收窄不成那一刻，口径真的变宽了：at-pm 被算进来。这条是上面两条的正向锚——
+// 光钉「文案说了它没收窄」与「stderr 有痕」，在收窄其实照常生效、只是多喊了一嗓子时
+// 同样绿。
+test('收窄不成：口径真的变宽——同一份 state 上 at-pm 这次被点名了', () => {
+  const { projectDir, pluginDir } = makeRun({ ...WALKED_S2, project: null })
+  try {
+    assert.match(ctxOf(writeState(projectDir).stdout), /S1 的 at-pm/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 反面：收窄成功时既不留那行痕迹、文案里也没有那句话。两条否定断言各配正向锚——
+// stderr 那条锚在「stdout 照常有回传」，文案那条锚在「该点名的还是点了」。
+test('收窄成功时 stderr 不留那行痕迹（锚：stdout 照常回传，不是整条通道哑了）', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    const { stdout, stderr } = writeState(projectDir)
+    assert.ok(ctxOf(stdout), '产者交代必须照常回传，否则下面那条证明不了任何事')
+    assert.equal(stderr.trim(), '')
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('收窄成功时文案里没有「没能收窄」那句话（锚：该点名的那个还是点了）', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    const ctx = ctxOf(writeState(projectDir).stdout)
+    assert.ok(ctx.includes('S2 的 at-ui'), '该点名的那一条必须还在，否则下面那条证明不了任何事')
+    assert.doesNotMatch(ctx, /没能按/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ⚠️ 收窄不成时，① 那条给的是**形状**而不是真实的第一条 gap。实测过：不收窄时第一条
+// 常常是 {"at-pm": "S1"}，而把 at-pm 写进 trimmed 是确确实实错的（它是每一趟的驱动者，
+// commands/at-init.md 明令 available_roles 不写它），偏偏 validateState 会放它过去
+// ——at-pm 真的是 S1/S4/S8 的产者，形状校验挑不出毛病。这就是本仓库「失败文案把人指向
+// 错误修法」那一族的第三种形状：**文案给的示例本身是错的修法**。
+// 正向锚是上面「带上可以照抄的形状」那条：收窄成功时它给的就是真实那一条。
+test('收窄不成：文案不拿 at-pm 当 trimmed 的示例，给的是占位形状', () => {
+  const { projectDir, pluginDir } = makeRun({ ...WALKED_S2, project: null })
+  try {
+    const ctx = ctxOf(writeState(projectDir).stdout)
+    assert.ok(ctx.includes('{"<角色名>": "<阶段 id>"}'), '占位形状必须在，否则下面那条证明不了任何事')
+    assert.doesNotMatch(ctx, /\{"at-pm": "S1"\}/)
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })
