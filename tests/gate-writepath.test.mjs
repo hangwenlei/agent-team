@@ -720,3 +720,114 @@ test('unreadable 时：at-backend 写 state.json 仍然 fail closed', () => {
     rmSync(pluginDir, { recursive: true, force: true })
   }
 })
+
+// ——— M3b「坏指针的窗口」：current-run 在、非空，但它指向的 runs/<id>/ 不存在 ———
+//
+// 这个输入状态此前归 kind:'no-run'，H3 因此在这里对**所有角色** fail open。
+// 子进程级实测（改动前）：at-backend 写得成 runs/r1/state.json、写得成别人认领的
+// 路径、也写得成自己的地盘——**H3 是 fail-closed 的检查项，它有一个输入状态对所有人
+// fail open**。本轮把这一格挪去 unreadable 关上它；分类本身的论证在
+// hooks/lib/runctx.mjs 头部，不在这里重复第二遍。
+//
+// 下面几条各守一件事、各占一个 test()：
+//   · 非 PM 被拒（窗口关上了）——两条，一条控制文件、一条它自己的地盘；
+//   · PM 仍然通（**收窄的全部前提就是「坏掉的 run 还修得了」**）——两条，
+//     其中一条写的正是 current-run 本身，那是修好这个坏指针的那一次写入。
+// 自举那一侧的正向锚不在这里另写：上面「没有 run 时，有名有姓的角色（非 MAIN）也
+// 放行」与「没有 run 时……at-pm 写 project.json 不受阻」两条走的是 pointer **根本
+// 不在**的 no-run，本轮一个字没碰它们，它们正是「收窄没有波及自举」的守卫。
+const makeDanglingPointer = () => {
+  const dirs = makeRun({ runId: 'r1', project: PROJECT })
+  // current-run 留着（内容仍然是 r1），只删掉它指向的 run 目录——这就是坏指针。
+  rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r1'), { recursive: true, force: true })
+  return dirs
+}
+
+test('坏指针（current-run 指向的 run 目录不存在）：at-backend 写 runs/r1/state.json 被拒——这个窗口本轮关上了', () => {
+  const { projectDir, pluginDir } = makeDanglingPointer()
+  try {
+    const { stdout, status } = run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'agent-team:at-backend',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'runs', 'r1', 'state.json') },
+    }, GATE, projectDir)
+    assert.equal(status, 0)
+    const out = decisionOf(stdout)
+    assert.ok(out, '坏指针下非 PM 写控制文件必须 deny——这里放行就是那个 fail-open 窗口回来了')
+    assert.equal(out.permissionDecision, 'deny')
+    // 光断言 deny 抓不住「这个 deny 其实来自别处」：理由必须同时点名 fail-closed 的
+    // 那条措辞与这次失败的**具体原因**，否则 kind 被塌成别的取值、或 deny 由另一条
+    // 分支发出，这条照样绿（与本文件 project.json 损坏那条同一个手法）。
+    assert.match(out.permissionDecisionReason, /读不到运行上下文/)
+    assert.match(out.permissionDecisionReason, /不存在/, '理由里要带上「run 目录不存在」这个真实原因')
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ⚠️ 这一条钉的是**爆炸半径**，不是又一次「控制文件被拦住」。unreadable 的 deny
+// 发生在**看路径之前**（gate.mjs 的 writepath 分支：ctx 不 ok 就地 denyAndExit，
+// decideWritePath 压根没被调用），所以坏指针下非 PM 连自己认领的地盘都写不了。
+// 这是收窄要付的代价，写下来、由判据守着，不要让下一个人以为只拦了控制文件。
+// 它与既有的「unreadable 时：at-backend 写 state.json 仍然 fail closed」不重复：
+// 那一条钉的是控制文件这一类，这一条钉的是**本来合法的那一类也一起被拦**。
+test('坏指针：at-backend 连自己认领的 src/server/ 也写不了——unreadable 的 deny 在看路径之前，爆炸半径就是这么大', () => {
+  const { projectDir, pluginDir } = makeDanglingPointer()
+  try {
+    const { stdout } = run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'agent-team:at-backend',
+      tool_input: { file_path: join(projectDir, 'src', 'server', 'api.ts') },
+    }, GATE, projectDir)
+    const out = decisionOf(stdout)
+    assert.ok(out, 'ctx 读不出来时 H3 拒的是这个会话的每一次 Edit/Write，不只是控制文件')
+    assert.equal(out.permissionDecision, 'deny')
+    assert.match(out.permissionDecisionReason, /读不到运行上下文/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ⚠️ 下面两条是上面两条的**正向自检锚**，也是这次收窄的前提本身：收窄的全部前提
+// 是「坏了还能修」。判据被错改成「unreadable 一律拒」时上面两条照样绿，红的是这两条。
+test('坏指针：被钉成主线程的 at-pm 写 state.json 仍然放行，走 I2 豁免——修一个坏掉的 run 恰恰要 PM 动手', () => {
+  const { projectDir, pluginDir } = makeDanglingPointer()
+  try {
+    const { stdout, stderr } = run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'at-pm',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'runs', 'r1', 'state.json') },
+    }, GATE, projectDir)
+    assert.equal(decisionOf(stdout), null, '把插件唯一的运维人锁在门外，比多拒一次更糟')
+    // 这两行 stderr 是 I2 豁免独有的留痕（与本文件上面那条同一份判别方式）：
+    // 只断言「没被拒」的话，放行改由别的分支发出也照样绿。
+    assert.match(stderr, /读不到运行上下文/)
+    assert.match(stderr, /调用者是 PM/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('坏指针：at-pm 写 .agent-team/current-run 本身放行——那正是把这个坏指针修好的那一次写入', () => {
+  const { projectDir, pluginDir } = makeDanglingPointer()
+  try {
+    const { stdout, stderr } = run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'at-pm',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'current-run') },
+    }, GATE, projectDir)
+    assert.equal(
+      decisionOf(stdout),
+      null,
+      '这一次写入就是逃生路径本身：拦住它，坏指针在 Claude 里就再也改不回来，' +
+        '只能由用户离开会话手工改文件',
+    )
+    assert.match(stderr, /调用者是 PM/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})

@@ -15,7 +15,9 @@
 // 拒绝。这两种性质分别是：
 //
 //   kind: 'no-run'     压根没有进行中的 run（没有 .agent-team、没有
-//                       current-run、current-run 指向的 run 目录不存在）。
+//                       current-run）。**只有「pointer 文件根本不在」这一种**
+//                       ——pointer 在、而内容读不出或指不到东西，一律归下面
+//                       那一格，完整理由见本文件末尾那一段。
 //                       这不是「门禁判不出来」——门禁做出了一个有依据的
 //                       判定：本次调用不归它管。H3/H4 的全部前提是「一个
 //                       run 正在跑，角色各自认领了地盘」；没有 run 就没有
@@ -33,7 +35,8 @@
 //
 //   kind: 'unreadable' run 存在但读不出来，或者输入本身不可信（state.json/
 //                       project.json 坏了、内容不是对象、current-run 是
-//                       空文件、runId 含路径穿越字符、两个根传了非字符串、
+//                       空文件、current-run 指向的 run 目录不存在、runId
+//                       含路径穿越字符、两个根传了非字符串、
 //                       以及任何意外异常）。这才是门禁真的判不出来，规格
 //                       §6 fail closed 说的是这种情形，继续拒绝。这条边界
 //                       不能因为上面那条放宽：一个被写坏的 project.json
@@ -50,12 +53,29 @@
 // 就是抛异常的原因（projectDir 不是字符串），base 根本没被算出来、也不在作用域里。
 // ⚠️ 这个字段不改变任何 kind 语义：它只是一条路径，不是「可以继续往下判」的许可。
 //
-// current-run 是空文件属于 unreadable 而不是 no-run，是一个有意的判断：
-// pointer 文件本身存在（不同于「找不到 pointer」），空内容更像是写入过程
-// 被打断的异常状态，不是「nobody has started a run yet」那种干净的缺席。
-// 分类成 unreadable 更安全——如果算 no-run，任何能把 current-run 截断成
-// 空文件的手段（哪怕只是 H3 已知边界里那条「Bash 能写文件」）都会被当成
-// 「没有 run」而放行，即便 runs/<真实 id>/ 下还有一个真正在跑的 run。
+// pointer 文件**存在**时的失败一律属于 unreadable 而不是 no-run，是一个有意的
+// 判断。它今天有两个实物，**同一条理由的两半**：
+//
+//   ① current-run 是空文件；
+//   ② current-run 非空，但它指向的 runs/<id>/ 不存在。
+//
+// 理由：pointer 文件本身存在（不同于「找不到 pointer」），**指针在 = 有人开过
+// run**。空内容更像是写入过程被打断，指向一个消失的 run 更像是 run 被清掉了
+// 或从没建成——两者都是异常状态，不是「nobody has started a run yet」那种干净
+// 的缺席。分类成 unreadable 更安全：如果算 no-run，任何能改写 current-run 的
+// 手段（哪怕只是 H3 已知边界里那条「Bash 能写文件」）都会被当成「没有 run」而
+// 放行，即便 runs/<真实 id>/ 下还有一个真正在跑的 run——① 是把它截断成空文件，
+// ② 是把它改写成一个不存在的 id，**同一个绕法，差一个字符**。
+//
+// ⚠️ ② 起初归的是 no-run，写下的理由只有一句「同样是『没有 run 可管』」。M3b
+// 「坏指针的窗口」把那个分类的代价实测出来了（子进程级探针，记录在 docs/11
+// §5.23）：它让 H3 与 H4 这两个 fail-closed 的检查项在这**一个输入状态**下对
+// **所有角色** fail open——非 PM 在那个窗口里写得成 runs/<id>/state.json、写得成
+// 别人认领的路径、也写得成 00-contract.md。收窄不会把 PM 锁在门外（这一条是这次
+// 收窄的全部前提，已实测不是预测）：H3 在 unreadable 那一支的 I2 豁免、H4 读 ctx
+// 之前那条短路，谓词都是 isContractWriter，两处的理由逐字都是「修复一个坏掉的 run
+// 恰恰要 PM 动手」——**而指针指向一个不存在的 run，正是一个坏掉的 run**。自举也不
+// 受影响：建第一个 run 之前 pointer 压根不存在，那仍然是 no-run。
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -148,10 +168,12 @@ export function readRunContext(projectDir, pluginDir) {
     const runDir = join(base, 'runs', runId)
     if (!existsSync(runDir)) {
       // current-run 指向的 run 目录不存在——指针指向了一个从没建出来、
-      // 或已经被清理掉的 run。同样是「没有 run 可管」，归 no-run。
+      // 或已经被清理掉的 run。归 unreadable，不是 no-run：pointer 在就意味着
+      // 有人开过 run，这不是干净的缺席，而是一个坏掉的 run。与上面「空文件」
+      // 那一条是同一条理由的两个实物，完整论证见文件头部，不在这里重复第二遍。
       return {
         ok: false,
-        kind: 'no-run',
+        kind: 'unreadable',
         agentTeamDir: base,
         reason: `current-run 指向 ${runId}，但 ${runDir} 不存在`,
       }

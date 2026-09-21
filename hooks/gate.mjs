@@ -280,6 +280,14 @@ function misroutedNotice(label, channel, recipient) {
 // 这条回传只在 ctx.ok 时才算得出来，那个窗口从这个调用点够不到；**哪天这条回传被挪到
 // 一个 ctx 不保证 ok 的触发点上，这个差额就落地了。**
 //
+// ⚠️ **M3b「坏指针的窗口」把这个差额的口径收窄了一次，但没有把它消掉。** 上面那句
+// 「no-run 那一支对所有角色 fail open」今天仍然成立，变的是 no-run **是什么**：
+// 「current-run 指向的 run 目录不存在」已经从 no-run 挪去 unreadable（论证在
+// hooks/lib/runctx.mjs 头部），所以 no-run 今天只剩「pointer 根本不在」一种。
+// 差额因此变窄：那种状态下写 runs/<id>/state.json 不会顺手把 pointer 造出来，
+// PostToolUse 那一帧 ctx 仍然不 ok。**但这仍然不是「写不成」**——H3 照样放行了那次
+// 写入，只是这个调用点看不见它。别把收窄读成消除。
+//
 // ⚠️ 参数缺省（判不出收件人）时落**改不了**那一支：多一次转述的代价，远小于再一次
 // 指挥一个改不了它的人去改——那正是这一轮要修的形状。
 function buildDriftNotice(cmp, recipientCanWriteState) {
@@ -357,6 +365,26 @@ function buildDriftNotice(cmp, recipientCanWriteState) {
 //
 // **所以那个决定换掉了**：收尾按「收件人改不改得了 state.json」分两支，谓词与手法与
 // buildDriftNotice 同一份（callerOf → isContractWriter，在调用点算），见下面 outs 那一段。
+//
+// ⚠️ **M3b「坏指针的窗口」把上面那个窗口关上了——上面这段机制描述因此过期了一半，
+// 就地标出来，不抹掉**（它记的是那个决定当时的依据，抹掉就看不出这条分支为什么在）。
+// 今天的真值：「current-run 指向的 run 目录不存在」已经归 kind:'unreadable'，H3 在那一支
+// 对非 PM fail **closed**（hooks/lib/runctx.mjs 头部是论证，本文件 writepath 分支是落点）。
+// 于是上面第二、三条描述的那条路**已经走不通**：非 PM 写不成 runs/<id>/state.json，
+// 就没有 PostToolUse，这条提示到不了他手里。而第四条今天覆盖了 no-run 的全部——
+// no-run 只剩「pointer 根本不在」，那一帧 ctx 不 ok，ledger 提前退出。
+//
+// **两支照留，理由不是「万一」**：
+//   · 这里的 recipientCanWriteState 算的是**这一帧真实的收件人**，不是「谁到得了这里」
+//     那个理论。把分支删掉等于让这一层去替 H3 断言「非 PM 结构上到不了」——**上一轮
+//     正是这条断言被实测打假的**，而它当时也是从另一个模块的分类推出来的。
+//   · 参数缺省（判不出收件人）时落的是「改不了」那一支；删掉分支，那个缺省就退回
+//     「你去改」的口吻——M3b 要修的正是这个形状。
+//   · 同一份谓词还服务着 buildDriftNotice，**那一条的非 PM 收件人照样到得了**
+//     （PostToolUse:Agent，收件人是发起派发的那个子代理，与本窗口无关）。
+// 钉这两支的子进程用例（tests/gate-ledger.test.mjs「M3b 修复轮 1」那一组）**不受影响**：
+// 它们构造的是 ctx.ok + 非 PM agent_type 这一帧本身，而 ledger 从不判「这次写入当初该不该
+// 被放行」——那是 H3 在 PreToolUse 上的事，另一个 hook。那组用例上方已经把这条写下来了。
 // **诊断那一半对谁都成立，两支共用、一个字不动**：哪一段的哪个角色没交代、口径宽不宽、
 // 驱动者那条护栏——分支的只是「你去把它改了」这个假设。
 //
@@ -810,7 +838,8 @@ function main() {
           //     ——在正路上刷一行「当前没有进行中的 run，本次放行、不拦截」只会把人
           //     指向 current-run 去查一个根本不存在的问题。
           //   - 'unreadable' 是门禁**自己判不出来**（current-run 被截断成空文件、
-          //     run 目录缺 state.json、project.json 之外的东西坏了……）。触达表照发
+          //     current-run 指向的 run 目录不存在、run 目录缺 state.json、project.json
+          //     之外的东西坏了……）。触达表照发
           //     ——它的判据只有 roster.json + 刚写完的 project.json，跟那个坏掉的 run
           //     无关，而「在一个坏掉的 run 上重跑 /at-init」恰恰是要支持的动作——
           //     但**留痕照留**。「fail open 必须留痕」是这个仓库的硬规矩：静默的放行

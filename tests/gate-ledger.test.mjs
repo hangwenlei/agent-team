@@ -764,6 +764,13 @@ test('收窄不成：文案不拿 at-pm 当 trimmed 的示例，给的是占位�
 // **而窗口在同一刻关上**——他的下一次写入就被 H3 拒了，于是收件人拿到这条提示时已经
 // 改不了它。与账本比对那一条**同一个形状，只是门更窄**。完整机制在 gate.mjs 里。
 //
+// ⚠️ **M3b「坏指针的窗口」把上面那条路关上了**：那种 ctx 已经归 unreadable，H3 在那一支
+// 拒非 PM，所以「非 PM 到得了这条回传」今天没有已知的确定性路径了。**下面这几条不因此
+// 作废，也不改一个字**——它们钉的是「这一帧长这样时文案说什么」，而这一帧的构造理由
+// 写在下一段里（ledger 从不判这次写入当初该不该被放行，那是另一个 hook 的事）。
+// 为什么分支本身留着（不是「万一」，有三条具体理由），写在 gate.mjs 的
+// buildCoverageNotice 上方，不在这里重复第二遍。
+//
 // ⚠️ **夹具不需要去重建那个坏掉的 run**：ledger 这个检查项读的输入在两种情形下逐字
 // 相同（ctx.ok + tool_input.file_path 指着 state.json + agent_type 是那个非 PM），
 // 它自己不判「这次写入当初该不该被放行」——那是 H3 在 PreToolUse 上的事，另一个 hook。
@@ -929,6 +936,67 @@ test('M3b：收件人是主线程时也不留那行痕', () => {
   const { projectDir, pluginDir } = makeRun(WALKED_S2)
   try {
     assert.equal(writeState(projectDir, null).stderr.trim(), '')
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ——— M3b「坏指针的窗口」：ledger 这一支本轮的变化是**开始留痕** ———
+//
+// 「current-run 指向的 run 目录不存在」本轮从 no-run 挪去 unreadable（论证在
+// hooks/lib/runctx.mjs 头部）。对 project.json 那条缝，这意味着两件事分别落在
+// 上面已有的两组判据上：触达表照发（缝本身不看 kind），而 `ctx.kind !== 'no-run'`
+// 那一行**本轮开始对坏指针成立**，于是 fail-open 痕迹开始出现。
+//
+// ⚠️ **那一行痕开始出现是对的，不是回归**：上面「没有 run 时写 project.json：
+// 不留 fail-open 痕迹」那一条的理由逐字是「在正路上刷一行……只会把人指向
+// current-run 去查一个**根本不存在的问题**」。坏指针恰恰相反——current-run 里
+// 真的有一个指不到东西的 id，**这时真有问题可指**。那条「正路不留痕」的判据
+// 一个字没动，它守的仍然是 pointer 根本不在的 no-run。
+//
+// 拆成两条：同一次调用的两个侧面（该说的话说了没有 / 该留的痕留了没有），
+// 放同一个 test() 里前一句失败会把后一句整个挡住——与上面 unreadable 那一组同一个
+// 理由，也与它构成对照：那一组用空 current-run，这一组用坏指针，两个实物同一条理由。
+const makeDanglingPointerRun = () => {
+  const dirs = makeRun({
+    runId: 'r1', stage: 'S1',
+    project: { paths: { 'at-product': ['docs/'], 'at-backend': ['src/server/'] } },
+  })
+  // current-run 留着（内容仍然是 r1），删掉它指向的 run 目录。
+  rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r1'), { recursive: true, force: true })
+  return dirs
+}
+
+test('坏指针（run 目录不存在）时写 project.json：触达表照发——在坏掉的 run 上重跑 /at-init 必须跑得完', () => {
+  const { projectDir, pluginDir } = makeDanglingPointerRun()
+  try {
+    const { stdout, status } = writeProjectJson(projectDir)
+    assert.equal(status, 0)
+    const ctx = ctxOf(stdout)
+    assert.ok(
+      ctx,
+      '坏指针是「这个 run 坏了」，而触达表的判据只有 roster.json + 刚写完的 project.json，' +
+        '跟那个坏掉的 run 无关——stdout 为空意味着收窄把 /at-init 的逃生路径一起关掉了',
+    )
+    assert.match(ctx, /reach\.json/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('坏指针时写 project.json：fail-open 留痕本轮开始出现——这时 current-run 里真有一个指不到东西的 id', () => {
+  const { projectDir, pluginDir } = makeDanglingPointerRun()
+  try {
+    const { stderr, status } = writeProjectJson(projectDir)
+    assert.equal(status, 0)
+    assert.match(
+      stderr,
+      /ledger 回传：读不到运行上下文（/,
+      '门禁自己判不出来时必须留痕；措辞要说「读不到运行上下文」而不是「没有进行中的 run」' +
+        '——指针在，说明有人开过 run，坏的是它指向的东西',
+    )
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })

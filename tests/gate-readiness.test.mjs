@@ -131,3 +131,35 @@ test('readiness：ctx.ok 为 true 但没有可判定的目标角色时，同样�
     rmSync(dirs.pluginDir, { recursive: true, force: true })
   }
 })
+
+// ——— M3b「坏指针的窗口」：H2 是四个消费方里**行为一个字没变**的那一个 ———
+//
+// H2 不按 ctx.kind 分派**行为**（两种 kind 都 fail open），只分派**措辞**。本轮把
+// 「current-run 指向的 run 目录不存在」从 no-run 挪去 unreadable 之后，H2 在这个
+// 输入状态下仍然放行、仍然留痕，变的只有那半句话：从「当前没有进行中的 run」
+// 变成「读不到运行上下文」。**而那两句对读到它的人不是同一件事**——前者是门禁做出
+// 了一个有依据的判定（本次调用不归它管），后者是门禁自己判不出来，说明有东西坏了。
+// 坏指针属于后者，所以这次措辞变化本身就是修复的一部分，不是副作用。
+// 锚到「检查项名：措辞（」这个位置才有判别力（手法与 tests/gate-writepath.test.mjs
+// 里 no-run 措辞那一条同一份）：ctx.reason 自己不含这两句中的任何一句，单查几个字
+// 会让 failOpenNotice 的三元塌成任一支都照样绿。
+test('readiness：坏指针时仍然 fail open，但措辞说「读不到运行上下文」——H2 的行为不随 kind 变，措辞随', () => {
+  const dirs = makeRun({ runId: 'r1' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r1'), { recursive: true, force: true })
+    const input = { tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-product' } }
+    const { stdout, stderr, status } = run('readiness', input, undefined, dirs.projectDir)
+
+    assert.equal(status, 0, 'H2 是 fail open：收窄改的是 H3/H4，不该把 H2 也变成拦截')
+    assert.equal(stdout.trim(), '', 'H2 在这里不该 deny')
+    assert.match(
+      stderr,
+      /H2 就绪门禁：读不到运行上下文（/,
+      '坏指针是「门禁自己判不出来」，不是「没有进行中的 run」——run 是有人开过的，' +
+        '指针还在那里，坏的是它指向的东西',
+    )
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})

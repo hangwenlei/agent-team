@@ -149,6 +149,9 @@ test('当前阶段产物已齐：提示推进，并说明不推进会让 H5 哑�
 // ⚠️ **M3b 修复轮 1：这里原来写的是「H3 对非 PM 一律拒绝」，那个全称量词假**——
 // no-run 那一支对所有角色 fail open，理由写在 hooks/lib/ledger.mjs 的 pmOnlyNotice 上方，
 // 不在这里重复。**这条测试要的那层意思没变**：文案必须点名 PM。
+// ⚠️ M3b「坏指针的窗口」之后那个全称量词**仍然假**，只是该举的实物换了一个
+// （坏指针已归 unreadable、H3 在那里拒非 PM；剩下的是「pointer 根本不在」）。
+// 单一真源还是 pmOnlyNotice 上方那一段，这里不抄第二份。
 test('提示推进时点名这个动作只能由 PM 执行', () => {
   const s = joined({ stageDone: true })
   assert.match(s, /PM/)
