@@ -41,3 +41,17 @@ const project = JSON.parse(
 export const ROLES_WITHOUT_PATHS = project.available_roles.filter(
   (r) => !Object.hasOwn(project.paths, r),
 )
+
+// ⭐ M3h：**另一侧**——模板里真的认领了 `paths` 的那些角色。
+//
+// 为什么挂在这个文件里，而不是在消费方自己 `JSON.parse` 一次 `templates/project.json`：
+// 两侧是同一份数据的补集，**必须同一次读出来**。分开读的失效形状本文件上半段已经
+// 记过一次（禁令与依据各有真源、静默分叉）；补集这一侧再开一个真源，就是同一个形状
+// 第三次。消费方是 `tests/agents.test.mjs` 里「认领了 `paths` 的角色，正文必须写着
+// 『只有那些』」那条——H3 写路径隔离在**角色正文侧**的第一道（`docs/11` §5.31）。
+//
+// ⚠️ 这里取的是 `paths` 的**键本身**，不是 `available_roles` 与它的交集。
+// 两者今天相等，但它们答的不是同一个问题：这条不变量问的是「谁被划了地盘」，
+// 而一个被划了地盘却不在 `available_roles` 里的角色，**照样受 H3 按那份前缀管**
+// ——用交集会把它悄悄漏掉。
+export const ROLES_WITH_PATHS = Object.keys(project.paths)
