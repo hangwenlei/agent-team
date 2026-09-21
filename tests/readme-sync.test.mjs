@@ -733,9 +733,26 @@ test('Status: 那句「真实环境完整跑通过一趟」今天仍然成立—
 // **本轮不为它加判据**（M2d 裁定：不扩范围）；这里做的只是把它从「将来也许有人绕得开」
 // 降级成**一个已经被演示过的具体实例**——下一个人不必再自己想一遍它长什么样。
 const DOCS17 = 'docs/17-正式安装路径实测.md'
+const DOCS19 = 'docs/19-远端安装路径实测.md'
 
 // M2d 之前两份 README 里的原话，逐字抄下来。它们描述的状态已经不成立了
 // （`docs/17` §2 的七条全部有结论），原样写回去就是把已经做到的说成没做到。
+//
+// ⚠️ **M3b 又往这张表里加了四句，而加它们的理由比这四句本身值钱**（`docs/19`）。
+// 仓库公开那天，两份 README 的安装那一节开头逐字写着「`Not published to any
+// marketplace`」／「尚未发布到任何市场」——**一句当场变假的话**。而「有意不写」
+// 那一段里还有一句更贵的：它断言 GitHub 源装出来的插件根解析到哪里「本项目没有去看」，
+// 而 M3b 正是去看了。
+//
+// **两句都改对之后，整套 772 条全绿；把后一句原样塞回去再跑，仍然 772 / 0，一条没红。**
+// （这是实测跑出来的，不是推的。）也就是说：这两句在变假的那一刻起到被改对为止，
+// **没有任何判据在看着它们**。这正是 `docs/11` §5.20 四记的那个形状的又一个实物——
+// 而这一次它不是「真源选在冻结文档上」造成的，是**根本没有真源**：
+// 一句「我们没做过 X」的话，在 X 被做掉的那一刻自动变假，而没有任何机械形状会因此改变。
+//
+// 加进这张表是**唯一拿得到的那一点**，它不假装更多：这条判据钉的仍然是一张
+// **退役原话清单**，不是「任何把某件事说成没做过的写法」。换一种措辞把同一件事说回去，
+// 它不会红（理由与下面那段「盖不住的那一半」相同，不在这里抄第二份）。
 const RETIRED_CLAIMS = [
   'the formally installed path is untested',
   '正式安装的路径没测',
@@ -743,6 +760,12 @@ const RETIRED_CLAIMS = [
   '本项目唯一实测过的加载方式是 `--plugin-dir`',
   'a properly installed plugin (`claude plugin install`) rather than `--plugin-dir`',
   '正式安装的插件（`claude plugin install`）而非 `--plugin-dir`',
+  // M3b 退役的四句（`docs/19`）。前两句是仓库公开当天变假的那一句的两半，
+  // 后两句是「GitHub 源的插件根解析到哪里没看过」的两半。
+  'Not published to any marketplace',
+  '尚未发布到任何市场',
+  'a GitHub-sourced install may resolve the plugin root somewhere else entirely, and this project has not looked',
+  '从 GitHub 源装出来的插件，它的插件根目录解析到哪里，本项目没有去看',
 ]
 
 function retiredClaimsIn(text) {
@@ -776,6 +799,9 @@ test('前置条件：RETIRED_CLAIMS 非空——空清单会让下面那条反�
   assert.ok(RETIRED_CLAIMS.length > 0, 'RETIRED_CLAIMS 被清空了，反向那条判据什么都不再拦')
 })
 
+// ⚠️ **这条锚与下面 docs/19 那条钉的都是「历史」，不是「现状」**——`docs/11` §5.20 四
+// 判死的是「拿冻结文档当**现状**的真源」（「docs/15 里还找得到那个小节标题」恒为真）。
+// 「这份实测记录还在不在」是一件会变的事：文件被删、被改名，这条就红。两者不是一回事。
 test('锚：docs/17 在，且它记的就是 --scope local 那条正式安装路径', () => {
   let text
   try {
@@ -791,6 +817,24 @@ test('锚：docs/17 在，且它记的就是 --scope local 那条正式安装路
     text.includes('--scope local'),
     `${DOCS17} 里找不到 --scope local。它记的是「用 local 作用域把插件正式装上」这条路，` +
       '两份 README 的安装那一节引的就是它；这个词不在了，说明那份记录已经不是原来那件事',
+  )
+})
+
+test('锚：docs/19 在，且它记的就是从 GitHub 装的那条远端路径', () => {
+  let text
+  try {
+    text = read(DOCS19)
+  } catch {
+    assert.fail(
+      `读不到 ${DOCS19}。两份 README 的安装那一节现在写着「从 GitHub 装是实测过的」，` +
+        '而那份实测记录就是它。同 docs/17 那条锚：如果这份文档是被有意删掉/改名的，' +
+        '安装那一节里关于远端路径的每一句都要跟着重新想一遍——不要只把这里的文件名改掉了事',
+    )
+  }
+  assert.ok(
+    text.includes('marketplace add hangwenlei/agent-team'),
+    `${DOCS19} 里找不到那条 GitHub 市场的 marketplace add 命令。它记的是「从公开仓库把插件装上」` +
+      '这条路，两份 README 安装那一节开头引的就是它；这条命令不在了，说明那份记录已经不是原来那件事',
   )
 })
 
