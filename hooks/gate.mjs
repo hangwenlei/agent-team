@@ -19,6 +19,7 @@ import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideRework } from './lib/rework-guard.mjs'
 import { decideDeliverable } from './lib/deliverable.mjs'
+import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { isControlFile } from './lib/control-files.mjs'
 import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
@@ -1177,10 +1178,15 @@ function main() {
       // 任何痕迹。这条 warning 就是那个不能丢的痕迹：不能被误读成"子代理
       // 正常返回=这一段已经完成"。写完直接落到本函数末尾共用的
       // process.exit(0)，不需要在这里另写一次。
+      //
+      // ⚠️ 那半句「重试有上限、到点会静默放行」来自 ./lib/retry-budget.mjs，
+      // **不要在这里把它的计数写成字面量**：那个计数不是常数（本仓库的几次观测
+      // 彼此不等，数法也不同），而且同一份知识此前在八句话里各写了一份。
+      // 判据见 tests/retry-budget-single-source.test.mjs，它会拦住第二份。
       const notices = [
         `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，` +
-          `但磁盘上还没有。SubagentStop 已经尝试拦截过，但平台的重试有上限（约 9 次），到点会` +
-          `静默放行——不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`,
+          `但磁盘上还没有。SubagentStop 已经尝试拦截过，但${SUBAGENT_STOP_RETRY_NOTE}` +
+          `——不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`,
       ]
       // 交付物本身还缺产物时，账本比对一样并进同一条——它审计的是全部阶段的
       // produces，不只是刚被判定缺失的这一段（比如更早的阶段被 Bash 绕过写过）。

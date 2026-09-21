@@ -207,8 +207,9 @@ test('deliverable：查的是被派发的目标角色（tool_input.subagent_type
     )
     assert.doesNotMatch(stdout, /permissionDecision/)
 
-    // 这条 warning 存在的全部理由：H5b 到点（约 9 次）会被平台静默放行，父级
-    // 看到的是干净的一次通过。文案必须点明"不要仅凭子代理正常返回就判断这一段
+    // 这条 warning 存在的全部理由：H5b 到点会被平台静默放行（到点是第几下不写在
+    // 这里，单一真源是 hooks/lib/retry-budget.mjs），父级看到的是干净的一次通过。
+    // 文案必须点明"不要仅凭子代理正常返回就判断这一段
     // 完成了"，否则它退化成一句无害的提示，读的人不会去核实产物。
     assert.match(out.additionalContext, /不要仅凭/)
     assert.match(out.additionalContext, /核实/)

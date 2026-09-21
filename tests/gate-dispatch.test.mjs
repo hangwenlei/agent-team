@@ -25,7 +25,8 @@ function cleanCwd() {
 
 // 这是本任务存在的理由：SubagentStop 不带 tool_name，
 // 若沿用 PreToolUse 那套「非字符串就 deny」的前置校验，
-// 每个角色每次收尾都会被无故顶回去约九次（U5 实测平台重试上限）。
+// 每个角色每次收尾都会被无故顶回去，一路顶到平台的重试上限
+// （顶多少下不写在这里，单一真源是 hooks/lib/retry-budget.mjs）。
 // SubagentStop 的拒绝走 exit 2（denyAndExit），不是 stdout 上的
 // permissionDecision JSON，所以这里断言的是退出码，不是 decisionOf(stdout)。
 test('stop-gate：输入里没有 tool_name 也不能因此 deny', () => {
