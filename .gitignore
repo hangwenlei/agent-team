@@ -1,3 +1,10 @@
 # superpowers 的流程工作区（ledger、任务 brief、评审包、各轮报告）。
 # 是脚手架不是产物——结论落在 docs/ 与 git 历史里。
 .superpowers/
+
+# Claude Code 给隔离子代理开的 git worktree（本轮实测时 26 MB）。
+# 是脚手架不是产物：每个 worktree 的分支都已经合进 main，内容在 git 历史里。
+# 不忽略它的后果很具体——它没进 .gitignore，而一次 git add -A 就会把几十兆
+# 临时检出推进公开仓库（本仓库为「add -A 卷走别人的东西」栽过一次，
+# 见 docs/11 的换行符那一节同族的操作纪律）。
+.claude/worktrees/
