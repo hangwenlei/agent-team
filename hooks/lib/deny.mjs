@@ -2,8 +2,12 @@
 // 平台上表达「拒绝」根本不是同一种机制：
 //   PreToolUse    stdout 上 hookSpecificOutput.permissionDecision = 'deny' 的 JSON，exitCode 0（M0 实测）
 //   SubagentStop  stderr 上的理由，exitCode 2（U5 实测：docs/07-U5-U6-U8-实测结论.md §1，
-//                 九次 exit 2 全部把 subagent 顶回去；平台约 9 次后静默放行是它自己的
-//                 重试上限，不是这个函数要处理的事）
+//                 连着的 exit 2 全部把 subagent 顶回去；平台到点后静默放行是它自己的
+//                 重试上限，不是这个函数要处理的事。⚠️ **顶多少下不写在这里**——
+//                 那个计数的单一真源是 ./retry-budget.mjs，判据是
+//                 tests/retry-budget-single-source.test.mjs。这一行此前写的是中文
+//                 数字「九次」，于是按词形扫同一份知识时它被整个漏掉，是
+//                 docs/16 §3.4 的实物，记在 docs/11 §5.29）
 //   其它事件      本插件目前没有检查项会在这些事件上调用它（PostToolUse／H5a
 //                 按规格 §6 表格只记 warning、从不拒绝）——这条分支当前不可达，
 //                 留着是为了万一将来误调用时它会出声，而不是静默吞掉。

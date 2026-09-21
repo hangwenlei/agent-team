@@ -16,6 +16,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
+import { isContractWriter } from '../hooks/lib/contract-guard.mjs'
 import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 import { EXPECTED_AGENTS } from './helpers/expected-agents.mjs'
 import { producedNames } from '../hooks/lib/stages.mjs'
@@ -112,6 +113,110 @@ test('持有 Bash 的角色，正文里必须有「不得用 Bash 绕过写路�
         '绕过写路径隔离」这条实质红线',
     )
   }
+})
+
+// ---------------------------------------------------------------------------
+// ⭐ M3g：**角色层先于门禁生效**，而在这之前没有任何判据钉着第一道还在不在
+// ---------------------------------------------------------------------------
+//
+// 实测（`docs/19` §11.4.4 / §11.5.3）：三次派子代理去撞 H4 契约保护，
+// **两次它在发出那次 `Write` 之前就自己拒绝了**，理由逐字来自它自己的角色正文
+// （`agents/at-product.md` 的「不得写契约」）。任务描述是逐字转交过的，
+// 在子代理转录里核过。最后量到 H4，靠的是**把第一道拿掉**——换一个不属于本插件的
+// 主会话角色（`--agent general-purpose`），它没有那条正文，照做了，H4 当场拒绝。
+//
+// **两层都在做该做的事，外层先拦下来更省。问题不在纵深，在观测面：**
+// 「门禁强制」这个卖点的**全部判据都在第二道上**（`tests/gate-contract.test.mjs`、
+// `tests/contract-guard.test.mjs` 等），而**第一道消失的可观测表征是正文被改松**
+// ——那是一件树内的、可扫的事实，此前没有任何东西扫它。
+//
+// ⚠️ **为什么这一条不属于「正文里写着 ≠ agent 照做」那一族**（`docs/18` §5.2、
+// `docs/11` §5.23 各为那一族付过三样）：那几条要钉的是**agent 有没有照做**
+// ——那件事不在树里留产物，测不了。这一条要钉的是**那几句话还在不在**
+// ——它就是文件里的字。同一份 `tests/agents.test.mjs` 已经用这个形状钉过好几条
+// （Bash 红线、受信前缀、按通道信任的边界、paths 早退）。完整裁定在 `docs/11` §5.30。
+//
+// ⚠️ **本条钉的是 H4 那一道的第一层，不是所有门禁的第一层。** 为什么只钉这一道、
+// 别的几道要什么条件才值得跟上，写在 `docs/11` §5.30，不在这里重复。
+
+// 这道红线该出现在哪几份正文里，是**派生**的，不是另抄一份清单：
+//   · 门禁自己认作契约写者的（`isContractWriter`：主线程与 `at-pm`）——
+//     H4 对它本来就放行，"第一道"无从谈起；
+//   · 工具面里根本没有写文件的工具的（`at-outsider` 只有 `Read`）——它写不了契约。
+// 其余每一份都必须有。**派生**这件事本身承重：哪天有人给 `at-outsider` 加上
+// `Write`，它立刻落进"必须有红线"那一侧，不需要谁记得回来改这里。
+const CONTRACT_FILE = '00-contract.md'
+const WRITE_TOOLS = ['Write', 'Edit', 'NotebookEdit']
+function needsContractRedLine(f) {
+  if (isContractWriter(f.replace(/\.md$/, ''))) return false
+  const { names } = toolsDeclarationOf(textOf(f))
+  return WRITE_TOOLS.some((t) => names.includes(t))
+}
+
+// 判据抽成具名函数，主判据与下面的自检**共用同一份**——两处各写一遍正则的代价
+// hasBoundary() 那一轮实测过（只放宽其中一份，自检等于给自己发通行证）。
+//
+// 钉两半、且要求它们在**同一行**上：禁令本身（「不得写契约」）**与**它管的那个
+// 文件名。只钉前半，契约文件哪天改名会留下一条指向不存在文件的禁令；只钉后半，
+// 一句「你要先读 00-contract.md 弄清需求」就能把判据喂饱（这正是 hasBoundary()
+// 那一轮栽过的形状：真正的那句话之前先有一句不相干的把正则满足了）。
+function hasContractRedLine(body) {
+  return body.split(/\r?\n/).some((l) => /不得写契约/.test(l) && l.includes(CONTRACT_FILE))
+}
+
+// 锚：**豁免的那一侧**钉身份。主判据是「剩下的每一份都要有」，它的分量全压在
+// "剩下的"是哪些上——豁免集合一旦悄悄长大，主判据会对一个更小的集合全绿。
+// 这里钉的不是数量是身份（`docs/16` §3.1：清单可核，数字不可核）。
+test('锚：契约红线的豁免恰好是 at-outsider（写不了文件）与 at-pm（门禁认它是契约写者）', () => {
+  assert.deepEqual(
+    AGENTS.filter((f) => !needsContractRedLine(f)).sort(),
+    ['at-outsider.md', 'at-pm.md'],
+    '契约红线的豁免集合变了。\n' +
+      '  它是派生的：isContractWriter() 认作契约写者的，加上工具面里没有 ' +
+      `${WRITE_TOOLS.join('/')} 的。\n` +
+      '  多出一份 = 某个角色刚被拿掉了写文件的工具、或者被算进了契约写者，' +
+      '它的契约红线从此没人管；\n' +
+      '  少一份 = 反过来。两种都要人看一眼，不要直接改这条断言的期望值。',
+  )
+})
+
+test('每份能写文件、又不是契约写者的角色正文里，都有「不得写契约」这条红线——它是 H4 真正的第一道', () => {
+  for (const f of AGENTS.filter(needsContractRedLine)) {
+    assert.ok(
+      hasContractRedLine(bodyOf(f)),
+      `agents/${f} 正文里没有一行同时写着「不得写契约」与 ${CONTRACT_FILE}。\n` +
+        '  实测里这条正文就是 H4 的**第一道**：子代理两次在发出 Write 之前就照它自己拒绝了' +
+        '（docs/19 §11.4.4）。门禁还在，但第一道没了这件事此前没有任何东西看得见——\n' +
+        '  本条就是那个观测面。要改这段正文的措辞，连本条一起改，并在 docs/11 §5.30 留痕；\n' +
+        '  **不要为了让它绿而把禁令删掉或加上例外**。',
+    )
+  }
+})
+
+// 正向锚（`docs/11` §3.3 第 2 条）：拿**已知违规样本**证明 hasContractRedLine()
+// 认得出违规。样本取的是这条判据要防的那个动作的最便宜两种形态——删掉、说反。
+test('前置条件：hasContractRedLine() 认得出「被改松」的几种样本，也不被一句无关的契约提及喂饱', () => {
+  const real = `- **不得写契约**（\`${CONTRACT_FILE}\`）。它是这趟 run 的需求基线，只能由用户改、经 PM 转写。`
+  assert.ok(hasContractRedLine(real), '真实原文形状都认不出来，判据本身坏了')
+
+  // ① 整条删掉。
+  assert.ok(!hasContractRedLine('## 红线\n\n- **不得声称做完了没做的事。**'), '红线被整条删掉时应判为不通过')
+  // ② 说反 / 改松——**这才是 concern 描述的那个动作**。
+  assert.ok(
+    !hasContractRedLine(`- 契约（\`${CONTRACT_FILE}\`）通常由 PM 转写，确有必要时你可以自己改。`),
+    '禁令被改写成「通常由 PM，必要时可以自己改」时应判为不通过',
+  )
+  // ③ 只提到契约文件、没有禁令——不能把判据喂饱。
+  assert.ok(
+    !hasContractRedLine(`你要先读 \`${CONTRACT_FILE}\` 弄清需求，再动手。`),
+    '一句无关的契约提及不该被当成红线',
+  )
+  // ④ 禁令与文件名分在两行——**故意判为不通过**，理由见 hasContractRedLine() 上面
+  //    那段：两半必须绑在一起。这一条钉的是那个取舍本身，改版式会红是已知代价。
+  assert.ok(
+    !hasContractRedLine(`- **不得写契约**。\n- 契约文件是 \`${CONTRACT_FILE}\`。`),
+    '两半分在两行时按设计判为不通过——这条断言红了说明有人放宽了「同一行」那个要求',
+  )
 })
 
 test('每个角色正文都引用了受信前缀', () => {

@@ -86,7 +86,8 @@ test('按传入的 stageId 判定，不再自己找「第一个未完成的阶�
     S5: { role: 'at-architect', requires: [], produces: ['05-impl/index.md'] },
   }
   const exists = (p) => p === '03-arch.md'
-  // 老规则会拿 S5 的缺失产物把刚交完 S3 的它顶回去，最多九次然后平台静默放行。
+  // 老规则会拿 S5 的缺失产物把刚交完 S3 的它顶回去，顶到平台静默放行为止
+  // （顶多少下不写在这里，单一真源是 hooks/lib/retry-budget.mjs）。
   assert.deepEqual(
     decideDeliverable({ role: 'at-architect', stageId: 'S3', stages, artifactExists: exists }),
     { ok: true },
