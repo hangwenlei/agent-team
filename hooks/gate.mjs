@@ -291,6 +291,29 @@ function buildDriftNotice(cmp) {
 // 「谁算这一趟的驱动者」复用 isContractWriter，不在这里另写一遍 role === 'at-pm'
 // ——hooks/lib/writepath.mjs 已经为另一个问题（谁能写控制文件）复用过同一个谓词，
 // 它自己的注释写着「不另写一遍 role === at-pm」。这里是第三个问题、同一份知识。
+//
+// ⚠️ **上面这句只论证了「为什么复用而不是另写」，没说这次复用的代价。**
+// 复用把两个**概念上不同**的问题绑在了一起：
+//   isContractWriter 答的是「**谁能写契约**」（契约守卫的授权问题）；
+//   这里借它答的是「**谁是不参与「有没有被叫到」统计的驱动者**」（覆盖判据的统计口径）。
+// 今天两者**外延重合**，核法是（不报总数，报判据——docs/16 那条「列举，不报总数」）：
+// 拿 roster.json 里**除 __main__ 之外的每一个键**、以及 stages.json 里 stageRoles
+// **出现过的每一个角色**，逐个喂给 isContractWriter，为真的只有 at-pm。
+// ⚠️ roster.json 的**键数**不等于**角色数**：__main__ 是主线程的镜像、不是角色。
+// **但没有任何机制保证将来还重合**：isContractWriter 哪天为
+// **它自己的**理由放宽（它头部那段注释已经点名了一种：有人往某个角色的
+// can_delegate_to 里加 at-pm，那条豁免就会同时放行一个真正的子代理），
+// **这条护栏会跟着静默放宽**——而这里没有任何东西会提示它变了。
+//
+// 「不是同一份知识」有一处现成的实物：isContractWriter 为真的条件是
+// `caller === MAIN || caller === 'at-pm'`，**MAIN 那一支与「这一趟的驱动者」毫无关系**，
+// 它答的是「调用者是被钉住的主线程」。这一支在这里今天到不了（gaps 的 role 全部来自
+// stageRoles，必然是非空字符串），所以不影响判断——但它说明这个谓词的「真」里，
+// 本来就含着一块不属于这个问题的东西。
+//
+// 现在不拆（外延重合时拆出第二份 role === 'at-pm' 就是本仓库反复裁过的那种分叉）。
+// **要记的是失效条件**：isContractWriter 一旦为它自己的理由改动，这里要回来重核两者
+// 是否还重合；不重合就该在这里写一个独立的谓词，而不是继续借。
 const isDriverRole = (role) => isContractWriter(role)
 
 function buildCoverageNotice({ gaps, narrowed } = {}) {

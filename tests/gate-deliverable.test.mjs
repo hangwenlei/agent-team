@@ -921,15 +921,25 @@ test('前置条件：上一条那个场景确实产出了非空回传', () => {
 // `roster: undefined` 之后跑全量 node --test，439 条不变、fail 0，没有任何测试变红，
 // 印证了 brief 的预判，这里补上。----
 
+// ⚠️ **M3a Task 3 把这一对的信号从 unrecorded 换成了 missing。**
+// 它们原来钉的是「at-frontend 磁盘上的文件进不进 unrecorded」——而 unrecorded 现在
+// **不看 roster 了**（hooks/lib/artifact-drift.mjs：它是「Bash 绕过 H3 的直接表征」，
+// 按 roster 收窄就看不见还没进 roster 的角色写出来的东西，设计 §3.3）。那个信号因此
+// 不再分辨得出 gate 到底传没传 roster：两种 roster 下它都会报，这一对会双双恒绿。
+// **还跟着 roster 变的只剩 drifted / missing**，所以改钉 missing。夹具跟着换：磁盘上
+// 不放文件、账本里记一条——missing 于是成了这一趟回传的唯一可能来源。
+// 旧夹具（文件在磁盘上、账本里没有）没有浪费，它现在是下面那组形状 B 的回归。
+
 // 仓库根真实 stages.json 的 S5 现在有五个 producers。roster 只派了 at-backend 一个
-// 人的 run 里，at-frontend 的实现记录不该进"这一趟该有的"集合——即使它真的被写到了
-// 磁盘上（比如一次误操作、或者角色被误派但仍然写了文件）也不该被账本比对报出来。
-test('roster 只派了 at-backend：at-frontend 磁盘上的文件不进账本比对回传（roster 真的传到了 compareArtifacts）', () => {
-  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S5', artifacts: ['05-impl/at-frontend.md'] })
+// 人的 run 里，at-frontend 的实现记录不该进"这一趟该有的"集合——账本里记着它、磁盘上
+// 没有，也不该被报成 missing：那个角色这一趟压根没被派。
+test('roster 只派了 at-backend：账本里记着的 at-frontend 产物不被报成 missing（roster 真的传到了 compareArtifacts）', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S5' })
   try {
     const statePath = join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
     const state = JSON.parse(readFileSync(statePath, 'utf8'))
     state.roster = ['at-backend']
+    state.artifacts = { '05-impl/at-frontend.md': sha256OfContract('fixture 05-impl/at-frontend.md\n') }
     writeFileSync(statePath, JSON.stringify(state), 'utf8')
 
     // at-architect 是 S5 的合法协调者（roster.json：can_delegate_to 含 at-backend），
@@ -944,13 +954,64 @@ test('roster 只派了 at-backend：at-frontend 磁盘上的文件不进账本�
   }
 })
 
-// 上一条的正向自检锚：同样的磁盘内容，roster 换成同时包含 at-backend 与 at-frontend
-// 时，at-frontend 的文件确实会被报成 unrecorded——证明上一条的沉默不是因为账本比对
-// 对这份夹具恒沉默（比如 stage/artifacts 传错了、gate 走错分支），而是 roster 排除
+// 上一条的正向自检锚：同一份账本、同一块空磁盘，roster 换成同时包含 at-backend 与
+// at-frontend 时，at-frontend 那条确实会被报成 missing——证明上一条的沉默不是因为账本
+// 比对对这份夹具恒沉默（比如 stage/artifacts 传错了、gate 走错分支），而是 roster 排除
 // 生效。这条也正是 Step 10 变异 3 的红：把 gate.mjs 里的 roster 改成恒 undefined 时，
 // undefined 落回"退回全部 producers"，效果等价于 roster 包含了 at-frontend——上一条
 // 会变得跟这一条同构，从"沉默"变成"非空回传"，即变红。
-test('正向自检锚：roster 同时包含 at-frontend 时，同样的磁盘内容会被报成 unrecorded——证明上一条不是账本比对对这份夹具恒沉默', () => {
+test('正向自检锚：roster 同时包含 at-frontend 时，同一份账本会被报成 missing——证明上一条不是账本比对对这份夹具恒沉默', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    const statePath = join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8'))
+    state.roster = ['at-backend', 'at-frontend']
+    state.artifacts = { '05-impl/at-frontend.md': sha256OfContract('fixture 05-impl/at-frontend.md\n') }
+    writeFileSync(statePath, JSON.stringify(state), 'utf8')
+
+    const { stdout } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm', tool_input: { subagent_type: 'agent-team:at-architect' },
+    }, GATE, projectDir)
+    const c = JSON.parse(stdout).hookSpecificOutput.additionalContext
+    assert.match(c, /05-impl\/at-frontend\.md/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ---- M3a Task 3：形状 B 在 gate 这一层的回归 ----
+//
+// 纯函数那一侧（tests/artifact-drift.test.mjs）已经钉了 compareArtifacts 自己的口径，
+// 钉不到的是**接线**：gate.mjs 仍然把 ctx.state.roster 传进去（drifted/missing 要它），
+// 一个只改了纯函数、接线处又把 unrecorded 重新收窄回去的实现，纯函数测试是绿的。
+//
+// 夹具就是 docs/11 记的那一趟真实形状（「同一条洞在 S5 上的第二种形状」）：实现记录
+// 已经落盘，而写它的角色还没进 roster——commands/at.md 第 4 步在派发并核实之后才累加
+// roster，所以产物落盘的那一刻 roster 必然还不含它。
+test('形状 B（接线）：at-frontend 还不在 roster 里，它写在磁盘上的文件照样被报成 unrecorded', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S5', artifacts: ['05-impl/at-frontend.md'] })
+  try {
+    const statePath = join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8'))
+    state.roster = ['at-backend']
+    writeFileSync(statePath, JSON.stringify(state), 'utf8')
+
+    const { stdout } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm', tool_input: { subagent_type: 'agent-team:at-architect' },
+    }, GATE, projectDir)
+    const c = JSON.parse(stdout).hookSpecificOutput.additionalContext
+    assert.match(c, /05-impl\/at-frontend\.md/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 上一条的对照：**同一块磁盘、同一个空账本，只把 at-frontend 加进 roster**，回传一模
+// 一样。两条并排才说得清「unrecorded 不跟着 roster 变」——单独看上一条，它与「口径
+// 其实没改、只是这份夹具恰好两边都报」区分不开。
+test('同一块磁盘，roster 换成含 at-frontend 时回传一模一样——unrecorded 在接线这一层也不跟着 roster 变', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S5', artifacts: ['05-impl/at-frontend.md'] })
   try {
     const statePath = join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
@@ -973,22 +1034,31 @@ test('正向自检锚：roster 同时包含 at-frontend 时，同样的磁盘内
 // `Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined` 里，`: undefined`
 // 那一支**零覆盖**——把它改成 `: []`（文档反复强调不能去的方向）不会让任何测试变红。
 //
-// 这一支是承重的，不是风格选择。实测两者的差别（直接调 compareArtifacts，真实 stages.json）：
+// 这一支是承重的，不是风格选择。
+//
+// ⚠️ **M3a Task 3 让这一对原来用的那个信号失效了，夹具跟着换。** 当初实测记的差别是：
 //   roster = undefined → unrecorded: ["05-impl/at-frontend.md"]
 //   roster = []        → unrecorded: []
-// 也就是说：`state.roster` 一旦不是数组，`[]` 那个退法会让一份**磁盘上真实存在、账本里
-// 没记**的伪造产物**不被报出来**——正好是账本比对存在的理由。`undefined` 退回「全部
+// **上面这两行今天不成立了**——unrecorded 改走 producedNames(stages)、不看 roster 之后，
+// 两种取值都会报，这一对会双双恒绿、什么也不分辨（设计 §3.3，理由见
+// hooks/lib/artifact-drift.mjs）。重测同一个问题、换成还跟着 roster 变的那个清单
+// （账本里记着 05-impl/at-frontend.md、磁盘上没有）：
+//   roster = undefined → missing: ["05-impl/at-frontend.md"]
+//   roster = []        → missing: []
+// 也就是说：`state.roster` 一旦不是数组，`[]` 那个退法会让一份**账本里记着、磁盘上却
+// 不存在**的产物**不被报出来**——正好是账本比对存在的理由。`undefined` 退回「全部
 // producers」是更宽的集合，宁可多报不要漏报。
 //
 // 这条测试钉的是**接线**，不是纯函数：stages.mjs 那一层「roster 缺省退回全部 producers」
 // 早有单测，缺的是「gate 真的传了 undefined 而不是 []」。
-test('账本比对：state.roster 不是数组时退回全部 producers——伪造的产物仍然被报成 unrecorded', () => {
-  const dirs = makeRun({ runId: 'r1', stage: 'S5', artifacts: ['05-impl/at-frontend.md'] })
+test('账本比对：state.roster 不是数组时退回全部 producers——账本里记着而磁盘上没有的产物仍然被报成 missing', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
   try {
     const statePath = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
     const state = JSON.parse(readFileSync(statePath, 'utf8'))
     // 非数组。validateState 会嫌它，但那是 ledger 检查项的事，deliverable 这条路不跑它。
     state.roster = null
+    state.artifacts = { '05-impl/at-frontend.md': sha256OfContract('fixture 05-impl/at-frontend.md\n') }
     writeFileSync(statePath, JSON.stringify(state), 'utf8')
 
     const input = {
@@ -1005,11 +1075,12 @@ test('账本比对：state.roster 不是数组时退回全部 producers——伪
 })
 
 test('前置条件：同一夹具在 state.roster 是合法数组且含 at-frontend 时也报——上一条不是靠别的原因绿的', () => {
-  const dirs = makeRun({ runId: 'r1', stage: 'S5', artifacts: ['05-impl/at-frontend.md'] })
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
   try {
     const statePath = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
     const state = JSON.parse(readFileSync(statePath, 'utf8'))
     state.roster = ['at-frontend']
+    state.artifacts = { '05-impl/at-frontend.md': sha256OfContract('fixture 05-impl/at-frontend.md\n') }
     writeFileSync(statePath, JSON.stringify(state), 'utf8')
 
     const input = {

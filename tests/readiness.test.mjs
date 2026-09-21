@@ -142,7 +142,14 @@ test('H2：producerOf 认得出 <role> 展开后的产物归属——缺失项�
 //
 // gate.mjs 三处同构的 `Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined`
 // 实测差异（直接调纯函数，真实 stages.json）：
-//   compareArtifacts  undefined → 报出伪造产物；[] → **不报**（已由 gate-deliverable.test.mjs 覆盖）
+//   compareArtifacts  undefined → 报出账本里记着而磁盘上没有的产物（missing）；[] → **不报**
+//                     （已由 gate-deliverable.test.mjs 覆盖）
+//                     ⚠️ M3a Task 3 改过这一行：原文写的是「undefined → 报出**伪造产物**；
+//                     [] → 不报」，那是 unrecorded 这个信号——它现在**不看 roster 了**
+//                     （hooks/lib/artifact-drift.mjs：unrecorded 是「Bash 绕过 H3 的直接
+//                     表征」，按 roster 收窄就看不见还没进 roster 的角色写的东西）。实测
+//                     重跑：伪造产物在 undefined 与 [] 两种取值下**都报**，这一支的差别
+//                     已经整个移到 missing/drifted 上。差别本身还在，观测点换了。
 //   isStageDone       undefined → false；[]  → false  —— **不可观测**，没有可测的东西
 //   decideReadiness   undefined → **deny**；[] → **allow** —— 本条覆盖它
 //

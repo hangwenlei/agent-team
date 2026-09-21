@@ -27,7 +27,7 @@ import { sha256OfContract } from './contract-hash.mjs'
 // isPlainObject 也走 stages.mjs 同一份（M2b 终审 A2）——它原来是这里的私有拷贝，与
 // reach.mjs / rework-guard.mjs / state.mjs / gate.mjs 共五份。理由与上面那段哈希实现
 // 一字不差：手写的多条件布尔表达式有变体空间，两份逐字相同的实现真的会分叉。
-import { expectedArtifacts, isPlainObject } from './stages.mjs'
+import { expectedArtifacts, isPlainObject, producedNames } from './stages.mjs'
 
 export function compareArtifacts({ artifacts, stages, artifactBytes, roster }) {
   const empty = { drifted: [], missing: [], unrecorded: [] }
@@ -49,17 +49,44 @@ export function compareArtifacts({ artifacts, stages, artifactBytes, roster }) {
   // S2 的产物集合当场变成 roster ∩ producers 驱动的。M2b Task 2 报告记着这件事的实物
   // ——makeRun() 的 roster 缺省值 [] 让四条测试当场变红，正是因为 S2 不再「不受影响」。
   // 改成按条件说、不枚举阶段号。同族另外三处（deliverable/writepath/state）一并改了。
-  const produced = expectedArtifacts(stages, roster)
+  //
+  // ⚠️ M3a Task 3（2026-09-20）：上面这整段理由**只管 drifted / missing 了**，不再管
+  // 第三个清单。它们问的是「**这一趟**该有的对不对得上」，roster 就是对的口径，
+  // 这一支一个字没改。
+  const expected = expectedArtifacts(stages, roster)
 
+  // M3a Task 3（设计 §3.3）：**unrecorded 脱离 roster 收窄，三个清单不再共用一个宇宙。**
+  //
+  // 理由全部写在本文件头部那张表里，它给 unrecorded 的定义逐字是：
+  //
+  //     unrecorded  磁盘上有、账本里没有       —— **Bash 绕过 H3 的直接表征**
+  //
+  // 而一个按 roster 收窄的 unrecorded **看不见一个还没进 roster 的角色写出来的任何
+  // 东西**——commands/at.md 第 4 步在**派发并核实之后**才累加 roster，所以产物落盘的
+  // 那一刻，roster 必然还不含写它的那个人。**判据与它自己声明的用途矛盾。**
+  // 真实形状见 docs/11 的「同一条洞在 S5 上的第二种形状」：S5 两份实现记录已经落盘、
+  // 角色还没被写进 roster，这个清单对它们是瞎的。
+  //
+  // **所以这不是加功能，是让它回到已经写明的用途**：它问的是「磁盘上有谁没交代的
+  // 东西」，而这个问题从来就不该被 roster 闸住。
+  //
+  // ⚠️ 一个循环、每个名字最多读一次磁盘，**不是两个循环各扫一遍**：两遍扫是重复 I/O，
+  // 而且「哪些名字算数」会分成两份各自漂。能这么写是因为
+  // **expectedArtifacts(stages, roster) ⊆ producedNames(stages)**——两者走同一个
+  // expandProduces，前者的角色集合（stageRolesInRun = stageRoles ∩ roster）是后者
+  // （stageRoles）的子集。于是宽的那个当唯一的遍历面，收窄退化成循环里的一个判定。
   const out = { drifted: [], missing: [], unrecorded: [] }
-  for (const name of produced) {
-    const bytes = artifactBytes(name)
-    const has = Object.hasOwn(recorded, name)
-    if (!has) {
+  for (const name of producedNames(stages)) {
+    if (!Object.hasOwn(recorded, name)) {
       // 磁盘上有、账本里没记。磁盘上也没有的话什么都不是——那只是还没做到这一段。
-      if (bytes !== null) out.unrecorded.push(name)
+      // 这一支**不看 roster**，就是上面那段的全部内容。
+      if (artifactBytes(name) !== null) out.unrecorded.push(name)
       continue
     }
+    // 记了。下面两支是 drifted / missing，**roster 口径在这里没变**：账本里记着一份
+    // 这一趟没派的角色的产物，不算「对不上账」——那正是 M2a 那段注释防的东西。
+    if (!expected.has(name)) continue
+    const bytes = artifactBytes(name)
     if (bytes === null) {
       out.missing.push({ name, recorded: recorded[name] })
       continue
