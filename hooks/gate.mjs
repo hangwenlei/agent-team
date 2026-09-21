@@ -918,8 +918,14 @@ function main() {
       // ⚠️ 这是**新增**一处 isStageDone 调用，跟上面 ledger 分支里那处不是同一处（这里是
       // deliverable 分支，两处互不共享调用点）。roster 传 ctx.state?.roster——不是数组时
       // 传 undefined 退回全部 producers：state.json 的 roster 字段本身坏掉时，宁可多判
-      // 一次未推进，不要漏判。**传参的写法**与下面 compareArtifacts、上面 readiness
-      // 分支逐字相同。
+      // 一次未推进，不要漏判。**传参的写法**与本文件另外两处逐字相同：deliverable 分支里
+      // 那次 compareArtifacts 调用，和 readiness 分支里那次 decideReadiness 调用。
+      //
+      // ⚠️ M3a Task 4 同时改掉了这句话里的**位置指代**：上一版写的是「与**下面**
+      // compareArtifacts、**上面** readiness 分支」——**两个方位词里有一个是错的**，
+      // compareArtifacts 那次调用在本文件里排在这一处**上面**，不是下面。
+      // 按 Ruling 11 同一条（文档与注释里不写 file:line，写符号名）：**方位词和行号是同一族
+      // ——靠位置定位，被下一次插入或搬动静默弄假，而且没有任何东西会红。** 改成点名。
       //
       // ⚠️ M3a Task 4：上一版这里写的是「口径与下面 compareArtifacts、上面 readiness
       // **分支一致**」——M3a Task 3 之后那句只剩一半真，改成上面那样分两层说。
