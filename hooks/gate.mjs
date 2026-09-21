@@ -222,7 +222,43 @@ function failOpenNotice(label, ctx) {
 // 闸，它从不拒绝任何调用；要说明这是审计、对不上账，并写明它不阻止伪造、只留痕迹——与
 // hooks/lib/reach.mjs 的触达表同一个性质，完整理由见 hooks/lib/artifact-drift.mjs 头部，
 // 不在这里重复第二遍。
-function buildDriftNotice(cmp) {
+//
+// ---
+//
+// M3b：**收尾按「收件人改不改得了它」分支**（docs/11 §5.23 二）。
+//
+// 这条回传挂在 CHECK === 'deliverable'，也就是 PostToolUse:Agent，而 additionalContext
+// **发给发起那次 Agent 调用的人**。子代理派子代理时（at-product 派 at-ui）收件人就是
+// at-product——M3a Task 5 在活会话里实测过那一趟：unrecorded 落在 at-product 的
+// sidechain 里，PM 从头到尾零命中（docs/18 §3.6 末尾那条边）。
+//
+// **而上一版的收尾是「需要的话把 artifacts 改成与磁盘一致」**，同一条回传的上一句自己
+// 就写着「state.json 对 Edit/Write 只对 PM 开」——**先告诉收件人你改不了，再让他去改**。
+// 这正是本仓库记过的「失败文案把人指向错误修法」那一族的一个变体：文案没指错路，
+// **是路由指错了人**（buildCoverageNotice 上方那段注释记的是同一族的另一种形状）。
+//
+// 分量不在「措辞不好看」：账本比对的 unrecorded 是 **Bash 绕过 H3 的直接表征**
+// （hooks/lib/artifact-drift.mjs 头部那张表逐字这么定义它）。它发不到能处理的人手里，
+// 这个机制在子代理场景下就形同虚设。
+//
+// **「谁算 PM」复用 isContractWriter，不在这里另写一遍 role === 'at-pm'。**
+// 理由与 hooks/lib/writepath.mjs 的控制文件豁免同一条——那里用的**就是它**：
+// 这条文案断言的「你改不了 state.json」与 H3 真实会不会拒，由**同一个谓词**决定，
+// 不让文案自己再读一遍「谁是 PM」。调用点因此照抄 H3 的那组合（callerOf → isContractWriter）。
+//
+// ⚠️ **isDriverRole 上方那条失效条件对这一处同样适用，不抄第二份**：isContractWriter
+// 一旦为**它自己的**理由放宽（那段注释点名的那一种：有人往某个角色的 can_delegate_to
+// 里加 at-pm），这里要回来重核两者是否还重合。两处有一个差别值得写下来：那一处借它答的
+// 是**另一个**问题（谁是不参与统计的驱动者），今天只是外延重合；**这一处借的是 H3 自己
+// 调用的那同一个谓词**，所以 isContractWriter 放宽时 H3 与这条文案会**一起**放宽，断言
+// 不会因此变假。真正要重核的是另一半：isContractWriter 为假**不等于**一定写不成——H3
+// 在 ctx.kind === 'no-run' 那一支对**所有角色** fail open（gate.mjs 的 writepath 分支）。
+// 这条回传只在 ctx.ok 时才算得出来，那个窗口从这个调用点够不到；**哪天这条回传被挪到
+// 一个 ctx 不保证 ok 的触发点上，这个差额就落地了。**
+//
+// ⚠️ 参数缺省（判不出收件人）时落**改不了**那一支：多一次转述的代价，远小于再一次
+// 指挥一个改不了它的人去改——那正是这一轮要修的形状。
+function buildDriftNotice(cmp, recipientCanWriteState) {
   if (!cmp) return null
   const { drifted, missing, unrecorded } = cmp
   if (!drifted.length && !missing.length && !unrecorded.length) return null
@@ -238,12 +274,21 @@ function buildDriftNotice(cmp) {
     lines.push(`  - ${name}：磁盘上有这份文件，但 artifacts 里没记`)
   }
 
+  // 两支收尾。前面那一整段（审计边界）两支共用，一个字不改：它对谁都成立。
+  const tail = recipientCanWriteState
+    ? `去 run 目录核实磁盘内容，需要的话把 artifacts 改成与磁盘一致。`
+    : `⚠️ **这一条你改不了**：artifacts 住在 state.json 里，它是编排层的控制文件，` +
+      `H3 写路径门禁在 PreToolUse 上把非 PM 对它的 Edit/Write 拒掉。而这条回传只发给` +
+      `发起这次派发的人——**也就是你，PM 不会同时收到一份**。` +
+      `**把上面这几行原样冒泡给派你的人**，让它继续往上带到 PM；` +
+      `**不要自己把它咽掉**——咽掉之后没有任何人会再看见它。`
+
   return (
     `【账本比对】以下产物对不上账：\n${lines.join('\n')}\n` +
     `这是审计产物，不是安全边界——它不阻止任何人伪造产物，只让伪造留下痕迹。真要伪造的人` +
     `可以连 artifacts 一起改（任何持有 Bash 的角色都写得了——state.json 对 Edit/Write 只对` +
     `PM 开，但 Bash 不经任何 hook），但那时它不再是顺手绕过，而是一次需要同时改两处的刻意` +
-    `行为。去 run 目录核实磁盘内容，需要的话把 artifacts 改成与磁盘一致。`
+    `行为。${tail}`
   )
 }
 
@@ -884,6 +929,16 @@ function main() {
     // 会让 PM 只看见后一条（下面统一交给 emitLedger 拼成一条）。只在 CHECK === 'deliverable'
     // 时算：H5b（stop-gate）走 SubagentStop 的 stderr 契约，没有 additionalContext 这条
     // 通道，算了也没地方发。
+    // M3b：**这条回传的收件人不是 role**。role 是刚被派出去的那个目标
+    // （tool_input.subagent_type）；additionalContext 发给**发起这次 Agent 调用的人**，
+    // 也就是 agent_type——主线程发起时它缺失，callerOf 归成 MAIN。两个字段在这个事件上
+    // 含义不同这件事，上面 rawTarget 那段注释已经写过一次，这里只是用它的另一半。
+    //
+    // 组合（callerOf → isContractWriter）与 hooks/lib/writepath.mjs 的控制文件豁免逐字
+    // 同构，是有意的：文案断言的「收件人改不改得了 state.json」与 H3 真实会不会拒，
+    // 由同一个谓词决定。完整理由与失效条件写在 buildDriftNotice 上方，不在这里重复。
+    const recipient = callerOf(input)
+    const recipientCanWriteState = isContractWriter(recipient)
     const driftNotice =
       CHECK === 'deliverable'
         ? buildDriftNotice(
@@ -896,8 +951,31 @@ function main() {
               // 字段坏掉（不是数组）时应当退回更宽的集合，多报几条不要漏报。
               roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
             }),
+            recipientCanWriteState,
           )
         : null
+
+    // M3b：收件人改不了它时，**往 stderr 留一行痕**。
+    //
+    // 理由：这条回传**只走 additionalContext**，收件人不转述就没有任何人再看得见它——
+    // 而它是 Bash 绕过 H3 的直接表征。文案那一半在 buildDriftNotice 里，痕迹这一半在
+    // 调用点，两半都要有；这个分工与 buildCoverageNotice 那条收窄失效的痕迹逐字同构。
+    //
+    // ⚠️ **这不是 fail open，措辞不要写成 fail open**，所以不复用 failOpenNotice。
+    // 那一族说的是「运行上下文读不到、本次放行」；这里运行上下文是好的、判据照常算了、
+    // 回传照常发了，**没有放行任何东西**——错的是收件人，不是判定。两件事混用同一句话，
+    // 就是本仓库记过的那种口径分叉（同一个说法在不同检查项里被说成两个意思）。
+    //
+    // ⚠️ 只在收件人改不了时留。PM（含主线程）收到时那条路径本来就通，留痕只是噪音。
+    if (driftNotice && !recipientCanWriteState) {
+      process.stderr.write(
+        `agent-team 账本比对：这次的回传落在 ${recipient} 手里——PostToolUse:Agent 的 ` +
+          `additionalContext 只发给发起这次派发的人，而 artifacts 住在 state.json 里，` +
+          `H3 写路径门禁在 PreToolUse 上把非 PM 对控制文件的 Edit/Write 拒掉。` +
+          `告警照发、判据没有放行任何东西，发错的是收件人不是判定；` +
+          `这一条要被处理，得靠 ${recipient} 把那段回传原样冒泡上去，一路带到 PM。\n`,
+      )
+    }
 
     if (r.ok) {
       // ⚠️ ok 有三种成因，只有一种是真的「交付了」。skipped 的两种是门禁**哑掉**：

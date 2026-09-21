@@ -1095,3 +1095,96 @@ test('前置条件：同一夹具在 state.roster 是合法数组且含 at-front
     rmSync(dirs.pluginDir, { recursive: true, force: true })
   }
 })
+
+// ---- M3b：账本回传的路由——收尾按「收件人改不改得了它」分支（docs/11 §5.23 二）----
+//
+// 夹具就是 M3a Task 5 在活会话里实测到的那一趟（docs/18 §3.6 末尾那条边）：at-product
+// 在 S2 里派 at-ui，PostToolUse:Agent 在派发**启动**那一帧触发，additionalContext 落在
+// at-product 手里，PM 从头到尾零命中。而上一版的收尾是「需要的话把 artifacts 改成与磁盘
+// 一致」——同一条回传的上一句自己就写着 state.json 只对 PM 开。
+//
+// ⚠️ 这一组的 agent_type 与 tool_input.subagent_type **必须不同**：前者是**收件人**
+// （发起这次派发的人），后者是刚被派出去的目标。两个字段在这个事件上含义不同这件事，
+// 本文件开头第二段说的是 subagent_type 那一半，这一组测的是 agent_type 那一半——
+// 只有跑一次真实子进程、用一个收件人与目标不同的场景才验得出来。
+//
+// 磁盘上放齐 S2 的三份产物、state.artifacts 为空：at-ui 的两份都在 → r.ok 成立 →
+// H5a 那条哑火告警不发，stdout 里剩下的只可能是账本比对（三条 unrecorded）。
+// roster 用 makeRun 的缺省空数组，与那一趟实测到的 state.roster 逐字相同——
+// unrecorded 本来就不看 roster（hooks/lib/artifact-drift.mjs 的 M3a 注释块）。
+
+// 下面几条只换一个变量：收件人。抽一个本地帮手而不是把 makeRun + try/finally 抄若干遍
+// ——本仓库为「同一份知识抄多份会分叉」开过好几轮循环，而这里要分辨的恰恰只有 agent_type
+// 一个字段，抄多遍会把「夹具相同」变成读的人要自己逐行核的事。
+// agentType 传 null 表示**主线程**：逐字是「没有 agent_type 这个键」，不是
+// `agent_type: undefined`——callerOf 两者都归 MAIN，但 JSON.stringify 会把显式的
+// undefined 整个键丢掉，留着它等于让这条测试依赖一个它没打算依赖的序列化细节。
+function driftAs(agentType) {
+  const { projectDir, pluginDir } = makeRun({
+    runId: 'r1',
+    stage: 'S2',
+    artifacts: ['01-prd.md', '02-ui-spec.md', '02-wireframe.html'],
+  })
+  try {
+    const input = { tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-ui' } }
+    if (agentType !== null) input.agent_type = agentType
+    const { stdout, stderr } = run('deliverable', input, GATE, projectDir)
+    const context = stdout.trim() ? JSON.parse(stdout).hookSpecificOutput.additionalContext : ''
+    return { context, stderr }
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+}
+
+test('M3b：收件人是 at-product 时，收尾不再出现「把 artifacts 改成与磁盘一致」——不要指挥一个改不了它的人去改', () => {
+  assert.doesNotMatch(driftAs('at-product').context, /把 artifacts 改成与磁盘一致/)
+})
+
+// ⚠️ 上一条的正向自检锚，钉在**判据真正迭代的那一层**：不是「这份夹具有没有回传」
+// （那只证明夹具活着），是「同一份夹具、只把收件人换成 PM，那句收尾就回来」。
+// 分支判据被改成恒「改不了」时这一条红；被改成恒「改得了」时上一条红。两条各守一侧。
+test('M3b 正向自检锚：同一份夹具、收件人换成 at-pm 时那句收尾照旧出现——上一条守的是分支，不是文案整个没了', () => {
+  assert.match(driftAs('at-pm').context, /把 artifacts 改成与磁盘一致/)
+})
+
+test('M3b：收件人改不了时，文案要先说清这一条他改不了', () => {
+  assert.match(driftAs('at-product').context, /这一条你改不了/)
+})
+
+test('M3b：收件人改不了时，文案要他把这一条原样冒泡给派他的人', () => {
+  assert.match(driftAs('at-product').context, /原样冒泡给派你的人/)
+})
+
+// 三条里最容易被当成客套话省掉的那一条：咽掉之后没有任何人会再看见它——这条回传只走
+// additionalContext，没有第二条通道。
+test('M3b：收件人改不了时，文案要他别自己把它咽掉', () => {
+  assert.match(driftAs('at-product').context, /不要自己把它咽掉/)
+})
+
+test('M3b：收件人改不了时往 stderr 留一行痕——这条回传只走 additionalContext，他不转述就没有任何人再看得见', () => {
+  assert.ok(driftAs('at-product').stderr.length > 0)
+})
+
+// ⚠️ 本仓库「fail open 必须留痕」是硬规矩，**但这一条不是 fail open**：运行上下文是好的、
+// 判据照常算了、回传照常发了，没有放行任何东西——错的是收件人，不是判定。所以这里钉的是
+// 正向的「写清它是什么」，不是「不许出现某个词」：复用 failOpenNotice 那一族的措辞会让
+// 这一条红，而一条否定式断言在那种改法下反而可能照样绿。
+test('M3b：那行痕要写清它不是 fail open', () => {
+  assert.match(driftAs('at-product').stderr, /没有放行任何东西/)
+})
+
+// ⚠️ 下面两条是空断言，夹具整个哑掉时天然满足。它们的正向锚是上面那条「收件人是
+// at-product 时 stderr 非空」——同一份夹具、同一条代码路径，只差 agent_type 一个字段。
+// 删掉 stderr 那一行时它红；把分支判据改成恒「改不了」时下面这两条红。
+test('M3b：收件人是 at-pm 时 stderr 为空——那条路径本来就通，留痕只是噪音', () => {
+  assert.equal(driftAs('at-pm').stderr, '')
+})
+
+test('M3b：收件人是主线程（没有 agent_type 这个键）时，保持旧收尾', () => {
+  assert.match(driftAs(null).context, /把 artifacts 改成与磁盘一致/)
+})
+
+test('M3b：收件人是主线程时 stderr 为空', () => {
+  assert.equal(driftAs(null).stderr, '')
+})
