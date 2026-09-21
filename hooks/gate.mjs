@@ -917,8 +917,23 @@ function main() {
       //
       // ⚠️ 这是**新增**一处 isStageDone 调用，跟上面 ledger 分支里那处不是同一处（这里是
       // deliverable 分支，两处互不共享调用点）。roster 传 ctx.state?.roster——不是数组时
-      // 传 undefined 退回全部 producers，口径与下面 compareArtifacts、上面 readiness
-      // 分支一致：state.json 的 roster 字段本身坏掉时，宁可多判一次未推进，不要漏判。
+      // 传 undefined 退回全部 producers：state.json 的 roster 字段本身坏掉时，宁可多判
+      // 一次未推进，不要漏判。**传参的写法**与下面 compareArtifacts、上面 readiness
+      // 分支逐字相同。
+      //
+      // ⚠️ M3a Task 4：上一版这里写的是「口径与下面 compareArtifacts、上面 readiness
+      // **分支一致**」——M3a Task 3 之后那句只剩一半真，改成上面那样分两层说。
+      // **写法一致是真的**（三处都是 Array.isArray(...) ? ... : undefined）；
+      // **假的是「传进去之后退回全部 producers」这个效果对 compareArtifacts 整体成立**：
+      // 那个函数里三个清单已经不共用一个宇宙，drifted/missing 吃这个参数，
+      // **unrecorded 根本不看它**（hooks/lib/artifact-drift.mjs 的 M3a 注释块）。
+      // 传 undefined 还是传一份真 roster，对 unrecorded 一个字的差别都没有。
+      // **三处的写法一致，不等于三处拿它干同一件事。**
+      //
+      // ⚠️ 这句话在 stages.README.md 的「H5a 的静默集合」那一节末尾有**逐字同族的
+      // 一份**（讲的就是上面这处 isStageDone 调用），同一轮一起改的——两处都改，
+      // 是因为本仓库最稳定的那个失败模式就是「更正只作用到它逐字点名的那一句上」。
+      // 改一处的时候去看另一处。
       const coordinator = isCoordinatorFor(ctx, role)
       const stageDone = isStageDone({
         stage: ctx.state?.stage,
