@@ -773,6 +773,10 @@ const RETIRED_CLAIMS = [
   '在本仓库走过它记下的那个 commit 之后会怎么样，今天是一个没答的问题',
   'what `claude plugin update` does once this repository has moved past the commit an install pinned',
   '还有 `claude plugin update` 在本仓库走到某次安装钉住的那个 commit 之后会怎么做',
+  // M3e 退役的两句（`docs/19` §10）。这一句的两半，在「装旧的 → 上游真的推新的 →
+  // `update` 真的拿得到」这条链于真 GitHub 上跑通的那一刻同时变假。
+  'Nothing was ever pushed to this repository mid-measurement',
+  '实测期间**一次都没有往本仓库推过东西**',
 ]
 
 function retiredClaimsIn(text) {
