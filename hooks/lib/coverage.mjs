@@ -6,9 +6,20 @@
 //   stageRolesInRun(S2, roster) = ["at-product"]  ← roster ∩ producers
 //   expandProduces(S2, …)       = ["01-prd.md"]   ← 只剩一份
 //   isStageDone(S2)             = true
-//   expectedArtifacts 里根本没有 02-ui-spec.md / 02-wireframe.html 这两个名字，
-//   compareArtifacts 只遍历 expectedArtifacts → 那两份既不算 missing 也不算
-//   unrecorded，连查都没被查。
+//   expectedArtifacts 里根本没有 02-ui-spec.md / 02-wireframe.html 这两个名字 →
+//   账本比对的三个清单一个都接不住它们。
+//
+// ⚠️ **M3a Task 3 改了上面最后一句，别照旧版抄。** 原文写的是「compareArtifacts 只遍历
+// expectedArtifacts → 那两份既不算 missing 也不算 unrecorded，**连查都没被查**」——
+// **那个机制已经不成立了**：unrecorded 现在走 producedNames(stages)、不按 roster 收窄
+// （hooks/lib/artifact-drift.mjs 的 M3a 注释块），这两个名字**是被查了的**。
+//
+// **结论一个字没变，而且从此不再依赖那个已经不成立的前提**：形状 A 里那两份
+// **从来没被写出来**，磁盘上没有 → artifactBytes 返回 null → 仍然什么都不是。
+// 换句话说：**问「磁盘上多了什么」的判据，结构上就照不到「从来没写」——不管它的宇宙
+// 有多宽。** 把 unrecorded 的宇宙放宽到全部 producers 之后形状 A 依然漏，这件事现在
+// 是实测过的，不是推的。
+// 所以接住形状 A 的**必须**是一条问「**谁没被交代**」的判据，这个模块因此存在。
 //
 // 根在于：roster 决定「这一趟该有什么」，而 roster 是 PM 在**派发并核实之后**才写的
 // ——从来没被派的角色，就从来不被期待，它的缺席因此不可见。
