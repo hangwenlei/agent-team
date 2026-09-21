@@ -196,8 +196,17 @@ test('正向自检锚（at-pm 退出宇宙）：把 at-pm 塞进 available_roles
 //
 // 这四条是 Task 5「误报率」那一项的第一份数据：不需要真实 run，拿 docs/15 §3.8 的终局
 // state 跑一遍就有。控制方要再调判据的话，这四条会红——那正是它们该干的事。
-
-test('收窄前：终局 state 上报四条（S5 那三条是这个项目根本用不上的角色）', () => {
+//
+// ⚠️ M3a Task 5：下面那条的名字原先写的是「上报四条（S5 那**三条**是这个项目根本用不上
+// 的角色）」——**假的**。S5 那三条是 at-ui / at-ios / at-android，而 at-ui 就在
+// M2B_AVAILABLE 里（它是那个项目用得上的角色，只是这一趟被裁了）；真正「这个项目根本
+// 用不上」的只有 at-ios 与 at-android。那句话还自相矛盾：四条里去掉三条噪声该剩一条，
+// 而收窄之后实测是两条。
+// **这是同一句话的第四个落点**：定向复评 N5 已经把 hooks/lib/coverage.mjs 的注释、
+// 设计与计划三处改成列举，**这里没被扫到**——三处用的是「四条里有三条」那个词形，
+// 这里用的是「上报四条（S5 那三条……）」，**说法不同而成因相同**（docs/16 §3.4）。
+// 按 docs/16 §3.1「列举，不报总数」改成逐个点名。
+test('收窄前：终局 state 报出 S2 的 at-ui、S5 的 at-ui/at-ios/at-android —— at-ios 与 at-android 是这个项目根本用不上的角色，at-ui 不是', () => {
   const out = decideCoverage({ stages, state: m2bFinal() })
   assert.deepEqual(out.gaps, [
     { stage: 'S2', role: 'at-ui' },
