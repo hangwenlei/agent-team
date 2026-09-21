@@ -19,6 +19,58 @@ test('state.json 模板的 contract_sha 是 PENDING——模板里不该有一�
   assert.equal(readJson('templates/state.json').contract_sha, 'PENDING')
 })
 
+// ——— 哪些顶层键是「少了就报」的，哪些不是 ———
+//
+// M3a Task 4。commands/at.md 建 run 那一段写着「模板的顶层键照着写，一个都不要省：
+// **除 trimmed 以外**，少任何一个都会被账本回传报成状态不合法」，主规格 §4.4 里有
+// 同一句的另一处。**那句话在 M3a 之前是没有例外的**——Task 1 给模板加了 trimmed，而
+// validateState 对 trimmed 缺失**有意**不报（向后兼容：这个字段之前落盘的 run 里没有），
+// 于是原来那句「少了会被账本回传报成状态不合法」当场对一个键变假，**而全仓没有任何
+// 东西会响**。这条就是那句话的判据。
+//
+// ⚠️ 判据从 templates/state.json 派生，**不在测试里抄一份「模板有哪些键」**，理由与
+// tests/commands.test.mjs 里那条「模板的键都在 /at 那段列举里」逐字相同：抄一份就是
+// 第二处真源，往模板加键的人只会同时改模板和那份拷贝，判据永远不会红。
+//
+// ⚠️ 两条互为对方的正向自检锚，所以必须成对：
+//   - 上面那条断言的是「删了就报」（problems 非空）。**它单独可能因为夹具坏了而恒真**
+//     ——比如 readJson 读出来的根本不是一份合法 state，那么删哪个键都照样报。
+//   - 下面那条断言同一套夹具、同一个删法，对 trimmed 得到的是 **problems 为空**。
+//     它一红就说明「删一个键之后还能是合法 state」这件事做不到了，上面那条于是不再
+//     是在检查「这个键承重」，而是在检查「这份夹具坏着」。
+// 这正是「锚要钉在判据真正迭代的那一层」：锚钉的是删键这个动作本身，不是键的名字。
+const stateTemplateKeys = () => Object.keys(readJson('templates/state.json'))
+const withoutKey = (k) => {
+  const s = readJson('templates/state.json')
+  delete s[k]
+  return validateState(s, { stages }).problems
+}
+
+test('state.json 模板里除 trimmed 之外的每个顶层键，删掉就会被 validateState 报', () => {
+  for (const k of stateTemplateKeys()) {
+    if (k === 'trimmed') continue
+    assert.notDeepEqual(
+      withoutKey(k),
+      [],
+      `templates/state.json 的 ${k} 删掉之后 validateState 一声不吭——` +
+        'commands/at.md 建 run 那一段与主规格 §4.4 都写着「除 trimmed 以外，少任何一个都会被' +
+        '账本回传报成状态不合法」，那句话因此对 ' + k + ' 变假了。' +
+        '要么给这个键补上必填校验，要么把那两处正文里的例外名单改对——别只改一处。',
+    )
+  }
+})
+
+test('state.json 模板的 trimmed 删掉不报——向后兼容那条例外，也是上一条的正向锚', () => {
+  assert.deepEqual(
+    withoutKey('trimmed'),
+    [],
+    'trimmed 缺失被 validateState 报了。它是 M3a 后加的字段，对更早落盘的 state.json ' +
+      '必须缺失即合法（/agent-team:at-resume 要去读那些 run）；同时这条还是上一条的' +
+      '正向锚——它一红，就说明「删掉一个键之后仍然是合法 state」这件事本身做不到了，' +
+      '上一条那些「删了就报」于是可能是夹具坏掉带来的恒真。',
+  )
+})
+
 // Task 2 修复轮 1 · 修复 1：hooks/lib/readiness.mjs 的 decideReadiness 那条回归
 // （H2 在真实初始状态下对 S2/S5 完全失效）整条推理都建立在这个前提上——
 // commands/at.md 第 4 步在派发**并核实之后**才把 targetRole 累加进 roster，
@@ -123,6 +175,21 @@ test('前置条件：available_roles 真的比 paths 的键多，且多出来的
 // 这不是 H3 的安全洞——H3 从不看 available_roles。真实代价局限在 /at 的班底核算：一个
 // 拿到真实写权限（paths）的角色可以完全不出现在「可用班底」里，于是它连
 // never_invoked 的分母都进不去，「这个角色到底算不算数」失去机械校验。
+//
+// ⚠️ **上面那句「没有任何 hook 读它」M3a 之后是假的（M3a Task 4 补标）。**
+// M3a Task 2 的 Ruling 2 把产者交代判据的宇宙收窄到了 available_roles：
+// hooks/gate.mjs 的 ledger 分支把 ctx.project?.available_roles 传进
+// hooks/lib/coverage.mjs 的 decideCoverage。**available_roles 从此有第二个消费方，
+// 而且它在 hook 里。**
+//
+// **代价跟着变，所以这条测试的严重性也要重说**：一个在 paths 里、却不在 available_roles
+// 里的角色，今天**同时**掉出两个口径——收尾的 never_invoked 分母（旧的那一半），
+// 以及**产者交代判据的宇宙**（新的那一半）。后者的表现是：它当了某一段的产者却从来
+// 没被派，判据**也不会报它**，因为它压根没进宇宙。「这个角色到底算不算数」失去的不再
+// 只是收尾时的机械校验，而是**运行中唯一会喊出「这个人没交代」的那条判据**。
+//
+// ⚠️ 这一条仍然**不是** H3 的安全洞——H3 到今天也不看 available_roles，那半句没变。
+// 分开说是有意的：变假的是「有没有 hook 读它」，没变的是「H3 看不看它」。
 test('paths 的每个键都在 available_roles 里——拿到写权限的角色不能不在班底名单上', () => {
   const p = JSON.parse(readFileSync(new URL('../templates/project.json', import.meta.url), 'utf8'))
   const orphan = Object.keys(p.paths).filter((r) => !p.available_roles.includes(r)).sort()

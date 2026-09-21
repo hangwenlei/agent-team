@@ -194,12 +194,20 @@ U4 与 U7 是同一个机制的两个观测面，只是分别撞在「agent 宇�
 > | 展开成 | 决策点 |
 > |---|---|
 > | **写入者自己** | `writepath.mjs` 的 `stageOwnerOfRunPath`（H3 归属；`ledger` 的 `produce` 回传**与它共用同一份**）<br>`deliverable.mjs` 的 `expandProduces(stage, [role])`（H5 交付物展开） |
-> | **`roster ∩ producers`** | `state.mjs` 的 `isStageDone`<br>`artifact-drift.mjs` 的 `compareArtifacts`（经 `expectedArtifacts`）<br>`readiness.mjs` 的 `done` |
-> | **全部 `producers`** | `state.mjs` 的 `validateState`（经 `producedNames`）<br>`readiness.mjs` 的 `producerOf` |
+> | **`roster ∩ producers`** | `state.mjs` 的 `isStageDone`<br>`artifact-drift.mjs` 的 `compareArtifacts` 的 **`drifted` / `missing`**（经 `expectedArtifacts`）<br>`readiness.mjs` 的 `done` |
+> | **全部 `producers`** | `state.mjs` 的 `validateState`（经 `producedNames`）<br>`artifact-drift.mjs` 的 `compareArtifacts` 的 **`unrecorded`**（经 `producedNames`）<br>`readiness.mjs` 的 `producerOf` |
 > | **归属判据（「这一段归不归我」）** | `deliverable.mjs`：`stageRoles(stage).includes(role)`<br>`readiness.mjs`：`stageRoles(s).includes(targetRole)` |
 >
 > 「`roster ∩ producers`」这一组的单一真源是 `stages.mjs` 的 `stageRolesInRun(stage, roster)`——
 > **不要在调用点自己再 filter 一遍**。M2a 期间这段逻辑一度被写了两份，评审抓出后收敛。
+>
+> ⚠️ **`compareArtifacts` 在上表里占两行，不是笔误（M3a 补）。** 上一版它整个挂在
+> 「`roster ∩ producers`」那一行，M3a 之后那么写只对一半：三个清单不再共用一个宇宙。
+> `drifted`/`missing` 问的是「**这一趟**该有的对不对得上」，`roster` 是对的口径；
+> `unrecorded` 问的是「**磁盘上有谁没交代的东西**」，而 `roster` 是 PM 在派发并核实之后
+> 才写的——产物落盘那一刻它必然还不含写它的那个人，**按 `roster` 收窄的 `unrecorded`
+> 因此与它自己声明的用途矛盾**。完整论证在 `hooks/lib/artifact-drift.mjs` 的 M3a 注释块，
+> 不在这里抄第二份。**`stages.README.md` 那张摘要表是这张表的摘要，两处要一起改。**
 >
 > **漏掉的三处分别会怎样**（都是实测，不是推演）：`writepath.mjs` 的 `producesOf` 对
 > `<role>` 产物恒答「不是你的」，H3 会把 **at-backend 自己**也拒在写
@@ -287,6 +295,7 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
   "stage": "S5",
   "contract_sha": "sha256:...",
   "roster": ["at-frontend", "at-backend", "at-qa"],
+  "trimmed": { "at-ui": "S2" },
   "artifacts": { "01-prd.md": "sha256:..." },
   "history": [
     { "stage": "S1", "at": "2026-09-17T14:30:00Z" },
@@ -298,7 +307,7 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
     { "stage": "S5", "at": "2026-09-17T17:15:00Z" }
   ],
   "rework": { "S5": 1 },
-  "never_invoked": ["at-ios", "at-android"],
+  "never_invoked": ["at-ui", "at-ios", "at-android"],
   "escalations": [
     { "stage": "S4", "kind": "tradeoff", "question": "...", "answer": "...", "at": "..." }
   ]
@@ -318,6 +327,26 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
 S5 重做，所以 S5 在 `history` 里出现两次、`rework.S5` 是 1，而 S6 只出现一次、返工 0
 次因而不进 `rework`。**规格里的示例必须能通过它自己写下的规则**——否则第一个照着它写
 模板的人就会写出一份校验不过的 `state.json`。
+
+`trimmed` 与 `roster` 是一对（**M3a 补**）：`roster` 答「这一趟**叫到了**谁」，`trimmed` 答
+「这一趟**主动不叫**谁、在哪一段」。键是角色名，值是它被裁掉的那一段。
+**它不要求写理由**——理由写在 `04-dispatch.md` 里，再要一份就是同一份知识的第二处。
+
+为什么需要它：`roster` 是 PM 在**派发并核实之后**才写的，所以一个**从来没被派**的角色
+**从来不被期待**，它的缺席对所有按 `roster` 收窄的判据都不可见。按需组队地裁掉某个
+产出角色是合法动作，问题从来不在「裁剪」，在「裁剪只写在散文里、不可机器读」。
+`trimmed` 把那个**已经存在**的决定变成一条声明：阶段推进之后有判据把该段的产出角色
+逐个对 `roster ∪ trimmed` 查一遍，两边都不在就报出来（报，不拦）。完整论证与被排除的
+两个候选方案见 `docs/superpowers/specs/2026-09-20-M3a-roster的洞-design.md`。
+
+示例里 `at-ui` 是**在 S2 被裁掉的**，所以它不在 `roster` 里、最后也会进 `never_invoked`
+——**两个字段答的不是同一个问题**：`trimmed` 是当段就写下的**决定**，`never_invoked` 是
+收口时按 `available_roles` 减去 `roster` **算**出来的结果，算的时候一整趟都走完了。
+
+⚠️ **`trimmed` 缺失不报错**，这是向后兼容：这个字段是后加的，更早落盘的 `state.json`
+没有它，而 `/agent-team:at-resume` 要去读那些 run。**其余每一个顶层键都是必须的**
+（判据：拿 `templates/state.json` 逐个删键跑 `validateState`，除 `trimmed` 外每一个都报
+——`tests/templates.test.mjs` 里那条从模板派生的测试钉着这件事，不在测试里另抄一份键名清单）。
 
 `artifacts` 由 `ledger` 的 `produce` 回传填写：某个阶段的 `produces` 被写到磁盘上时，
 `ledger` 算出它的 sha256 回传给 PM，PM 写进这个字段。**键必须是某个阶段的 `produces`**，

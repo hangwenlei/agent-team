@@ -62,19 +62,32 @@ stageRolesInRun(stage, roster))`；要知道「某个名字是不是任何一个
 **`<role>` 的展开按消费方不同而不同**，完整表格与理由见主规格 §4 阶段表下方
 「注记（M2a 补）」那一条——这里不重复抄一遍，防的正是 `docs/11` §1.5 第 2 点点名的
 那种漂移（同一份清单在两处各抄一份，改一处另一处不会有任何提示地继续用旧口径）。
-摘要，五个消费方各自的集合：
+摘要，逐个消费方各自的集合：
 
 | 消费方 | `<role>` 展开成 |
 |---|---|
 | H3 写路径（`writepath.mjs` 的 `stageOwnerOfRunPath`） | 写入者自己 |
 | `ledger` 的 `produce` 回传 | 写入者自己——与上一行共用同一个 `stageOwnerOfRunPath` |
 | `isStageDone`（推进判据） | `roster ∩ producers` |
-| 账本比对 `compareArtifacts` | `roster ∩ producers` |
+| 账本比对 `compareArtifacts` 的 `drifted` / `missing` | `roster ∩ producers` |
+| 账本比对 `compareArtifacts` 的 `unrecorded` | 全部 `producers` |
 | `validateState` 的 artifacts 键校验 | 全部 `producers` |
 | `/at-resume` 的「产物齐没齐」核盘（`commands/at-resume.md`） | `roster ∩ producers` |
 | `/at-status` 的产物那一栏（`commands/at-status.md`） | `roster ∩ producers` |
 
-⚠️ **最后两行是 M2b 终审 B5 补的。** 那两条命令是正文层**唯一被要求自己展开 `produces`**
+⚠️ **`compareArtifacts` 占两行不是笔误，M3a Task 3 之后它内部就是两个口径。**
+`drifted`/`missing` 问的是「**这一趟**该有的对不对得上」，`roster` 是对的口径；
+`unrecorded` 问的是「**磁盘上有谁没交代的东西**」，那个问题从来就不该被 `roster` 闸住
+——理由与那条边界的完整论证在 `hooks/lib/artifact-drift.mjs` 的 M3a 注释块里，
+这里不抄第二份。**上一版这张表给 `compareArtifacts` 写的是单独一行 `roster ∩ producers`**，
+改口径之后那一行就成了对一半。
+
+⚠️ **上一版这句引导语写的是「五个消费方」，而表当时已经是七行。** 非本轮造成，一并改掉：
+本文件自己立的规矩就是「列举，不报总数」（见本文件下面 S5 那一节末尾），
+而报出来的那个总数会在下一次给表加行的时候静默变假——这一次正是被加行撞出来的。
+
+⚠️ **`/at-resume` 与 `/at-status` 那两行是 M2b 终审 B5 补的**（原文写的是「最后两行」
+——那是靠位置定位，加一行就会指错人，一并改成点名）。那两条命令是正文层**唯一被要求自己展开 `produces`**
 的地方，此前既不在这张表里、也没有指向 `expandProduces`——**它们没有任何口径**。
 两份正文当时写的是「把 `produces` 逐个去磁盘上 `Glob` 一遍」，而有些阶段的
 `produces` 不是字面文件名的扁平数组（S2 是对象形式，S5 是含 `<role>` 的模式）。
@@ -214,8 +227,15 @@ Task 4 修复轮 1 补（裁定「豁免不覆盖被证伪的预测」：叙述�
 
 `isStageDone` 在这里的调用**新增**在 `hooks/gate.mjs` 的 `CHECK === 'deliverable'` 分支，
 与 `CHECK === 'ledger'` 分支里那处（阶段推进提示用）是两个独立调用点，互不共享——两处都要
-在，改一处不代表另一处也改了。`roster` 参数的口径与 `compareArtifacts`/`readiness` 一致：
-`ctx.state?.roster` 不是数组时传 `undefined`（退回全部 `producers`，宁可多报不要漏报）。
+在，改一处不代表另一处也改了。**传参的写法**三处一致（这里、`compareArtifacts`、
+`readiness`）：`ctx.state?.roster` 不是数组时传 `undefined`，宁可多报不要漏报。
+
+⚠️ **但「传进去之后退回全部 `producers`」只对 `isStageDone` 与 `readiness` 说得通。**
+上一版这句写的是「`roster` 参数的口径与 `compareArtifacts`/`readiness` 一致：……
+（退回全部 `producers`）」——M3a Task 3 之后它只剩一半真：`compareArtifacts` 内部已经是
+两个口径，`drifted`/`missing` 吃这个参数，**`unrecorded` 根本不看它**（见上面那张消费方表）。
+传 `undefined` 还是传一份真 `roster`，对 `unrecorded` 一个字的差别都没有。
+**三处的写法一致，不等于三处拿它干同一件事。**
 
 **账本比对不受这张静默表约束**（`docs/11` §5.8 结清的裁定）：`buildDriftNotice` 的三个清单
 （`drifted`/`missing`/`unrecorded`）只要非空就照发，跟这次返回是不是合法协调、当前阶段有没有
