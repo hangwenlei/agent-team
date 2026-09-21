@@ -468,10 +468,16 @@ const PM_IN_AVAILABLE = {
 }
 
 const stateJsonOf = (projectDir) => join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
-const writeState = (projectDir) =>
-  run('ledger', {
-    tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: stateJsonOf(projectDir) },
-  }, GATE, projectDir)
+// agentType 是**收件人**：PostToolUse 的 additionalContext 发给刚做完这次写入的那个上下文。
+// 缺省 at-pm 与 M3b 之前逐字相同，既有调用一个都不用改；传 null 表示主线程
+// （逐字是「**没有 agent_type 这个键**」，不是 agent_type: undefined——callerOf 两者都归
+// MAIN，但 JSON.stringify 会把显式的 undefined 整个键丢掉，留着它等于让测试依赖一个
+// 它没打算依赖的序列化细节）。
+const writeState = (projectDir, agentType = 'at-pm') => {
+  const input = { tool_name: 'Write', tool_input: { file_path: stateJsonOf(projectDir) } }
+  if (agentType !== null) input.agent_type = agentType
+  return run('ledger', input, GATE, projectDir)
+}
 
 test('推进出去之后写 state.json：产者交代那条文案出现在 stdout，并点名是哪一段的哪个角色', () => {
   const { projectDir, pluginDir } = makeRun(WALKED_S2)
@@ -743,6 +749,186 @@ test('收窄不成：文案不拿 at-pm 当 trimmed 的示例，给的是占位�
     const ctx = ctxOf(writeState(projectDir).stdout)
     assert.ok(ctx.includes('{"<角色名>": "<阶段 id>"}'), '占位形状必须在，否则下面那条证明不了任何事')
     assert.doesNotMatch(ctx, /\{"at-pm": "S1"\}/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ——— M3b 修复轮 1：产者交代的收尾也按「收件人改不改得了 state.json」分支 ———
+//
+// 这条回传曾经被断言**到不了非 PM 手里**（buildCoverageNotice 上方那段注释的原话），
+// 那个全称量词实测不成立：readRunContext 把「current-run 指向的 run 目录不存在」判成
+// kind:'no-run'，H3 在那一支对**所有角色** fail open，非 PM 因此写得成
+// runs/<id>/state.json；写完那一刻 ctx 已经 ok，ledger 照常走到 kind === 'state'。
+// **而窗口在同一刻关上**——他的下一次写入就被 H3 拒了，于是收件人拿到这条提示时已经
+// 改不了它。与账本比对那一条**同一个形状，只是门更窄**。完整机制在 gate.mjs 里。
+//
+// ⚠️ **夹具不需要去重建那个坏掉的 run**：ledger 这个检查项读的输入在两种情形下逐字
+// 相同（ctx.ok + tool_input.file_path 指着 state.json + agent_type 是那个非 PM），
+// 它自己不判「这次写入当初该不该被放行」——那是 H3 在 PreToolUse 上的事，另一个 hook。
+// 直接换 agent_type 就是那一帧的真实形状，不是简化。
+//
+// 下面每条只换 writeState 的第二个参数。诊断那一半（哪一段的哪个角色、口径宽不宽、
+// 驱动者护栏）对谁都成立，由上面那几组钉着，这里不重复。
+
+test('M3b：收件人是 at-backend 时，产者交代不再用「两条出路，逐个按事实选一条」那种「你去改」的口吻', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.doesNotMatch(ctxOf(writeState(projectDir, 'at-backend').stdout), /两条出路，逐个按事实选一条/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ⚠️ 上一条的正向自检锚，钉在**判据真正迭代的那一层**：不是「这份夹具有没有回传」
+// （那只证明夹具活着），是「同一份夹具、只把收件人换成 PM，那句口吻就回来」。
+// 分支判据被改成恒「改不了」时这一条红；被改成恒「改得了」时上一条红。两条各守一侧。
+test('M3b 正向自检锚：同一份夹具、收件人换成 at-pm 时那句口吻照旧出现——上一条守的是分支，不是文案整个没了', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(ctxOf(writeState(projectDir, 'at-pm').stdout), /两条出路，逐个按事实选一条/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('M3b：收件人改不了时，产者交代要先说清这一条他改不了', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(ctxOf(writeState(projectDir, 'at-backend').stdout), /这一条你改不了/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('M3b：收件人改不了时，产者交代要他把这一条原样冒泡给派他的人', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(ctxOf(writeState(projectDir, 'at-backend').stdout), /原样冒泡给派你的人/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('M3b：收件人改不了时，产者交代要他别自己把它咽掉', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(ctxOf(writeState(projectDir, 'at-backend').stdout), /不要自己把它咽掉/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ——— 下面四条：**信息不许在这一支里丢掉，只是换了谁动手** ———
+//
+// 「判据分辨不了真裁剪还是真漏派、读的人分辨得了」这件事**不随收件人变**，那正是两条
+// 出路存在的全部理由。把这一支写成一句「转给 PM 吧」，等于替读的人做了那个判断——
+// 而收件人常常恰恰是**做过那个裁剪决定的人本人**（M3a 真实那一趟：at-product 自决不派
+// at-ui）。上面那几条 PM 侧的同族断言（trimmed 形状 / 去派出去 / roster 护栏）一一对应。
+
+test('M3b：收件人改不了时，「判据分辨不了、你分辨得了」这句话没丢', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(ctxOf(writeState(projectDir, 'at-backend').stdout), /判据分辨不了真裁剪还是真漏派，你分辨得了/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('M3b：收件人改不了时，① 那条裁剪出路连同可照抄的形状一起留着', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(ctxOf(writeState(projectDir, 'at-backend').stdout), /trimmed[\s\S]*\{"at-ui": "S2"\}/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ② 那一条在这一支里是**部分做得到**：派人受 H1 的 can_delegate_to 管，可能行可能不行；
+// 而记账那一半无论如何都在 PM 那边（roster 也住在 state.json）。两件事都要说出来，
+// 只说一半会让他以为派完就没事了。
+test('M3b：收件人改不了时，② 那条补派出路留着，并说清他可能真的做得到', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(ctxOf(writeState(projectDir, 'at-backend').stdout), /派它出去这一半你可能真的做得到/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 错误修法那条护栏在这一支里换了个方向：他自己写不了 roster，但他**往上带**的时候可以
+// 把错的修法一起带上去，PM 照做一样把洞留着。所以护栏不能因为他动不了手就删掉。
+test('M3b：收件人改不了时，「别把它说成把名字写进 roster 就行」那条护栏留着', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(ctxOf(writeState(projectDir, 'at-backend').stdout), /不要把它说成「把名字写进 roster 就行」/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('M3b：收件人改不了时往 stderr 留一行痕，并点名是谁收到的', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(writeState(projectDir, 'at-backend').stderr, /产者交代：这次的回传落在 at-backend 手里/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ⚠️ 本仓库「fail open 必须留痕」是硬规矩，**但这一条不是 fail open**：运行上下文是好的、
+// 判据照常算了、回传照常发了，没有放行任何东西——错的是收件人，不是判定。所以钉的是
+// 正向的「写清它是什么」：复用 failOpenNotice 那一族的措辞会让这一条红，而一条否定式
+// 断言在那种改法下反而可能照样绿。
+test('M3b：产者交代那行痕要写清它不是 fail open', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(writeState(projectDir, 'at-backend').stderr, /没有放行任何东西/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ⚠️ 空断言，夹具整个哑掉时天然满足。它的正向锚是上面那条「收件人 at-backend 时 stderr
+// 点名了他」——同一份夹具、同一条代码路径，只差 agent_type 一个字段。
+// ⚠️ 这份夹具 narrowed 为真（project.available_roles 写齐了），所以这里的「空」同时
+// 说明那条「没能按 available_roles 收窄」的痕迹也没有被误发——两条痕迹是两件事。
+test('M3b：收件人是 at-pm 时不留那行痕——那条路径本来就通，留痕只是噪音', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.equal(writeState(projectDir, 'at-pm').stderr.trim(), '')
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('M3b：收件人是主线程（没有 agent_type 这个键）时，产者交代保持「你去改」那一支', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(ctxOf(writeState(projectDir, null).stdout), /两条出路，逐个按事实选一条/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('M3b：收件人是主线程时也不留那行痕', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.equal(writeState(projectDir, null).stderr.trim(), '')
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })

@@ -120,7 +120,10 @@ test('写了阶段产物且 artifacts 里记的是别的哈希：报出来，两
 
 // 修复轮 1 缺陷 2：stages.json 里 S2/S3/S5 的 produces 恰恰是 at-product/at-architect/
 // at-backend 自己写的，PostToolUse 的 additionalContext 送给写文件的那个角色本人，
-// 不是 PM——但只有 PM 能写 state.json。M1 里每阶段只有一个 produces，写完它几乎总是
+// 不是 PM——但 state.json 归 PM 写（⚠️ M3b 修复轮 1：这句话和下面那条原来都带着
+// 「一律」那个口径，它不成立；同一份知识只留一处，在 hooks/lib/ledger.mjs 的
+// pmOnlyNotice 上方，别在这里抄第二份。**这条测试要的那层意思没变。**）。
+// M1 里每阶段只有一个 produces，写完它几乎总是
 // 同时触发下面的 stageDone 分支（已经带"回报上级"提示），两条拼在同一次回传里凑巧
 // 补全了语义；这条测试特意只给 kind:'produce'、不给 stageDone（`base` 的
 // `stageDone: false` 默认值不动），确保 produce 分支自己就把这句话说完整，不依赖
@@ -141,8 +144,11 @@ test('当前阶段产物已齐：提示推进，并说明不推进会让 H5 哑�
 })
 
 // 评审 M-2：这条提示可能发给任何触发了 ledger 的角色，不止 PM——但改 state.json
-// 只有 PM 能做（控制文件，H3 对非 PM 一律拒绝）。不点破这件事，提示会让一个做
-// 不到的角色去做它，跟 H3 互相矛盾。钉住新增的这层意思：文案必须点名 PM。
+// 只有 PM 能做（控制文件，H3 在 PreToolUse 上把非 PM 对它的写入拒掉）。不点破这件事，
+// 提示会让一个做不到的角色去做它，跟 H3 互相矛盾。钉住新增的这层意思：文案必须点名 PM。
+// ⚠️ **M3b 修复轮 1：这里原来写的是「H3 对非 PM 一律拒绝」，那个全称量词假**——
+// no-run 那一支对所有角色 fail open，理由写在 hooks/lib/ledger.mjs 的 pmOnlyNotice 上方，
+// 不在这里重复。**这条测试要的那层意思没变**：文案必须点名 PM。
 test('提示推进时点名这个动作只能由 PM 执行', () => {
   const s = joined({ stageDone: true })
   assert.match(s, /PM/)
