@@ -19,9 +19,11 @@ import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { isContractWriter } from '../hooks/lib/contract-guard.mjs'
 import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 import { EXPECTED_AGENTS } from './helpers/expected-agents.mjs'
-import { producedNames } from '../hooks/lib/stages.mjs'
+// stageRoles 在本文件下半段已经有一个同名的局部常量（那是「所有 stage.role 的集合」，
+// 与这个函数不是一回事），所以这里改名导入，不在本文件里另写一份「这一段的产出角色」。
+import { producedNames, stageRoles as stageRolesOf } from '../hooks/lib/stages.mjs'
 import { COMMAND_NAMES } from './helpers/command-names.mjs'
-import { ROLES_WITHOUT_PATHS } from './helpers/roles-without-paths.mjs'
+import { ROLES_WITHOUT_PATHS, ROLES_WITH_PATHS } from './helpers/roles-without-paths.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const roster = JSON.parse(readFileSync(url('roster.json'), 'utf8'))
@@ -216,6 +218,176 @@ test('前置条件：hasContractRedLine() 认得出「被改松」的几种样�
   assert.ok(
     !hasContractRedLine(`- **不得写契约**。\n- 契约文件是 \`${CONTRACT_FILE}\`。`),
     '两半分在两行时按设计判为不通过——这条断言红了说明有人放宽了「同一行」那个要求',
+  )
+})
+
+// ---------------------------------------------------------------------------
+// ⭐ M3h：**第一道防线全表**——§5.30 只覆盖了 H4 那一格，这里补 H3 与 H5b 两格
+// ---------------------------------------------------------------------------
+//
+// §5.30 钉住了 H4 的第一道，并逐字留下一句「H2 / H5 / H6 在正文侧有没有对应的话、
+// 有没有被钉，**本轮没看**」。本轮把八格（H1 / H2 / H3 / H4 / H5a / H5b / H6 /
+// `ledger`）逐格看了一遍，全表与逐格证据在 `docs/11` §5.31。
+//
+// ⚠️ **只有三格值得补判据，另外五格不补**——而「不补」里有两种，别混：
+//   · `ledger` 压根不是门禁（`hooks/lib/checks.mjs` 逐字：「ledger 不是门禁——它永不
+//     拒绝」），它在正文侧的对应物是**消费侧**那句「只认通道不认字符串」，
+//     而那一条**已经**被本文件下面两条判据钉着；
+//   · H6 返工预算**在正文侧根本没有第一道**——`agents/` / `commands/` / `templates/` /
+//     `skills/` 里没有任何一句禁止把返工计数改小，`hooks/lib/rework-guard.mjs` 头部
+//     还逐字写着它「不豁免任何调用者……这条要拦的恰恰是 PM 自己」。
+//     **那不是「缺判据」，是「没有那个东西」**，硬写一条就是钉注释。
+// 逐格的三样（拒绝的判据长什么样 / 打不红的那一刀 / 什么会让答案改变）在 `docs/11` §5.31。
+//
+// 三格里 H1 那一格写在 `tests/roster-sync.test.mjs`：它那边已经有 ROLES_WITH_EDGES
+// 与 bodyOfAgent 那套机械，搬过来就是同一份知识的第二份（本仓库为这个形状开过好几轮）。
+
+// ── H3 写路径隔离的第一道：「划给你的那些目录前缀，**只有那些**」 ──────────────
+//
+// H3 拒的是「写到不归你的地方去」。它在正文侧的第一道**不是**红线里那条
+// 「不得用 `Bash` 绕过写路径隔离」——那一条钉的是 H3 够不着的**旁路**（`Bash` 不经
+// 任何 hook），已经由上面 HAS_BASH 那一族守着。第一道是「你写代码的地方」那一节里的
+// **正面限定**：`paths` 里划给你的那些前缀，**只有那些**。删掉它，角色手里就只剩
+// 「我有 `Write`、我知道自己要产出什么」，H3 成了唯一一道。
+//
+// ⚠️ **实测旁证**（`docs/19` §11.4.3 与 §11.4.4 恰好是一对照）：H3 那一格量到的
+// 真拒绝，撞上去的是 `at-pm`——而 `agents/at-pm.md` 里**没有**这一节，第一道不在场，
+// 门禁当场就说了话。H4 那一格反过来：第一道在场，三次里两次门禁没机会说话。
+//
+// 集合从 `templates/project.json` 的 `paths` 键**派生**，不抄清单（与 ROLES_WITHOUT_PATHS
+// 同一次读，理由写在那个 helper 里）。
+//
+// 钉两半、且要求在**同一行**上（取舍与 hasContractRedLine 逐字同一个）：
+// `paths`（这条限定管的是哪份数据）**与**「只有那些」（限定本身）。只钉后半，
+// 「那几段的阶段产物走 run 目录那条路」这类句子里也可能冒出「只有那些」；只钉前半，
+// `at-qa` 正文里那句**意思相反**的「`paths` 里没有你的条目」就能把判据喂饱。
+function hasPathScopeLine(body) {
+  return body.split(/\r?\n/).some((l) => l.includes('paths') && l.includes('只有那些'))
+}
+
+// ⚠️ **这是记录在案的缺口，不是漏写。** `at-product` 与 `at-architect` 在模板里各认领了
+// 一条 `paths`（`docs/product/`、`docs/arch/`），也都持有 `Write`，H3 对它们照管不误
+// ——**而它们的正文里一个字都没提这件事**。本轮只读 `agents/`、不改它（要改角色正文
+// 得先报协调方），所以这两个名字作为已知缺口写在这里，归属规则在 `docs/11` §5.31。
+//
+// 下面那条 deepEqual **两个方向都钉**：缺口长大（有人删了某一份的那一节）红；
+// 缺口缩小（有人把那句话补进这两份之一）也红——后者的正确做法是把名字从这份清单里
+// 划掉，**不是**改判据的期望值。钉的是身份不是数量（`docs/16` §3.1）。
+const PATH_SCOPE_LINE_MISSING = ['at-architect', 'at-product']
+
+test('锚：认领了 project.paths、却没写「只有那些」这条第一道的，恰好是 at-architect 与 at-product——记录在案的缺口', () => {
+  const missing = ROLES_WITH_PATHS.filter(
+    (r) => !hasPathScopeLine(existsSync(url(`agents/${r}.md`)) ? bodyOf(`${r}.md`) : ''),
+  ).sort()
+  assert.deepEqual(
+    missing,
+    [...PATH_SCOPE_LINE_MISSING].sort(),
+    '「认领了 paths、却没写『只有那些』」的集合变了。\n' +
+      '  它是派生的：templates/project.json 的 paths 键，减去正文里有那条限定的。\n' +
+      `  期望的那份缺口清单是 ${JSON.stringify([...PATH_SCOPE_LINE_MISSING].sort())}` +
+      `，实际算出来是 ${JSON.stringify(missing)}。\n` +
+      '  多出一份 = 有人把某份正文里「你写代码的地方」那一节删了或改松了——H3 在那个\n' +
+      '  角色身上从此只剩门禁一道，**这正是本条要拦的那一刀**；\n' +
+      '  少一份 = 有人把那句话补进了缺口里的某一份，**那是好事**：把名字从\n' +
+      '  PATH_SCOPE_LINE_MISSING 里划掉，不要改判据；\n' +
+      '  出现一个 agents/ 下没有对应文件的名字 = 模板里多了一个不存在角色的 paths 键。\n' +
+      '  背景与归属规则在 docs/11 §5.31。',
+  )
+})
+
+// 正向锚（`docs/11` §3.3 第 2 条）：拿已知违规样本证明 hasPathScopeLine() 认得出违规。
+test('前置条件：hasPathScopeLine() 认得出「被改松」的样本，也不被意思相反的一句 paths 提及喂饱', () => {
+  const real = '`.agent-team/project.json` 的 `paths` 里划给你的那些目录前缀，**只有那些**。'
+  assert.ok(hasPathScopeLine(real), '真实原文形状都认不出来，判据本身坏了')
+
+  // ① 限定整条删掉，只留一句「这是你的主场」。
+  assert.ok(
+    !hasPathScopeLine('## 你写代码的地方\r\n\r\n`paths` 里划给你的那些目录前缀是你的主场。'),
+    '限定被整条删掉时应判为不通过',
+  )
+  // ② 说反 / 改松——**这才是这条判据要拦的那个动作**。
+  assert.ok(
+    !hasPathScopeLine('`paths` 里划给你的那些前缀是默认落点，确有必要时写到别处去也可以。'),
+    '限定被改写成「默认落点，必要时可以写别处」时应判为不通过',
+  )
+  // ③ 意思**相反**的那一句不能喂饱判据——at-qa / at-acceptance 正文里写的正是这一句。
+  assert.ok(
+    !hasPathScopeLine('⚠️ **`paths` 里没有你的条目，意味着写路径隔离在 run 目录之外对你整段早退放行**'),
+    '「paths 里没有你的条目」是反面那一句，不该被当成这条限定',
+  )
+  // ④ 两半分在两行——**故意判为不通过**，与 hasContractRedLine 同一个取舍：
+  //    两半必须绑在一起。这一条钉的是那个取舍本身，改版式会红是已知代价。
+  assert.ok(
+    !hasPathScopeLine('`paths` 里划给你的是那几个前缀。\r\n就只有那些，别的地方不要写。'),
+    '两半分在两行时按设计判为不通过——这条断言红了说明有人放宽了「同一行」那个要求',
+  )
+})
+
+// ── H5b 交付物拦截的第一道：「不得声称做完了没做的事」 ───────────────────────────
+//
+// H5b（`SubagentStop`）拒的是「这一段该产出的东西还不在磁盘上，你却要收工了」
+// ——实测见 `docs/19` §11.4.6（真拦截，平台连发 10 次）。它在正文侧的第一道就是红线里
+// 那一条「**不得声称做完了没做的事**」：十份正文逐字都有，而此前没有任何东西扫它。
+//
+// 该有这条红线的集合从 `stages.json` **派生**：凡是某一段的产出角色都要有
+// （`stageRolesOf`：有 `producers` 用 `producers`，否则退回 `[role]`）。
+// `at-outsider` 不是任何一段的产出角色——`hooks/lib/deliverable.mjs` 的
+// `decideDeliverable` 对它返回 `skipped: 'role-not-in-stage'`，H5b 对它无从谈起。
+// **这个豁免同样是派生的**：哪天有人把它写进某一段的 `producers`，它立刻落进
+// 「必须有」那一侧，不需要谁记得回来改判据。
+//
+// ⚠️ **H5a 与 H5b 不各钉一条。** 两条 hook 喂的是同一个 `decideDeliverable`
+// （那个文件头部逐字写着「同一份判定喂两条 hook」），正文侧对应的也是同一句话；
+// 分成两条判据就是同一份知识的第二份拷贝，而这个仓库为那个形状开过好几轮循环。
+//
+// ⚠️ **这一条只钉整句禁令，不像 hasContractRedLine 那样钉两半**，理由是这句话本身就
+// 窄到喂不饱：全仓没有第二处写「声称做完了没做的事」。它钉不住的仍然是「加一个例外
+// 子句」那种更聪明的改松，与 §5.30 同一个已知缺口，不在这里重复论证。
+const STAGE_PRODUCERS = new Set(Object.values(stages).flatMap((s) => stageRolesOf(s)))
+
+function hasDoneClaimRedLine(body) {
+  return /不得声称做完了没做的事/.test(body)
+}
+
+test('锚：agents/ 里不是任何一段产出角色的正文恰好是 at-outsider.md——H5b 对它无从谈起', () => {
+  assert.deepEqual(
+    AGENTS.filter((f) => !STAGE_PRODUCERS.has(f.replace(/\.md$/, ''))).sort(),
+    ['at-outsider.md'],
+    '「不是任何一段产出角色」的集合变了。它是从 stages.json 的 stageRoles 派生的。\n' +
+      '  多出一份 = 某个角色刚被从所有阶段的 producers/role 里拿掉了，它的交付红线从此\n' +
+      '  没人管（而 H5b 对它也确实不再判定）；\n' +
+      '  少一份 = at-outsider 被写进了某一段的 producers——它是测试替身，那是配置错误。\n' +
+      '  下面那条「每一份产出角色都要有交付红线」只遍历这份集合的补集。',
+  )
+})
+
+test('每一份是某段产出角色的正文里，都有「不得声称做完了没做的事」这条红线——它是 H5b 真正的第一道', () => {
+  for (const f of AGENTS.filter((f) => STAGE_PRODUCERS.has(f.replace(/\.md$/, '')))) {
+    assert.ok(
+      hasDoneClaimRedLine(bodyOf(f)),
+      `agents/${f} 是某一段的产出角色，但正文里没有「不得声称做完了没做的事」这条红线。\n` +
+        '  H5b 在 SubagentStop 上拦的就是这件事（docs/19 §11.4.6 量到过真拦截），\n' +
+        '  而这句话是它在正文侧的第一道——删掉它，收工前那一刻就只剩门禁一道。\n' +
+        '  **不要为了让它绿而给禁令加上例外**；要改这段正文的措辞，连本条一起改，\n' +
+        '  并在 docs/11 §5.31 留痕。',
+    )
+  }
+})
+
+test('前置条件：hasDoneClaimRedLine() 认得出被整条删掉、被改松的样本', () => {
+  assert.ok(
+    hasDoneClaimRedLine('- **不得声称做完了没做的事。** 没写出来、没跑起来，都要如实回报。'),
+    '真实原文形状都认不出来，判据本身坏了',
+  )
+  // ① 整条删掉。
+  assert.ok(
+    !hasDoneClaimRedLine('## 红线\r\n\r\n- **不得写契约**（`00-contract.md`）与编排层的控制文件。'),
+    '红线被整条删掉时应判为不通过',
+  )
+  // ② 说反 / 改松——**这才是这条判据要拦的那个动作**。
+  assert.ok(
+    !hasDoneClaimRedLine('- 尽量不要声称做完了没做的事；实在来不及，可以先报完成、随后补上。'),
+    '禁令被改写成「尽量不要……可以先报完成」时应判为不通过',
   )
 })
 
