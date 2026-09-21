@@ -275,27 +275,51 @@ function buildDriftNotice(cmp) {
 // 这批 gap 里可能混着「这个项目根本用不上的角色」与「PM 自己那几段」——不说的话，
 // 同一条提示在两种完全不同的口径下长得一模一样，而这正是本仓库反复栽的那个形状
 // （「静默的放行和门禁彻底坏掉长得一模一样」）。stderr 那一行痕迹是另一半，在调用点。
+// ⚠️ **修复轮 F1**：护栏原来挂在「没收窄」那一支上，那是挂错了地方——
+// `{"at-pm": "S1"}` 这个错示例**恰恰只在收窄成功时才产生**。实跑过整条链：
+// 真实 project.json 的 available_roles 里写了 at-pm（/agent-team:at-init 明令不要写，
+// 但**没有任何运行时判据拦它**）→ 收窄成功（stderr 无痕、文案里那段「口径比平时宽」
+// 与它带的护栏全都不出现）→ S1 是每趟 history 的第一段、而 at-pm 做自己那几段时没有
+// 「派发」这个动作所以不在 roster → gaps[0] 就是 {S1, at-pm} → 文案逐字给出
+// {"at-pm": "S1"} → validateState 放过（at-pm 真的是 S1/S4/S8 的产者，形状挑不出毛病）
+// → gap 消失、洞留着，而且这一趟从此声明「把自己的驱动者裁掉了」。
+//
+// 所以护栏不挂在口径上，**挂在「这批 gap 里出现了不该被裁的角色」这件事上**：
+// 举例跳过它们，并且无条件多发一句点名它、指向真修法（去 available_roles 里删掉它，
+// 不是写进 trimmed）。
+//
+// 「谁算这一趟的驱动者」复用 isContractWriter，不在这里另写一遍 role === 'at-pm'
+// ——hooks/lib/writepath.mjs 已经为另一个问题（谁能写控制文件）复用过同一个谓词，
+// 它自己的注释写着「不另写一遍 role === at-pm」。这里是第三个问题、同一份知识。
+const isDriverRole = (role) => isContractWriter(role)
+
 function buildCoverageNotice({ gaps, narrowed } = {}) {
   if (!Array.isArray(gaps) || !gaps.length) return null
   const lines = gaps.map((g) => `  - ${g.stage} 的 ${g.role}`)
-  // ⚠️ 举例只在**收窄成功**时用真实的第一条 gap。没收窄的时候，这批 gap 里混着
-  // 「这个项目根本用不上的角色」与「PM 自己做的那几段」——拿它们举例会把人直接指向
-  // 一个错的修法：实测过，不收窄时第一条常常是 {"at-pm": "S1"}，而 at-pm 写进 trimmed
-  // 是**确确实实错的**（它是每一趟的驱动者，不参与「有没有被叫到」的统计，
-  // commands/at-init.md 明令 available_roles 不写它），偏偏 validateState 会放它过去
-  // ——at-pm 真的是 S1/S4/S8 的产者，形状校验挑不出毛病。所以这一支给形状不给实例。
-  const shape = narrowed ? `{"${gaps[0].role}": "${gaps[0].stage}"}` : '{"<角色名>": "<阶段 id>"}'
+  const drivers = [...new Set(gaps.filter((g) => isDriverRole(g.role)).map((g) => g.role))]
+  // 举例要同时满足两条才用真实的那一条：① 这一批是收窄过的（没收窄时这批名字里混着
+  // 「这个项目根本用不上的角色」，拿它们举例同样是指向错的修法）；② 那一条不是驱动者
+  // 本人。两条里缺一条就给占位形状——宁可让人多填两个尖括号，也不要递给他一条错的。
+  const safe = gaps.find((g) => !isDriverRole(g.role))
+  const shape = narrowed && safe ? `{"${safe.role}": "${safe.stage}"}` : '{"<角色名>": "<阶段 id>"}'
+  const driverWarning = drivers.length
+    ? `⚠️ 上面点名的 ${drivers.join('、')} 是**这一趟的驱动者本人**，它不参与「有没有被叫到」` +
+      `的统计，**不要把它写进 trimmed**——state.json 的校验会放它过去（它确实是那几段的产者，` +
+      `形状挑不出毛病），写进去等于声明这一趟把自己的驱动者裁掉了。它被点到名只有两种原因：` +
+      `.agent-team/project.json 的 available_roles 里写了它（/agent-team:at-init 明令不要写` +
+      `——去把它删掉），或者这一批根本没能按 available_roles 收窄。\n`
+    : ''
   const widened = narrowed
     ? ''
     : `⚠️ 这一批**没能按「这个项目用得上哪些角色」收窄**（读不到 .agent-team/project.json ` +
       `的 available_roles），所以口径比平时宽：这个项目根本用不上的角色、以及 PM 自己做的` +
       `那几段（S1/S4/S8 那一类），都会算进来。**先把 available_roles 补上再判这批名字**` +
-      `——它是 /agent-team:at-init 写的那一份；在补上之前不要照着下面两条出路动手，` +
-      `尤其不要把 at-pm 这种本来就不该进这份名单的角色写进 trimmed。\n`
+      `——它是 /agent-team:at-init 写的那一份；在补上之前不要照着下面两条出路动手。\n`
   return (
     `【产者交代】下面这些角色是**已经走过的阶段**的产者，而这一趟既没叫到它们、` +
     `也没声明裁掉它们——它们的缺席今天不会被任何别的判据看见：\n${lines.join('\n')}\n` +
     widened +
+    driverWarning +
     `两条出路，逐个按事实选一条：\n` +
     `  ① 本来就不打算用它（按需组队的主动裁剪）：把它写进 state.json 的 trimmed，` +
     `形状是 ${shape}——键是角色名，值是它在哪一段被裁掉的。` +

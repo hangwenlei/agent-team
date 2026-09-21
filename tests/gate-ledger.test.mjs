@@ -460,6 +460,13 @@ const WALKED_S2 = {
   project: { available_roles: M2B_AVAILABLE, paths: {} },
 }
 
+// 同一份 state，只把 at-pm 塞进 available_roles（正是 commands/at-init.md 禁的那件事，
+// 而没有任何运行时判据拦它——见修复轮 F1 那一组）。
+const PM_IN_AVAILABLE = {
+  ...WALKED_S2,
+  project: { available_roles: [...M2B_AVAILABLE, 'at-pm'], paths: {} },
+}
+
 const stateJsonOf = (projectDir) => join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
 const writeState = (projectDir) =>
   run('ledger', {
@@ -580,11 +587,82 @@ test('Ruling 2：available_roles 不含 at-pm，S1 那一段不被点名', () =>
 // 已知违规样本锚：把 at-pm 塞进 available_roles（正是 commands/at-init.md 禁的那件事）
 // → 同一份 state 上 S1 立刻被点名。没有这条，上一条在「收窄退化成恒不点名」时照样绿。
 test('正向自检锚（Ruling 2）：at-pm 一旦被写进 available_roles，S1 立刻被点名', () => {
-  const { projectDir, pluginDir } = makeRun({
-    ...WALKED_S2, project: { available_roles: [...M2B_AVAILABLE, 'at-pm'], paths: {} },
-  })
+  const { projectDir, pluginDir } = makeRun(PM_IN_AVAILABLE)
   try {
     assert.match(ctxOf(writeState(projectDir).stdout), /S1 的 at-pm/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ——— 修复轮 F1：那个错示例**只在收窄成功时**才产生，护栏原来挂错了地方 ———
+//
+// 整条链（实跑核过）：真实 project.json 的 available_roles 里写了 at-pm
+// （commands/at-init.md 明令不要写，但没有任何运行时判据拦它）→ **收窄成功**
+// （narrowed 为真，stderr 无痕、「口径比平时宽」那段与它带的护栏全都不出现）
+// → S1 是每趟 history 的第一段，而 at-pm 做自己那几段时没有「派发」这个动作、
+// 所以不在 roster（docs/15 §5.1 第 3 点逐字）→ gaps[0] 就是 {S1, at-pm}
+// → 文案逐字给出 {"at-pm": "S1"} → validateState 放过（at-pm 真的是 S1/S4/S8 的产者，
+// 形状挑不出毛病）→ gap 消失、洞留着，而且这一趟从此声明「把自己的驱动者裁掉了」。
+//
+// ⚠️ 这个夹具本来就在（上面那条锚用的就是它），**只差这几条断言没写**。
+// 下面三条共用它：上面那条锚（S1 真的被点名）就是它们的正向自检锚。
+
+test('修复轮 F1：收窄成功时文案也不得逐字给出把 at-pm 写进 trimmed 的示例', () => {
+  const { projectDir, pluginDir } = makeRun(PM_IN_AVAILABLE)
+  try {
+    assert.doesNotMatch(ctxOf(writeState(projectDir).stdout), /\{"at-pm": "S1"\}/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('修复轮 F1：护栏点名 at-pm 是驱动者本人，并指向真修法（去 available_roles 里删掉它）', () => {
+  const { projectDir, pluginDir } = makeRun(PM_IN_AVAILABLE)
+  try {
+    const ctx = ctxOf(writeState(projectDir).stdout)
+    assert.match(ctx, /at-pm 是\*\*这一趟的驱动者本人\*\*[\s\S]*available_roles 里写了它/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 举例跳过驱动者、落到同一批里安全的那一条上——不是退化成「永远给占位形状」。
+test('修复轮 F1：举例跳过驱动者，落到同一批里安全的那一条上', () => {
+  const { projectDir, pluginDir } = makeRun(PM_IN_AVAILABLE)
+  try {
+    assert.match(ctxOf(writeState(projectDir).stdout), /形状是 \{"at-ui": "S2"\}/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 这一批里**一个安全的都没有**（available_roles 只有 at-pm）：退回占位形状，
+// 而不是硬拿驱动者举例。
+test('修复轮 F1：整批都是驱动者时退回占位形状，不硬拿它举例', () => {
+  const { projectDir, pluginDir } = makeRun({ ...WALKED_S2, project: { available_roles: ['at-pm'], paths: {} } })
+  try {
+    const ctx = ctxOf(writeState(projectDir).stdout)
+    assert.ok(ctx.includes('S1 的 at-pm'), '这一批必须真的只剩驱动者那一条，否则下面那条证明不了任何事')
+    assert.ok(ctx.includes('形状是 {"<角色名>": "<阶段 id>"}'))
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 反面：这一批里没有驱动者时，护栏那句不出现——它不是一句无条件的套话。
+// 锚在「该点名的那个还是点了」。
+test('修复轮 F1：这一批没有驱动者时，护栏那句不出现（锚：该点名的那个还是点了）', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    const ctx = ctxOf(writeState(projectDir).stdout)
+    assert.ok(ctx.includes('S2 的 at-ui'), '该点名的那一条必须还在，否则下面那条证明不了任何事')
+    assert.doesNotMatch(ctx, /驱动者本人/)
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })

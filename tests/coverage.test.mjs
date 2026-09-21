@@ -258,8 +258,23 @@ test('退化输入：整个入参缺省时返回空 gaps，不抛', () => {
   assert.deepEqual(decideCoverage().gaps, [])
 })
 
-test('退化输入：history 不是数组时返回空 gaps，不抛', () => {
-  const state = { stage: 'S3', history: 'S1,S2,S3', roster: [], trimmed: {} }
+// ⚠️ **修复轮 F2**：这两条原来是**一条**，而且夹具值是字符串 `'S1,S2,S3'`
+// ——那条测试今天什么也守不住：删掉 `Array.isArray(state.history) ? … : []` 这个守卫，
+// 裸 `node --test` 仍然全绿。**因为字符串本身可迭代**：`for…of` 逐字符走一遍，
+// 每个字符都被下一行的形状守卫 `continue` 掉，结果同样是空 gaps。
+// 它测到的是「形状守卫在工作」，不是「history 守卫在工作」，而后者才是它名字里写的那个。
+// 这是 docs/16 那条「锚要钉在判据**真正迭代**的那一层」的同族第五次。
+//
+// 换成**不可迭代**的值（对象 / null；数字也同族）：守卫一删，`for…of` 立刻 TypeError。
+// 而这三种**都能从磁盘上的 state.json 读出来**——validateState 只把它报成一条 problem，
+// 不阻止 ledger 继续往下调这个判据。所以这个守卫是承重的，不是防御性装饰。
+test('退化输入：history 是对象（不可迭代）时返回空 gaps，不抛', () => {
+  const state = { stage: 'S3', history: {}, roster: [], trimmed: {} }
+  assert.deepEqual(decideCoverage({ stages, state }).gaps, [])
+})
+
+test('退化输入：history 是 null 时返回空 gaps，不抛', () => {
+  const state = { stage: 'S3', history: null, roster: [], trimmed: {} }
   assert.deepEqual(decideCoverage({ stages, state }).gaps, [])
 })
 
