@@ -54,6 +54,13 @@ import { stageRoles, isPlainObject } from './stages.mjs'
  * （两轮自发返工，rework 是 {"S5":1,"S6":1}）。所以同一个阶段 id 会在 history 里重复
  * 出现——下面按 seen 去重，否则同一条 gap 会照 history 里的出现次数重复上榜。
  *
+ * ⚠️ 同一条口径还有**第二个后果，上面那段没说**（M3a 全分支终审 Minor-1）：
+ * **链尾那一段永远不算走过**——它停下来的时候自己就是 state.stage，之后没有下一段把它
+ * 推出去。所以 stageRoles(链尾) 里的角色**结构上进不了这条判据的宇宙**。
+ * 今天零可观测：链尾是 S8，它只写了 role: "at-pm"，而 at-pm 本来就被 available_roles
+ * 挡在宇宙外。**哪天链尾那一段有了 at-pm 以外的产者，它们会整段静默掉出去**
+ * ——完整记录、可观测的失效条件、以及为什么本轮只记不改，见 docs/11 §5.25。
+ *
  * **宇宙**（Ruling 2）：`stageRoles(S) ∩ availableRoles`。
  * availableRoles 就是 .agent-team/project.json 的 `available_roles`——「**这个项目用得上
  * 哪些执行角色**」，由 /agent-team:at-init 写。它把**项目配置**与**运行时决定**分开：

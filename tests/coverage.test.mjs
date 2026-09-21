@@ -265,7 +265,14 @@ test('正向自检锚（narrowed）：传了可用的一份 available_roles 时 
 
 // ——— 退化输入：一律不抛 ———
 //
-// 这一组一律不传 availableRoles（走不收窄那条路），顺带覆盖「收窄不成时判据仍然工作」。
+// ⚠️ 这一段原先写的是「这一组**一律**不传 availableRoles（走不收窄那条路）」——**假的**，
+// M3a 全分支终审 Trivial-1 抓的。**不传的是这几条**（照 docs/16 §3.1「列举，不报总数」）：
+// `state 不是对象` / `stages 不是对象` / `整个入参缺省` / `history 是对象（不可迭代）` /
+// `history 是 null` / `history 的条目形状不对`——它们退化的是**判据的两个入参本身**，
+// 传不传收窄名单都到不了用它的那一行，所以不传，顺带覆盖「收窄不成时判据仍然工作」。
+// **底下那三条传了 M2B_AVAILABLE**（`trimmed 缺失` / `roster 不是数组` / `trimmed 不是对象`）：
+// 它们退化的是 state 里的**某一个字段**，而断言的是**收窄之后那份具体的 gaps**
+// ——不传就换成了另一条路上的期望值，那三条的名字就对不上它们真正钉的东西了。
 
 test('退化输入：state 不是对象时返回空 gaps，不抛', () => {
   assert.deepEqual(decideCoverage({ stages, state: null }).gaps, [])
