@@ -15,6 +15,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { decideCoverage } from '../hooks/lib/coverage.mjs'
+import { stageRoles } from '../hooks/lib/stages.mjs'
+import { nextStage } from '../hooks/lib/state.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const stages = JSON.parse(readFileSync(url('stages.json'), 'utf8'))
@@ -353,4 +355,80 @@ test('trimmed 的值是出处不是匹配键：at-ui 记在 S2，S5 那一段也
     trimmed: { 'at-ui': 'S2', 'at-ios': 'S5', 'at-android': 'S5' },
   }
   assert.deepEqual(decideCoverage({ stages, state, availableRoles: FULL_AVAILABLE }).gaps, [])
+})
+
+// ——— docs/11 §5.25：链尾那一段的产者永远进不了这条判据的宇宙 ———
+//
+// 「走过的阶段」= history 里出现**且不等于 state.stage**。链尾那一段永远不会满足后半句
+// ——它停下来的时候自己就是当前段，后面没有下一段能把它推出去。所以
+// stageRoles(链尾) 里的角色**结构上**进不了宇宙（hooks/lib/coverage.mjs 定义段末尾
+// 那一段注释，以及 docs/11 §5.25 的三组实跑）。
+//
+// **今天零可观测**：链尾只写了 role: "at-pm"，而 at-pm 本来就被 available_roles 挡在外面。
+// 下面这条判据钉的**不是 decideCoverage 的行为**（那条改动零可观测差异，按 docs/16 §3.3
+// 第三行不该为它配不变量），**是「§5.25 那条已知边界的前提还成立」这个配置事实**。
+// 两者不是一回事：前者问「判据做了什么」，后者问「那条边界今天还无害吗」。
+//
+// 链尾**从 stages.json 派生**，不硬编码 S8——§5.25 第五节写明了「这一条讲的是链尾，
+// 不是 S8」，硬编码会让它在阶段链加长那天守错段。派生复用 hooks/lib/state.mjs 的
+// nextStage（返回 null 就是链尾），不在这里另写一份「怎么算下一段」——那份知识里
+// 含着一条非平凡的规矩（按书写顺序而不是 id 字典序，否则 S10 会排到 S2 前面），
+// 它已经在 nextStage 里被注释钉着，抄第二份就是让两处各自漂。
+const tailStageId = (st) => Object.keys(st).find((id) => nextStage(st, id) === null)
+
+// 判据与三条锚**共用这一份**（docs/16 §3.2：锚要钉在判据真正进入 assert 的那一层）：
+// 返回链尾那一段里「不是驱动者」的产出角色。空数组 = §5.25 的前提仍然成立。
+function nonDriverProducersOfTail(st) {
+  const tail = tailStageId(st)
+  return tail === undefined ? [] : stageRoles(st[tail]).filter((r) => r !== 'at-pm')
+}
+
+// ⭐ 前置条件锚：链尾真的解析得到、而且它真的有产出角色。
+// 少了这条，主判据可以在一个空集合上恒绿——tailStageId 返回 undefined 时
+// nonDriverProducersOfTail 直接给空数组，而那时它什么也没守。
+test('前置条件：链尾从 stages.json 派生得到，而且它的 stageRoles 非空——否则下面那条在空集合上恒绿', () => {
+  assert.ok(
+    stageRoles(stages[tailStageId(stages)]).length > 0,
+    'tailStageId(stages) 解析不到链尾、或者链尾一个产出角色都没有。' +
+      '前者说明 nextStage 的口径变了，后者说明 stages.json 的链尾形状变了——' +
+      '两种情况下，下面那条主判据都在一个空集合上恒绿，它什么也没守。',
+  )
+})
+
+// ⭐ 已知违规样本锚：给链尾加一个 at-pm 以外的产者，判据必须认出来。
+// 这份夹具就是 docs/11 §5.25 第二节 B 组那份改过的 stages.json——
+// 那一组实跑证明了「加 producers 不够，只要它还是链尾就进不了宇宙」。
+test('锚：给链尾加上 at-pm 以外的产者，判据认得出来——这正是 §5.25 第二节 B 组那份夹具', () => {
+  const mutated = JSON.parse(JSON.stringify(stages))
+  const tail = tailStageId(mutated)
+  mutated[tail].producers = ['at-pm', 'at-acceptance', 'at-qa']
+  assert.deepEqual(nonDriverProducersOfTail(mutated), ['at-acceptance', 'at-qa'])
+})
+
+// ⭐ 换段锚：阶段链加长时，判据要跟着换段守。
+// 硬编码链尾 id 的写法在这一刀下会静默失效：它会继续盯着旧的那一段，
+// 而真正掉出宇宙的是新链尾的产者。§5.25 第五节那句「这一条讲的是链尾，不是 S8」
+// 就是这条锚要钉住的东西。
+test('锚：阶段链加长时判据跟着换段守——新链尾的产者被看见，旧链尾的不再被它看', () => {
+  const extended = JSON.parse(JSON.stringify(stages))
+  const oldTail = tailStageId(extended)
+  extended[oldTail].producers = ['at-pm', 'at-qa'] // 旧链尾现在不是链尾了，它这个产者不该再被报
+  extended.S9 = { role: 'at-pm', producers: ['at-pm', 'at-acceptance'], produces: { 'at-pm': ['09-x.md'], 'at-acceptance': ['09-y.md'] } }
+  assert.deepEqual(nonDriverProducersOfTail(extended), ['at-acceptance'])
+})
+
+// ⭐ 主判据。**红了不是「把这条断言改掉」**——失败文案里写清了该做什么。
+test('docs/11 §5.25 的前提仍然成立：链尾那一段除了 at-pm 没有别的产出角色', () => {
+  assert.deepEqual(
+    nonDriverProducersOfTail(stages),
+    [],
+    'stages.json 的链尾那一段现在有 at-pm 以外的产出角色了。\n' +
+      '  ⚠️ **不要把这条断言改掉让它变绿**——它红，说明 docs/11 §5.25 记的那条已知边界\n' +
+      '  刚刚从「零可观测」变成了「真的在漏」：链尾永远不满足「走过」的定义\n' +
+      '  （history 里出现**且不等于 state.stage**），所以它的产出角色**整段静默掉出**\n' +
+      '  hooks/lib/coverage.mjs 那条产者交代判据的宇宙——而「静默掉出去」正是那条判据\n' +
+      '  存在的全部理由要防的事。\n' +
+      '  **该做的是去读 docs/11 §5.25**（尤其第五节的失效条件与第六节），\n' +
+      '  按它决定这条边界怎么修；修完了再回来动这条断言。',
+  )
 })

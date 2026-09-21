@@ -59,7 +59,12 @@ import { stageRoles, isPlainObject } from './stages.mjs'
  * 推出去。所以 stageRoles(链尾) 里的角色**结构上进不了这条判据的宇宙**。
  * 今天零可观测：链尾是 S8，它只写了 role: "at-pm"，而 at-pm 本来就被 available_roles
  * 挡在宇宙外。**哪天链尾那一段有了 at-pm 以外的产者，它们会整段静默掉出去**
- * ——完整记录、可观测的失效条件、以及为什么本轮只记不改，见 docs/11 §5.25。
+ * ——完整记录与可观测的失效条件见 docs/11 §5.25。
+ *
+ * ⚠️ **本函数为这件事一个字都没改，也不该改**（零可观测差异的改动没有测试能钉住它，
+ * docs/16 §3.3 第三行）。**钉着的是那条边界的前提**：tests/coverage.test.mjs 末尾那一组
+ * 从 stages.json 派生链尾（走 state.mjs 的 nextStage），断言它除 at-pm 外没有别的产出
+ * 角色。**它红不是要你改那条断言，是 §5.25 记的那条边界刚从「零可观测」变成「真的在漏」。**
  *
  * **宇宙**（Ruling 2）：`stageRoles(S) ∩ availableRoles`。
  * availableRoles 就是 .agent-team/project.json 的 `available_roles`——「**这个项目用得上
