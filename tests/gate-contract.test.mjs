@@ -331,3 +331,59 @@ test('contract：没有 run 时，被 settings.json 钉成主线程的 at-pm 写
     rmSync(cwd, { recursive: true, force: true })
   }
 })
+
+// ——— M3b「坏指针的窗口」：current-run 在、非空，但它指向的 runs/<id>/ 不存在 ———
+//
+// H4 与 H3 一起变：这个输入状态此前归 kind:'no-run'，H4 走的是「没有 run 就没有契约
+// 文件可保护」那条放行。子进程级实测（改动前）：**at-backend 写得成
+// runs/r1/00-contract.md**——一个 subagent 在那个窗口里可以给指针点名的那个 run
+// 造一份契约出来，而契约是这趟 run 唯一的需求基线。本轮把这一格挪去 unreadable
+// （论证在 hooks/lib/runctx.mjs 头部），H4 在那一支对 subagent 继续 fail closed。
+//
+// 两条各占一个 test()，与上面 project.json 损坏那一组同构：子代理被拒 / PM 仍然通。
+// PM 那一条是前者的正向自检锚——H4 的短路排在读 ctx 之前，收窄不该波及它。
+const makeDanglingPointerH4 = () => {
+  const dirs = makeRun({ runId: 'r1' })
+  rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r1'), { recursive: true, force: true })
+  return dirs
+}
+
+test('contract：坏指针（run 目录不存在），子代理写契约——本轮起 fail closed，这个窗口曾经对所有角色开着', () => {
+  const dirs = makeDanglingPointerH4()
+  try {
+    const { stdout, status } = run('contract', {
+      tool_name: 'Write',
+      agent_type: 'agent-team:at-product',
+      tool_input: { file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md') },
+    }, undefined, dirs.projectDir)
+    const out = decisionOf(stdout)
+    assert.equal(status, 0)
+    assert.ok(out, '坏指针下 subagent 写契约必须 deny——放行就是那个 fail-open 窗口回来了')
+    assert.equal(out.permissionDecision, 'deny')
+    assert.match(out.permissionDecisionReason, /运行上下文/)
+    assert.match(out.permissionDecisionReason, /不存在/, '理由要带上「run 目录不存在」这个真实原因')
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('contract：坏指针（run 目录不存在），被钉成主线程的 at-pm——仍然放行，短路排在读 ctx 之前', () => {
+  const dirs = makeDanglingPointerH4()
+  try {
+    const { stdout, status } = run('contract', {
+      tool_name: 'Write',
+      agent_type: 'at-pm',
+      tool_input: { file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md') },
+    }, undefined, dirs.projectDir)
+    assert.equal(status, 0)
+    assert.equal(
+      stdout.trim(),
+      '',
+      '收窄的全部前提是「坏掉的 run 还修得了」：这条一红，说明 H4 把 PM 也锁在了门外',
+    )
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})

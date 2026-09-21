@@ -36,7 +36,13 @@ test('没有 .agent-team 时返回 ok:false 而不是抛异常，kind 是 no-run
   assert.equal(ctx.kind, 'no-run')
 })
 
-test('current-run 指向不存在的 run 时返回 ok:false，kind 是 no-run', () => {
+// ⚠️ M3b「坏指针的窗口」：这一条原来钉的是 kind === 'no-run'，**本轮把真源改了，
+// 判据跟着改**——它当时红得对，红的原因就是分类变了。为什么改：pointer 在就意味着
+// 有人开过 run，这不是干净的缺席；归 no-run 会让 H3/H4 这两个 fail-closed 的检查项
+// 在这一个输入状态下对**所有角色** fail open。完整论证在 runctx.mjs 头部，不在这里
+// 重复第二遍；子进程级的前后行为由 tests/gate-writepath.test.mjs 与
+// tests/gate-contract.test.mjs 里那几条「坏指针」用例钉着。
+test('current-run 指向不存在的 run 时返回 ok:false，kind 是 unreadable（不是 no-run）', () => {
   const dirs = makeRun({ runId: 'r1', stages: STAGES })
   try {
     rmSync(`${dirs.projectDir}/.agent-team/runs/r1`, { recursive: true, force: true })
@@ -45,14 +51,17 @@ test('current-run 指向不存在的 run 时返回 ok:false，kind 是 no-run', 
     // M1：不止判定失败，还要钉住失败原因是「目录不存在」，
     // 不是别的碰巧也返回 ok:false 的路径。
     assert.match(ctx.reason, /不存在/)
-    assert.equal(ctx.kind, 'no-run')
+    assert.equal(ctx.kind, 'unreadable')
   } finally {
     cleanup(dirs)
   }
 })
 
-// 这条单独判断（跟上面两条 no-run 反着来）的依据也在 runctx.mjs 头部
-// 注释里——pointer 文件本身存在，空内容是异常状态，不是干净的缺席。
+// 这条与上面那条是同一条理由的两个实物（pointer 在 = 有人开过 run），
+// 依据都在 runctx.mjs 头部注释里——空内容是异常状态，不是干净的缺席。
+// ⚠️ 这两条都变绿不等于分类判别力还在：把 kind 塌成恒 'unreadable' 时它们照样绿，
+// 真正会红的是本文件里 pointer **不在**的那两条——「没有 .agent-team 时……kind 是
+// no-run」与「kind 是 no-run 的失败返回也带 agentTeamDir」。两侧各有人守着。
 test('current-run 是空文件时返回 ok:false，kind 是 unreadable（不是 no-run）', () => {
   const dirs = makeRun({ runId: 'r1', stages: STAGES })
   try {

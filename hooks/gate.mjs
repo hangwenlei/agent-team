@@ -211,6 +211,30 @@ function failOpenNotice(label, ctx) {
   )
 }
 
+// M3b：**一条回传落在一个改不了它的收件人手里**时，往 stderr 留的那一行痕。
+//
+// 为什么留痕：这两条回传都**只走 additionalContext**，收件人不转述就没有第二条通道。
+// 账本比对那一条尤其重——它的 unrecorded 是「Bash 绕过 H3 的直接表征」
+// （hooks/lib/artifact-drift.mjs 头部那张表）。
+//
+// 为什么共用一份（M3b 修复轮 1）：两处要说的**路由事实是同一份知识**——additionalContext
+// 只发给这次 hook 事件所属的那个上下文，而要动的东西住在控制文件里。账本比对那一条先
+// 写出来、产者交代那一条后补，正是本仓库 docs/11 §5.15 记的「一边解决过、另一边不知道」
+// 那个形状的入口；抽成一份、各自只提供自己的名字与通道名，与 failOpenNotice 同一个手法、
+// 同一个理由（那一族此前四处各写一份近似拷贝，同一个 kind 在两个检查项里被说成两个意思）。
+//
+// ⚠️ **这不是 fail open，措辞不要写成 fail open**，所以不复用 failOpenNotice：那一族说的是
+// 「运行上下文读不到、本次放行」；这里运行上下文是好的、判据照常算了、回传照常发了，
+// **没有放行任何东西**——错的是收件人，不是判定。混用同一句话就是上面那种口径分叉。
+function misroutedNotice(label, channel, recipient) {
+  return (
+    `agent-team ${label}：这次的回传落在 ${recipient} 手里——${channel} 只发给这次工具调用` +
+    `所属的那个上下文，而它要动的东西住在 state.json 里，H3 写路径门禁在 PreToolUse 上把` +
+    `非 PM 对控制文件的 Edit/Write 拒掉。告警照发、判据没有放行任何东西，发错的是收件人` +
+    `不是判定；这一条要被处理，得靠 ${recipient} 把那段回传原样冒泡上去，一路带到 PM。\n`
+  )
+}
+
 // Task 4：账本比对的措辞组装。compareArtifacts（hooks/lib/artifact-drift.mjs）本身是
 // 纯函数、只回结构化数据；拼成人话、决定要不要发，同 buildLedgerNotices 一样放在调用
 // 它的这一层，不在纯函数模块里掺 I/O 或文案。
@@ -222,7 +246,51 @@ function failOpenNotice(label, ctx) {
 // 闸，它从不拒绝任何调用；要说明这是审计、对不上账，并写明它不阻止伪造、只留痕迹——与
 // hooks/lib/reach.mjs 的触达表同一个性质，完整理由见 hooks/lib/artifact-drift.mjs 头部，
 // 不在这里重复第二遍。
-function buildDriftNotice(cmp) {
+//
+// ---
+//
+// M3b：**收尾按「收件人改不改得了它」分支**（docs/11 §5.23 二）。
+//
+// 这条回传挂在 CHECK === 'deliverable'，也就是 PostToolUse:Agent，而 additionalContext
+// **发给发起那次 Agent 调用的人**。子代理派子代理时（at-product 派 at-ui）收件人就是
+// at-product——M3a Task 5 在活会话里实测过那一趟：unrecorded 落在 at-product 的
+// sidechain 里，PM 从头到尾零命中（docs/18 §3.6 末尾那条边）。
+//
+// **而上一版的收尾是「需要的话把 artifacts 改成与磁盘一致」**，同一条回传的上一句自己
+// 就写着「state.json 对 Edit/Write 只对 PM 开」——**先告诉收件人你改不了，再让他去改**。
+// 这正是本仓库记过的「失败文案把人指向错误修法」那一族的一个变体：文案没指错路，
+// **是路由指错了人**（buildCoverageNotice 上方那段注释记的是同一族的另一种形状）。
+//
+// 分量不在「措辞不好看」：账本比对的 unrecorded 是 **Bash 绕过 H3 的直接表征**
+// （hooks/lib/artifact-drift.mjs 头部那张表逐字这么定义它）。它发不到能处理的人手里，
+// 这个机制在子代理场景下就形同虚设。
+//
+// **「谁算 PM」复用 isContractWriter，不在这里另写一遍 role === 'at-pm'。**
+// 理由与 hooks/lib/writepath.mjs 的控制文件豁免同一条——那里用的**就是它**：
+// 这条文案断言的「你改不了 state.json」与 H3 真实会不会拒，由**同一个谓词**决定，
+// 不让文案自己再读一遍「谁是 PM」。调用点因此照抄 H3 的那组合（callerOf → isContractWriter）。
+//
+// ⚠️ **isDriverRole 上方那条失效条件对这一处同样适用，不抄第二份**：isContractWriter
+// 一旦为**它自己的**理由放宽（那段注释点名的那一种：有人往某个角色的 can_delegate_to
+// 里加 at-pm），这里要回来重核两者是否还重合。两处有一个差别值得写下来：那一处借它答的
+// 是**另一个**问题（谁是不参与统计的驱动者），今天只是外延重合；**这一处借的是 H3 自己
+// 调用的那同一个谓词**，所以 isContractWriter 放宽时 H3 与这条文案会**一起**放宽，断言
+// 不会因此变假。真正要重核的是另一半：isContractWriter 为假**不等于**一定写不成——H3
+// 在 ctx.kind === 'no-run' 那一支对**所有角色** fail open（gate.mjs 的 writepath 分支）。
+// 这条回传只在 ctx.ok 时才算得出来，那个窗口从这个调用点够不到；**哪天这条回传被挪到
+// 一个 ctx 不保证 ok 的触发点上，这个差额就落地了。**
+//
+// ⚠️ **M3b「坏指针的窗口」把这个差额的口径收窄了一次，但没有把它消掉。** 上面那句
+// 「no-run 那一支对所有角色 fail open」今天仍然成立，变的是 no-run **是什么**：
+// 「current-run 指向的 run 目录不存在」已经从 no-run 挪去 unreadable（论证在
+// hooks/lib/runctx.mjs 头部），所以 no-run 今天只剩「pointer 根本不在」一种。
+// 差额因此变窄：那种状态下写 runs/<id>/state.json 不会顺手把 pointer 造出来，
+// PostToolUse 那一帧 ctx 仍然不 ok。**但这仍然不是「写不成」**——H3 照样放行了那次
+// 写入，只是这个调用点看不见它。别把收窄读成消除。
+//
+// ⚠️ 参数缺省（判不出收件人）时落**改不了**那一支：多一次转述的代价，远小于再一次
+// 指挥一个改不了它的人去改——那正是这一轮要修的形状。
+function buildDriftNotice(cmp, recipientCanWriteState) {
   if (!cmp) return null
   const { drifted, missing, unrecorded } = cmp
   if (!drifted.length && !missing.length && !unrecorded.length) return null
@@ -238,12 +306,21 @@ function buildDriftNotice(cmp) {
     lines.push(`  - ${name}：磁盘上有这份文件，但 artifacts 里没记`)
   }
 
+  // 两支收尾。前面那一整段（审计边界）两支共用，一个字不改：它对谁都成立。
+  const tail = recipientCanWriteState
+    ? `去 run 目录核实磁盘内容，需要的话把 artifacts 改成与磁盘一致。`
+    : `⚠️ **这一条你改不了**：artifacts 住在 state.json 里，它是编排层的控制文件，` +
+      `H3 写路径门禁在 PreToolUse 上把非 PM 对它的 Edit/Write 拒掉。而这条回传只发给` +
+      `发起这次派发的人——**也就是你，PM 不会同时收到一份**。` +
+      `**把上面这几行原样冒泡给派你的人**，让它继续往上带到 PM；` +
+      `**不要自己把它咽掉**——咽掉之后没有任何人会再看见它。`
+
   return (
     `【账本比对】以下产物对不上账：\n${lines.join('\n')}\n` +
     `这是审计产物，不是安全边界——它不阻止任何人伪造产物，只让伪造留下痕迹。真要伪造的人` +
     `可以连 artifacts 一起改（任何持有 Bash 的角色都写得了——state.json 对 Edit/Write 只对` +
     `PM 开，但 Bash 不经任何 hook），但那时它不再是顺手绕过，而是一次需要同时改两处的刻意` +
-    `行为。去 run 目录核实磁盘内容，需要的话把 artifacts 改成与磁盘一致。`
+    `行为。${tail}`
   )
 }
 
@@ -267,9 +344,49 @@ function buildDriftNotice(cmp) {
 // 同理，trimmed 那一条给的是**形状**、用当前第一条 gap 举例，不是一份可以整批粘贴的
 // JSON——整批写进 trimmed 就是另一种「让它闭嘴」。
 //
-// 不点名「这个动作只能由 PM 做」（ledger 的【阶段】与【产物】两条要点名）：这条只在
-// kind === 'state' 时发，而 state.json 是控制文件，H4（writepath）在 PreToolUse 上对
-// 非 PM 一律拒绝——写不成就没有 PostToolUse，这条提示到不了非 PM 手里。
+// ⚠️ **这里原来写着一条已经被实测证伪的理由，M3b 修复轮 1 就地改对**（代码注释不是带
+// 日期的记录，不在旁边另加一段；记录那一份在 docs/11 §5.23 的收口块）。原文两处假：
+// ① 它把 writepath 写成「H4」——writepath 是 **H3**，H4 是 contract（本文件两条分支各自
+// 的注释写着）；② 它据此断言「对非 PM 一律拒绝——写不成就没有 PostToolUse，这条提示到
+// 不了非 PM 手里」，**那个全称量词不成立**，而那句话是「不点名这个动作只能由 PM 做」
+// 那个决定的全部支撑。
+//
+// 真实机制（子进程级探针实测）：
+//   · ctx.ok 时 H3 按控制文件规则拒非 PM（decideWritePath 顶部那一段，谓词是 isContractWriter）；
+//   · **但 readRunContext 把「current-run 存在且非空、指向的 run 目录不存在」判成
+//     kind:'no-run'，而 H3 在 no-run 那一支对所有角色 fail open**（本文件 writepath 分支）。
+//     非 PM 在那个窗口里**写得成** runs/<id>/state.json，PostToolUse 照常发；而此刻
+//     ctx 已经 ok（文件刚落盘），ledger 于是走到 kind === 'state'——**这条提示真的到得了
+//     非 PM 手里**；
+//   · **窗口在同一刻关上**：他的下一次写入就被 H3 拒了。所以收件人拿到这条提示时，
+//     他已经改不了它——与 buildDriftNotice 那条**同一个形状，只是门更窄**；
+//   · 只有这一种 no-run 走得通：current-run **完全不存在**时，PostToolUse 那一帧 ctx 仍是
+//     no-run，ledger 在 !ctx.ok 那条分支就退出了（只留 fail open 痕迹），这条提示压根不发。
+//
+// **所以那个决定换掉了**：收尾按「收件人改不改得了 state.json」分两支，谓词与手法与
+// buildDriftNotice 同一份（callerOf → isContractWriter，在调用点算），见下面 outs 那一段。
+//
+// ⚠️ **M3b「坏指针的窗口」把上面那个窗口关上了——上面这段机制描述因此过期了一半，
+// 就地标出来，不抹掉**（它记的是那个决定当时的依据，抹掉就看不出这条分支为什么在）。
+// 今天的真值：「current-run 指向的 run 目录不存在」已经归 kind:'unreadable'，H3 在那一支
+// 对非 PM fail **closed**（hooks/lib/runctx.mjs 头部是论证，本文件 writepath 分支是落点）。
+// 于是上面第二、三条描述的那条路**已经走不通**：非 PM 写不成 runs/<id>/state.json，
+// 就没有 PostToolUse，这条提示到不了他手里。而第四条今天覆盖了 no-run 的全部——
+// no-run 只剩「pointer 根本不在」，那一帧 ctx 不 ok，ledger 提前退出。
+//
+// **两支照留，理由不是「万一」**：
+//   · 这里的 recipientCanWriteState 算的是**这一帧真实的收件人**，不是「谁到得了这里」
+//     那个理论。把分支删掉等于让这一层去替 H3 断言「非 PM 结构上到不了」——**上一轮
+//     正是这条断言被实测打假的**，而它当时也是从另一个模块的分类推出来的。
+//   · 参数缺省（判不出收件人）时落的是「改不了」那一支；删掉分支，那个缺省就退回
+//     「你去改」的口吻——M3b 要修的正是这个形状。
+//   · 同一份谓词还服务着 buildDriftNotice，**那一条的非 PM 收件人照样到得了**
+//     （PostToolUse:Agent，收件人是发起派发的那个子代理，与本窗口无关）。
+// 钉这两支的子进程用例（tests/gate-ledger.test.mjs「M3b 修复轮 1」那一组）**不受影响**：
+// 它们构造的是 ctx.ok + 非 PM agent_type 这一帧本身，而 ledger 从不判「这次写入当初该不该
+// 被放行」——那是 H3 在 PreToolUse 上的事，另一个 hook。那组用例上方已经把这条写下来了。
+// **诊断那一半对谁都成立，两支共用、一个字不动**：哪一段的哪个角色没交代、口径宽不宽、
+// 驱动者那条护栏——分支的只是「你去把它改了」这个假设。
 //
 // ⚠️ Ruling 2：narrowed 为假时文案要**自己说出口径比平时宽**。读的人凭这一句才知道
 // 这批 gap 里可能混着「这个项目根本用不上的角色」与「PM 自己那几段」——不说的话，
@@ -316,7 +433,7 @@ function buildDriftNotice(cmp) {
 // 是否还重合；不重合就该在这里写一个独立的谓词，而不是继续借。
 const isDriverRole = (role) => isContractWriter(role)
 
-function buildCoverageNotice({ gaps, narrowed } = {}) {
+function buildCoverageNotice({ gaps, narrowed } = {}, recipientCanWriteState) {
   if (!Array.isArray(gaps) || !gaps.length) return null
   const lines = gaps.map((g) => `  - ${g.stage} 的 ${g.role}`)
   const drivers = [...new Set(gaps.filter((g) => isDriverRole(g.role)).map((g) => g.role))]
@@ -338,22 +455,45 @@ function buildCoverageNotice({ gaps, narrowed } = {}) {
       `的 available_roles），所以口径比平时宽：这个项目根本用不上的角色、以及 PM 自己做的` +
       `那几段（S1/S4/S8 那一类），都会算进来。**先把 available_roles 补上再判这批名字**` +
       `——它是 /agent-team:at-init 写的那一份；在补上之前不要照着下面两条出路动手。\n`
+  // 两条出路。**两支都要保留它们**：判据分辨不了「真裁了 / 真漏了」而读的人分辨得了，
+  // 这件事不随收件人变（那正是这两条出路存在的全部理由，见上面那段）。变的只是
+  // **谁动手**——写不了的那一支把动作换成「带着事实往上冒泡」，不是把信息删掉。
+  const outs = recipientCanWriteState
+    ? `两条出路，逐个按事实选一条：\n` +
+      `  ① 本来就不打算用它（按需组队的主动裁剪）：把它写进 state.json 的 trimmed，` +
+      `形状是 ${shape}——键是角色名，值是它在哪一段被裁掉的。` +
+      `理由不用写在这里，它已经在 04-dispatch.md 里。` +
+      `已经写过却还在报的话，先核字段名拼对了没有：state.json 的校验不拒未知键，` +
+      `trimmed 拼错了不会有任何别的提示。\n` +
+      `  ② 不是裁剪，是漏了：把它派出去，让它自己写出那一段的产物。\n` +
+      `⚠️ 不要为了让这条提示消失就把名字写进 roster：roster 记的是这一趟真的叫到过谁，` +
+      `只写名字不派人，产物照样不存在——提示没了，洞还在，而且下一次账本比对会把它报成 ` +
+      `missing，那时看起来像是产物丢了，不像是没派。同样，没真裁就别写进 trimmed。\n` +
+      `这条只报不拦：选哪条都不会卡住你往下走，不选也不会。`
+    : `⚠️ **这一条你改不了**：trimmed 与 roster 都住在 state.json 里，它是编排层的控制` +
+      `文件，H3 写路径门禁在 PreToolUse 上把非 PM 对它的 Edit/Write 拒掉。而这条回传只` +
+      `发给刚做完这次写入的那个上下文——**也就是你，PM 不会同时收到一份**。\n` +
+      `**但你很可能正是知道答案的那个人**（判据分辨不了真裁剪还是真漏派，你分辨得了），` +
+      `所以不要只把这几行转上去，带上事实：\n` +
+      `  ① 本来就不打算用它（按需组队的主动裁剪）：它要写进 state.json 的 trimmed，` +
+      `形状是 ${shape}——键是角色名，值是它在哪一段被裁掉的；**落盘是 PM 的动作**，` +
+      `你把「是哪几条、为什么」说清楚就够了。\n` +
+      `  ② 不是裁剪，是漏了：**派它出去这一半你可能真的做得到**（看花名册里你的 ` +
+      `can_delegate_to 含不含它），做得到就派、让它自己写出那一段的产物；` +
+      `**但记账那一半仍然在 PM 那边**——roster 记的是这一趟真的叫到过谁，同样住在 state.json。\n` +
+      `⚠️ 往上带的时候不要把它说成「把名字写进 roster 就行」：只写名字不派人，产物照样` +
+      `不存在——提示没了，洞还在，而且下一次账本比对会把它报成 missing，那时看起来像是` +
+      `产物丢了，不像是没派。同样，没真裁就别建议写进 trimmed。\n` +
+      `**把上面这几行原样冒泡给派你的人**，让它继续往上带到 PM；` +
+      `**不要自己把它咽掉**——咽掉之后没有任何人会再看见它。\n` +
+      `这条只报不拦：它没有卡住你往下走。`
+
   return (
     `【产者交代】下面这些角色是**已经走过的阶段**的产者，而这一趟既没叫到它们、` +
     `也没声明裁掉它们——它们的缺席今天不会被任何别的判据看见：\n${lines.join('\n')}\n` +
     widened +
     driverWarning +
-    `两条出路，逐个按事实选一条：\n` +
-    `  ① 本来就不打算用它（按需组队的主动裁剪）：把它写进 state.json 的 trimmed，` +
-    `形状是 ${shape}——键是角色名，值是它在哪一段被裁掉的。` +
-    `理由不用写在这里，它已经在 04-dispatch.md 里。` +
-    `已经写过却还在报的话，先核字段名拼对了没有：state.json 的校验不拒未知键，` +
-    `trimmed 拼错了不会有任何别的提示。\n` +
-    `  ② 不是裁剪，是漏了：把它派出去，让它自己写出那一段的产物。\n` +
-    `⚠️ 不要为了让这条提示消失就把名字写进 roster：roster 记的是这一趟真的叫到过谁，` +
-    `只写名字不派人，产物照样不存在——提示没了，洞还在，而且下一次账本比对会把它报成 ` +
-    `missing，那时看起来像是产物丢了，不像是没派。同样，没真裁就别写进 trimmed。\n` +
-    `这条只报不拦：选哪条都不会卡住你往下走，不选也不会。`
+    outs
   )
 }
 
@@ -698,7 +838,8 @@ function main() {
           //     ——在正路上刷一行「当前没有进行中的 run，本次放行、不拦截」只会把人
           //     指向 current-run 去查一个根本不存在的问题。
           //   - 'unreadable' 是门禁**自己判不出来**（current-run 被截断成空文件、
-          //     run 目录缺 state.json、project.json 之外的东西坏了……）。触达表照发
+          //     current-run 指向的 run 目录不存在、run 目录缺 state.json、project.json
+          //     之外的东西坏了……）。触达表照发
           //     ——它的判据只有 roster.json + 刚写完的 project.json，跟那个坏掉的 run
           //     无关，而「在一个坏掉的 run 上重跑 /at-init」恰恰是要支持的动作——
           //     但**留痕照留**。「fail open 必须留痕」是这个仓库的硬规矩：静默的放行
@@ -815,8 +956,30 @@ function main() {
             `本次判据没能按它收窄，报出来的口径比平时宽。跑 /agent-team:at-init 把它写上。\n`,
         )
       }
-      const coverage = buildCoverageNotice(cov)
-      if (coverage) notices.push(coverage)
+      // M3b 修复轮 1：收尾按「收件人改不改得了 state.json」分支。
+      //
+      // 收件人是**刚做完这次 Edit/Write 的那个上下文**——PostToolUse 的 additionalContext
+      // 发给它。这里的 input.agent_type 与 writepath 分支读的是同一个字段、同一个含义
+      // （不像 deliverable 分支那样还有一个 tool_input.subagent_type 要区分）。
+      //
+      // 组合（callerOf → isContractWriter）与 hooks/lib/writepath.mjs 控制文件豁免那一处
+      // 逐字同构，与 deliverable 分支那一处同一份：**文案断言的「你改不了」与 H3 真会不会
+      // 拒，由同一个谓词决定**。为什么这一支到得了非 PM 手里（它曾经被断言到不了），
+      // 完整机制写在 buildCoverageNotice 上方，不在这里重复第二遍。
+      const recipient = callerOf(input)
+      const recipientCanWriteState = isContractWriter(recipient)
+      const coverage = buildCoverageNotice(cov, recipientCanWriteState)
+      if (coverage) {
+        notices.push(coverage)
+        // 痕迹这一半，与账本比对那一条共用 misroutedNotice。⚠️ 它与上面那条
+        // 「没能按 available_roles 收窄」不是同一件事，两条可以同时出现：
+        // 前者说口径宽了，这一条说它发错了人。
+        if (!recipientCanWriteState) {
+          process.stderr.write(
+            misroutedNotice('产者交代', 'PostToolUse 的 additionalContext', recipient),
+          )
+        }
+      }
     }
 
     emitLedger(spec.event, notices)
@@ -884,6 +1047,16 @@ function main() {
     // 会让 PM 只看见后一条（下面统一交给 emitLedger 拼成一条）。只在 CHECK === 'deliverable'
     // 时算：H5b（stop-gate）走 SubagentStop 的 stderr 契约，没有 additionalContext 这条
     // 通道，算了也没地方发。
+    // M3b：**这条回传的收件人不是 role**。role 是刚被派出去的那个目标
+    // （tool_input.subagent_type）；additionalContext 发给**发起这次 Agent 调用的人**，
+    // 也就是 agent_type——主线程发起时它缺失，callerOf 归成 MAIN。两个字段在这个事件上
+    // 含义不同这件事，上面 rawTarget 那段注释已经写过一次，这里只是用它的另一半。
+    //
+    // 组合（callerOf → isContractWriter）与 hooks/lib/writepath.mjs 的控制文件豁免逐字
+    // 同构，是有意的：文案断言的「收件人改不改得了 state.json」与 H3 真实会不会拒，
+    // 由同一个谓词决定。完整理由与失效条件写在 buildDriftNotice 上方，不在这里重复。
+    const recipient = callerOf(input)
+    const recipientCanWriteState = isContractWriter(recipient)
     const driftNotice =
       CHECK === 'deliverable'
         ? buildDriftNotice(
@@ -896,8 +1069,20 @@ function main() {
               // 字段坏掉（不是数组）时应当退回更宽的集合，多报几条不要漏报。
               roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
             }),
+            recipientCanWriteState,
           )
         : null
+
+    // M3b：收件人改不了它时，**往 stderr 留一行痕**。文案那一半在 buildDriftNotice 里，
+    // 痕迹这一半在调用点，两半都要有；这个分工与 buildCoverageNotice 那条收窄失效的痕迹
+    // 逐字同构。措辞与完整理由在 misroutedNotice 上方，产者交代那一条共用同一份。
+    //
+    // ⚠️ 只在收件人改不了时留。PM（含主线程）收到时那条路径本来就通，留痕只是噪音。
+    if (driftNotice && !recipientCanWriteState) {
+      process.stderr.write(
+        misroutedNotice('账本比对', 'PostToolUse:Agent 的 additionalContext', recipient),
+      )
+    }
 
     if (r.ok) {
       // ⚠️ ok 有三种成因，只有一种是真的「交付了」。skipped 的两种是门禁**哑掉**：
