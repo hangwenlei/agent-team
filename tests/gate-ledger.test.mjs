@@ -427,3 +427,130 @@ test('没有 run 时写别的文件：fail open 且留痕，不静默', () => {
     rmSync(pluginDir, { recursive: true, force: true })
   }
 })
+
+// ——— M3a Task 2：产者交代判据在真实 gate 上的子进程级验证 ———
+//
+// 纯函数那一层在 tests/coverage.test.mjs。这里钉的是接线：触发点选对了没
+// （kind === 'state' 那一刻，不是每次写）、文案有没有真的到 stdout 上、
+// 以及它有没有经 trustedBlock 包装。
+//
+// 夹具是 docs/15 §5.1 那一趟的形状：S2 走过了（history 里有、且不是当前阶段），
+// at-ui 是 S2 的产者而 roster 里没有它。gate.mjs 读的是仓库根真实 stages.json
+// （见本文件头部那条已知边界），所以 S2 的 producers 就是 at-product + at-ui。
+//
+// roster 里带 at-pm 是必须的，不是凑数：S1 也走过了，而它的产者是 at-pm 自己。
+// 少了它这份夹具会多报一条 {S1, at-pm}，下面那条 assert.doesNotMatch 就证明不了
+// 「只点名该点的那一个」。这条实测差异记在 tests/coverage.test.mjs 的「实测记录」
+// 那一组里。
+const WALKED_S2 = {
+  runId: 'r1',
+  stage: 'S3',
+  history: [
+    { stage: 'S1', at: '2026-09-20T10:00:00Z' },
+    { stage: 'S2', at: '2026-09-20T10:10:00Z' },
+    { stage: 'S3', at: '2026-09-20T10:20:00Z' },
+  ],
+  roster: ['at-pm', 'at-product', 'at-architect'],
+}
+
+const stateJsonOf = (projectDir) => join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+const writeState = (projectDir) =>
+  run('ledger', {
+    tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: stateJsonOf(projectDir) },
+  }, GATE, projectDir)
+
+test('推进出去之后写 state.json：产者交代那条文案出现在 stdout，并点名是哪一段的哪个角色', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    const ctx = ctxOf(writeState(projectDir).stdout)
+    assert.match(ctx, /S2 的 at-ui/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 文案的两条出路各钉一条。brief 的硬要求：一条是「真要裁就写进 trimmed」，
+// 一条是「不是裁剪就去补派」。只写一条出路等于替读的人做了那个判断，而判据恰恰
+// 分辨不了这两种触发（它看到的东西在两种情况下完全一样）。
+test('产者交代文案给出「写进 trimmed」这条出路，并带上可以照抄的形状', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(ctxOf(writeState(projectDir).stdout), /trimmed[\s\S]*\{"at-ui": "S2"\}/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('产者交代文案给出「去把它派出去」这条出路，不是只有 trimmed 一条', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(ctxOf(writeState(projectDir).stdout), /不是裁剪，是漏了：把它派出去/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 这条防的是本仓库栽过的那一族：失败文案把人指向错误修法。这里的错误修法很具体
+// ——把名字写进 roster 让提示消失。写了名字不派人，产物照样不存在，洞还在。
+test('产者交代文案明确写出「不要为了让提示消失就写进 roster」', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    assert.match(ctxOf(writeState(projectDir).stdout), /不要为了让这条提示消失就把名字写进 roster/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 新增回传内容照本仓库既有形状钉一条「真实输出以受信前缀开头」（Task 2 修复轮 1 的
+// 先例）。这份夹具不会产生别的 notice（S3 的产物一个都不在磁盘上 → 没有【阶段】；
+// state 本身合法 → 没有【state.json】），所以这条断言没有顺风车可搭：输出非空就
+// 只能是产者交代这一条。
+test('产者交代的真实回传以受信前缀开头', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    const { stdout } = writeState(projectDir)
+    assert.ok(ctxOf(stdout).startsWith(TRUSTED_PREFIX))
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 正向自检锚在上面那四条：同一份夹具（逐字同一个 WALKED_S2，只多一个 trimmed）
+// 在 at-ui 没被声明时真的报。这里断言的是**整个 stdout 为空**，不是
+// doesNotMatch——后者在「整条通道被删掉」时同样绿（空输出天然满足否定断言），
+// 而 stdout 严格为空是对整个输出的正面陈述：一条 notice 都没有。
+test('at-ui 写进 trimmed 之后：同一份夹具不再报，整条回传为空', () => {
+  const { projectDir, pluginDir } = makeRun({ ...WALKED_S2, trimmed: { 'at-ui': 'S2' } })
+  try {
+    assert.equal(writeState(projectDir).stdout.trim(), '')
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 触发点：推进出去时，不是每次写。写产物那一刻 roster 对这一段本来就还不完整
+// （commands/at.md 第 4 步在派发并核实之后才累加它），在那里算是稳定的误报。
+// 这条不是拿空输出证明的——同一次调用的 stdout 里有【产物】那条 sha256 回传，
+// 证明通道是通的、只是产者交代那一条按设计没上车。
+test('写的不是 state.json 时不报产者交代——触发点是推进出去那一刻', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    const p = join(projectDir, '.agent-team', 'runs', 'r1', '01-prd.md')
+    writeFileSync(p, '# PRD\n', 'utf8')
+    const { stdout } = run('ledger', {
+      tool_name: 'Write', agent_type: 'at-product', tool_input: { file_path: p },
+    }, GATE, projectDir)
+    const ctx = ctxOf(stdout)
+    assert.ok(ctx.includes(sha256OfContract(readFileSync(p))), '【产物】回传必须照常出现，否则下面那条证明不了任何事')
+    assert.doesNotMatch(ctx, /产者交代/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})

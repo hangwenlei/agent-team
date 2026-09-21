@@ -25,6 +25,7 @@ import { validateState, isStageDone } from './lib/state.mjs'
 import { sha256OfContract } from './lib/contract-hash.mjs'
 import { buildLedgerNotices } from './lib/ledger.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
+import { decideCoverage } from './lib/coverage.mjs'
 import { norm, underDir } from './lib/path-norm.mjs'
 import { isPlainObject } from './lib/stages.mjs'
 import { TRUSTED_PREFIX, trustedBlock } from './lib/trusted.mjs'
@@ -243,6 +244,50 @@ function buildDriftNotice(cmp) {
     `可以连 artifacts 一起改（任何持有 Bash 的角色都写得了——state.json 对 Edit/Write 只对` +
     `PM 开，但 Bash 不经任何 hook），但那时它不再是顺手绕过，而是一次需要同时改两处的刻意` +
     `行为。去 run 目录核实磁盘内容，需要的话把 artifacts 改成与磁盘一致。`
+  )
+}
+
+// M3a Task 2：「已经走过的那几段，产者有没有交代」的措辞组装。decideCoverage
+// （hooks/lib/coverage.mjs）本身是纯函数、只回结构化数据；拼成人话、决定要不要发，
+// 放在调用它的这一层，与上面 buildDriftNotice 同一个手法、同一个理由。
+// gaps 为空时返回 null，调用方据此决定要不要往这次的 notices 里塞一条。
+//
+// ⚠️ **报，不拦**（M3a 设计 §3.2 末尾），与 H5a 同一档。裁剪是合法动作，这条判据只
+// 负责把沉默变成一句话；做成 deny 会在「PM 还没来得及写 trimmed」时卡死整条链。
+//
+// ⚠️ 文案必须给**两条**出路，而且要把它们和各自的触发对上：这条提示有两个判据分辨
+// 不了、而读的人分辨得了的触发——真的裁了 / 真的漏了。只写一条出路就等于替读的人
+// 做了那个判断，而判据恰恰是做不了这个判断的那一方。
+//
+// ⚠️ 这里要防的错误修法很具体：**把名字写进 roster 让提示消失**。roster 记的是「这一趟
+// 真的叫到过谁」，只写名字不派人，产物照样不存在——提示没了，洞还在，而且下一次账本
+// 比对会把它报成 missing，那时看起来像是产物丢了，不像是没派。本仓库为「失败文案把人
+// 指向错误修法」栽过一次（ledger 的【阶段】那条：提示让一个做不到这件事的角色去做
+// 它），这条是同一族的第二种形状：能做到，但做的是错的那件事。
+// 同理，trimmed 那一条给的是**形状**、用当前第一条 gap 举例，不是一份可以整批粘贴的
+// JSON——整批写进 trimmed 就是另一种「让它闭嘴」。
+//
+// 不点名「这个动作只能由 PM 做」（ledger 的【阶段】与【产物】两条要点名）：这条只在
+// kind === 'state' 时发，而 state.json 是控制文件，H4（writepath）在 PreToolUse 上对
+// 非 PM 一律拒绝——写不成就没有 PostToolUse，这条提示到不了非 PM 手里。
+function buildCoverageNotice(gaps) {
+  if (!Array.isArray(gaps) || !gaps.length) return null
+  const lines = gaps.map((g) => `  - ${g.stage} 的 ${g.role}`)
+  const eg = gaps[0]
+  return (
+    `【产者交代】下面这些角色是**已经走过的阶段**的产者，而这一趟既没叫到它们、` +
+    `也没声明裁掉它们——它们的缺席今天不会被任何别的判据看见：\n${lines.join('\n')}\n` +
+    `两条出路，逐个按事实选一条：\n` +
+    `  ① 本来就不打算用它（按需组队的主动裁剪）：把它写进 state.json 的 trimmed，` +
+    `形状是 {"${eg.role}": "${eg.stage}"}——键是角色名，值是它在哪一段被裁掉的。` +
+    `理由不用写在这里，它已经在 04-dispatch.md 里。` +
+    `已经写过却还在报的话，先核字段名拼对了没有：state.json 的校验不拒未知键，` +
+    `trimmed 拼错了不会有任何别的提示。\n` +
+    `  ② 不是裁剪，是漏了：把它派出去，让它自己写出那一段的产物。\n` +
+    `⚠️ 不要为了让这条提示消失就把名字写进 roster：roster 记的是这一趟真的叫到过谁，` +
+    `只写名字不派人，产物照样不存在——提示没了，洞还在，而且下一次账本比对会把它报成 ` +
+    `missing，那时看起来像是产物丢了，不像是没派。同样，没真裁就别写进 trimmed。\n` +
+    `这条只报不拦：选哪条都不会卡住你往下走，不选也不会。`
   )
 }
 
@@ -670,6 +715,23 @@ function main() {
       produceName,
       produceSha: produceBytes ? sha256OfContract(produceBytes) : null,
     })
+
+    // M3a Task 2：产者交代判据的触发点是「state.stage 推进出去时」（设计 §3.2），
+    // 而推进这个动作落盘的形式就是写 runs/*/state.json —— kind === 'state' 就是它，
+    // 不另找一个触发点。
+    //
+    // ⚠️ 为什么不是每次 ledger 都算一遍：同一条理由在本文件的 buildDriftNotice、
+    // ledger 分支开头那条路径过滤、以及 hooks/lib/ledger.mjs 的【产物】分支各留过一次
+    // 注释——每次子代理返回 / 每写一个产物都刷一段 additionalContext 会把真正要看的
+    // 东西淹掉。写产物那一刻 roster 对这一段本来就还不完整（commands/at.md 第 4 步在
+    // 派发并核实之后才累加它），在那里算等于专挑形状 B 那个窗口报，是稳定的误报。
+    //
+    // ⚠️ 不塞进 buildLedgerNotices：那个函数的入参全是调用方算好的派生值，这一层
+    // 才是持有 ctx.stages / ctx.state 的地方；措辞组装与 buildDriftNotice 同址。
+    if (kind === 'state') {
+      const coverage = buildCoverageNotice(decideCoverage({ stages: ctx.stages, state: ctx.state }).gaps)
+      if (coverage) notices.push(coverage)
+    }
 
     emitLedger(spec.event, notices)
   }

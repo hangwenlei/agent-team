@@ -28,7 +28,18 @@ import { join, dirname } from 'node:path'
 // 测试里仍然保留的显式传参，是为了隔离测试自己真正要盯的那件事，不是因为还
 // 依赖这个绕法（见 tests/gate-readiness.test.mjs 与 tests/readiness.test.mjs
 // 里对应测试的说明）。
-export function makeRun({ runId = 'r1', stage = 'S2', artifacts = [], project = null, stages = null, roster = [] } = {}) {
+//
+// M3a Task 2：加可选 history 与 trimmed。两个都缺省 null，**缺省时与改动前逐字相同**
+// （history 仍是单条 [{ stage, at }]，state.json 里根本没有 trimmed 这个键）。
+//   - history：产者交代判据（hooks/lib/coverage.mjs）只看「走过的阶段」，而走过的阶段
+//     = history 里出现过且不等于 stage 的那些。单条 history 的旧夹具因此对它恒沉默，
+//     要子进程级测到它就得能造出多条 history。
+//     ⚠️ 传多条 history 时**调用方自己保证 rework 与它一致**（某阶段出现 n 次 → n-1）。
+//     这里不替你算——validateState 会交叉校验，不一致会多出一条无关的【state.json】噪声。
+//   - trimmed：缺省**不写这个键**，而不是写成 {}。这不是偷懒：M3a 之前落盘的 state.json
+//     没有这个字段，validateState 对缺失不报错（向后兼容），缺省保持缺失能让既有夹具
+//     顺带覆盖那条真实存在的形状。要测「声明过的裁剪」就显式传进来。
+export function makeRun({ runId = 'r1', stage = 'S2', artifacts = [], project = null, stages = null, roster = [], history = null, trimmed = null } = {}) {
   // 两个根分开造：projectDir 模拟用户仓库，pluginDir 模拟插件安装目录。
   const projectDir = mkdtempSync(join(tmpdir(), 'agent-team-proj-'))
   const pluginDir = mkdtempSync(join(tmpdir(), 'agent-team-plug-'))
@@ -46,11 +57,12 @@ export function makeRun({ runId = 'r1', stage = 'S2', artifacts = [], project = 
       stage,
       contract_sha: 'PENDING',
       roster,
+      ...(trimmed === null ? {} : { trimmed }),
       artifacts: {},
       rework: {},
       never_invoked: [],
       escalations: [],
-      history: [{ stage, at: '2026-09-17T14:30:00Z' }],
+      history: history ?? [{ stage, at: '2026-09-17T14:30:00Z' }],
     }),
     'utf8',
   )
