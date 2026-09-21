@@ -147,7 +147,17 @@ test('交叉核：产品角色 = settings.json 的 agent + templates/project.jso
     [...new Set([settings.agent, ...project.available_roles])].sort(),
     'agents/ 减去测试替身，与「主会话角色 + 可用班底」两个真源算出来的对不上——' +
       '往 agents/ 里加了真角色却没写进 available_roles，或者反过来。先确认哪一侧漏了，' +
-      '再决定对外那句角色数要不要跟着改',
+      '再决定对外那句角色数要不要跟着改。\n' +
+      '  ⚠️ **少一个名字时，先去看 templates/project.json 的 `paths` 里还有没有它**（M3j 补）。\n' +
+      '  一个角色**同时**从 `available_roles` 与 `paths` 里被拿掉时，**全仓只有本条会红**\n' +
+      '  ——而真正发生的事不在本条的标题里：`tests/agents.test.mjs` 那条「认领了 `paths`\n' +
+      '  的正文都写着『只有那些』」（H3 写路径隔离在角色正文侧的第一道）遍历的是\n' +
+      '  `Object.keys(paths)` 派生出来的集合，**那个角色直接退出了遍历**，它的写路径限定\n' +
+      '  从此没有任何东西检查，而那份正文里的话一个字没变。实测在 docs/11 §5.32（变异 A）。\n' +
+      '  ⚠️ **别为了让本条绿而删 agents/ 下那份正文、或者把它塞进 TEST_DOUBLE_ROLES**：\n' +
+      '  前者会把一个真角色从整套判据里一起抹掉，后者是把「班底漏了一个」改写成\n' +
+      '  「它本来就不算数」。正常的修法是把名字补回 `available_roles`（以及 `paths`，\n' +
+      '  如果它本来就该认领路径）。',
   )
 })
 
