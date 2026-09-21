@@ -831,3 +831,176 @@ test('坏指针：at-pm 写 .agent-team/current-run 本身放行——那正是�
     rmSync(pluginDir, { recursive: true, force: true })
   }
 })
+
+// ——— M3c「丢指针」：current-run **根本不在**，而 runs/<真实 id>/ 原封不动 ———
+//
+// 上面那一族的第三个实物，**比坏指针还便宜一个参数**（rm 比 echo bogus > 少一个）。
+// 这个输入状态此前归 kind:'no-run'，H3 因此在这里同样对**所有角色** fail open：
+// 子进程级实测（改动前）at-backend 写得成别人认领的路径、写得成 runs/r1/state.json、
+// 也写得成 00-contract.md（H4 那一半在 tests/gate-contract.test.mjs）。
+// 本轮把「指针不在**且** runs/ 非空」挪去 unreadable 关上它；分类本身的论证在
+// hooks/lib/runctx.mjs 头部 ③，不在这里重复第二遍。
+//
+// ⚠️ **这一族与坏指针有一处不同，下面专门有一条钉它**：坏指针在正路上不可达，
+// 而这一格**在正路上可达**——commands/at.md 第 1 节建 run 的顺序（先建目录与
+// state.json、最后写 current-run）前半段就落在这一格里。所以「PM 通得过」在这里
+// 不只是运维逃生路径，它是**建第一趟 run 这件事本身**。
+const makeMissingPointer = () => {
+  const dirs = makeRun({ runId: 'r1', project: PROJECT })
+  // runs/r1/ 与它的 state.json 原封不动，只删掉指针——这就是这一格。
+  rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+  return dirs
+}
+
+test('丢指针（current-run 不在、runs/ 非空）：at-backend 写别人认领的 src/web/ 被拒——这个窗口本轮关上了', () => {
+  const { projectDir, pluginDir } = makeMissingPointer()
+  try {
+    const { stdout, status } = run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'agent-team:at-backend',
+      tool_input: { file_path: join(projectDir, 'src', 'web', 'app.tsx') },
+    }, GATE, projectDir)
+    assert.equal(status, 0)
+    const out = decisionOf(stdout)
+    assert.ok(out, '丢指针下非 PM 写别人的地盘必须 deny——放行就是那个 fail-open 窗口回来了')
+    assert.equal(out.permissionDecision, 'deny')
+    // 光断言 deny 抓不住「这个 deny 其实来自别处」（比如 decideWritePath 的归属判定）：
+    // 理由必须同时点名 fail-closed 那条措辞与这次失败的**具体原因**，手法与上面
+    // 坏指针那一条同一份。
+    assert.match(out.permissionDecisionReason, /读不到运行上下文/)
+    assert.match(out.permissionDecisionReason, /非空/, '理由里要带上「runs/ 下非空」这个真实原因')
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('丢指针：at-backend 写 runs/r1/state.json 被拒——控制文件这一类同样关上了', () => {
+  const { projectDir, pluginDir } = makeMissingPointer()
+  try {
+    const { stdout } = run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'agent-team:at-backend',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'runs', 'r1', 'state.json') },
+    }, GATE, projectDir)
+    const out = decisionOf(stdout)
+    assert.ok(out, '改动前这里放行，而 state.json 的 artifacts 是账本比对的唯一基线')
+    assert.equal(out.permissionDecision, 'deny')
+    assert.match(out.permissionDecisionReason, /读不到运行上下文/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ⚠️ 与坏指针那一族同理，这条钉的是**爆炸半径**，不是又一次「控制文件被拦住」：
+// unreadable 的 deny 发生在**看路径之前**，所以丢指针下非 PM 连自己认领的地盘都
+// 写不了。这是收窄要付的代价，写下来、由判据守着。
+test('丢指针：at-backend 连自己认领的 src/server/ 也写不了——代价与既有的每一个 unreadable 状态一样大', () => {
+  const { projectDir, pluginDir } = makeMissingPointer()
+  try {
+    const { stdout } = run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'agent-team:at-backend',
+      tool_input: { file_path: join(projectDir, 'src', 'server', 'api.ts') },
+    }, GATE, projectDir)
+    const out = decisionOf(stdout)
+    assert.ok(out, 'ctx 读不出来时 H3 拒的是这个会话的每一次 Edit/Write，不只是控制文件')
+    assert.equal(out.permissionDecision, 'deny')
+    assert.match(out.permissionDecisionReason, /读不到运行上下文/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ⚠️ 下面三条是上面三条的**正向自检锚**。判据被错改成「unreadable 一律拒」时
+// 上面三条照样绿，红的是这三条——而它们红掉的后果分别是：run 接不回来、
+// **第一趟 run 建不出来**、自举死锁。
+test('丢指针：at-pm 写 .agent-team/current-run 本身放行——把指针写回去就是修好它的那一次写入', () => {
+  const { projectDir, pluginDir } = makeMissingPointer()
+  try {
+    const { stdout, stderr } = run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'at-pm',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'current-run') },
+    }, GATE, projectDir)
+    assert.equal(
+      decisionOf(stdout),
+      null,
+      '拦住它，一个丢了指针的 run 在 Claude 里就再也接不回来，只能由用户离开会话手工改文件',
+    )
+    // 这两行 stderr 是 I2 豁免独有的留痕：只断言「没被拒」的话，放行改由别的分支
+    // 发出（比如 kind 被塌回 no-run）也照样绿。
+    assert.match(stderr, /读不到运行上下文/)
+    assert.match(stderr, /调用者是 PM/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ⚠️ 这一条与上面那条**不是同一件事**，它是这一族独有的那一半：
+// commands/at.md 第 1 节建 run 的顺序是「建目录 → 写 runs/<id>/state.json →
+// 写 current-run」，**头两步跑在指针还没写、而 runs/ 已经非空的时刻**——也就是
+// 这一格里。坏指针那一族在正路上不可达，这一格可达，所以这里放行的不是运维逃生
+// 路径，而是**建第一趟 run 这个动作本身**。一条用例走完两步，因为要钉的是那个
+// **顺序**：拆开就看不出它们是同一趟里相邻的两帧。
+test('丢指针 · 正路瞬态：照 commands/at.md 第 1 节建第一趟 run，PM 的每一步都放行', () => {
+  const projectDir = mkdtempSync(join(tmpdir(), 'agent-team-h3-firstrun-'))
+  try {
+    // /at-init 之后的形态：.agent-team 在、project.json 在、还没有任何 run。
+    mkdirSync(join(projectDir, '.agent-team'), { recursive: true })
+    writeFileSync(join(projectDir, '.agent-team', 'project.json'), JSON.stringify(PROJECT), 'utf8')
+    const asPm = (file) => run('writepath', {
+      tool_name: 'Write',
+      agent_type: 'at-pm',
+      tool_input: { file_path: file },
+    }, GATE, projectDir)
+
+    // 第 1 节第 2 步：目录已建（runs/ 非空、指针还没写 = 这一格），写 state.json。
+    mkdirSync(join(projectDir, '.agent-team', 'runs', 'r1'), { recursive: true })
+    const stateWrite = asPm(join(projectDir, '.agent-team', 'runs', 'r1', 'state.json'))
+    assert.equal(
+      decisionOf(stateWrite.stdout),
+      null,
+      '拦住这一步，第一趟 run 永远建不出来——这一格在正路上是可达的，不只是运维场景',
+    )
+    assert.match(
+      stateWrite.stderr,
+      /读不到运行上下文/,
+      '走的是 unreadable 那一支的 I2 豁免，不是 no-run 的 fail open——' +
+        '这半句话一变，说明这一格的分类又漂回去了',
+    )
+
+    // 第 1 节第 3 步：state.json 已落盘，写 current-run。仍然在这一格里。
+    writeFileSync(join(projectDir, '.agent-team', 'runs', 'r1', 'state.json'), '{}', 'utf8')
+    assert.equal(decisionOf(asPm(join(projectDir, '.agent-team', 'current-run')).stdout), null)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+  }
+})
+
+// ⚠️ **这一刀的硬边界**：收窄认的是「runs/ 里有没有东西」，不是「runs/ 这个目录在不在」。
+// 判据被错写成 existsSync(runsDir) 时上面每一条都照样绿，红的是这一条——而它红掉的
+// 后果是：run 目录被清空过的项目里，整支班底一上来就写不了任何东西。
+// 本文件上面「没有 run 时，有名有姓的角色（非 MAIN）也放行」那条走的是 .agent-team
+// 整个不存在，与这条是同一条边的两个形态，两条都要在。
+test('自举边界：runs/ 存在但是空目录——有名有姓的非 PM 角色仍然放行，按 no-run 处理', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h3-emptyruns-'))
+  try {
+    mkdirSync(join(cwd, '.agent-team', 'runs'), { recursive: true })
+    const { stdout, stderr, status } = run('writepath', {
+      tool_name: 'Edit',
+      agent_type: 'agent-team:at-backend',
+      tool_input: { file_path: join(cwd, 'src', 'server', 'api.ts') },
+    }, GATE, cwd)
+    assert.equal(status, 0)
+    assert.equal(stdout.trim(), '', '空的 runs/ 是「从来没有人建过 run」，仍然是干净的缺席')
+    // 连措辞一起锚：只断言没被拒的话，kind 改判成 unreadable 而放行改由别的分支
+    // 发出也照样绿——而这个角色根本不是 PM，它必须走 no-run 那一支。
+    assert.match(stderr, /H3 写路径门禁：当前没有进行中的 run（/)
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})

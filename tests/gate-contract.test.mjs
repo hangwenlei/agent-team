@@ -14,7 +14,7 @@
 // 的产物"这个背景，不是说 H4 的判定借用了它。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, decisionOf } from './helpers/gate-runner.mjs'
@@ -365,6 +365,81 @@ test('contract：坏指针（run 目录不存在），子代理写契约——�
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ——— M3c「丢指针」：current-run **根本不在**，而 runs/<真实 id>/ 原封不动 ———
+//
+// 与上面坏指针那一组同构，只是这一格更便宜（rm 比 echo bogus > 少一个参数）。
+// 子进程级实测（改动前）：**at-backend 写得成 runs/r1/00-contract.md**——一个 subagent
+// 可以在这个窗口里给一个真实存在的 run 覆写掉它唯一的需求基线，而 S7 验收拿契约的
+// 哈希对账。本轮把这一格挪去 unreadable（论证在 hooks/lib/runctx.mjs 头部 ③）。
+//
+// 两条各占一个 test()：子代理被拒 / PM 仍然通。后者是前者的正向自检锚，而且在这一族里
+// 它还多担一件事——commands/at.md 第 2 节写 00-contract.md 时 current-run 已经写好了，
+// 所以正路不经过它；但 run 丢了指针之后 PM 要重建契约仍然得走这条。
+const makeMissingPointerH4 = () => {
+  const dirs = makeRun({ runId: 'r1' })
+  rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+  return dirs
+}
+
+test('contract：丢指针（current-run 不在、runs/ 非空），子代理写契约——本轮起 fail closed', () => {
+  const dirs = makeMissingPointerH4()
+  try {
+    const { stdout, status } = run('contract', {
+      tool_name: 'Write',
+      agent_type: 'agent-team:at-product',
+      tool_input: { file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md') },
+    }, undefined, dirs.projectDir)
+    const out = decisionOf(stdout)
+    assert.equal(status, 0)
+    assert.ok(out, '丢指针下 subagent 写契约必须 deny——放行就是那个 fail-open 窗口回来了')
+    assert.equal(out.permissionDecision, 'deny')
+    assert.match(out.permissionDecisionReason, /运行上下文/)
+    assert.match(out.permissionDecisionReason, /非空/, '理由要带上「runs/ 下非空」这个真实原因')
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('contract：丢指针，被钉成主线程的 at-pm——仍然放行，短路排在读 ctx 之前', () => {
+  const dirs = makeMissingPointerH4()
+  try {
+    const { stdout, status } = run('contract', {
+      tool_name: 'Write',
+      agent_type: 'at-pm',
+      tool_input: { file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md') },
+    }, undefined, dirs.projectDir)
+    assert.equal(status, 0)
+    assert.equal(
+      stdout.trim(),
+      '',
+      '收窄的全部前提是「丢了指针的 run 还接得回来」：这条一红，说明 H4 把 PM 也锁在了门外',
+    )
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ⚠️ 自举那条边的正向锚，与 tests/gate-writepath.test.mjs 里同名那条配对：
+// 判据被错写成 existsSync(runsDir)（而不是「非空」）时，上面两条照样绿，红的是这一条。
+test('contract · 自举边界：runs/ 存在但是空目录——子代理写契约仍然放行，按 no-run 处理', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h4-emptyruns-'))
+  try {
+    mkdirSync(join(cwd, '.agent-team', 'runs'), { recursive: true })
+    const { stdout, stderr, status } = run('contract', {
+      tool_name: 'Write',
+      agent_type: 'agent-team:at-product',
+      tool_input: { file_path: join(cwd, '.agent-team', 'runs', 'r1', '00-contract.md') },
+    }, undefined, cwd)
+    assert.equal(status, 0)
+    assert.equal(stdout.trim(), '', '空的 runs/ 是「从来没有人建过 run」，没有契约可保护')
+    assert.match(stderr, /H4 契约保护：当前没有进行中的 run（/)
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
   }
 })
 

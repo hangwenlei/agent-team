@@ -296,13 +296,26 @@ test('ledger 永不拒绝——输出里不会出现 permissionDecision', () => 
 // 拆成两个 test()：一条验「写 project.json 照常回传」，一条验「写别的文件才
 // fail open」。它们检验的是不同侧面，不是同一个不变量按数据遍历；而且第一条正是
 // 变异验证里期望变红的那条，必须自己占一个 test()，否则它一失败会把第二条挡住。
+//
+// ⚠️ M3c：**光删 current-run 已经不再是 no-run 了**——runs/r1/ 还躺在那里时它是
+// kind:'unreadable'（指针丢了，不是「从来没有人建过 run」；判据在
+// hooks/lib/runctx.mjs 头部 ③ 那一段）。下面三条用例的名字都写着「没有 run 时」，
+// 要它们名副其实，runs/ 得跟着一起没有。
+// **抽成一个帮手而不是在三处各写两行**：这三处要的是**同一个输入状态**，而它的
+// 构造方式刚刚变过一次；下一次再变时，三份拷贝里漏掉一份的表现是**静默变质**
+// ——本轮实测到的正是这个形状：同一次改动下两条当场变红，而「没有 run 时写别的
+// 文件」那条**悄悄改测了另一个 kind，照样全绿**。
+const dropPointerAndRuns = (projectDir) => {
+  rmSync(join(projectDir, '.agent-team', 'current-run'), { force: true })
+  rmSync(join(projectDir, '.agent-team', 'runs'), { recursive: true, force: true })
+}
 test('没有 run 时写 project.json：仍然回传触达表——/at-init 按设计就跑在没有 run 的时候', () => {
   const { projectDir, pluginDir } = makeRun({
     runId: 'r1', stage: 'S1',
     project: { paths: { 'at-product': ['docs/'], 'at-backend': ['src/server/'] } },
   })
   try {
-    rmSync(join(projectDir, '.agent-team', 'current-run'), { force: true })
+    dropPointerAndRuns(projectDir)
     const { stdout, status } = run('ledger', {
       tool_name: 'Write', agent_type: 'at-pm',
       tool_input: { file_path: join(projectDir, '.agent-team', 'project.json') },
@@ -387,6 +400,53 @@ test('run 坏了（unreadable）时写 project.json：fail-open 留痕照留—�
   }
 })
 
+// ——— M3c「丢指针」：/at-init 在一个丢了指针的项目上重跑，触达表这条缝仍然要通 ———
+//
+// 沿着输入状态横着走一遍消费方（docs/16 §3.12）补的那两格。这一格本轮从 no-run 改判成
+// unreadable，ledger 这一层的出口因此整体换了一支：触达表**照发**（它的判据只有
+// roster.json 与刚写完的 project.json，跟指针在不在无关），而留痕**开始出现**。
+// ⚠️ 这两条不与上面 makeBrokenRun（空 current-run）那一对重复：它们钉的是**同一段代码在
+// 一个新的输入状态上的出口**，而那正是上一轮那个窗口能在所有人眼皮底下待着的原因
+// ——两条判据各自为真，没有人把它们摆到一起过。
+const makeMissingPointerRun = () => {
+  const dirs = makeRun({
+    runId: 'r1', stage: 'S1',
+    project: { paths: { 'at-product': ['docs/'], 'at-backend': ['src/server/'] } },
+  })
+  rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+  return dirs
+}
+
+test('丢指针时写 project.json：触达表照发——在一个丢了指针的项目上重跑 /at-init 必须走得通', () => {
+  const { projectDir, pluginDir } = makeMissingPointerRun()
+  try {
+    const { stdout, status } = writeProjectJson(projectDir)
+    assert.equal(status, 0)
+    const ctx = ctxOf(stdout)
+    assert.ok(ctx, '触达表的判据跟那个丢了指针的 run 无关，这条缝不能因为分类变了就关上')
+    assert.match(ctx, /reach\.json/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('丢指针时写 project.json：fail-open 留痕本轮开始出现——这时 runs/ 下真躺着一个接不回来的 run', () => {
+  const { projectDir, pluginDir } = makeMissingPointerRun()
+  try {
+    const { stderr, status } = writeProjectJson(projectDir)
+    assert.equal(status, 0)
+    assert.match(
+      stderr,
+      /ledger 回传：读不到运行上下文（/,
+      '改动前这一格是 no-run，走的是「/at-init 的正常形态，不留痕」那一支；' +
+        '改动后它是 unreadable，留痕照留——发了触达表不等于可以不留这一行',
+    )
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
 // no-run 是 /at-init 的**正常**形态，那条路径不该留痕——在正路上刷一行「当前没有
 // 进行中的 run，本次放行」只会把人指向 current-run 去查一个不存在的问题。
 // 这条与上面那条 unreadable 留痕配对：ctx.kind 那个三元塌成任一支，必有一条变红。
@@ -396,7 +456,7 @@ test('没有 run 时写 project.json：不留 fail-open 痕迹——那是 /at-i
     project: { paths: { 'at-product': ['docs/'], 'at-backend': ['src/server/'] } },
   })
   try {
-    rmSync(join(projectDir, '.agent-team', 'current-run'), { force: true })
+    dropPointerAndRuns(projectDir)
     const { stdout, stderr } = writeProjectJson(projectDir)
     // 正向锚点：光断言 stderr 为空的话，整条通道被删掉（stdout 也空）照样绿。
     assert.ok(ctxOf(stdout), '触达表必须照常回传，否则下面那条"没留痕"证明不了任何事')
@@ -410,7 +470,7 @@ test('没有 run 时写 project.json：不留 fail-open 痕迹——那是 /at-i
 test('没有 run 时写别的文件：fail open 且留痕，不静默', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S1' })
   try {
-    rmSync(join(projectDir, '.agent-team', 'current-run'), { force: true })
+    dropPointerAndRuns(projectDir)
     const { stdout, stderr, status } = run('ledger', {
       tool_name: 'Write', agent_type: 'at-pm',
       // run 目录下的阶段产物：上面那条缝只放 project.json 一个文件，别的照旧。
