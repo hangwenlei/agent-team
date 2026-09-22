@@ -207,12 +207,42 @@ test('deliverable：查的是被派发的目标角色（tool_input.subagent_type
     )
     assert.doesNotMatch(stdout, /permissionDecision/)
 
-    // 这条 warning 存在的全部理由：H5b 到点会被平台静默放行（到点是第几下不写在
-    // 这里，单一真源是 hooks/lib/retry-budget.mjs），父级看到的是干净的一次通过。
+    // 这条 warning 存在的全部理由：H5b 那一道靠不住（到点是第几下不写在这里，
+    // 单一真源是 hooks/lib/retry-budget.mjs），父级看到的是干净的一次通过。
     // 文案必须点明"不要仅凭子代理正常返回就判断这一段
     // 完成了"，否则它退化成一句无害的提示，读的人不会去核实产物。
     assert.match(out.additionalContext, /不要仅凭/)
     assert.match(out.additionalContext, /核实/)
+
+    // ⭐ M3k：**解释「为什么会这样」那一半必须把派发形态这个条件说出来。**
+    //
+    // BASE (`21ea786`) 上这句话逐字是「SubagentStop 已经尝试拦截过，但平台对它的
+    // 重试有上限……到点会静默放行」——**它无条件断言 SubagentStop 已经发生过，
+    // 而异步派发下那一刻它一次都没发生过**（H5a 挂在 PostToolUse:Agent 上，那个事件
+    // 在子代理刚被启动那一帧就跑完了；实测 docs/20 §7.10，告警 00:12:53、产物落盘
+    // 00:15:20）。**结论那半句一直对，归因那半句错，而它是这条回传里唯一解释
+    // 「为什么会这样」的一句。** 收口在 docs/11 §5.33。
+    //
+    // 上面那两条（不要仅凭 / 核实）**盯不住这件事**：BASE 那句假归因同时满足它们
+    // 两条，一个字都不会红——这正是这条判据要补的那一格。
+    //
+    // ⚠️ **它钉得住的与钉不住的，说清楚**：
+    //   · 钉得住「条件在不在」——把归因缩回 BASE 那种无条件版本，当场红
+    //     （已知违规样本就是 BASE 的原文，不是想象出来的变异）；
+    //   · **钉不住「归因对不对」**——有人写一句「异步派发下 SubagentStop 已经拦过了」
+    //     照样绿。那一层是散文的语义，词形表覆盖不到（docs/16 §3.4），
+    //     本轮不硬写：靠 hooks/lib/retry-budget.mjs 那段 docstring 与 docs/11 §5.33。
+    // 在真实 stdout 上断言，不在常量上——重构可以把常量换掉而输出不变，反之亦然。
+    assert.match(
+      out.additionalContext,
+      /异步/,
+      'H5a 这条告警解释「为什么磁盘上还没有」时必须把**派发形态**这个条件说出来。\n' +
+        '  这条红，最可能是那句归因被缩回了 BASE 那种无条件版本（「SubagentStop 已经\n' +
+        '  尝试拦截过，但……」）——那句话在异步派发下是假的：H5a 挂的 PostToolUse:Agent\n' +
+        '  在子代理刚被启动那一刻就跑完了，SubagentStop 一次都还没发生过。\n' +
+        '  文案的单一真源是 hooks/lib/retry-budget.mjs 的 SUBAGENT_STOP_RETRY_NOTE，\n' +
+        '  完整分寸（含「异步是不是唯一」的认知状态）在 docs/11 §5.33。',
+    )
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })

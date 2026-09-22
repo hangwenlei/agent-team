@@ -906,10 +906,30 @@ function main() {
     const stateProblems =
       kind === 'state' ? validateState(ctx.state, { stages: ctx.stages }).problems : []
 
+    // 【阶段】那条提示的判据。roster 传 ctx.state?.roster——不是数组时传 undefined 退回
+    // 全部 producers，写法与本文件另外三处一致（deliverable 分支里那次 isStageDone、
+    // 那次 compareArtifacts、readiness 分支里那次 decideReadiness）。
+    //
+    // ⚠️ M3k：**这个参数此前不在这里**，而这一处正是 M2a §1.1 裁定（docs/11 §5.7：
+    // 「让 isStageDone 与 compareArtifacts 按 roster ∩ producers 展开」）本来要落地的
+    // 第一个调用点——那条裁定写下的时候，isStageDone 在本文件里只有这一处调用。
+    // 不传它的后果不是误报，**是哑掉**：stageRolesInRun(stage, undefined) 退回全部
+    // producers，于是任何有产者被裁剪的阶段**结构上永远不 done**，这条提示对那些阶段
+    // 一次也不发。实测（docs/20 §7.8，S1→S8 整链那一趟：roster 六个、at-ui 被裁、
+    // at-ios/at-android 不在 available_roles）：S2 与 S5 整趟【阶段】零条，PM 把
+    // S2→S3、S5→S6 两次推进完全无提示地做掉了——而这条提示逐字是「H5 哑掉」的两条
+    // 对策之一（理由在 hooks/lib/deliverable.mjs 头部与 stages.README.md）。
+    //
+    // ⚠️ 判据在 tests/stage-done-call-site.test.mjs，它钉的是**本文件里每一处
+    // isStageDone 调用都按 roster 收窄**，不是「这一行长什么样」。上一轮守这件事的
+    // 是 deliverable 分支那段注释末尾那句「两处都改，改一处的时候去看另一处」，
+    // **而它点名的那一处正是没改的那一处**——一条注释不是一条判据，这件事现在有实物
+    // 了（docs/11 §5.33）。
     const stageDone = isStageDone({
       stage: ctx.state?.stage,
       stages: ctx.stages,
       artifactExists: ctx.artifactExists,
+      roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
     })
 
     const notices = buildLedgerNotices({
@@ -1104,8 +1124,16 @@ function main() {
       // ⚠️ 这是**新增**一处 isStageDone 调用，跟上面 ledger 分支里那处不是同一处（这里是
       // deliverable 分支，两处互不共享调用点）。roster 传 ctx.state?.roster——不是数组时
       // 传 undefined 退回全部 producers：state.json 的 roster 字段本身坏掉时，宁可多判
-      // 一次未推进，不要漏判。**传参的写法**与本文件另外两处逐字相同：deliverable 分支里
-      // 那次 compareArtifacts 调用，和 readiness 分支里那次 decideReadiness 调用。
+      // 一次未推进，不要漏判。**传参的写法**与本文件这几处逐字相同（按 docs/16 §3.1
+      // 列举，不报总数）：ledger 分支里那次 isStageDone、deliverable 分支里那次
+      // compareArtifacts、readiness 分支里那次 decideReadiness。
+      //
+      // ⚠️ **M3k：ledger 分支里那次 isStageDone 是这一轮才进这张清单的**——在那之前它
+      // 是本文件里唯一**不**传这个参数的一处，后果是有产者被裁剪的阶段那条【阶段】提示
+      // 结构上永远不发（实测 docs/20 §7.8、收口 docs/11 §5.33）。**下面那句「两处都改，
+      // 改一处的时候去看另一处」当时就写在这里，而它点名的那一处正是没改的那一处**：
+      // 从此这件事由 tests/stage-done-call-site.test.mjs 钉着——它按源码派生，
+      // 本文件里任何一处 isStageDone 调用不带 roster，它当场红。
       //
       // ⚠️ M3a Task 4 同时改掉了这句话里的**位置指代**：上一版写的是「与**下面**
       // compareArtifacts、**上面** readiness 分支」——**两个方位词里有一个是错的**，
@@ -1115,12 +1143,12 @@ function main() {
       //
       // ⚠️ M3a Task 4：上一版这里写的是「口径与下面 compareArtifacts、上面 readiness
       // **分支一致**」——M3a Task 3 之后那句只剩一半真，改成上面那样分两层说。
-      // **写法一致是真的**（三处都是 Array.isArray(...) ? ... : undefined）；
+      // **写法一致是真的**（上面列举的那几处都是 Array.isArray(...) ? ... : undefined）；
       // **假的是「传进去之后退回全部 producers」这个效果对 compareArtifacts 整体成立**：
       // 那个函数里三个清单已经不共用一个宇宙，drifted/missing 吃这个参数，
       // **unrecorded 根本不看它**（hooks/lib/artifact-drift.mjs 的 M3a 注释块）。
       // 传 undefined 还是传一份真 roster，对 unrecorded 一个字的差别都没有。
-      // **三处的写法一致，不等于三处拿它干同一件事。**
+      // **那几处的写法一致，不等于它们拿它干同一件事。**
       //
       // ⚠️ 这句话在 stages.README.md 的「H5a 的静默集合」那一节末尾有**逐字同族的
       // 一份**（讲的就是上面这处 isStageDone 调用），同一轮一起改的——两处都改，
@@ -1173,20 +1201,26 @@ function main() {
       // 也不应该在它之后再写 process.exit。
       denyAndExit(r.reason, spec.event)
     } else {
-      // H5a：权威记录。不 block，只把事实留在会话里——因为 H5b 到点会被
-      // 平台静默放行，父级看到的是干净的一次通过，中间发生过的拦截不留
-      // 任何痕迹。这条 warning 就是那个不能丢的痕迹：不能被误读成"子代理
-      // 正常返回=这一段已经完成"。写完直接落到本函数末尾共用的
-      // process.exit(0)，不需要在这里另写一次。
+      // H5a：权威记录。不 block，只把事实留在会话里——不能被误读成"子代理正常返回
+      // =这一段已经完成"。写完直接落到本函数末尾共用的 process.exit(0)，不需要在
+      // 这里另写一次。
       //
-      // ⚠️ 那半句「重试有上限、到点会静默放行」来自 ./lib/retry-budget.mjs，
-      // **不要在这里把它的计数写成字面量**：那个计数不是常数（本仓库的几次观测
-      // 彼此不等，数法也不同），而且同一份知识此前在八句话里各写了一份。
-      // 判据见 tests/retry-budget-single-source.test.mjs，它会拦住第二份。
+      // ⚠️ 解释「为什么会这样」那一整段来自 ./lib/retry-budget.mjs 的
+      // SUBAGENT_STOP_RETRY_NOTE，**不要在这里把它的计数写成字面量**：那个计数不是
+      // 常数（本仓库的几次观测彼此不等，数法也不同），而且同一份知识此前在八句话里
+      // 各写了一份。判据见 tests/retry-budget-single-source.test.mjs，它会拦住第二份。
+      //
+      // ⚠️ M3k：**这个模板上一版自己写着「SubagentStop 已经尝试拦截过，但」，
+      // 而那句话在异步派发下是假的**——H5a 挂在 PostToolUse:Agent 上，那个事件在
+      // 子代理刚被启动那一刻就跑完了，那一刻 SubagentStop 一次都还没发生过
+      // （实测 docs/20 §7.10：告警 00:12:53、产物落盘 00:15:20）。
+      // 上一版这段注释开头写的理由（「因为 H5b 到点会被平台静默放行，父级看到的是
+      // 干净的一次通过」）**是同一个归因的另一份**：它只覆盖同步那一种。
+      // 两种情形各自为什么都不足以放心，现在由那个常量一并说清；收口 docs/11 §5.33。
       const notices = [
         `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，` +
-          `但磁盘上还没有。SubagentStop 已经尝试拦截过，但${SUBAGENT_STOP_RETRY_NOTE}` +
-          `——不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`,
+          `但磁盘上还没有。${SUBAGENT_STOP_RETRY_NOTE}` +
+          `。不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`,
       ]
       // 交付物本身还缺产物时，账本比对一样并进同一条——它审计的是全部阶段的
       // produces，不只是刚被判定缺失的这一段（比如更早的阶段被 Bash 绕过写过）。
