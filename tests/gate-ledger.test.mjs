@@ -272,6 +272,79 @@ test('阶段产物已经齐了，但这次写的是业务代码：仍然保持�
   }
 })
 
+// ---------------------------------------------------------------------------
+// M3k：【阶段】提示在**有产者被裁剪的阶段**发不发 —— 缺陷本体的行为判据
+// ---------------------------------------------------------------------------
+//
+// 缺陷：ledger 分支那次 `isStageDone` 调用**不传 `roster`**，于是
+// `stageRolesInRun(stage, undefined)` 退回**全部 producers**，任何有产者被裁剪的阶段
+// 结构上永远不 `done`，这条提示对那些阶段一次也不发。**后果不是误报，是哑掉**
+// ——实测那一趟（`docs/20` §7.8）S2 与 S5 整趟【阶段】零条，PM 把 S2→S3、S5→S6
+// 两次推进完全无提示地做掉了。收口在 `docs/11` §5.33。
+//
+// ⚠️ **改动前这个缺陷对整套 799 条测试完全不可观测**（实跑核过：把 `roster` 加上去，
+// 799 全绿、一条没红）。下面这两条就是那个零覆盖的补法，**必须成对**：
+//
+//   · 第一条钉「该发的时候发」——它是删掉 `roster:` 那一行时**唯一**会红的行为测试；
+//   · 第二条钉「不该发的时候不发」——少了它，把 `isStageDone` 改成恒真、或者把
+//     `roster` 换成恒 `undefined` **再把口径反过来**（退回空集合）都能让第一条绿。
+//     `docs/16` §3.2：锚要钉在判据真正进入 assert 的那一层。
+//
+// ⚠️ 两条夹具的差别**只有 `roster` 一个字段**（磁盘产物、`stage`、写的文件全同）。
+// 这是有意的：差两样的话，红的时候分不清是哪一样造成的。
+//
+// ⚠️ 那一趟的真实形状里还有 `trimmed: {"at-ui": "S2"}`，**这条判据不读它**
+// ——收窄靠的是 `roster`，`trimmed` 是产者交代判据那一侧的字段（`docs/20` §7.5：
+// 同一条 `trimmed` 记录上两条判据同时给出相反的评价，而两条都对）。夹具不带它，
+// 免得读的人以为它在这里承重。
+test('M3k：S2 的 at-ui 这一趟没被派（roster 里没有它），只有 01-prd.md 在磁盘上——【阶段】照样要发', () => {
+  const { projectDir, pluginDir } = makeRun({
+    runId: 'r1', stage: 'S2', roster: ['at-product'], artifacts: ['00-contract.md', '01-prd.md'],
+  })
+  try {
+    const { stdout } = run('ledger', {
+      tool_name: 'Write', agent_type: 'at-product',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'runs', 'r1', '01-prd.md') },
+    }, GATE, projectDir)
+    assert.match(
+      ctxOf(stdout) ?? '',
+      /【阶段】S2 的产物已经齐了/,
+      '这一趟 S2 的产者只有 at-product，它交了 01-prd.md 就该算齐——' +
+        '按 M2a §1.1 裁定（docs/11 §5.7）isStageDone 要按 roster ∩ producers 展开。' +
+        '这条红，最可能是 gate.mjs 的 ledger 分支那次 isStageDone 又不传 roster 了：' +
+        '那时 S2 会去等 at-ui 的 02-ui-spec.md / 02-wireframe.html，而它们永远不会来。',
+    )
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('M3k：同一份夹具、只把 at-ui 加进 roster——它的两份产物不在磁盘上，【阶段】就不该发', () => {
+  const { projectDir, pluginDir } = makeRun({
+    runId: 'r1', stage: 'S2', roster: ['at-product', 'at-ui'], artifacts: ['00-contract.md', '01-prd.md'],
+  })
+  try {
+    const { stdout } = run('ledger', {
+      tool_name: 'Write', agent_type: 'at-product',
+      tool_input: { file_path: join(projectDir, '.agent-team', 'runs', 'r1', '01-prd.md') },
+    }, GATE, projectDir)
+    // 仍然有【产物】那一段（写的是真的阶段产物），所以不能断言 stdout 为空——
+    // 要断言的是这一段**不在**里面。
+    const ctx = ctxOf(stdout) ?? ''
+    assert.match(ctx, /【产物】/, '写的是 S2 的真产物，【产物】那一段本来就该在——它不在说明夹具坏了')
+    assert.doesNotMatch(
+      ctx,
+      /【阶段】/,
+      'at-ui 在 roster 里，而它的 02-ui-spec.md / 02-wireframe.html 不在磁盘上——' +
+        'S2 没齐。这条红说明收窄的口径塌了（isStageDone 恒真，或者 roster 的交集算反了）。',
+    )
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
 test('ledger 永不拒绝——输出里不会出现 permissionDecision', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S1', artifacts: ['00-contract.md'] })
   try {

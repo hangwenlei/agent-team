@@ -230,15 +230,25 @@ Task 4 修复轮 1 补（裁定「豁免不覆盖被证伪的预测」：叙述�
 
 `isStageDone` 在这里的调用**新增**在 `hooks/gate.mjs` 的 `CHECK === 'deliverable'` 分支，
 与 `CHECK === 'ledger'` 分支里那处（阶段推进提示用）是两个独立调用点，互不共享——两处都要
-在，改一处不代表另一处也改了。**传参的写法**三处一致（这里、`compareArtifacts`、
-`readiness`）：`ctx.state?.roster` 不是数组时传 `undefined`，宁可多报不要漏报。
+在，改一处不代表另一处也改了。**传参的写法**这几处一致（按 `docs/16` §3.1 列举，不报总数：
+这里、`CHECK === 'ledger'` 分支里那处 `isStageDone`、`compareArtifacts`、`readiness`）：
+`ctx.state?.roster` 不是数组时传 `undefined`，宁可多报不要漏报。
+
+⚠️ **M3k（2026-09-21）：`CHECK === 'ledger'` 分支里那处是这一轮才进上面这张清单的。**
+在那之前它是 `hooks/gate.mjs` 里唯一**不**传 `roster` 的一处 `isStageDone` 调用，
+于是【阶段】「产物齐了」那条提示在**任何有产者被裁剪的阶段**结构上永远不发
+（S1→S8 整链那一趟的实测：S2 与 S5 整趟零条，`docs/20` §7.8；收口 `docs/11` §5.33）。
+**下面那句「改一处的时候去看另一处」当时就写在两处，而它点名的那一处正是没改的那一处**
+——所以这件事从此由 `tests/stage-done-call-site.test.mjs` 钉着：判据从源码派生，
+`hooks/gate.mjs` 里任何一处 `isStageDone` 调用不带 `roster`，它当场红。
+**判据管的是「每一处都收窄」，这一节与那段注释管的是「为什么要收窄」，谁也替不了谁。**
 
 ⚠️ **但「传进去之后退回全部 `producers`」只对 `isStageDone` 与 `readiness` 说得通。**
 上一版这句写的是「`roster` 参数的口径与 `compareArtifacts`/`readiness` 一致：……
 （退回全部 `producers`）」——M3a Task 3 之后它只剩一半真：`compareArtifacts` 内部已经是
 两个口径，`drifted`/`missing` 吃这个参数，**`unrecorded` 根本不看它**（见上面那张消费方表）。
 传 `undefined` 还是传一份真 `roster`，对 `unrecorded` 一个字的差别都没有。
-**三处的写法一致，不等于三处拿它干同一件事。**
+**那几处的写法一致，不等于它们拿它干同一件事。**
 
 ⚠️ **这句话在 `hooks/gate.mjs` 那处 `isStageDone` 调用的上方有逐字同族的一份**
 （改代码的人从那边进来，改阶段链的人从这边进来），M3a Task 4 两处一起改的
