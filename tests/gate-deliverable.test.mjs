@@ -160,6 +160,149 @@ test('stop-gate：agent_type 缺失时放行——没有可判定的目标角色
   }
 })
 
+// ——— M3n「分叉带谁的名字」：SubagentStop 带着 PM 的身份时，H5b 不表态 ———
+//
+// 实测（docs/22 §3、§5）：CLI 自己起的内部分叉（agent_summary、prompt_suggestion……）停下时
+// 也发 SubagentStop，带进来的 agent_type 是**主线程**的身份、不是父代理的——本插件把主线程
+// 钉成 at-pm，于是它们一律是 "agent-team:at-pm"。at-pm 是 S1 / S4 / S8 的产者，修之前 H5b
+// 在这三段、PM 的产物落盘之前对每一个分叉 exit 2。
+//
+// 输入照 docs/22 §3 第 7 行那次真实输入的形状写：十五个键，一个不少；路径与 id 换成占位。
+// H5b 只该看 agent_type——其余十四个键在这里的作用，是让这件事在平台真正送来的形状上成立，
+// 而不是只在一个一键的玩具输入上成立。
+function forkStopInput(cwd, agentType) {
+  return {
+    session_id: '00000000-0000-4000-8000-000000000000',
+    transcript_path: join(cwd, 'placeholder-session.jsonl'),
+    cwd,
+    scratchpad_dir: join(cwd, 'placeholder-scratchpad'),
+    prompt_id: '00000000-0000-4000-8000-000000000001',
+    permission_mode: 'bypassPermissions',
+    agent_id: 'ab1f426fcbf54898d',
+    agent_type: agentType,
+    effort: { level: 'xhigh' },
+    hook_event_name: 'SubagentStop',
+    stop_hook_active: false,
+    agent_transcript_path: join(cwd, 'subagents', 'agent-ab1f426fcbf54898d.jsonl'),
+    last_assistant_message: 'Reading stages.json, contract, and project.json',
+    background_tasks: [
+      {
+        id: 'a2bc3fda99edc5e17',
+        type: 'subagent',
+        status: 'running',
+        description: '派发 at-product 写 01-prd.md',
+        agent_type: 'agent-team:at-product',
+      },
+    ],
+    session_crons: [],
+  }
+}
+
+// PM 的那几段与各段产物——照仓库根真实的 stages.json（本文件开头那段说明的有意耦合）。
+const PM_STAGES = [
+  ['S1', '00-contract.md'],
+  ['S4', '04-dispatch.md'],
+  ['S8', '08-delivery.md'],
+]
+
+test('自检：分叉输入的形状就是 docs/22 §3 记下的那十五个键', () => {
+  assert.deepEqual(Object.keys(forkStopInput('x', 'agent-team:at-pm')), [
+    'session_id', 'transcript_path', 'cwd', 'scratchpad_dir', 'prompt_id', 'permission_mode',
+    'agent_id', 'agent_type', 'effort', 'hook_event_name', 'stop_hook_active',
+    'agent_transcript_path', 'last_assistant_message', 'background_tasks', 'session_crons',
+  ])
+})
+
+for (const [stage, product] of PM_STAGES) {
+  for (const agentType of ['agent-team:at-pm', 'at-pm']) {
+    test(`stop-gate：分叉带着 PM 的身份（${agentType}）在 ${stage} 停下、${product} 还不在——不表态：exit 0，stdout 与 stderr 都为空`, () => {
+      const dirs = makeRun({ runId: 'r1', stage }) // 不建任何产物：PM 在这一段的产物必然缺失
+      try {
+        const { stdout, stderr, status } = run('stop-gate', forkStopInput(dirs.projectDir, agentType), undefined, dirs.projectDir)
+        assert.equal(
+          status,
+          0,
+          `修之前这里是 exit 2：「at-pm 在 ${stage} 应当产出 ${product}……」（docs/22 §5 是实物）。stderr=${stderr}`,
+        )
+        assert.equal(stdout, '')
+        assert.equal(stderr, '', '这一支是「这次事件不归本检查项管」，不是 fail open——不写 failOpenNotice，也不写别的')
+      } finally {
+        rmSync(dirs.projectDir, { recursive: true, force: true })
+        rmSync(dirs.pluginDir, { recursive: true, force: true })
+      }
+    })
+  }
+
+  // 正向锚 + 反向锚，一条两用：同一份夹具上 H5a 对目标 at-pm 照报缺产物。
+  //   · 证明上面那两条的静默不是因为产物恰好在盘上（夹具里 PM 的产物确实不在）；
+  //   · 证明那一行只属于 stop-gate——H5a 读的是 tool_input.subagent_type，它那条告警不变。
+  test(`H5a：同一份 ${stage} 夹具、目标是 agent-team:at-pm——照报「应当产出 ${product}」，那一行只属于 stop-gate`, () => {
+    const dirs = makeRun({ runId: 'r1', stage })
+    try {
+      const input = {
+        tool_name: 'Agent',
+        tool_input: { subagent_type: 'agent-team:at-pm', prompt: 'x', description: 'x' },
+        tool_response: {},
+      }
+      const { stdout, status } = run('deliverable', input, undefined, dirs.projectDir)
+      assert.equal(status, 0)
+      const out = decisionOf(stdout)
+      assert.ok(out, `H5a 应当发 additionalContext；stdout=${stdout}`)
+      assert.match(out.additionalContext, new RegExp(`at-pm 在 ${stage} 应当产出 ${product.replace('.', '\\.')}`))
+    } finally {
+      rmSync(dirs.projectDir, { recursive: true, force: true })
+      rmSync(dirs.pluginDir, { recursive: true, force: true })
+    }
+  })
+}
+
+// 顺序也是判定的一部分：那一行排在读运行上下文**之前**（与 H4 对 PM 的短路同构）——
+// 「这次事件不归本检查项管」先于「读不读得到上下文」。所以连 run 都还没有的时候（/at 建 run
+// 之前，被钉成 at-pm 的会话里照样有分叉在停），它也不该写 failOpenNotice。
+// 修之前这里是「当前没有进行中的 run」那一行 fail open 留痕；把那一行挪到 !ctx.ok 那一支
+// 之后，这一条红——gate.mjs 那段注释写着这个顺序，**注释不是判据**（docs/11 §5.33）。
+test('stop-gate：分叉带着 PM 的身份、而且还没有任何 run——同样不表态，不写 failOpenNotice', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h5b-fork-norun-'))
+  try {
+    const { stdout, stderr, status } = run('stop-gate', forkStopInput(cwd, 'agent-team:at-pm'), undefined, cwd)
+    assert.equal(status, 0)
+    assert.equal(stdout, '')
+    assert.equal(stderr, '', `不归本检查项管的事件不该留 fail open 的痕；stderr=${stderr}`)
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+// 反向锚：同一种输入形状，换成一个真正被派出去的执行角色——照拦。这一行没有顺手把 H5b 关掉。
+test('stop-gate：同一种输入形状、换成 agent-team:at-product 在 S2 停下而 01-prd.md 还不在——照拦（exit 2）', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S2' })
+  try {
+    const { stdout, stderr, status } = run('stop-gate', forkStopInput(dirs.projectDir, 'agent-team:at-product'), undefined, dirs.projectDir)
+    assert.equal(status, 2)
+    assert.equal(stdout, '')
+    assert.match(stderr, /at-product 在 S2 应当产出 01-prd\.md/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 主线程没被钉住时，分叉带的是空串（docs/22 §3 第 10 行，实测）——那一格走的仍是
+// 「没有可判定的目标角色」：放行并留痕。这一行没有碰它：isContractWriter 的 MAIN 那一半
+// 在这里够不着，空串与缺失都先被 !rawTarget 那一支接住了。
+test('stop-gate：分叉在主线程没钉住时带空串——仍走「没有可判定的目标角色」，放行并留痕', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S4' })
+  try {
+    const { stdout, stderr, status } = run('stop-gate', forkStopInput(dirs.projectDir, ''), undefined, dirs.projectDir)
+    assert.equal(status, 0)
+    assert.equal(stdout, '')
+    assert.match(stderr, /没有可判定的目标角色/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
 // ---- H5a（deliverable，PostToolUse / Agent）----
 
 test('deliverable：查的是被派发的目标角色（tool_input.subagent_type），不是发起调用的 agent_type', () => {

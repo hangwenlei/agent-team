@@ -314,6 +314,18 @@ const SCENARIOS = [
     }),
     shape: { status: 2, stdout: 'empty', stderr: 'nonempty' },
   },
+  // M3n：内部分叉带着主线程（at-pm）的身份停下，在 PM 自己的阶段、PM 的产物还不在
+  // （docs/22 §5 的实物）。这一支是「判定为不归本检查项管」，它的放行不许比别的放行
+  // 更不可见——开着留痕时这一格要多出恰好那一行，和其它静默放行一样。
+  {
+    name: 'H5b stop-gate：分叉带着 PM 的身份在 S4 停下、04-dispatch.md 还不在，判定为不归它管、静默放行',
+    check: 'stop-gate',
+    setup: () => ({
+      ...fromRun({ runId: 'r1', stage: 'S4' }),
+      input: { hook_event_name: 'SubagentStop', agent_type: 'agent-team:at-pm' },
+    }),
+    shape: { status: 0, stdout: 'empty', stderr: 'empty' },
+  },
   {
     name: 'ledger：写的不在 .agent-team 下，静默退出',
     check: 'ledger',
