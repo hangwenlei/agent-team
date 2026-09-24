@@ -30,6 +30,7 @@ import { decideCoverage } from './lib/coverage.mjs'
 import { norm, underDir } from './lib/path-norm.mjs'
 import { isPlainObject } from './lib/stages.mjs'
 import { TRUSTED_PREFIX, trustedBlock } from './lib/trusted.mjs'
+import { installTrace } from './lib/trace.mjs'
 
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -38,6 +39,14 @@ const ROOT = join(HERE, '..')
 // hook 以用户项目为 cwd 运行，所以用 process.cwd()；
 // 插件自身的文件（roster.json、stages.json）仍用 ROOT。
 const ROOT_PROJECT = process.cwd()
+
+// 门禁留痕（M3l，默认关）：打开时每次 exit 0 往 stderr 多写一行，让静默放行在转录里
+// 留下 CLI 自己写的记录。纯旁路——不碰 stdout、不碰退出码、exit 2 那一支一个字不加、
+// 绝不抛异常；四条硬约束与「它能证明什么、不能证明什么」写在 hooks/lib/trace.mjs 头部，
+// 不在这里重复。注册放在 main() 之外、调用之前：这样 main() 一行都没跑的那种退出
+// （M0 junction 守卫那个形状，见本文件末尾）也会留下一行 main=not-entered，而不是沉默。
+const TRACE_STATE = { entered: false }
+installTrace({ env: process.env, check: CHECK, proc: process, state: TRACE_STATE })
 
 function readStdin() {
   try {
@@ -499,6 +508,8 @@ function buildCoverageNotice({ gaps, narrowed } = {}, recipientCanWriteState) {
 }
 
 function main() {
+  // 门禁留痕用：只是一个标记，不参与任何判定（见上面 TRACE_STATE 那段）。
+  TRACE_STATE.entered = true
   if (!KNOWN_CHECKS.has(CHECK)) {
     process.stderr.write(
       `agent-team: 未知的检查项 ${JSON.stringify(CHECK)}；hooks.json 与 checks.mjs 已漂移。\n`,
