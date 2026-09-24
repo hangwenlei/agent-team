@@ -1052,6 +1052,29 @@ function main() {
     }
     const role = stripPluginPrefix(rawTarget)
 
+    // M3n：SubagentStop 带着 PM 的身份时，H5b 不表态——那不是一个被派出去的角色在收尾。
+    // 实测（docs/22 §3）：CLI 自己起的内部分叉（agent_summary、prompt_suggestion、compact……）
+    // 停下时也发 SubagentStop，而它们带的 agent_type 是**主线程**的身份，不是父代理的；
+    // 本插件用 settings.json 的 agent 键把主线程钉成 at-pm，于是它们一律是 "agent-team:at-pm"。
+    // at-pm 是 S1 / S4 / S8 的产者：没有这一行时，H5b 在这几段、PM 的产物落盘之前会对每一个
+    // 分叉 exit 2（docs/22 §5 是实物：一个写进度摘要的分叉被要求交出 04-dispatch.md）。
+    // 这一行的前提有两半：
+    //   ① 平台侧：分叉恒带主线程身份。node --test 钉不住它，三样付在 docs/22 §9。
+    //   ② 插件侧：花名册里没有任何角色能派 at-pm，所以真的 at-pm 从来不以子代理身份停下
+    //      ——**由 tests/roster-closure.test.mjs 钉着，这里不另抄一份判据**：那条判据变红的那天，
+    //      就是这一行的前提失效的那天，连这一行一起重判。
+    // 谓词复用 isContractWriter（与 H3 的 I2 豁免、H4 的短路同一个），不另写一份 role === 'at-pm'。
+    // 它的 MAIN 那一半在这里够不着：agent_type 缺失或为空时，上面 !rawTarget 那一支已经放行并留痕。
+    // （唯一的例外是字面量字符串 "__main__"——callerOf 的哨兵值，H3/H4 同样把它当主线程；
+    // 它在这一支上改判前后都是静默 exit 0，只少了读不到上下文时那行痕，docs/22 §14.1。）
+    // 只对 stop-gate：H5a 读的是 tool_input.subagent_type，它那条告警不归这一行管。
+    // 排在读运行上下文之前，与 H4 对 PM 的短路同构：这是「这次事件不归本检查项管」，不是
+    // fail open，所以不写 failOpenNotice；但走的是 process.exit(0)，门禁留痕开着时照样留下
+    // 那一行（hooks/lib/trace.mjs），不比别的放行更不可见。
+    // 盖不住的一格：用户用 --agent 把主线程钉成别的团队角色时，分叉带的是那个角色的名字
+    // （docs/11 §5.35 的收口）。
+    if (CHECK === 'stop-gate' && isContractWriter(rawTarget)) process.exit(0)
+
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
     // H5 两道都是 fail open（规格 §6：流程辅助，坏了不该把整趟跑卡死）——
     // 且不像 H3/H4 要按 ctx.kind 分派：H5 从头到尾没有 fail closed 的那
