@@ -58,10 +58,21 @@ const STAGE_IDS = Object.keys(STAGES)
 const HEADING_PAIRS = [
   ['# agent-team', '# agent-team'],
   ['## Installation', '## 安装'],
+  ['## Watching each role', '## 怎么看每个角色'],
   ['## Known Limitations', '## 已知边界'],
   ['## Development', '## 开发'],
   ['## License', '## 许可'],
 ]
+
+// 按英文标题取配对，不按下标取。下面有两条判据要找「安装」与「开发」那一节，
+// 它们原来写的是 HEADING_PAIRS[1] 与 HEADING_PAIRS[3]——往表中间加一个小节，
+// 下标就整体错开，而那两条红起来说的是「这一节里没有某某」，不是「找错了节」。
+// 2026-09-25 加「Watching each role」一节时当场撞上过一次。
+const pairOf = (en) => {
+  const pair = HEADING_PAIRS.find(([e]) => e === en)
+  if (!pair) throw new Error(`HEADING_PAIRS 里没有 ${en} 这一对——改了小节标题的话，下面按名字取节的判据要一起改`)
+  return pair
+}
 
 // 抽标题时要跳过围栏代码块：安装那一节里有一个 ```sh 块，将来有人往里写一行以
 // `#` 开头的 shell 注释，不跳围栏就会把它当成一个小节标题抠出来。
@@ -860,7 +871,7 @@ test('锚：docs/19 在，且它记的就是从 GitHub 装的那条远端路径'
 })
 
 for (const [i, f] of [README_EN, README_ZH].entries()) {
-  const heading = HEADING_PAIRS[1][i]
+  const heading = pairOf('## Installation')[i]
   test(`${f} 的安装那一节写着那条实测过的第二条路（--scope local）`, () => {
     const section = installSectionOf(read(f), heading)
     assert.ok(section, `${f} 里找不到 ${heading} 那一节`)
@@ -919,7 +930,7 @@ for (const [i, f] of [README_EN, README_ZH].entries()) {
   // ⚠️ **别把这一条读成「发布纪律有判据钉着了」**——「版本号该挪的时候真的挪了」这件事
   // 本轮**判定不配机械判据**，三样（拒绝的那条判据 X、X 打不红的那一刀、什么会让答案
   // 改变）付在 `docs/19` §9.2。本条只拦一种情形：**有人把那条纪律从 README 里删掉。**
-  const devHeading = HEADING_PAIRS[3][i]
+  const devHeading = pairOf('## Development')[i]
   test(`${f} 的开发那一节写着发布纪律要挪哪个文件里的哪个字段`, () => {
     const section = installSectionOf(read(f), devHeading)
     assert.ok(section, `${f} 里找不到 ${devHeading} 那一节`)
