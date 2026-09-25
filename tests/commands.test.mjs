@@ -4,7 +4,8 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { CONTROL_FILES } from '../hooks/lib/control-files.mjs'
 import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
-import { producedNames } from '../hooks/lib/stages.mjs'
+import { producedNames, expandProduces, stageRolesInRun } from '../hooks/lib/stages.mjs'
+import { isStageDone } from '../hooks/lib/state.mjs'
 import { COMMAND_NAMES } from './helpers/command-names.mjs'
 import { ROLES_WITHOUT_PATHS } from './helpers/roles-without-paths.mjs'
 
@@ -454,6 +455,41 @@ test('每条命令都写明「核实磁盘，不信子代理自述」', () => {
   for (const f of FILES) {
     assert.match(textOf(f), /磁盘/, `commands/${f} 没有提到要核实磁盘`)
   }
+})
+
+// ⭐ docs/11 §5.37：`/agent-team:at-resume` 第 2 节让 PM 按
+// `expandProduces(stage, stageRolesInRun(stage, roster))` 展开、再「齐了 → 推进」。刚进 S2 / S5、
+// 这一段的产者还一个都没派时，展开是空集，而「全部都在磁盘上」对空集是真命题——照字面判会把
+// 整段跳过。跳过 S5 时没有门禁拦得住：S6 的 `requires` 里没有任何一份 `05-impl`。
+//
+// 这条判据把两半钉在一起，**任何一半单独改都红**：正文写着「空集不算齐了」，**并且**
+// `isStageDone` 在「S5 开头」这个形状上真的答 false。只钉正文的话，哪天 `isStageDone` 改成对空集
+// 答 true，正文照样绿着说反话——`docs/16` §3.12：洞不长在判据的缝里，长在两条判据之间。
+//
+// 分寸：改之前量过三个样本，**三个都派了架构师，没有一个跳过**（`docs/11` §5.37 的收口）。
+// 这一条补的是一处潜在的分叉，不是一个已经发生的错误。
+test('/at-resume 第 2 节写明「展开为空集不算齐了」，且 isStageDone 对空集的回答与它一致', () => {
+  const t = textOf('at-resume.md')
+  const start = t.indexOf('## 2.')
+  const end = t.indexOf('## 3.')
+  assert.ok(start >= 0 && end > start, 'commands/at-resume.md 里找不到第 2 节——节标题改了的话，这条判据的定位要跟着改')
+  assert.match(
+    t.slice(start, end),
+    /空集[^\n]*不算齐/,
+    'commands/at-resume.md 第 2 节没写「展开出来是空集 → 不算齐了」——对空集，「全部都在磁盘上」是真命题，' +
+      '照字面判的 PM 会把一段整个跳过（docs/11 §5.37）',
+  )
+  const s5Start = ['at-product', 'at-architect']
+  assert.deepEqual(
+    expandProduces(stages.S5, stageRolesInRun(stages.S5, s5Start)),
+    [],
+    '前置：S5 开头（实现角色一个都没派）按 roster 展开应该是空集——不是的话，下面那条问的就不是空集',
+  )
+  assert.equal(
+    isStageDone({ stage: 'S5', stages, artifactExists: () => true, roster: s5Start }),
+    false,
+    'isStageDone 对空集答了「齐了」——commands/at-resume.md 第 2 节写的是「空集不算齐了」，两边要一起改',
+  )
 })
 
 test('/at 写明了五类升级条件的 kind 取值', () => {
