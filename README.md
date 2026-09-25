@@ -54,7 +54,7 @@ When you run it in the desktop app, the project manager is the session you are l
 
 Roles within one stage run **in parallel**: during implementation the backend and frontend run at the same time, each as its own entry. The whole run is still a single session, filed under your project in the sidebar, not a scatter of separate sessions.
 
-Two more things worth knowing. **You can watch a role, but not talk to it**: only the project manager talks to you; a role reports its questions up and the project manager asks you. **The project manager runs on whatever model you picked in the app**, while the other roles run on the `sonnet` their definitions name — measured: the main session ran on the model selected in the app, the roles on Sonnet. All of this was measured in the desktop app; the full record is `docs/23-桌面端角色可见性实测.md`.
+Two more things worth knowing. **You can watch a role, but not talk to it**: only the project manager talks to you; a role reports its questions up and the project manager asks you. **The project manager runs on whatever model you picked in the app**, while the other roles run on the `sonnet` their definitions name — measured: the main session ran on the model selected in the app, the roles on Sonnet. All of this was measured in the desktop app; the full record is `docs/23-桌面端角色可见性实测.md`. The CLI differs on one point: without `--model`, the project manager runs on the `sonnet` named in `agents/at-pm.md`, and `--model` overrides it. The desktop app always passes `--model` when it starts a session, which is why your pick wins there (measured; see `docs/11` §5.36).
 
 ## Known Limitations
 
