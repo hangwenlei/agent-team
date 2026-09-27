@@ -65,7 +65,9 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `git merge -F -` 不读 stdin（只有 `git commit -F -` 读）；合并说明先写进仓库外的临时文件，再 `-F <文件>`。
 - `README.md` 一份文件里中文在前、英文在后，以 `<a id="english"></a>` 那一行分界（已经没有 `README.zh-CN.md`）。
   改它之前先读 `tests/readme-sync.test.mjs` 各节的标题：两半的小节标题（含 `###`）要在 `HEADING_PAIRS` 里成对同序，
-  `claude …` 命令行要中英镜像，阶段编号只准在同一行写全两个端点，「使用」一节要列全 `commands/` 下的命令——都有判据钉着。
+  `claude …` 命令行要中英镜像，阶段编号只准在同一行写全两个端点，「使用」一节要列全 `commands/` 下的命令，
+  流程图的箭头数要等于阶段数——都有判据钉着。排版要按 GitHub 首页 README 栏的实际宽度看（1280 视口下 823px）：
+  表格右列写太长，会把左列挤成好几行。
 - **拿内置浏览器验页面行为之前，先看面板显没显示**（`tabs_context` 会说）：面板隐藏时页面不渲染，`requestAnimationFrame`
   不跑，连 `window.scrollTo` 都不生效——点锚点「不动」、动画「不播」都会是假阴性。要么让面板显示，要么用 Playwright 无头浏览器测
   （它会往仓库根写 `.playwright-mcp/` 快照，测完删掉）。2026-09-27 就因此把一个能用的 `<a name>` 锚点误判成不能跳，多发了一版。
