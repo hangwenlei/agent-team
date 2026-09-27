@@ -25,7 +25,7 @@
 // 「`at-pm` 工具面」那条钉的就是它——前提一旦重新变假，论证会跟着红。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
@@ -34,11 +34,33 @@ import { ROLES_WITHOUT_PATHS } from './helpers/roles-without-paths.mjs'
 import { COMMAND_NAMES } from './helpers/command-names.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
-const read = (p) => readFileSync(url(p), 'utf8')
+const readFile = (p) => readFileSync(url(p), 'utf8')
 
-const README_EN = 'README.md'
-const README_ZH = 'README.zh-CN.md'
-// 四份「对外表面」文件：两份 README 加两份清单。角色数那条断言四份都写了。
+// ⚠️ 2026-09-27 起，中英文写在同一份 README.md 里：**中文在前、英文在后**（用户要 GitHub 首页
+// 两种语言都有、先看到中文），中间用一行 `<a name="english"></a>` 分开——它既是顶部那个
+// 「English」链接的锚点，也是这里切两半的界线。此前是两份文件：README.md（英）与
+// README.zh-CN.md（中）。
+//
+// 本文件其余各节写的都是「两份互相对照」，所以判据一条没改，只把两份换成同一个文件的两半：
+// 下面的 README_ZH / README_EN 不再是路径，是两半的名字，`read()` 认得它们，失败文案里印的
+// 也是这两个名字。**中文在前不靠注释守**：两半各自的小节标题要等于第一节 HEADING_PAIRS 的
+// 中文列与英文列，把两半调换顺序，那两条当场红。
+const README = 'README.md'
+const LANG_SPLIT = '<a name="english"></a>'
+const README_ZH = 'README.md（中文部分）'
+const README_EN = 'README.md（英文部分）'
+
+function halvesOf(text) {
+  const lines = text.split(/\r?\n/)
+  const at = lines.flatMap((l, i) => (l.trim() === LANG_SPLIT ? [i] : []))
+  if (at.length !== 1) throw new Error(`${README} 里的分界行 ${LANG_SPLIT} 应当恰好一行，实际 ${at.length} 行`)
+  return { zh: lines.slice(0, at[0]).join('\n'), en: lines.slice(at[0] + 1).join('\n') }
+}
+
+const read = (p) =>
+  p === README_ZH ? halvesOf(readFile(README)).zh : p === README_EN ? halvesOf(readFile(README)).en : readFile(p)
+
+// 四份「对外表面」：README 的中英两半加两份清单。角色数那条断言四份都写了。
 const OUTWARD_FILES = [README_EN, README_ZH, '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json']
 
 const STAGES = JSON.parse(read('stages.json'))
@@ -102,19 +124,38 @@ test('自检：headingsOf() 抽得出标题、且跳得过围栏代码块里以 
   assert.deepEqual(headingsOf(sample), ['# 标题', '## 小节', '### 更深一层'])
 })
 
-test('README.md 的小节标题序列与配对表的英文那一半逐条一致', () => {
+test('README.md 英文部分的小节标题序列与配对表的英文列逐条一致', () => {
   assert.deepEqual(
     headingsOf(read(README_EN)),
     HEADING_PAIRS.map(([en]) => en),
-    '两份 README 是互为真源的镜像：改了一份的小节结构，另一份与本文件的 HEADING_PAIRS 要一起改',
+    'README 的中英两半是互为真源的镜像：改了一半的小节结构，另一半与本文件的 HEADING_PAIRS 要一起改。' +
+      '两半调换了顺序也在这里红——中文要在前',
   )
 })
 
-test('README.zh-CN.md 的小节标题序列与配对表的中文那一半逐条一致', () => {
+test('README.md 中文部分的小节标题序列与配对表的中文列逐条一致', () => {
   assert.deepEqual(
     headingsOf(read(README_ZH)),
     HEADING_PAIRS.map(([, zh]) => zh),
-    '两份 README 是互为真源的镜像：改了一份的小节结构，另一份与本文件的 HEADING_PAIRS 要一起改',
+    'README 的中英两半是互为真源的镜像：改了一半的小节结构，另一半与本文件的 HEADING_PAIRS 要一起改。' +
+      '两半调换了顺序也在这里红——中文要在前',
+  )
+})
+
+// ⭐ 正向自检锚：halvesOf() 在分界行切开，分界行本身不进任何一半；缺了或多了都抛，
+// 不会悄悄把整份文件当成其中一半。
+test('自检：halvesOf() 在分界行切开两半，分界行缺失或重复时抛错', () => {
+  const sample = ['# 标题', '中文', LANG_SPLIT, '# title', 'English'].join('\n')
+  assert.deepEqual(halvesOf(sample), { zh: '# 标题\n中文', en: '# title\nEnglish' })
+  assert.throws(() => halvesOf('# 标题\n没有分界行'), /恰好一行/)
+  assert.throws(() => halvesOf([LANG_SPLIT, '正文', LANG_SPLIT].join('\n')), /恰好一行/)
+})
+
+test('README.zh-CN.md 已经并进 README.md，不再单独存在', () => {
+  assert.ok(
+    !existsSync(url('README.zh-CN.md')),
+    'README.zh-CN.md 又出现了。中文说明现在是 README.md 的前一半，本文件的判据只看那一半——' +
+      '另起一份中文文件，就是一份没有任何判据看着、迟早与 README.md 分叉的副本。要改中文说明，改 README.md',
   )
 })
 
@@ -1239,7 +1280,7 @@ test('自检：判据认得出已知违规——一份写 --scope local、另一
   )
 })
 
-test('前置条件：两份 README 都抠得出非空的命令清单——否则下面那条在两个空数组上恒绿', () => {
+test('前置条件：README 中英两半都抠得出非空的命令清单——否则下面那条在两个空数组上恒绿', () => {
   assert.ok(
     commandShapeOf(read(README_EN)).length > 0 && commandShapeOf(read(README_ZH)).length > 0,
     '有一份 README 里一条 claude 命令都抠不到。两个空数组 deepEqual 是通过的，' +
@@ -1247,7 +1288,7 @@ test('前置条件：两份 README 都抠得出非空的命令清单——否则
   )
 })
 
-test('两份 README 里的命令行互为镜像——同一组命令、同一组参数、同一个顺序', () => {
+test('README 中英两半的命令行互为镜像——同一组命令、同一组参数、同一个顺序', () => {
   assert.deepEqual(
     commandShapeOf(read(README_EN)),
     commandShapeOf(read(README_ZH)),

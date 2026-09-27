@@ -63,7 +63,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - 本机有一个同名的 `agent-team@skills-dir`（user 作用域、disabled，一条指向本工作树的软链）——不要碰；插件命令一律写全名 `<插件>@<市场>`。
 - 子代理写不进 `.superpowers/`（harness 拒绝），它的报告正文要放进返回消息，由主会话落盘。
 - `git merge -F -` 不读 stdin（只有 `git commit -F -` 读）；合并说明先写进仓库外的临时文件，再 `-F <文件>`。
-- 改两份 README 之前先读 `tests/readme-sync.test.mjs` 各节的标题：小节标题（含 `###`）要在 `HEADING_PAIRS` 里成对同序，
+- `README.md` 一份文件里中文在前、英文在后，以 `<a name="english"></a>` 那一行分界（已经没有 `README.zh-CN.md`）。
+  改它之前先读 `tests/readme-sync.test.mjs` 各节的标题：两半的小节标题（含 `###`）要在 `HEADING_PAIRS` 里成对同序，
   `claude …` 命令行要中英镜像，阶段编号只准在同一行写全两个端点，「使用」一节要列全 `commands/` 下的命令——都有判据钉着。
 
 ## ▶️ 常用命令
