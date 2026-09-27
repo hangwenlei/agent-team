@@ -37,7 +37,7 @@ const url = (p) => new URL(`../${p}`, import.meta.url)
 const readFile = (p) => readFileSync(url(p), 'utf8')
 
 // ⚠️ 2026-09-27 起，中英文写在同一份 README.md 里：**中文在前、英文在后**（用户要 GitHub 首页
-// 两种语言都有、先看到中文），中间用一行 `<a name="english"></a>` 分开——它既是顶部那个
+// 两种语言都有、先看到中文），中间用一行 `<a id="english"></a>` 分开——它既是顶部那个
 // 「English」链接的锚点，也是这里切两半的界线。此前是两份文件：README.md（英）与
 // README.zh-CN.md（中）。
 //
@@ -45,8 +45,13 @@ const readFile = (p) => readFileSync(url(p), 'utf8')
 // 下面的 README_ZH / README_EN 不再是路径，是两半的名字，`read()` 认得它们，失败文案里印的
 // 也是这两个名字。**中文在前不靠注释守**：两半各自的小节标题要等于第一节 HEADING_PAIRS 的
 // 中文列与英文列，把两半调换顺序，那两条当场红。
+//
+// ⚠️ 分界行必须是 `id` 锚点，不能是 `name`（2026-09-27 实测）：GitHub 渲染时两种都会加上
+// `user-content-` 前缀，但页面上的跳转脚本只按 `id` 找。第一版用的是 `<a name="english">`，
+// 推上去之后点顶部的 English，地址栏变成 `#english`、页面一动不动。下面这个常量逐字钉着
+// 这一行——改回 `name`，halvesOf() 找不到分界行，本文件当场大面积红。
 const README = 'README.md'
-const LANG_SPLIT = '<a name="english"></a>'
+const LANG_SPLIT = '<a id="english"></a>'
 const README_ZH = 'README.md（中文部分）'
 const README_EN = 'README.md（英文部分）'
 
