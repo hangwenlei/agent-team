@@ -31,6 +31,7 @@ import { fileURLToPath } from 'node:url'
 import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 import { EXPECTED_AGENTS } from './helpers/expected-agents.mjs'
 import { ROLES_WITHOUT_PATHS } from './helpers/roles-without-paths.mjs'
+import { COMMAND_NAMES } from './helpers/command-names.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const read = (p) => readFileSync(url(p), 'utf8')
@@ -58,6 +59,7 @@ const STAGE_IDS = Object.keys(STAGES)
 const HEADING_PAIRS = [
   ['# agent-team', '# agent-team'],
   ['## Installation', '## 安装'],
+  ['## Usage', '## 使用'],
   ['## Watching each role', '## 怎么看每个角色'],
   ['## Known Limitations', '## 已知边界'],
   ['## Development', '## 开发'],
@@ -1362,6 +1364,45 @@ for (const f of [README_EN, README_ZH]) {
         '  两份 README 的收场那一段、docs/04 §9 ③ 与 docs/17 §1 的安全边界记录，' +
         '说的都是这件事。**这一条与第九节是两件事**：第九节管「两份别分叉」，' +
         '所以两份**一起**改成禁用作用域时它不响，这一条才是接住那一刀的。',
+    )
+  })
+}
+
+// ---------------------------------------------------------------------------
+// 十一、「使用」那一节列全了 commands/ 下的每一条命令 —— 真源是 commands/ 目录
+// ---------------------------------------------------------------------------
+//
+// 2026-09-27 补这一节之前，两份 README 一条命令都没列过（只在跟 `claude --resume`
+// 作区分时提过一次 `/agent-team:at-resume`）。列出来之后，这一节就是命令清单的第二份：
+// 加一条命令、改一个名字、删一条，它都不会自己跟上。所以双向钉：`commands/` 下的每一条
+// 都在这一节里出现，这一节里出现的每一条都在 `commands/` 下。
+//
+// ⚠️ 只看这一节，不看整份文件：「安装」那一节合法地提到 `/agent-team:at-resume`，按整份
+// 文件取并集，它会顶替「使用」里漏掉的那一条——第四节记过的那个形状（一处的真话把另一处
+// 的缺口顶绿）。取节用的是第七节的 `installSectionOf`：它按标题取节，名字是历史原因。
+const slashCommandsIn = (text) => [...text.matchAll(/`\/agent-team:([a-z][a-z0-9-]*)/g)].map((m) => m[1])
+
+// ⭐ 正向自检锚：抽取器认得出带参数的写法，不收没有命名空间的裸名。
+test('自检：slashCommandsIn() 抠得出带参数与不带参数的命令名，不收裸名', () => {
+  assert.deepEqual(
+    slashCommandsIn('先 `/agent-team:at-init`，再 `/agent-team:at <需求>`；裸的 `/at-status` 不算'),
+    ['at-init', 'at'],
+  )
+})
+
+for (const [f, i] of [
+  [README_EN, 0],
+  [README_ZH, 1],
+]) {
+  test(`${f} 的「使用」一节列全了 commands/ 下的每一条命令，也没有多列`, () => {
+    const heading = pairOf('## Usage')[i]
+    const sec = installSectionOf(read(f), heading)
+    assert.ok(sec !== null, `${f} 里找不到「${heading}」这一节——改了小节标题的话，HEADING_PAIRS 要一起改`)
+    assert.deepEqual(
+      [...new Set(slashCommandsIn(sec))].sort(),
+      [...COMMAND_NAMES].sort(),
+      `${f} 的「${heading}」一节列的命令与 commands/ 下的不一致。加、删、改名一条命令时，` +
+        '两份 README 的这一节要一起改——用户是从这里知道有哪些命令的',
     )
   })
 }

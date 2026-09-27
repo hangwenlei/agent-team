@@ -29,7 +29,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/22` — 带日期的实测记录。
+- `docs/13`…`docs/23` — 带日期的实测记录。
 - `tests/` — 全部判据。
 
 ## 🧠 长期决策与理由
@@ -50,14 +50,21 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   锚串替换要**断言命中数，并核对命中的是你要的那一处** —— 同一个实参有几处合法命中时，断言防不了砍错的那一刀。落盘后扫控制字节与行尾混用。
 - **后台 agent 与主会话共用工作树时**，别 `git add -A` / `checkout` / `reset`；要并行就用隔离 worktree。
 - `claude --resume` 不继承 `--plugin-dir`；local 安装下换了目录续会话，工具限制会整体掉光，而转录里看不出来。
-- 后台探针用 `claude --bg`，不用 `-p`（`-p` 下异步派发会卡死）。
+- 后台探针用 `claude --bg`，不用 `-p`（`-p` 下异步派发会卡死）。收尾对每个会话先 `claude stop` 再 `claude rm`：
+  没 stop 过的会话在 `~/.claude.json` 里留着 `lastGracefulShutdown: false`，会一直挂在桌面应用侧边栏的「Other」下；
+  `claude rm` 只删 `~/.claude/jobs/<id>/`，转录不动。
 - 变异验证用 `cp` 备份与还原，不用 `git checkout` / `git restore`；备份放仓库外。
 - 裸 `node --test`（仓库根，不带路径参数）；带路径参数会报出一个假的 `pass 0 / fail 1`。
 - 仓库里不要建 `scratchpad/`：它不在 `.gitignore` 里，而 `node --test` 会递归收它下面的 `*.test.mjs`。
 - **绝不 `claude plugin enable` / `disable`**：`enable` 接管正在跑的会话，`disable` 不把工具面还回来。
+- **`agents/at-pm.md` 的 `model:` 不是摆设**：命令行里不带 `--model` 时，项目经理就跑在这一行写的模型上，删掉它会无声地
+  掉回用户的默认模型；桌面应用起会话时总带 `--model`，所以在桌面端看不出来。见 `docs/11` §5.36 的订正。
 - Git Bash 里设了 `MSYS_NO_PATHCONV=1` 之后，传给 node 的 `/c/...` 路径不再被转换，要写成 `C:/...`。
 - 本机有一个同名的 `agent-team@skills-dir`（user 作用域、disabled，一条指向本工作树的软链）——不要碰；插件命令一律写全名 `<插件>@<市场>`。
 - 子代理写不进 `.superpowers/`（harness 拒绝），它的报告正文要放进返回消息，由主会话落盘。
+- `git merge -F -` 不读 stdin（只有 `git commit -F -` 读）；合并说明先写进仓库外的临时文件，再 `-F <文件>`。
+- 改两份 README 之前先读 `tests/readme-sync.test.mjs` 各节的标题：小节标题（含 `###`）要在 `HEADING_PAIRS` 里成对同序，
+  `claude …` 命令行要中英镜像，阶段编号只准在同一行写全两个端点，「使用」一节要列全 `commands/` 下的命令——都有判据钉着。
 
 ## ▶️ 常用命令
 
