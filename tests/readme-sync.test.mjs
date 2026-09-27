@@ -88,8 +88,13 @@ const STAGE_IDS = Object.keys(STAGES)
 // 它的两半。改任何一份而不改另一份，这条当场红。
 const HEADING_PAIRS = [
   ['# agent-team', '# agent-team'],
+  ['## Features', '## 特性'],
   ['## Installation', '## 安装'],
   ['## Usage', '## 使用'],
+  ['### Commands', '### 命令'],
+  ['### How a run flows', '### 一趟 run 怎么走'],
+  ['### When it asks you', '### 什么时候会问你'],
+  ['### Where things land', '### 产物在哪'],
   ['## Watching each role', '## 怎么看每个角色'],
   ['## Known Limitations', '## 已知边界'],
   ['## Development', '## 开发'],
@@ -640,9 +645,8 @@ test('Development 那一节的前提今天仍然成立：node --test tests/ 发�
   })
   const out = `${r.stdout ?? ''}${r.stderr ?? ''}`
   const hint =
-    '——两份 README 的 Development 一节写着「本机实测 node --test tests/ 不会发现 tests/ 下的' +
-    '测试文件，只报一个 pass 0 / fail 1 的幻影失败」。这条断言红了说明那个前提变了：' +
-    '去改那两段正文（两份都要改），不要改这条断言。实际输出：\n' +
+    '——README 中英两半的开发一节写着「不要带路径参数——带了会漏掉测试，并报一个假的失败」。' +
+    '这条断言红了说明那个前提变了：去改那两段正文（两半都要改），不要改这条断言。实际输出：\n' +
     out.split(/\r?\n/).filter(Boolean).slice(-8).join('\n')
   assert.match(out, /\bpass 0\b/, `node --test tests/ 的 pass 数不再是 0${hint}`)
   assert.match(out, /\bfail 1\b/, `node --test tests/ 的 fail 数不再是 1${hint}`)
@@ -1109,7 +1113,7 @@ for (const f of [README_EN, README_ZH]) {
 const DISABLE_CLAIM = {
   [README_EN]: {
     premise: /tool surface is fixed for its lifetime/,
-    negation: /disabling was measured not to hand it back/,
+    negation: /disabling does not hand it back/,
     flipped:
       'Do not reach for claude plugin disable — a session tool surface is fixed for its lifetime, and disabling hands it back.',
   },
@@ -1452,6 +1456,58 @@ for (const [f, i] of [
       [...COMMAND_NAMES].sort(),
       `${f} 的「${heading}」一节列的命令与 commands/ 下的不一致。加、删、改名一条命令时，` +
         '两份 README 的这一节要一起改——用户是从这里知道有哪些命令的',
+    )
+  })
+}
+
+// ---------------------------------------------------------------------------
+// 十二、「一趟 run 怎么走」那张流程图 —— 箭头数钉在 stages.json 的阶段数上
+// ---------------------------------------------------------------------------
+//
+// 2026-09-27 美化 README 时加了一张 mermaid 流程图：一个「需求」起点，之后每个阶段一个节点，
+// 首尾相连。它是阶段链的一份图形拷贝——第四节钉的是反引号里的阶段编号，而这张图一个编号
+// 都不写，第四节看不见它。这里钉最常见的那种漂移：**加一段、删一段**。一条直链上，
+// 「需求」加上 N 个阶段恰好是 N 条箭头。
+//
+// ⚠️ 钉不住的一半：某一段换了角色、或者两段互换了位置，箭头数不变，这条照样绿。要钉那一半，
+// 得在这里再造一张「角色名 ↔ 中英文显示名」的对照表——那是第三份拷贝，不造。
+function mermaidBlocksOf(text) {
+  const out = []
+  let cur = null
+  for (const line of text.split(/\r?\n/)) {
+    if (cur === null && /^\s*```mermaid\s*$/.test(line)) {
+      cur = []
+      continue
+    }
+    if (cur !== null && /^\s*```\s*$/.test(line)) {
+      out.push(cur.join('\n'))
+      cur = null
+      continue
+    }
+    if (cur !== null) cur.push(line)
+  }
+  return out
+}
+
+const arrowsIn = (block) => (block.match(/-->/g) ?? []).length
+
+// ⭐ 正向自检锚：只抠 mermaid 围栏里的内容（正文与别的围栏里的箭头不算），箭头数得对。
+test('自检：mermaidBlocksOf() 只抠 mermaid 围栏里的内容，arrowsIn() 数得对箭头', () => {
+  const sample = ['正文里 A --> B 不算', '```mermaid', 'flowchart LR', '  a --> b', '  b --> c', '```', '```sh', 'x --> y', '```'].join('\n')
+  const blocks = mermaidBlocksOf(sample)
+  assert.equal(blocks.length, 1)
+  assert.equal(arrowsIn(blocks[0]), 2)
+})
+
+for (const f of [README_EN, README_ZH]) {
+  test(`${f} 恰好有一张流程图，箭头数等于 stages.json 的阶段数`, () => {
+    const blocks = mermaidBlocksOf(read(f))
+    assert.equal(blocks.length, 1, `${f} 里应当恰好有一张 mermaid 流程图，实际是 ${blocks.length} 张`)
+    assert.equal(
+      arrowsIn(blocks[0]),
+      STAGE_IDS.length,
+      `${f} 的流程图有 ${arrowsIn(blocks[0])} 条箭头，而 stages.json 有 ${STAGE_IDS.length} 个阶段` +
+        `（${STAGE_IDS.join('、')}）。阶段链加了或删了一段，这张图要跟着改——中英两半都要改`,
     )
   })
 }
