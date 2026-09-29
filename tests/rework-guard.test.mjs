@@ -271,9 +271,15 @@ test('replayEdit：找不到 old_string → null', () => {
   assert.equal(replayEdit({ before: 'abc', oldString: 'zzz', newString: 'y' }), null)
 })
 
-test('replayEdit：old_string 为空——文件不在或只有空白时整份写成 new_string，否则 null（平台同样）', () => {
+test('replayEdit：old_string 为空、文件不在——新建，内容就是 new_string（平台同样）', () => {
   assert.equal(replayEdit({ before: null, oldString: '', newString: '{"a":1}' }), '{"a":1}')
+})
+
+test('replayEdit：old_string 为空、文件只有空白——整份写成 new_string（平台同样）', () => {
   assert.equal(replayEdit({ before: ' \r\n', oldString: '', newString: '{"a":1}' }), '{"a":1}')
+})
+
+test('replayEdit：old_string 为空、文件有内容——null（平台报错）', () => {
   assert.equal(replayEdit({ before: '{"a":1}', oldString: '', newString: '{"a":2}' }), null)
 })
 
@@ -294,4 +300,34 @@ test('parseStateText：开头的 BOM 剥掉；中间的 BOM 不剥（那就是�
 
 test('parseStateText：合法 JSON 但不是对象（数组、字符串、null）→ null', () => {
   for (const text of ['[]', '"x"', 'null', '1']) assert.equal(parseStateText(text), null, text)
+})
+
+// ---- 第二轮复核补的判据：实现是对的，但这几件事此前没有判据钉着（docs/26 §3）----
+
+// 平台精确命中时用函数替换（a.replace(c, () => u)），new_string 里的 $' $& $` $$ 一律按字面写入。
+// 把 split/join 换成字符串替换（replaceAll(o, n)）是最顺手的重构，而那会展开 $ 模式——门禁算的与
+// 平台落盘的不再一样，两步清零重新打开。
+test("replayEdit：new_string 里的 $' 按字面写入，不当替换模式", () => {
+  assert.equal(replayEdit({ before: '{"a":1}', oldString: '1}', newString: "1}$'" }), "{\"a\":1}$'")
+})
+
+test('replayEdit：new_string 里的 $& 按字面写入', () => {
+  assert.equal(replayEdit({ before: '{"a":1}', oldString: '1', newString: '$&2' }), '{"a":$&2}')
+})
+
+test('replayEdit：new_string 里的 $$ 按字面写入', () => {
+  assert.equal(replayEdit({ before: '{"a":1}', oldString: '1', newString: '$$' }), '{"a":$$}')
+})
+
+// 平台读文件只折成对的 CRLF，孤立的 \r 原样留着。
+test('replayEdit：孤立的 \\r 不当换行——old_string 里的 \\n 碰不上它', () => {
+  assert.equal(replayEdit({ before: 'x\ry', oldString: 'x\ny', newString: 'z' }), null)
+})
+
+test('replayEdit：孤立的 \\r 也不删——old_string 跳过它就碰不上', () => {
+  assert.equal(replayEdit({ before: 'x\ry', oldString: 'xy', newString: 'z' }), null)
+})
+
+test('replayEdit：只折成对的 CRLF，孤立的 \\r 原样留在结果里', () => {
+  assert.equal(replayEdit({ before: 'a\rb\r\nc', oldString: 'b\nc', newString: 'X' }), 'a\rX')
 })

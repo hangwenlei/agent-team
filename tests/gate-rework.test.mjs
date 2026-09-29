@@ -575,3 +575,75 @@ test('ledger：写坏的是 reach.json 而不是 state.json——不回传【sta
     cleanup(dirs)
   }
 })
+
+// ---- 第二轮复核补的判据（docs/26 §3）----
+
+test("new_string 在文件末尾插一个 $'——拒（平台按字面写入，文件就坏了；门禁若展开 $ 模式会算成原文）", () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeFileSync(statePath(dirs), JSON.stringify(SPENT, null, 2), 'utf8')
+    assert.ok(isDeny(gateEdit(dirs, '  ]\n}', "  ]\n}$'")))
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('对照：CRLF 的 state.json 上，replace_all 把每条记录的日期都改掉——放行（replace_all 的接线是通的）', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeCrlf(dirs, SPENT)
+    const r = gateEdit(dirs, '2026-09-17T', '2026-09-18T', { replace_all: true })
+    assert.equal(r.stdout, '', r.stdout)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('old_string 出现不止一处、又没带 replace_all：拒，理由说清是这个原因', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeCrlf(dirs, SPENT)
+    const r = gateEdit(dirs, '2026-09-17T', '2026-09-18T')
+    assert.ok(isDeny(r))
+    assert.match(decisionOf(r.stdout)?.permissionDecisionReason ?? '', /不止一处/)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('ledger：run 因为别的原因读不出来（current-run 不在），刚写的 state.json 却是合法的——不回传【state.json】', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeFileSync(statePath(dirs), JSON.stringify(SPENT), 'utf8')
+    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'))
+    const { stdout } = run(
+      'ledger',
+      { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: statePath(dirs) } },
+      GATE,
+      dirs.projectDir,
+    )
+    assert.doesNotMatch(stdout, /【state\.json】/)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('ledger：没有 run 时写业务目录里一个叫 state.json 的文件——不回传【state.json】，那不是控制文件', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'))
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs'), { recursive: true, force: true })
+    const p = join(dirs.projectDir, 'src', 'state.json')
+    mkdirSync(dirname(p), { recursive: true })
+    writeFileSync(p, '[]', 'utf8')
+    const { stdout } = run(
+      'ledger',
+      { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: p } },
+      GATE,
+      dirs.projectDir,
+    )
+    assert.doesNotMatch(stdout, /【state\.json】/)
+  } finally {
+    cleanup(dirs)
+  }
+})

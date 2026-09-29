@@ -818,7 +818,8 @@ function main() {
       if (afterText === null) {
         denyAndExit(
           `agent-team H6 返工预算：算不出这次 ${input.tool_name} 之后 state.json 会变成什么` +
-            `（Edit 的 old_string 在文件里找不到，或者参数不全），门禁没法判断它有没有改小返工计数，` +
+            `（Edit 的 old_string 在文件里找不到、出现不止一处又没带 replace_all、用了弯引号或转义写法，` +
+            `或者参数不全），门禁没法判断它有没有改小返工计数，` +
             `按安全边界拒绝。改用 Write 把完整的 state.json 整份重写。`,
           spec.event,
         )
