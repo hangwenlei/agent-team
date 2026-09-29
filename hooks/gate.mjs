@@ -10,7 +10,7 @@
 // 入口只做「该检查项声明的前置校验」，不做统一校验——H1–H5 分布在三种
 // hook 事件上，输入形状不同（规格 §6 注记）。
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
@@ -30,7 +30,7 @@ import { sha256OfContract } from './lib/contract-hash.mjs'
 import { buildLedgerNotices } from './lib/ledger.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
-import { norm, underDir } from './lib/path-norm.mjs'
+import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
 import { isPlainObject } from './lib/stages.mjs'
 import { TRUSTED_PREFIX, trustedBlock } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
@@ -763,6 +763,20 @@ function main() {
         : input?.tool_input?.file_path
 
     const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+
+    // M3q（docs/25）：认不出是哪个文件的写法（流后缀、结尾带点或空格、网络路径），可能正是
+    // 某个 run 的 state.json——H6 认不出来就等于放行一次清零。只在这个项目确实用着这支团队
+    // （.agent-team 在）时拦：H6 挂在每一次 Edit/Write 上，别的项目不归它管。排在 norm() 之前，
+    // 网络路径不能碰。
+    const exotic = existsSync(agentTeamDir) ? exoticPath(filePath, ROOT_PROJECT) : null
+    if (exotic) {
+      denyAndExit(
+        `agent-team H6 返工预算：不得写 ${filePath}——${exotic}。门禁认不出它是不是 state.json，` +
+          `按安全边界拒绝；请用普通的本地绝对路径。`,
+        spec.event,
+      )
+    }
+
     const target = typeof filePath === 'string' ? norm(filePath) : null
 
     if (

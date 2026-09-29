@@ -6,7 +6,8 @@
 // 评审三轮 Important 1 定下的大小写/分隔符归一化，现在是 hooks/lib/path-norm.mjs
 // 里的公共实现——H3 与 H4 必须用同一份（整理项 5：两边判错的方向相反，
 // 各留一份的代价不对称，理由写在那个文件的头部）。
-import { norm, underDir } from './path-norm.mjs'
+import { dirname, resolve } from 'node:path'
+import { exoticPath, norm, underDir } from './path-norm.mjs'
 import { isControlFile } from './control-files.mjs'
 import { isContractWriter } from './contract-guard.mjs'
 import { stageRoles, expandProduces } from './stages.mjs'
@@ -76,6 +77,18 @@ export function stageOwnerOfRunPath(stages, rd, target) {
 
 export function decideWritePath({ role, filePath, project, runDir, stages, agentTeamDir }) {
   if (typeof filePath !== 'string' || !filePath) return { decision: 'allow' }
+
+  // M3q（docs/25）：解析不了的写法（流后缀、结尾带点或空格、项目不在网络共享上却写网络路径）
+  // 排在一切比对之前拒掉——下面的每一条判据都要先认出「这是哪个文件」，而这些写法认不出来，
+  // 落到哪一条都可能是放行。排在 norm() 之前还因为网络路径不能碰：norm 会去 lstat 它。
+  const projectRoot = agentTeamDir ? dirname(agentTeamDir) : runDir ? resolve(runDir, '..', '..', '..') : null
+  const exotic = exoticPath(filePath, projectRoot)
+  if (exotic) {
+    return {
+      decision: 'deny',
+      reason: `${role} 不得写 ${filePath}——${exotic}。请用项目里普通的本地绝对路径。`,
+    }
+  }
 
   const target = norm(filePath)
 

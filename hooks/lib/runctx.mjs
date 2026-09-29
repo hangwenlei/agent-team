@@ -177,6 +177,9 @@ export function readProjectConfig(projectDir) {
  *
  * hasAgentTeam 注入只为单测；绝不抛——探测出错时退回 CLAUDE_PROJECT_DIR / cwd。
  */
+// run id 的白名单：以字母或数字开头，其余只许字母、数字、点、下划线、连字符。
+const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
 export function projectRootFrom(env, cwd, hasAgentTeam = hasAgentTeamDir) {
   const dir = env !== null && typeof env === 'object' ? env.CLAUDE_PROJECT_DIR : undefined
   const home = typeof dir === 'string' && dir !== '' ? dir : null
@@ -219,9 +222,14 @@ export function readRunContext(projectDir, pluginDir) {
       // 而指针不见了，与空 current-run、坏指针同族，归 unreadable。
       const runsDir = join(base, 'runs')
       if (existsSync(runsDir)) {
+        // 只数子目录（M3q，审查第 31 条）：一个 run 是 runs/ 下的一个目录；.gitkeep、.DS_Store、
+        // Thumbs.db 这类杂项文件不说明「有人建过 run」，按它们判 unreadable 会把干净的缺席
+        // 当成坏掉的 run、拒掉所有非 PM 的写入。链接也算（可能指向一个真的 run 目录），宁严勿松。
         let entries
         try {
-          entries = readdirSync(runsDir)
+          entries = readdirSync(runsDir, { withFileTypes: true }).filter(
+            (e) => e.isDirectory() || e.isSymbolicLink(),
+          )
         } catch (err) {
           // readdirSync 抛（runs 是个文件而不是目录、权限、并发删除……）：判不出
           // 空不空，就判不出这是自举还是丢了指针。归 unreadable，三条理由：
@@ -282,12 +290,19 @@ export function readRunContext(projectDir, pluginDir) {
     // 交付物门禁跑去别的目录判定产物是否存在——这是路径可信边界问题，不是
     // 普通的「文件不存在」失败，必须在拼路径之前挡住（Task 2 评审 M2）。
     // 归 unreadable：这是输入不可信，不是「没有 run」，这条边界不能放松。
-    if (runId.includes('/') || runId.includes('\\') || runId.includes('..')) {
+    //
+    // M3q（docs/25，审查第 31 条）：黑名单（分隔符、..）改成白名单。黑名单放过了两种别名：
+    // 单独一个 `.`（run 目录就是 runs/ 本身），与 NTFS 的目录流后缀 `r1::$INDEX_ALLOCATION`
+    // （指向 runs/r1，字面上却是另一个名字，run 目录的判定随之错位）。命令正文规定的 run id
+    // 形状（日期-时刻-slug）是这个白名单的子集。
+    if (!RUN_ID.test(runId)) {
       return {
         ok: false,
         kind: 'unreadable',
         agentTeamDir: base,
-        reason: `current-run 内容不是合法的 run id（含路径分隔符或 ..）：${JSON.stringify(runId)}`,
+        reason:
+          `current-run 内容不是合法的 run id（只允许字母、数字、点、下划线、连字符，且以字母或数字开头）：` +
+          JSON.stringify(runId),
       }
     }
 

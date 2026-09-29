@@ -26,7 +26,8 @@
 // I1 证明了那两个文件的假设确实会分叉，而这一侧判错的方向是**漏拦**（大小写
 // 没对齐 → 真实的契约写入被判成"目标不是契约文件"而放行，这道闸自己被绕过），
 // 是安全洞不是噪音。完整论证见 hooks/lib/path-norm.mjs 头部。
-import { norm } from './path-norm.mjs'
+import { resolve } from 'node:path'
+import { exoticPath, norm } from './path-norm.mjs'
 import { MAIN, callerOf } from './decide.mjs'
 
 const CONTRACT = '00-contract.md'
@@ -93,6 +94,15 @@ export function decideContractGuard({ agentType, filePath, runDir }) {
   if (!runDir) return { decision: 'allow' }
   if (typeof filePath !== 'string' || !filePath) return { decision: 'allow' }
   if (isContractWriter(agentType)) return { decision: 'allow' }
+
+  // M3q（docs/25）：认不出是哪个文件的写法，不能当成「不是契约」放行。
+  const exotic = exoticPath(filePath, resolve(runDir, '..', '..', '..'))
+  if (exotic) {
+    return {
+      decision: 'deny',
+      reason: `不得写 ${filePath}——${exotic}。门禁认不出它是不是契约，按安全边界拒绝；请用普通的本地绝对路径。`,
+    }
+  }
 
   if (norm(filePath) !== norm(`${runDir}/${CONTRACT}`)) return { decision: 'allow' }
 
