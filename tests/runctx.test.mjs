@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readProjectConfig, readRunContext } from '../hooks/lib/runctx.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
@@ -452,5 +452,25 @@ test('artifactBytes 读不到时返回 null，不抛', () => {
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// M3r（docs/26，全量审查第 32 条）：state.json / project.json 带 UTF-8 BOM 时（Windows PowerShell 5.1 的
+// Out-File -Encoding utf8 就会写），JSON.parse 直接失败，整趟 run 被判 unreadable、所有非 PM 的写入被拒。
+// H6 读旧版本时也曾因此把它当成「坏文件」、放行任意清零。两边现在走同一份归一化（hooks/lib/text-norm.mjs）。
+test('state.json 与 project.json 带 UTF-8 BOM：照样读得出来', () => {
+  const dirs = makeRun({ runId: 'r1', stages: STAGES, project: { paths: {} } })
+  try {
+    const base = join(dirs.projectDir, '.agent-team')
+    for (const rel of [join('runs', 'r1', 'state.json'), 'project.json']) {
+      const p = join(base, rel)
+      writeFileSync(p, '﻿' + readFileSync(p, 'utf8'), 'utf8')
+    }
+    const ctx = readRunContext(dirs.projectDir, dirs.pluginDir)
+    assert.equal(ctx.ok, true, ctx.reason)
+    assert.equal(readProjectConfig(dirs.projectDir).ok, true)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
   }
 })

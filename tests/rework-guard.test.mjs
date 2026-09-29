@@ -7,7 +7,7 @@
 // 替换只有那边能测到）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { decideRework } from '../hooks/lib/rework-guard.mjs'
+import { decideRework, replayEdit } from '../hooks/lib/rework-guard.mjs'
 
 const H = (...stages) => stages.map((s) => ({ stage: s, at: '2026-09-19T00:00:00Z' }))
 const st = (history, rework) => ({ stage: 'S5', history, rework })
@@ -48,9 +48,30 @@ test('旧 state 不存在（本趟第一次写）：放行', () => {
   assert.equal(r.ok, true)
 })
 
-test('新内容不是合法 JSON 对象：放行，不拒——拒了会让人连修回去都做不到', () => {
+// M3r（docs/26，全量审查第 5 条）：原先这条是「新内容不是合法 JSON 对象：放行」。那一半口子
+// 让返工史能用两次 Write 洗掉：先写一份垃圾（新的一侧 parse 不出来，放行），再写一份清零的
+// 合法版本（旧的一侧 parse 不出来，放行）。现在只剩「旧的本来就坏了」这一侧放行——那是把坏文件
+// 修回去的路；新内容必须永远是合法的 JSON 对象，PM 总写得出来，锁不死。
+test('旧的是合法对象、新内容不是合法 JSON 对象：拒——两步清零的第一步', () => {
+  for (const after of [null, [], 'x', 1]) {
+    const r = decideRework({ before: st(H('S1'), {}), after })
+    assert.equal(r.ok, false, JSON.stringify(after))
+  }
+})
+
+test('新内容不是合法 JSON 对象时，理由说清要写一份合法的 JSON 对象', () => {
   const r = decideRework({ before: st(H('S1'), {}), after: null })
+  assert.match(r.reason, /JSON 对象/)
+})
+
+test('旧的本来就坏了、新内容是合法对象：放行——把坏文件修回去这条路不能堵', () => {
+  const r = decideRework({ before: null, after: st(H('S1'), {}) })
   assert.equal(r.ok, true)
+})
+
+test('旧的不在、新内容也不是合法 JSON 对象：拒——第一次建也要写对', () => {
+  const r = decideRework({ before: null, after: null })
+  assert.equal(r.ok, false)
 })
 
 test('拒的时候要说清是哪一条判据、哪个阶段', () => {
@@ -190,4 +211,59 @@ test('rework 改小、走 Write 路径的那一格：拒（与 Edit 路径同判
     after: st(H('S5', 'S5'), { S5: 0 }),
   })
   assert.equal(r.ok, false)
+})
+
+// ---- replayEdit：照平台 Edit 的口径重放一次替换（M3r，docs/26，全量审查第 6 条）----
+//
+// 平台的 Edit 匹配之前先剥 BOM、把 CRLF 折成 LF，弯引号与直引号互认；写回时再恢复原来的行尾。
+// H6 此前按字节重放，CRLF 的 state.json 上任何多行 Edit 都匹配不上、算不出新内容、放行。
+// 重放的结果只拿去 JSON.parse，行尾不影响；匹配不上时返回 null，由门禁拒（让它改用 Write）。
+
+const CRLF = (s) => s.split('\n').join('\r\n')
+
+test('replayEdit：LF 文件上精确匹配', () => {
+  assert.equal(replayEdit({ before: 'a\nb\nc', oldString: 'b', newString: 'B' }), 'a\nB\nc')
+})
+
+test('replayEdit：CRLF 文件、LF 写的多行 old_string 照样匹配', () => {
+  const before = CRLF('{\n  "a": 1,\n  "b": 2\n}')
+  assert.equal(replayEdit({ before, oldString: '"a": 1,\n  "b": 2', newString: '"a": 0' }), '{\n  "a": 0\n}')
+})
+
+test('replayEdit：old_string 写成 CRLF、文件是 LF，照样匹配', () => {
+  assert.equal(replayEdit({ before: 'x\ny', oldString: 'x\r\ny', newString: 'z' }), 'z')
+})
+
+test('replayEdit：带 BOM 的文件照样匹配', () => {
+  assert.equal(replayEdit({ before: '﻿{"a":1}', oldString: '{"a":1}', newString: '{"a":2}' }), '{"a":2}')
+})
+
+test('replayEdit：old_string 用了弯引号，文件是直引号，照样匹配', () => {
+  const oldString = '“rework”: {“S5”: 3}'
+  assert.equal(replayEdit({ before: '{"rework": {"S5": 3}}', oldString, newString: '"rework": {}' }), '{"rework": {}}')
+})
+
+test('replayEdit：精确匹配优先于弯引号互认——两种都有时替换的是精确命中的那一处', () => {
+  const before = '“k”=1 "k"=1'
+  assert.equal(replayEdit({ before, oldString: '"k"=1', newString: 'X' }), '“k”=1 X')
+})
+
+test('replayEdit：replace_all 在 CRLF 文件上替换每一处', () => {
+  assert.equal(replayEdit({ before: CRLF('a\nx\na'), oldString: 'a', newString: 'b', replaceAll: true }), 'b\nx\nb')
+})
+
+test('replayEdit：找不到 old_string → null', () => {
+  assert.equal(replayEdit({ before: 'abc', oldString: 'zzz', newString: 'y' }), null)
+})
+
+test('replayEdit：文件不在、old_string 为空 → 新建，内容就是 new_string', () => {
+  assert.equal(replayEdit({ before: null, oldString: '', newString: '{"a":1}' }), '{"a":1}')
+})
+
+test('replayEdit：文件不在、old_string 不为空 → null（平台的 Edit 自己也会失败）', () => {
+  assert.equal(replayEdit({ before: null, oldString: 'a', newString: 'b' }), null)
+})
+
+test('replayEdit：参数不是字符串 → null', () => {
+  assert.equal(replayEdit({ before: 'a', oldString: undefined, newString: 'b' }), null)
 })

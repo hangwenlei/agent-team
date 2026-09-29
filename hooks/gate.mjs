@@ -20,7 +20,7 @@ import { projectRootFrom, readProjectConfig, readRunContext } from './lib/runctx
 import { decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
-import { decideRework } from './lib/rework-guard.mjs'
+import { decideRework, parseStateText, replayEdit } from './lib/rework-guard.mjs'
 import { decideDeliverable } from './lib/deliverable.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { isControlFile, mayBeStateFile } from './lib/control-files.mjs'
@@ -795,42 +795,39 @@ function main() {
         beforeText = null
       }
 
-      // 算新内容。Write 的新全文就是 tool_input.content；Edit 的语义是"对旧文本
-      // 套用一次 old_string → new_string 的替换"，磁盘上的旧文本已经拿到手，这里
-      // 确定性地重放同一次替换，不去猜——replace_all 缺省当 false，与真实 Edit
-      // 工具的默认语义一致（只替换第一次出现，且要求 old_string 在文件里存在）。
-      // old_string 在磁盘原文里找不到时算不出确定的新内容，按"parse 不出来"同一个
-      // 理由放行，不猜第二种可能。NotebookEdit 不适用：它的 schema 里没有
-      // file_path/content/old_string 这套字段，上面的外层条件已经把它整个排除。
+      // 算新内容。Write 的新全文就是 tool_input.content；Edit 由 replayEdit 照平台的口径重放
+      // 同一次替换（剥 BOM、折 CRLF、弯引号互认，见 hooks/lib/rework-guard.mjs）。
+      //
+      // M3r（docs/26，全量审查第 6 条）：算不出新内容时**拒**，不再按「parse 不出来」放行。
+      // 此前按字节重放，CRLF 的 state.json 上任何多行 Edit 都匹配不上、放行、真实落盘——
+      // 一次 Edit 就能把返工史清零。算不出来就让它改用 Write 整份重写：那条路的新内容是确定的。
+      // NotebookEdit 不适用：它的 schema 里没有 file_path/content/old_string 这套字段，上面的
+      // 外层条件已经把它整个排除。
       let afterText = null
       if (input.tool_name === 'Write') {
         afterText = typeof input?.tool_input?.content === 'string' ? input.tool_input.content : null
-      } else if (input.tool_name === 'Edit' && typeof beforeText === 'string') {
+      } else if (input.tool_name === 'Edit') {
         const { old_string, new_string, replace_all } = input?.tool_input ?? {}
-        if (typeof old_string === 'string' && typeof new_string === 'string') {
-          if (replace_all) {
-            afterText = beforeText.split(old_string).join(new_string)
-          } else {
-            const i = beforeText.indexOf(old_string)
-            afterText =
-              i === -1 ? null : beforeText.slice(0, i) + new_string + beforeText.slice(i + old_string.length)
-          }
-        }
+        afterText = replayEdit({
+          before: beforeText,
+          oldString: old_string,
+          newString: new_string,
+          replaceAll: replace_all === true,
+        })
+      }
+      if (afterText === null) {
+        denyAndExit(
+          `agent-team H6 返工预算：算不出这次 ${input.tool_name} 之后 state.json 会变成什么` +
+            `（Edit 的 old_string 在文件里找不到，或者参数不全），门禁没法判断它有没有改小返工计数，` +
+            `按安全边界拒绝。改用 Write 把完整的 state.json 整份重写。`,
+          spec.event,
+        )
       }
 
-      const parseOrNull = (text) => {
-        if (typeof text !== 'string') return null
-        try {
-          return JSON.parse(text)
-        } catch {
-          // 写坏的 state.json 不归这里管——parse 不出来就放行，deny 会让 PM 连
-          // "把文件修回去"都做不到，与 gate.mjs 里 I2 豁免同一个理由。写坏的内容
-          // 由 ledger 的 kind:'state' 报出来（事后告警，不是这里的事）。
-          return null
-        }
-      }
-
-      const r = decideRework({ before: parseOrNull(beforeText), after: parseOrNull(afterText) })
+      // 旧的读不出来（第一次写、或者本来就坏了）时放行、新的必须是合法 JSON 对象——判定在
+      // decideRework 里，理由见 hooks/lib/rework-guard.mjs 头部。parseStateText 剥 BOM，
+      // 与 runctx 读 state.json 同一份归一化。
+      const r = decideRework({ before: parseStateText(beforeText), after: parseStateText(afterText) })
       if (!r.ok) denyAndExit(r.reason, spec.event)
     }
   }
@@ -893,6 +890,36 @@ function main() {
         }
         // project.json 刚写进去却读不出来（写坏了、或者被并发占用）——没有判据，
         // 继续往下走原来的 fail open 留痕，不要凭空造一张空触达表回传。
+      }
+      // M3r（docs/26，全量审查第 5 条）：刚写的正是某个 run 的 state.json、而它读不出来——这趟
+      // run 此刻在门禁眼里是坏的（readRunContext 判 unreadable），此前这里只往 stderr 写一句，
+      // 模型和用户都看不见，docs/11 §5.31 说的「写坏会被 ledger 报出来」在代码里并不存在。
+      // 自己再 parse 一遍，只在确实是这份文件坏了时回传；不回显文件内容（审查第 7 条：受信
+      // 通道原样回显 state.json 字段会被拿来注入）。H6 现在拒掉「合法 → 坏」的写入，走到这里的
+      // 是第一次就写坏、或者坏了之后又写坏的。
+      if (
+        typeof filePath === 'string' &&
+        isControlFile(filePath, ctx.agentTeamDir) &&
+        norm(filePath).endsWith('/state.json')
+      ) {
+        let text = null
+        try {
+          text = readFileSync(filePath, 'utf8')
+        } catch {}
+        if (parseStateText(text) === null) {
+          process.stderr.write(failOpenNotice('ledger 回传', ctx))
+          emitLedger(
+            spec.event,
+            buildLedgerNotices({
+              kind: 'state',
+              stateProblems: [
+                '刚写进去的 state.json 不是一个合法的 JSON 对象，门禁读不出这趟 run——H2 到 H6 此刻都按' +
+                  '「读不出运行上下文」处理。用 Write 写回一份合法的完整 state.json，再继续。',
+              ],
+            }),
+          )
+          process.exit(0)
+        }
       }
       // fail open + 留痕，与 H2/H5 同一先例。措辞按 ctx.kind 分派，共用 failOpenNotice。
       process.stderr.write(failOpenNotice('ledger 回传', ctx))
