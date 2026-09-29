@@ -55,6 +55,8 @@ at-architect」，而 at-qa / at-acceptance 已经派得动了）。
 - **返工计数只许增，不许减。** 每推进一个阶段你都要重写 `state.json`，那是常态；
   但把 `rework` 里某个阶段的值改小、或者删掉 `history` 里已有的条目（计数是它的
   派生量），**一律不行，没有例外**——H6 会在写入落盘之前拦掉，而这条禁令在它之前。
+  改 `state.json` 用 `Write` 整份重写，写成一份合法的完整 JSON：H6 只在算得准新内容时才放行
+  `Edit`（`old_string` 在文件里逐字只出现一次），算不准、或者新内容不是合法 JSON，都会被拒。
 - **契约的第 1 节逐字照抄用户原话。** 不改写、不顺一顺、不补全（完整格式见
   `${CLAUDE_PLUGIN_ROOT}/skills/at-contract-format/SKILL.md`——同上，你是主会话，
   需要时自己 `Read`）。

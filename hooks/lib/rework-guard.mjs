@@ -97,24 +97,23 @@ export function decideRework({ before, after }) {
   return { ok: true }
 }
 
-// 弯引号折成直引号：平台的 Edit 在精确匹配不上时，把 “ ” ‘ ’ 与 " ' 当成同一个字符再找一遍。
-// 一对一替换，长度不变，所以在折过的文本里找到的下标就是原文里的下标。
-function straightQuotes(s) {
-  return s.replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
-}
-
 /**
- * 照平台 Edit 的口径重放一次替换，得出写入之后的文本（M3r，docs/26，全量审查第 6 条）。
+ * 重放一次 Edit，得出平台写入之后 state.json 的文本（M3r，docs/26，全量审查第 6 条）。
  *
- * 平台的 Edit 匹配之前先剥 BOM、把 CRLF 折成 LF；精确匹配不上时再把弯引号与直引号当成同一个
- * 字符找一遍；写回时恢复原来的行尾。H6 此前按字节重放，CRLF 的 state.json 上任何多行 Edit 都
- * 匹配不上、算不出新内容、按「parse 不出来」放行——在 Windows 上，core.autocrlf、编辑器、
- * PowerShell 都会写出 CRLF 的 state.json。
+ * **只镜像平台的「精确命中」那一层**（平台实现见 docs/26 §5，本机 claude.exe 2.1.283）：
+ *   - 读文件：只把 CRLF 折成 LF，UTF-8 BOM 原样留着；
+ *   - 匹配：old_string 原样在文件里找；平台之后还有弯引号互认、两层 \uXXXX 转义互认，那几层会
+ *     **改写 new_string**（把直引号换成弯引号、换转义写法），这里一概不认，返回 null；
+ *   - 多处命中又没带 replace_all：平台报错、不落盘——返回 null；
+ *   - 空 old_string：文件不在、或只有空白时整份写成 new_string；否则平台报错——返回 null；
+ *   - new_string 原样放进去，一个字不改（平台精确命中时同样一个字不改）。
+ * 写回时平台恢复原来的行尾；这里返回 LF 形式，只拿去 JSON.parse，行尾不影响语义。
  *
- * 返回的是 LF 形式的新文本（只拿去 JSON.parse，行尾不影响语义）；匹配不上、参数不对时返回
- * null，由调用方拒——不去猜第二种可能。门禁与平台的口径若在别处还有差别，差别只会让这里
- * 返回 null（多拒一次、让它改用 Write），而不会算出一份与真实落盘不同的新内容：平台要求
- * old_string 在文件里恰好出现一次（replace_all 除外），两边先精确、后弯引号，命中的是同一处。
+ * 为什么只镜像这一层：H6 放行的前提是「门禁算出的新内容就是真实落盘的内容」。第一版照「预测
+ * 平台」写，剥了 new_string 的 BOM、做了弯引号互认却没做平台随之而来的改写——门禁算出合法 JSON，
+ * 平台落盘的却是坏文件；下一次 Write 走「旧的读不出来」那条修复路放行，两步清零照样做成（复核
+ * 实测）。只镜像平台一个字不改的那一层，这个落差就不存在；其余情形返回 null，由门禁拒、让它
+ * 改用 Write——Write 的新内容是确定的。代价是多拒几种 Edit（用了弯引号或转义写法的 old_string）。
  *
  * @param {{ before: string|null, oldString: string, newString: string, replaceAll?: boolean }} args
  *   before：磁盘上的原文（文件不在时为 null）。
@@ -122,26 +121,14 @@ function straightQuotes(s) {
  */
 export function replayEdit({ before, oldString, newString, replaceAll = false }) {
   if (typeof oldString !== 'string' || typeof newString !== 'string') return null
-  const oldN = normalizeText(oldString)
-  const newN = normalizeText(newString)
-  // 文件不在：平台的 Edit 只在 old_string 为空时新建文件，内容就是 new_string。
-  if (before === null || before === undefined) return oldN === '' ? newN : null
-  if (typeof before !== 'string' || oldN === '') return null
-  const text = normalizeText(before)
-
-  for (const [hay, needle] of [[text, oldN], [straightQuotes(text), straightQuotes(oldN)]]) {
-    const first = hay.indexOf(needle)
-    if (first === -1) continue
-    if (!replaceAll) return text.slice(0, first) + newN + text.slice(first + needle.length)
-    let out = ''
-    let from = 0
-    for (let i = first; i !== -1; i = hay.indexOf(needle, from)) {
-      out += text.slice(from, i) + newN
-      from = i + needle.length
-    }
-    return out + text.slice(from)
-  }
-  return null
+  if (before === null || before === undefined) return oldString === '' ? newString : null
+  if (typeof before !== 'string') return null
+  const text = before.replace(/\r\n/g, '\n')
+  if (oldString === '') return text.trim() === '' ? newString : null
+  const parts = text.split(oldString)
+  if (parts.length === 1) return null
+  if (parts.length > 2 && !replaceAll) return null
+  return parts.join(newString)
 }
 
 /**

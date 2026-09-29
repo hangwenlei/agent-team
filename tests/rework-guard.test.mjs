@@ -7,7 +7,7 @@
 // 替换只有那边能测到）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { decideRework, replayEdit } from '../hooks/lib/rework-guard.mjs'
+import { decideRework, parseStateText, replayEdit } from '../hooks/lib/rework-guard.mjs'
 
 const H = (...stages) => stages.map((s) => ({ stage: s, at: '2026-09-19T00:00:00Z' }))
 const st = (history, rework) => ({ stage: 'S5', history, rework })
@@ -213,11 +213,17 @@ test('rework 改小、走 Write 路径的那一格：拒（与 Edit 路径同判
   assert.equal(r.ok, false)
 })
 
-// ---- replayEdit：照平台 Edit 的口径重放一次替换（M3r，docs/26，全量审查第 6 条）----
+// ---- replayEdit：只镜像平台 Edit 的「精确命中」那一层（M3r，docs/26，全量审查第 6 条）----
 //
-// 平台的 Edit 匹配之前先剥 BOM、把 CRLF 折成 LF，弯引号与直引号互认；写回时再恢复原来的行尾。
-// H6 此前按字节重放，CRLF 的 state.json 上任何多行 Edit 都匹配不上、算不出新内容、放行。
-// 重放的结果只拿去 JSON.parse，行尾不影响；匹配不上时返回 null，由门禁拒（让它改用 Write）。
+// 平台的 Edit（本机 claude.exe 2.1.283 的实现，docs/26 §5）：读文件时只把 CRLF 折成 LF、UTF-8 BOM
+// 原样留着；匹配分四层——精确、弯引号互认、两层 \uXXXX 转义互认；**只有精确命中时 new_string 原样
+// 写入**，其余几层会改写 new_string（比如把直引号换成弯引号）；多处命中又没带 replace_all 时报错、
+// 不落盘；写回时恢复原来的行尾。
+//
+// H6 此前按字节重放，CRLF 的 state.json 上任何多行 Edit 都匹配不上、放行。第一版修法照「预测平台」
+// 写，复核抓到它剥了 new_string 的 BOM、做了弯引号互认却没做平台随之而来的改写——门禁算出合法 JSON，
+// 平台落盘的却是坏文件，两步清零换条路照样做成。所以现在只镜像第一层：那一层平台一个字不改，门禁算的
+// 就是真实落盘的；其余几层门禁不预测，返回 null，由门禁拒、让它改用 Write。
 
 const CRLF = (s) => s.split('\n').join('\r\n')
 
@@ -225,27 +231,36 @@ test('replayEdit：LF 文件上精确匹配', () => {
   assert.equal(replayEdit({ before: 'a\nb\nc', oldString: 'b', newString: 'B' }), 'a\nB\nc')
 })
 
-test('replayEdit：CRLF 文件、LF 写的多行 old_string 照样匹配', () => {
+test('replayEdit：CRLF 文件、LF 写的多行 old_string 照样匹配（平台读文件时折 CRLF）', () => {
   const before = CRLF('{\n  "a": 1,\n  "b": 2\n}')
   assert.equal(replayEdit({ before, oldString: '"a": 1,\n  "b": 2', newString: '"a": 0' }), '{\n  "a": 0\n}')
 })
 
-test('replayEdit：old_string 写成 CRLF、文件是 LF，照样匹配', () => {
-  assert.equal(replayEdit({ before: 'x\ny', oldString: 'x\r\ny', newString: 'z' }), 'z')
+test('replayEdit：old_string 写成 CRLF → null（平台只折文件、不折 old_string，匹配不上）', () => {
+  assert.equal(replayEdit({ before: 'x\ny', oldString: 'x\r\ny', newString: 'z' }), null)
 })
 
-test('replayEdit：带 BOM 的文件照样匹配', () => {
-  assert.equal(replayEdit({ before: '﻿{"a":1}', oldString: '{"a":1}', newString: '{"a":2}' }), '{"a":2}')
+test('replayEdit：文件开头的 BOM 原样留着（平台不剥它）', () => {
+  assert.equal(replayEdit({ before: '﻿{"a":1}', oldString: '{"a":1}', newString: '{"a":2}' }), '﻿{"a":2}')
 })
 
-test('replayEdit：old_string 用了弯引号，文件是直引号，照样匹配', () => {
+test('replayEdit：new_string 原样放进去——带 BOM、带 CRLF 都不动（平台精确命中时一个字不改）', () => {
+  assert.equal(replayEdit({ before: '{"a":1}', oldString: '1', newString: '﻿1' }), '{"a":﻿1}')
+  assert.equal(replayEdit({ before: '{"a":1}', oldString: '1', newString: '1\r\n' }), '{"a":1\r\n}')
+})
+
+test('replayEdit：old_string 用了弯引号、文件是直引号 → null（那一层平台会改写 new_string，门禁不预测）', () => {
   const oldString = '“rework”: {“S5”: 3}'
-  assert.equal(replayEdit({ before: '{"rework": {"S5": 3}}', oldString, newString: '"rework": {}' }), '{"rework": {}}')
+  assert.equal(replayEdit({ before: '{"rework": {"S5": 3}}', oldString, newString: '"rework": {}' }), null)
 })
 
-test('replayEdit：精确匹配优先于弯引号互认——两种都有时替换的是精确命中的那一处', () => {
+test('replayEdit：弯引号与直引号同时在文件里时，只认精确命中的那一处', () => {
   const before = '“k”=1 "k"=1'
   assert.equal(replayEdit({ before, oldString: '"k"=1', newString: 'X' }), '“k”=1 X')
+})
+
+test('replayEdit：old_string 出现不止一处、又没带 replace_all → null（平台报错、不落盘）', () => {
+  assert.equal(replayEdit({ before: 'a x a', oldString: 'a', newString: 'b' }), null)
 })
 
 test('replayEdit：replace_all 在 CRLF 文件上替换每一处', () => {
@@ -256,8 +271,10 @@ test('replayEdit：找不到 old_string → null', () => {
   assert.equal(replayEdit({ before: 'abc', oldString: 'zzz', newString: 'y' }), null)
 })
 
-test('replayEdit：文件不在、old_string 为空 → 新建，内容就是 new_string', () => {
+test('replayEdit：old_string 为空——文件不在或只有空白时整份写成 new_string，否则 null（平台同样）', () => {
   assert.equal(replayEdit({ before: null, oldString: '', newString: '{"a":1}' }), '{"a":1}')
+  assert.equal(replayEdit({ before: ' \r\n', oldString: '', newString: '{"a":1}' }), '{"a":1}')
+  assert.equal(replayEdit({ before: '{"a":1}', oldString: '', newString: '{"a":2}' }), null)
 })
 
 test('replayEdit：文件不在、old_string 不为空 → null（平台的 Edit 自己也会失败）', () => {
@@ -266,4 +283,15 @@ test('replayEdit：文件不在、old_string 不为空 → null（平台的 Edit
 
 test('replayEdit：参数不是字符串 → null', () => {
   assert.equal(replayEdit({ before: 'a', oldString: undefined, newString: 'b' }), null)
+})
+
+// ---- parseStateText ----
+
+test('parseStateText：开头的 BOM 剥掉；中间的 BOM 不剥（那就是坏文件）', () => {
+  assert.deepEqual(parseStateText('﻿{"a":1}'), { a: 1 })
+  assert.equal(parseStateText('{"a":﻿1}'), null)
+})
+
+test('parseStateText：合法 JSON 但不是对象（数组、字符串、null）→ null', () => {
+  for (const text of ['[]', '"x"', 'null', '1']) assert.equal(parseStateText(text), null, text)
 })

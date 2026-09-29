@@ -530,3 +530,48 @@ test('ledger：刚写的 state.json 读不出来——回传一条【state.json�
     cleanup(dirs)
   }
 })
+
+// ---- 复核抓到的两条：门禁算出合法 JSON、平台落盘的却是坏文件（docs/26 §3）----
+//
+// 两步清零的第一步只要「H6 以为写完还是合法的、平台实际写坏了」就能做成：第二步旧的一侧读不出来，
+// 走修复那条路放行。下面两条是复核实测过的第一步，都必须拒。
+
+test('两步清零换条路：Edit 的 new_string 以 BOM 开头、插在文件中间——拒（平台原样写进去，文件就坏了）', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeFileSync(statePath(dirs), JSON.stringify(SPENT, null, 2), 'utf8')
+    const r = gateEdit(dirs, '"at": "2026-09-17T15:10:00Z"', '﻿"at": "2026-09-17T15:10:00Z"')
+    assert.ok(isDeny(r), r.stdout)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('两步清零换条路：old_string 用直引号去碰原文里的弯引号——拒（平台会把 new_string 的引号也换成弯的）', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeFileSync(statePath(dirs), JSON.stringify({ ...SPENT, note: '“' }, null, 2), 'utf8')
+    const r = gateEdit(dirs, '"note": """', '"note": "“"')
+    assert.ok(isDeny(r), r.stdout)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('ledger：写坏的是 reach.json 而不是 state.json——不回传【state.json】', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeFileSync(statePath(dirs), '{ oops', 'utf8')
+    const reach = join(dirs.projectDir, '.agent-team', 'reach.json')
+    writeFileSync(reach, '{ oops', 'utf8')
+    const { stdout } = run(
+      'ledger',
+      { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: reach } },
+      GATE,
+      dirs.projectDir,
+    )
+    assert.doesNotMatch(stdout, /【state\.json】/)
+  } finally {
+    cleanup(dirs)
+  }
+})
