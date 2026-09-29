@@ -22,7 +22,7 @@ export function norm(p) {
   const resolved = resolve(p).split(sep).join('/')
   // Windows 文件系统大小写不敏感，但 resolve() 保留调用方给的原始大小写：
   // filePath 来自工具调用方给的 file_path/notebook_path，runDir 与 base 最终
-  // 来自 process.cwd()，两者不同源，盘符或路径段的大小写可能对不齐
+  // 来自项目根（CLAUDE_PROJECT_DIR，缺失时是 process.cwd()），两者不同源，盘符或路径段的大小写可能对不齐
   // （C:\proj\... vs c:\proj\...，或 SRC vs src）。POSIX 文件系统大小写敏感，
   // 'src' 与 'SRC' 真的是两个不同的文件，不能对它做同样的折叠——这条分支只在
   // win32 触发，POSIX 上这一行根本跑不到。

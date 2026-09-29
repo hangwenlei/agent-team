@@ -3,7 +3,7 @@
 // 而不是被一个异常替它决定。
 //
 // 「绝不抛异常」是这个模块对外的硬契约，不是「代码顺手没写会抛的地方」：
-// Task 3-6 的真实调用形如 readRunContext(process.cwd(), process.env.CLAUDE_PLUGIN_ROOT)，
+// Task 3-6 的真实调用形如 readRunContext(<项目根>, process.env.CLAUDE_PLUGIN_ROOT)，
 // CLAUDE_PLUGIN_ROOT 没设置时就是 undefined，传给 path.join 会同步抛 TypeError。
 // 这类问题必须由这个函数自己兜住（下面整个函数体包一层 try/catch），而不是
 // 指望四个下游调用方各自防一遍——防漏一处，fail-closed 的检查项就会把
