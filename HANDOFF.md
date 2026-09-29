@@ -30,7 +30,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/24` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查逐条的现状（原文在它的附录），下一轮从那里挑。
+- `docs/13`…`docs/27` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查逐条的现状（原文在它的附录），下一轮从那里挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`。
 
 ## 🧠 长期决策与理由
@@ -48,6 +48,10 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **找缺陷靠变异验证，不靠读代码**（`docs/16` §3）。
 - **README 对外只写结论，不写过程。** 不写「某版本上实测」这类叙述、CLI 版本号和 `docs/` 编号引用；用户要知道的用法与风险照写，
   被 `tests/readme-sync.test.mjs` 钉着的那几条事实换成不带过程的说法保留。过程与证据留在 `docs/`。
+- **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
+  `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
+  原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。
+  那张表与理由在 `docs/27` §2.1，判据是 `tests/trusted-echo.test.mjs`——新拼一个外部值，它的入口清单跟着补。
 
 ## ⚠️ 注意事项 / 坑
 
@@ -57,6 +61,11 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **只在这台机器上成立的假设，CI 一跑就露**：macOS 的 `tmpdir()` 在 `/var` 软链接下，子进程 `process.cwd()` 给的是解析后的路径；
   GitHub 的 Windows runner 签出在 D 盘。夹具一律发 realpath，不写死盘符。产品侧同族的路径别名问题在 M3q 修了（`docs/25`）；还开着的边角登记在 `docs/25` §4。
 - 用脚本往文件里写带 `\0` 之类转义的文字时，落盘后照样扫控制字节——这一轮就有一个真的 NUL 字节混进了注释。
+- **写文件工具（Write / Edit）会把单反斜杠的 `\u2028` 这类转义换成真字符**：真字符进了正则字面量是语法错误，
+  进了字符串就让判据测的是它自己。特殊字符一律用 `String.fromCharCode` 构造；写完扫一遍原始的行分隔符（`docs/27` §5）。
+- **Bash 工具的 heredoc 会吃掉一半反斜杠**：带反斜杠的编辑脚本用写文件工具写，脚本里的反斜杠用 `String.fromCharCode(92)` 构造。
+- **锚串替换不要用 `String.prototype.replace(a, b)`**：`b` 里的 `$'`、`$&` 会被展开成替换模式（`docs/26` §3 就这样把一段文档
+  搅乱过）。用 `split(a).join(b)`，并断言命中次数。
 
 - **换行符是混的**（`docs/11` §5.28）：索引统一 LF，`core.autocrlf=true` 让签出副本是 CRLF，被工具重写过的文件停在 LF。
   锚串替换要**断言命中数，并核对命中的是你要的那一处** —— 同一个实参有几处合法命中时，断言防不了砍错的那一刀。落盘后扫控制字节与行尾混用。
