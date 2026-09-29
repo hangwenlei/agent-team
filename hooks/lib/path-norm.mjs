@@ -93,8 +93,9 @@ function canonical(abs, depth = 0) {
  *   - 流后缀（`::$DATA`、`:名字`）：冒号在 Windows 文件名里只可能是流分隔符。写主流等于写文件
  *     本身，写别的流则把数据挂在同一个文件上；两种都不是任何角色该做的事。
  *   - 路径段结尾带点或空格：Win32 会把它们剥掉，`state.json.` 就是 `state.json`。
- *   - 网络路径（`\\server\share`、`\\?\UNC\…`，含本机管理共享 `\\localhost\C$`）而项目不在
- *     同一个共享上：它可能绕回本机的任何一个文件，而门禁没法不碰网络就认出来是哪一个。
+ *   - 网络路径（`\\server\share`、`\\?\UNC\…`、`\\.\UNC\…`，含本机管理共享 `\\localhost\C$`）
+ *     而项目不在同一个共享上：它可能绕回本机的任何一个文件，而门禁没法不碰网络就认出来是哪一个。
+ *   - 不带盘符的设备路径（`\\?\GLOBALROOT\…`、`\\?\Volume{…}\…`、`\\.\pipe\…`）：同理认不出。
  * 带盘符的设备前缀（`\\?\C:\…`、`\\.\C:\…`）不在这里——norm() 会把它解析回普通写法。
  * 纯字符串判断，不碰文件系统（网络路径尤其不能碰：那会去连 SMB）。
  */
@@ -102,6 +103,9 @@ export function exoticPath(p, projectRoot, { platform = process.platform } = {})
   if (platform !== 'win32' || typeof p !== 'string' || !p) return null
   const s = p.replace(/\//g, '\\')
   const unc = uncShare(s)
+  if (!unc && /^\\\\[?.]\\/.test(s) && !/^\\\\[?.]\\[A-Za-z]:(\\|$)/.test(s)) {
+    return `这是不带盘符的设备路径，门禁认不出它指向哪个文件：${p}`
+  }
   // 去掉网络共享前缀或带盘符的设备前缀之后的那一段；冒号只许出现在盘符位置。
   const rest = unc ? s.slice(unc.length) : s.replace(/^\\\\[?.]\\/, '')
   const colonFrom = !unc && /^[A-Za-z]:/.test(rest) ? 2 : 0
@@ -121,9 +125,10 @@ export function exoticPath(p, projectRoot, { platform = process.platform } = {})
   return null
 }
 
-// `\\server\share` 或 `\\?\UNC\server\share` 形式时返回规范化的 `\\server\share` 前缀，否则 null。
+// `\\server\share`、`\\?\UNC\server\share` 或 `\\.\UNC\server\share` 形式时返回规范化的
+// `\\server\share` 前缀，否则 null。
 function uncShare(s) {
-  let m = /^\\\\\?\\UNC\\([^\\]+)\\([^\\]+)/i.exec(s)
+  let m = /^\\\\[?.]\\UNC\\([^\\]+)\\([^\\]+)/i.exec(s)
   if (!m) m = /^\\\\(?![?.]\\)([^\\]+)\\([^\\]+)/.exec(s)
   return m ? `\\\\${m[1]}\\${m[2]}` : null
 }

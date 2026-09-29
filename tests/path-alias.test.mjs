@@ -152,6 +152,17 @@ test('exoticPath：项目在本地盘上时，网络路径（含本机管理共�
   assert.ok(exoticPath('\\\\?\\UNC\\localhost\\C$\\p\\x', 'C:\\p', W))
 })
 
+test('exoticPath：两种设备前缀的网络写法都认得出来——\\\\.\\UNC\\ 与 \\\\?\\UNC\\', () => {
+  assert.ok(exoticPath('\\\\.\\UNC\\localhost\\C$\\p\\x', 'C:\\p', W))
+  assert.ok(exoticPath('\\\\?\\UNC\\localhost\\C$\\p\\x', 'C:\\p', W))
+})
+
+test('exoticPath：不带盘符的设备路径（GLOBALROOT、卷 GUID、管道）认得出来', () => {
+  assert.ok(exoticPath('\\\\?\\GLOBALROOT\\Device\\HarddiskVolume3\\p\\x', 'C:\\p', W))
+  assert.ok(exoticPath('\\\\?\\Volume{0b8c1a7e-0000-0000-0000-100000000000}\\p\\x', 'C:\\p', W))
+  assert.ok(exoticPath('\\\\.\\pipe\\x', 'C:\\p', W))
+})
+
 test('exoticPath：项目本身在网络共享上时，同一个共享下的路径不算', () => {
   assert.equal(exoticPath('\\\\srv\\share\\p\\src\\a.ts', '\\\\srv\\share\\p', W), null)
 })
