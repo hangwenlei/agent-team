@@ -12,7 +12,9 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { TRACE_ENV } from '../../hooks/lib/trace.mjs'
 
-export const GATE = fileURLToPath(new URL('../../hooks/gate.mjs', import.meta.url))
+// GATE 是 hooks.json 真正注册的那个进程入口 boot.mjs，不是判定主体 gate.mjs（M3p）：子进程
+// 判据要走平台走的那条路，boot.mjs 再把判定交给 gate.mjs。
+export const GATE = fileURLToPath(new URL('../../hooks/boot.mjs', import.meta.url))
 
 // M3l：子进程的环境**默认剥掉门禁留痕那个开关**（hooks/lib/trace.mjs 的 TRACE_ENV）。
 // 这一整套测试断言的是「开关关着时」的门禁——许多用例逐字比 stderr 是不是空的。

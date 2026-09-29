@@ -646,7 +646,7 @@ function makeIsolatedRosterFixture(rosterText) {
   const dirs = makeRun({ runId: 'r1', stage: 'S5', stages: realStages })
   cpSync(new URL('../hooks', import.meta.url), join(dirs.pluginDir, 'hooks'), { recursive: true })
   writeFileSync(join(dirs.pluginDir, 'roster.json'), rosterText, 'utf8')
-  return { ...dirs, gate: join(dirs.pluginDir, 'hooks', 'gate.mjs') }
+  return { ...dirs, gate: join(dirs.pluginDir, 'hooks', 'boot.mjs') }
 }
 
 function runDeliverableAgainstIsolatedRoster(rosterText) {

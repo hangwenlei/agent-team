@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-// hook 单入口。第一个参数选择检查项。
+// 门禁的判定主体。第一个参数选择检查项。
+// 进程入口是 ./boot.mjs（hooks.json 注册的是它）：它动态 import 本文件，本文件任何一个
+// 静态依赖加载失败时，由它按 checks.mjs 的失败策略表收尾（M3p，docs/24 §2.2）。本文件
+// 被 import 时顶层照常跑 main()，直接 `node gate.mjs <检查项>` 也照常能跑。
 // 约定：exit 0 + stdout 上的 JSON 决策 = 生效；无输出 = 走正常权限流程。
 // SubagentStop 是例外——它的拒绝走 exit 2 + stderr，不是这套 JSON，
 // 见 hooks/lib/deny.mjs 的 denyOutput（拒绝输出契约的唯一真源）。
