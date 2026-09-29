@@ -33,6 +33,8 @@
  * @param {string} event hook 事件名（CHECKS[name].event）
  * @returns {{ stream: 'stdout' | 'stderr', text: string, exitCode: number }}
  */
+import { quote } from './trusted.mjs'
+
 export function denyOutput(reason, event) {
   if (event === 'PreToolUse') {
     return {
@@ -87,7 +89,7 @@ export function denyOutput(reason, event) {
  */
 export function crashNotice(check, err) {
   return (
-    `agent-team ${check} 检查项在判定过程中异常崩溃（${err?.message ?? String(err)}），本次放行、` +
+    `agent-team ${check} 检查项在判定过程中异常崩溃（${quote(err?.message ?? err, { max: 120 })}），本次放行、` +
     `没有拦截——这个检查项是 fail open 的。这类崩溃通常来自插件自带文件读坏或形状不对，` +
     `先检查 roster.json 与 stages.json 能否被 JSON.parse。\n`
   )

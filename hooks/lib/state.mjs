@@ -18,8 +18,14 @@
 // stageRoles 是 M3a 的 trimmed 键校验用的——「这一段的产者」的单一真源就是它，
 // 这里不另写一份角色集合（理由与下面 trimmed 那一段的注释同源）。
 import { producedNames, expandProduces, stageRoles, stageRolesInRun, isPlainObject } from './stages.mjs'
+import { SHA_RE } from './contract-hash.mjs'
+import { inline, quote } from './trusted.mjs'
 
-const SHA_RE = /^sha256:[0-9a-f]{64}$/
+// validateState 的问题文案会进受信回传【state.json】；state.json 是写得进它的任何人都能写的，
+// 键名与值一律过 quote / inline（M3s，docs/27）。数字原样。
+const val = (x) => (typeof x === 'number' ? String(x) : inline(x))
+
+// SHA_RE 的单一真源在 contract-hash.mjs（M3s）。
 const RUN_ID_RE = /^\d{8}-\d{4}-[a-z0-9][a-z0-9-]*$/
 
 export const REWORK_LIMIT = 3
@@ -169,15 +175,15 @@ export function validateState(state, { stages } = {}) {
   }
 
   if (typeof state.run_id !== 'string' || !RUN_ID_RE.test(state.run_id)) {
-    p(`run_id 不是 YYYYMMDD-HHmm-<slug> 形状（拿到 ${JSON.stringify(state.run_id)}）`)
+    p(`run_id 不是 YYYYMMDD-HHmm-<slug> 形状（拿到 ${quote(state.run_id)}）`)
   }
   if (typeof state.stage !== 'string' || !state.stage) {
     p('stage 缺失或不是字符串')
   } else if (isPlainObject(stages) && !Object.hasOwn(stages, state.stage)) {
-    p(`stage 是 ${state.stage}，但 stages.json 里没有这个阶段`)
+    p(`stage 是 ${inline(state.stage)}，但 stages.json 里没有这个阶段`)
   }
   if (state.contract_sha !== 'PENDING' && !(typeof state.contract_sha === 'string' && SHA_RE.test(state.contract_sha))) {
-    p(`contract_sha 既不是 "PENDING" 也不是 sha256:<64 位十六进制>（拿到 ${JSON.stringify(state.contract_sha)}）`)
+    p(`contract_sha 既不是 "PENDING" 也不是 sha256:<64 位十六进制>（拿到 ${quote(state.contract_sha)}）`)
   }
   if (!isStringArray(state.roster)) p('roster 不是字符串数组')
   if (!isStringArray(state.never_invoked)) p('never_invoked 不是字符串数组')
@@ -222,12 +228,12 @@ export function validateState(state, { stages } = {}) {
         : null
       for (const [role, stage] of Object.entries(state.trimmed)) {
         if (typeof stage !== 'string') {
-          p(`trimmed["${role}"] 不是字符串——值要写这个角色是在哪一段被裁掉的（阶段 id）`)
+          p(`trimmed[${quote(role)}] 不是字符串——值要写这个角色是在哪一段被裁掉的（阶段 id）`)
         } else if (isPlainObject(stages) && !Object.hasOwn(stages, stage)) {
-          p(`trimmed["${role}"] 是 ${stage}，但 stages.json 里没有这个阶段`)
+          p(`trimmed[${quote(role)}] 是 ${inline(stage)}，但 stages.json 里没有这个阶段`)
         }
         if (trimmable && !trimmable.has(role)) {
-          p(`trimmed 里有 "${role}"，但它不是任何阶段的产者——裁掉一个本来就什么都不产出的角色不构成交代`)
+          p(`trimmed 里有 ${quote(role)}，但它不是任何阶段的产者——裁掉一个本来就什么都不产出的角色不构成交代`)
         }
       }
     }
@@ -244,9 +250,9 @@ export function validateState(state, { stages } = {}) {
     // stages 不是对象时这条问题不表态。
     const produced = producedNames(stages)
     for (const [k, v] of Object.entries(state.artifacts)) {
-      if (typeof v !== 'string' || !SHA_RE.test(v)) p(`artifacts["${k}"] 不是 sha256:<64 位十六进制>`)
+      if (typeof v !== 'string' || !SHA_RE.test(v)) p(`artifacts[${quote(k)}] 不是 sha256:<64 位十六进制>`)
       if (isPlainObject(stages) && !produced.has(k)) {
-        p(`artifacts 里有 "${k}"，但它不是任何阶段的 produces——artifacts 只记阶段产物的哈希`)
+        p(`artifacts 里有 ${quote(k)}，但它不是任何阶段的 produces——artifacts 只记阶段产物的哈希`)
       }
     }
   }
@@ -260,7 +266,7 @@ export function validateState(state, { stages } = {}) {
         if (typeof e[k] !== 'string') p(`escalations[${i}].${k} 缺失或不是字符串`)
       }
       if (typeof e.kind === 'string' && !ESCALATION_KINDS.includes(e.kind)) {
-        p(`escalations[${i}].kind 是 ${JSON.stringify(e.kind)}，必须是规格 §5.1 的五类之一：${ESCALATION_KINDS.join('、')}`)
+        p(`escalations[${i}].kind 是 ${quote(e.kind)}，必须是规格 §5.1 的五类之一：${ESCALATION_KINDS.join('、')}`)
       }
     })
   }
@@ -273,12 +279,12 @@ export function validateState(state, { stages } = {}) {
         return p(`history[${i}] 不是 { stage, at } 形状`)
       }
       if (isPlainObject(stages) && !Object.hasOwn(stages, e.stage)) {
-        p(`history[${i}].stage 是 ${e.stage}，但 stages.json 里没有这个阶段`)
+        p(`history[${i}].stage 是 ${inline(e.stage)}，但 stages.json 里没有这个阶段`)
       }
     })
     const last = state.history[state.history.length - 1]
     if (isPlainObject(last) && last.stage !== state.stage) {
-      p(`history 的最后一条是 ${last.stage}，但 stage 字段是 ${state.stage}——有人改了当前阶段却没记账`)
+      p(`history 的最后一条是 ${val(last.stage)}，但 stage 字段是 ${val(state.stage)}——有人改了当前阶段却没记账`)
     }
   }
 
@@ -286,9 +292,9 @@ export function validateState(state, { stages } = {}) {
     p('rework 不是对象')
   } else {
     for (const [k, v] of Object.entries(state.rework)) {
-      if (!isNonNegativeInteger(v)) p(`rework["${k}"] 不是非负整数`)
-      else if (v > REWORK_LIMIT) p(`rework["${k}"] 是 ${v}，超过硬上限 ${REWORK_LIMIT}（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级）`)
-      if (isPlainObject(stages) && !Object.hasOwn(stages, k)) p(`rework 里有 ${k}，但 stages.json 里没有这个阶段`)
+      if (!isNonNegativeInteger(v)) p(`rework[${quote(k)}] 不是非负整数`)
+      else if (v > REWORK_LIMIT) p(`rework[${quote(k)}] 是 ${v}，超过硬上限 ${REWORK_LIMIT}（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级）`)
+      if (isPlainObject(stages) && !Object.hasOwn(stages, k)) p(`rework 里有 ${inline(k)}，但 stages.json 里没有这个阶段`)
     }
     // §4.2 ③「不可重置」的落点：rework 必须严格等于 history 的派生量。
     // 两个方向都查——改小是逃预算，改大是虚报返工把自己推进升级。
@@ -299,7 +305,7 @@ export function validateState(state, { stages } = {}) {
         const have = state.rework[k] ?? 0
         const want = derived[k] ?? 0
         if (have !== want) {
-          p(`rework["${k}"] 是 ${have}，但 history 里 ${k} 出现了 ${want + 1} 次，应当是 ${want}——` +
+          p(`rework[${quote(k)}] 是 ${val(have)}，但 history 里 ${inline(k)} 出现了 ${want + 1} 次，应当是 ${want}——` +
             `计数是 history 的派生量，不能单独改（规格 §4.2 ③）`)
         }
       }

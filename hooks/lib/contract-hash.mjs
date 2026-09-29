@@ -21,6 +21,21 @@ export function normalizeContract(buf) {
   return normalizeText(buf)
 }
 
+// sha 串长什么样的单一真源——sha256OfContract 产出的就是这个形状。state.mjs 的 validateState
+// 拿它校验，shaOrNote 拿它决定能不能回显（M3s 从 state.mjs 挪过来：回显侧要用、又不能反过来
+// 让 state.mjs 与 trusted.mjs 互相引用）。
+export const SHA_RE = /^sha256:[0-9a-f]{64}$/
+
+/**
+ * 记录下来的 sha 值要进回传文字时用它（M3s，docs/27，全量审查第 7 条）：合法的 sha256 与
+ * 'PENDING' 原样回显，其余一概不回显原值，只说它不合法——那个值是写得进 state.json 的任何人
+ * 都能写的，原样回显就是让他往受信通道里塞字。
+ */
+export function shaOrNote(value) {
+  if (value === 'PENDING' || (typeof value === 'string' && SHA_RE.test(value))) return value
+  return '（不是合法的 sha256，原值不回显）'
+}
+
 export function sha256OfContract(buf) {
   return 'sha256:' + createHash('sha256').update(normalizeContract(buf), 'utf8').digest('hex')
 }
@@ -35,7 +50,7 @@ export function compareContractSha({ recorded, actual }) {
     return {
       ok: false,
       problem:
-        `state.json 记着 contract_sha ${recorded}，但磁盘上没有 00-contract.md。` +
+        `state.json 记着 contract_sha ${shaOrNote(recorded)}，但磁盘上没有 00-contract.md。` +
         `契约是这趟 run 唯一的需求基线，它不在了，后面每一步都失去了对账的依据。`,
     }
   }
@@ -51,7 +66,7 @@ export function compareContractSha({ recorded, actual }) {
   return {
     ok: false,
     problem:
-      `契约漂移：磁盘上 00-contract.md 的 sha256 是 ${actual}，state.json 记的是 ${recorded}。` +
+      `契约漂移：磁盘上 00-contract.md 的 sha256 是 ${actual}，state.json 记的是 ${shaOrNote(recorded)}。` +
       `契约可以改，但只能由用户改、经 PM 转写，而且按规格 §5.3，每次改动都要在 escalations[] ` +
       `里留一条记录、并作为带日期的修订块追加进契约。如果这次改动是合法的，把新值写进 ` +
       `contract_sha 并补上 escalations 记录；如果不是，把契约恢复原样。`,

@@ -114,6 +114,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { norm, underDir } from './path-norm.mjs'
 import { normalizeText } from './text-norm.mjs'
+// reason 会进拒绝理由、stderr 留痕；JSON.parse 的异常消息会引用文件原文，一律过 quote（M3s，docs/27）。
+import { inline, quote } from './trusted.mjs'
 
 function readJson(path) {
   let value
@@ -122,7 +124,7 @@ function readJson(path) {
     // JSON.parse 直接失败，整趟 run 被判 unreadable。与 H6 读 state.json 同一份归一化。
     value = JSON.parse(normalizeText(readFileSync(path, 'utf8')))
   } catch (err) {
-    return { ok: false, reason: `读取 ${path} 失败：${err.message}` }
+    return { ok: false, reason: `读取 ${inline(path)} 失败：${quote(err.message, { max: 120 })}` }
   }
   // JSON.parse('null')/('[]')/('"x"') 都是合法 JSON 但取不出字段——放行的话
   // ok:true 会带着不可用的 value 传给下游，某次 ctx.state.stage 这样的属性
@@ -151,7 +153,7 @@ export function readProjectConfig(projectDir) {
     if (!existsSync(path)) return { ok: false, reason: `找不到 ${path}` }
     return readJson(path)
   } catch (err) {
-    return { ok: false, reason: `读取 project.json 失败：${err.message}` }
+    return { ok: false, reason: `读取 project.json 失败：${quote(err.message, { max: 120 })}` }
   }
 }
 
@@ -252,7 +254,7 @@ export function readRunContext(projectDir, pluginDir) {
             ok: false,
             kind: 'unreadable',
             agentTeamDir: base,
-            reason: `找不到 ${pointer}，而 ${runsDir} 读不出来：${err.message}`,
+            reason: `找不到 ${pointer}，而 ${runsDir} 读不出来：${quote(err.message, { max: 120 })}`,
           }
         }
         if (entries.length > 0) {
@@ -282,7 +284,7 @@ export function readRunContext(projectDir, pluginDir) {
         ok: false,
         kind: 'unreadable',
         agentTeamDir: base,
-        reason: `读取 current-run 失败：${err.message}`,
+        reason: `读取 current-run 失败：${quote(err.message, { max: 120 })}`,
       }
     }
     // 空文件不算 no-run，见文件头部注释：pointer 存在但内容为空是异常
@@ -307,7 +309,7 @@ export function readRunContext(projectDir, pluginDir) {
         agentTeamDir: base,
         reason:
           `current-run 内容不是合法的 run id（只允许字母、数字、点、下划线、连字符，且以字母或数字开头）：` +
-          JSON.stringify(runId),
+          quote(runId),
       }
     }
 
@@ -380,6 +382,6 @@ export function readRunContext(projectDir, pluginDir) {
     // base 从来没被算出来、此刻也不在作用域里。硬凑一个值出来就是在编一条路径。
     // 调用方按「取不到 agentTeamDir 就照原路 fail open」处理，见 hooks/gate.mjs 的
     // ledger 分支。
-    return { ok: false, kind: 'unreadable', reason: `读取运行上下文失败：${err.message}` }
+    return { ok: false, kind: 'unreadable', reason: `读取运行上下文失败：${quote(err.message, { max: 120 })}` }
   }
 }

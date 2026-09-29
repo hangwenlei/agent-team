@@ -26,13 +26,13 @@ import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { isControlFile, mayBeStateFile } from './lib/control-files.mjs'
 import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
-import { sha256OfContract } from './lib/contract-hash.mjs'
+import { sha256OfContract, shaOrNote } from './lib/contract-hash.mjs'
 import { buildLedgerNotices } from './lib/ledger.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
 import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
 import { isPlainObject } from './lib/stages.mjs'
-import { TRUSTED_PREFIX, trustedBlock } from './lib/trusted.mjs'
+import { TRUSTED_PREFIX, inline, quote, trustedBlock } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
 
 const CHECK = process.argv[2]
@@ -95,7 +95,7 @@ function loadRoster() {
     return JSON.parse(readFileSync(join(ROOT, 'roster.json'), 'utf8'))
   } catch (e) {
     process.stderr.write(
-      `agent-team：roster.json 读不出来（${e?.message ?? e}），本次按空花名册处理——` +
+      `agent-team：roster.json 读不出来（${quote(e?.message ?? e, { max: 120 })}），本次按空花名册处理——` +
         `派发白名单与协调者判定都会失效，请检查插件安装。\n`,
     )
     return {}
@@ -244,10 +244,10 @@ function failOpenNotice(label, ctx) {
 // **没有放行任何东西**——错的是收件人，不是判定。混用同一句话就是上面那种口径分叉。
 function misroutedNotice(label, channel, recipient) {
   return (
-    `agent-team ${label}：这次的回传落在 ${recipient} 手里——${channel} 只发给这次工具调用` +
+    `agent-team ${label}：这次的回传落在 ${inline(recipient)} 手里——${channel} 只发给这次工具调用` +
     `所属的那个上下文，而它要动的东西住在 state.json 里，H3 写路径门禁在 PreToolUse 上把` +
     `非 PM 对控制文件的 Edit/Write 拒掉。告警照发、判据没有放行任何东西，发错的是收件人` +
-    `不是判定；这一条要被处理，得靠 ${recipient} 把那段回传原样冒泡上去，一路带到 PM。\n`
+    `不是判定；这一条要被处理，得靠 ${inline(recipient)} 把那段回传原样冒泡上去，一路带到 PM。\n`
   )
 }
 
@@ -313,10 +313,10 @@ function buildDriftNotice(cmp, recipientCanWriteState) {
 
   const lines = []
   for (const d of drifted) {
-    lines.push(`  - ${d.name}：记录的是 ${d.recorded}，磁盘上算出来是 ${d.actual}——记账之后被改过`)
+    lines.push(`  - ${d.name}：记录的是 ${shaOrNote(d.recorded)}，磁盘上算出来是 ${d.actual}——记账之后被改过`)
   }
   for (const m of missing) {
-    lines.push(`  - ${m.name}：记录的是 ${m.recorded}，但磁盘上没有——被删了，或者从没真的写成`)
+    lines.push(`  - ${m.name}：记录的是 ${shaOrNote(m.recorded)}，但磁盘上没有——被删了，或者从没真的写成`)
   }
   for (const name of unrecorded) {
     lines.push(`  - ${name}：磁盘上有这份文件，但 artifacts 里没记`)
@@ -772,7 +772,7 @@ function main() {
       existsSync(agentTeamDir) && mayBeStateFile(filePath) ? exoticPath(filePath, ROOT_PROJECT) : null
     if (exotic) {
       denyAndExit(
-        `agent-team H6 返工预算：不得写 ${filePath}——${exotic}。门禁认不出它是不是 state.json，` +
+        `agent-team H6 返工预算：不得写 ${inline(filePath)}——${exotic}。门禁认不出它是不是 state.json，` +
           `按安全边界拒绝；请用普通的本地绝对路径。`,
         spec.event,
       )
@@ -1249,17 +1249,17 @@ function main() {
       // 而且真拦截不该因为「无话可说」就往 stderr 刷字。
       const notices = []
       if (CHECK === 'deliverable' && r.skipped === 'role-not-in-stage' && (!coordinator || stageDone)) {
-        const stageLabel = JSON.stringify(ctx.state?.stage)
+        const stageLabel = quote(ctx.state?.stage)
         // 两支措辞不能共用同一份文案："而且它也派不到那个执行者"在 coordinator 为真时
         // 是假话——它明明是合法的协调者，只是这一阶段的产物已经齐了、state.stage 没
         // 跟着推进。
         const notice = coordinator
-          ? `⚠️ 交付物校验：刚返回的 ${role} 不是当前阶段（state.stage = ${stageLabel}）的` +
+          ? `⚠️ 交付物校验：刚返回的 ${inline(role)} 不是当前阶段（state.stage = ${stageLabel}）的` +
             `执行者，但它能（传递地）派到当前阶段的执行角色——这原本是合法的层级协调。` +
             `只是当前阶段的产物已经全部齐备，state.stage 大概率没有随之推进到下一阶段：` +
             `这正是**停在旧阶段**，H5 会对新阶段全程哑火。去 run 目录核实产物是否真的都已` +
             `完成，确认后把 state.stage 推进到正确的阶段。`
-          : `⚠️ 交付物校验：刚返回的 ${role} 不是当前阶段（state.stage = ${stageLabel}）的` +
+          : `⚠️ 交付物校验：刚返回的 ${inline(role)} 不是当前阶段（state.stage = ${stageLabel}）的` +
             `执行者，**而且它也派不到那个执行者**（所以不是一次层级协调），所以这次校验` +
             `**没有意见**——不是它查过了没问题。两种可能：state.stage 停在旧阶段没推进，` +
             `那样 H5 会对整个新阶段全程哑火；或者这次派发本身不该发生。去 run 目录核实。` +
@@ -1336,7 +1336,7 @@ try {
   // 万一不存在（防御性兜底），按最严格的 fail closed 处理，安全边界优先于精确。
   if (!spec || spec.failClosed) {
     // err?.message：throw 出来的不一定是 Error，这一层自己再抛就会掉进 boot.mjs 的加载失败退路。
-    denyAndExit(`agent-team 门禁异常，按安全边界拒绝：${err?.message ?? String(err)}`, event)
+    denyAndExit(`agent-team 门禁异常，按安全边界拒绝：${quote(err?.message ?? err, { max: 120 })}`, event)
   }
   // fail open 的检查项（spec.failClosed === false，此刻 spec 必然存在，见上面
   // 那条分支）此前这里直接 process.exit(0)——零 stdout、零 stderr，跟「判定
