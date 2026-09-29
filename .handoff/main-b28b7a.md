@@ -2,7 +2,7 @@
 branch: main
 worktree: C:/Users/82370/Desktop/Agent-Team
 ---
-> 更新时间：2026-09-27T08:49:45-07:00
+> 更新时间：2026-09-28T22:52:49-07:00
 
 ## 📋 任务看板
 
@@ -23,6 +23,11 @@ worktree: C:/Users/82370/Desktop/Agent-Team
 - [x] 15. 分界锚点从 `<a name>` 改成 `<a id>`，随 `v0.7.3` 发布——起因是一次假阴性：内置浏览器面板隐藏时页面不滚动，被误读成「`name` 锚点不跳」；无头浏览器复测两种都能跳，错误的说法随 `v0.7.4` 订正
 - [x] 16. README 对外精简与美化：去掉过程叙述、CLI 版本号与 `docs/` 引用；居中标题与徽章、特性列表、命令与提问两张表、两行流程图、GitHub 警示块；随 `v0.7.5` 发布
 - [x] 17. 清理已合进 `main` 的本地功能分支（`readme-*` 五条、`m3o-resume-empty-set-and-pm-model` 与一条临时分支；删前逐条核过已合并、仅在本地）
+- [x] 18. 全量审查（`docs/24-附录-全量审查报告.md`）与第一轮修复（`docs/24`）：项目根、加载期失败的 `boot.mjs`、CI 与版本号检查、`hooks.json` 接线判据；复核轮修掉 `/cd` 回归等；随 `v0.8.0` 发布
+- [ ] 19. **路径别名**（`docs/24` §3，审查第 8、9 条）：门禁按字面比较路径，经软链接 / 短名 / 大小写变体访问时 H3/H4 会认错、错在放行方向——下一轮优先
+- [ ] 20. main 的分支保护要不要开、要不要改走 PR（`docs/24` §2.3）——用户定
+- [ ] 21. 后台会话在 git 仓库里跑不起来（`docs/24` §4.2）：`at-init` 要不要提示 `worktree.bgIsolation`、README 要不要写
+- [ ] 22. `docs/24` §5 里其余开着的审查条目，按严重度往下挑
 
 ## 🧠 本分支决策
 
@@ -30,6 +35,10 @@ worktree: C:/Users/82370/Desktop/Agent-Team
 - **门禁留痕选 stderr、默认关**：现成通道（`--debug-file`、`--verbose`、OTel）都说不出是哪一道门禁；stdout 不能用，`PreToolUse` 的拒绝就是 stdout 上的 JSON，前面多一行字就会被当成纯文本。
 - **`at-resume` 第 2 节把 `isStageDone` 对空集的答案写了出来，而不是只指回去**：只指不写，项目经理得去读 `hooks/lib/state.mjs` 才知道答案，而第 2 节正是它当场要判的地方。这是同一份知识的第二处，代价由 `tests/commands.test.mjs` 那条两半判据付——正文与 `isStageDone` 任一边单独改都红。
 
+- **门禁的项目根从 cwd 往上找，在启动项目里不越界**：只认 cwd，主线程一 cd 就全开；只认 `CLAUDE_PROJECT_DIR`，用户一 /cd 就看丢别处的 run。两个信号都用，理由与已知边界在 `docs/24` §2.1、§4.1。
+- **插件装坏时本会话写不了文件——接受**：另一个方向是门禁整体静默消失；Agent 一侧早有 `roster.json` 读坏一律拒的先例。「什么会让答案改变」写在 `docs/24` §2.2。
+
 ## ⏭️ 下一步
 
-- 任务看板第 5 项最便宜：在一趟真实 run 上跑一次 `/agent-team:at-status`。
+- 第 19 项：路径别名。先设计 `norm()` 按目录做 realpath 的口径，再配判据（macOS `/var`、Windows 短名与 junction 各一组）。
+- 第 5 项仍然最便宜：在一趟真实 run 上跑一次 `/agent-team:at-status`。
