@@ -16,7 +16,8 @@
 //
 //   kind: 'no-run'     压根没有进行中的 run，**而且从来没有人建过一个**：
 //                       没有 .agent-team、没有 current-run，**并且**
-//                       .agent-team/runs/ 不存在或者是空的。
+//                       .agent-team/runs/ 不存在或者没有子目录（M3q：只数子目录
+//                       与链接，.DS_Store 这类杂项文件不算）。
 //                       **pointer 不在只是必要条件，不是充分条件**（M3c）——
 //                       pointer 在而内容读不出或指不到东西、以及 pointer 不在
 //                       而 runs/ 下躺着 run，一律归下面那一格，完整理由见
@@ -39,7 +40,7 @@
 //   kind: 'unreadable' run 存在但读不出来，或者输入本身不可信（state.json/
 //                       project.json 坏了、内容不是对象、current-run 是
 //                       空文件、current-run 指向的 run 目录不存在、
-//                       current-run 不在而 .agent-team/runs/ 非空或读不出来、
+//                       current-run 不在而 .agent-team/runs/ 有子目录或读不出来、
 //                       runId 含路径穿越字符、两个根传了非字符串、
 //                       以及任何意外异常）。这才是门禁真的判不出来，规格
 //                       §6 fail closed 说的是这种情形，继续拒绝。这条边界
@@ -63,7 +64,8 @@
 //
 //   ① current-run 是空文件；
 //   ② current-run 非空，但它指向的 runs/<id>/ 不存在；
-//   ③ current-run 根本不在，而 .agent-team/runs/ 下非空（M3c 加的这一格）。
+//   ③ current-run 根本不在，而 .agent-team/runs/ 下有子目录或链接（M3c 加的这一格；M3q 起
+//      只数子目录与链接）。
 //
 // 理由：①② 里 pointer 文件本身存在（不同于「找不到 pointer」），③ 里 runs/ 下
 // 躺着建出来的 run——三者说的是同一件事，**有人开过 run**。空内容更像是写入过程
@@ -89,7 +91,7 @@
 // ⚠️ ③ 起初也归的是 no-run，M3b 的收尾评审把那个分类的代价实测出来（反例表在
 // docs/11 §5.27：那一格三条全放行，非 PM 写得成别人的地盘、写得成 00-contract.md、
 // 写得成 state.json），M3c 把它挪到这里。**判别只多读一次 runs/**：
-// existsSync(join(base, 'runs')) 加一次 readdirSync 非空。
+// existsSync(join(base, 'runs')) 加一次 readdirSync，看有没有子目录或链接（M3q）。
 //
 // **自举一个字没变，这是这一刀的硬边界**：.agent-team 压根不存在、runs/ 不存在、
 // runs/ 是个空目录——三种形态仍然是 no-run、仍然放行，仍然不会把「建第一个 run」
@@ -177,6 +179,9 @@ export function readProjectConfig(projectDir) {
  *
  * hasAgentTeam 注入只为单测；绝不抛——探测出错时退回 CLAUDE_PROJECT_DIR / cwd。
  */
+// run id 的白名单：以字母或数字开头，其余只许字母、数字、点、下划线、连字符。
+const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
 export function projectRootFrom(env, cwd, hasAgentTeam = hasAgentTeamDir) {
   const dir = env !== null && typeof env === 'object' ? env.CLAUDE_PROJECT_DIR : undefined
   const home = typeof dir === 'string' && dir !== '' ? dir : null
@@ -214,14 +219,19 @@ export function readRunContext(projectDir, pluginDir) {
     const pointer = join(base, 'current-run')
     if (!existsSync(pointer)) {
       // 指针不在有两种截然不同的成因，靠 runs/ 空不空分开（M3c，完整论证在文件
-      // 头部 ③ 那一段）：runs/ 不存在或为空 = 从来没有人建过 run，是干净的缺席，
-      // 仍然 no-run、仍然放行（自举那条边一个字没变）；runs/ 非空 = 有人建过 run
+      // 头部 ③ 那一段）：runs/ 不存在或没有子目录 = 从来没有人建过 run，是干净的缺席，
+      // 仍然 no-run、仍然放行（自举那条边一个字没变）；runs/ 下有子目录 = 有人建过 run
       // 而指针不见了，与空 current-run、坏指针同族，归 unreadable。
       const runsDir = join(base, 'runs')
       if (existsSync(runsDir)) {
+        // 只数子目录（M3q，审查第 31 条）：一个 run 是 runs/ 下的一个目录；.gitkeep、.DS_Store、
+        // Thumbs.db 这类杂项文件不说明「有人建过 run」，按它们判 unreadable 会把干净的缺席
+        // 当成坏掉的 run、拒掉所有非 PM 的写入。链接也算（可能指向一个真的 run 目录），宁严勿松。
         let entries
         try {
-          entries = readdirSync(runsDir)
+          entries = readdirSync(runsDir, { withFileTypes: true }).filter(
+            (e) => e.isDirectory() || e.isSymbolicLink(),
+          )
         } catch (err) {
           // readdirSync 抛（runs 是个文件而不是目录、权限、并发删除……）：判不出
           // 空不空，就判不出这是自举还是丢了指针。归 unreadable，三条理由：
@@ -282,12 +292,19 @@ export function readRunContext(projectDir, pluginDir) {
     // 交付物门禁跑去别的目录判定产物是否存在——这是路径可信边界问题，不是
     // 普通的「文件不存在」失败，必须在拼路径之前挡住（Task 2 评审 M2）。
     // 归 unreadable：这是输入不可信，不是「没有 run」，这条边界不能放松。
-    if (runId.includes('/') || runId.includes('\\') || runId.includes('..')) {
+    //
+    // M3q（docs/25，审查第 31 条）：黑名单（分隔符、..）改成白名单。黑名单放过了两种别名：
+    // 单独一个 `.`（run 目录就是 runs/ 本身），与 NTFS 的目录流后缀 `r1::$INDEX_ALLOCATION`
+    // （指向 runs/r1，字面上却是另一个名字，run 目录的判定随之错位）。命令正文规定的 run id
+    // 形状（日期-时刻-slug）是这个白名单的子集。
+    if (!RUN_ID.test(runId)) {
       return {
         ok: false,
         kind: 'unreadable',
         agentTeamDir: base,
-        reason: `current-run 内容不是合法的 run id（含路径分隔符或 ..）：${JSON.stringify(runId)}`,
+        reason:
+          `current-run 内容不是合法的 run id（只允许字母、数字、点、下划线、连字符，且以字母或数字开头）：` +
+          JSON.stringify(runId),
       }
     }
 

@@ -1,5 +1,5 @@
 // H3（writepath）在 gate.mjs 里 tests/writepath.test.mjs 覆盖不到的逻辑：
-// decideWritePath 是纯函数，从不知道 ctx.ok 是什么、从不知道 tool_input 的
+// decideWritePath 是判定函数，从不知道 ctx.ok 是什么、从不知道 tool_input 的
 // 字段到底叫 file_path 还是 notebook_path、也从不经过 denyAndExit——这些全部
 // 活在 gate.mjs 自己的 CHECK === 'writepath' 分支里。
 //

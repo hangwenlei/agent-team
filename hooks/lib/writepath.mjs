@@ -1,4 +1,4 @@
-// H3 写路径隔离（纯函数）。
+// H3 写路径隔离（判定函数：不读 stdin、不写输出、不退出进程；路径经 path-norm 的 norm() 解析到物理位置，会读文件系统——M3q）。
 //
 // ⚠️ 已知边界（规格 §6.2）：这道闸只管 Edit/Write/NotebookEdit。
 // 执行角色保留 Bash 以跑构建与测试，而 Bash 能写文件（echo >、sed -i），
@@ -6,7 +6,8 @@
 // 评审三轮 Important 1 定下的大小写/分隔符归一化，现在是 hooks/lib/path-norm.mjs
 // 里的公共实现——H3 与 H4 必须用同一份（整理项 5：两边判错的方向相反，
 // 各留一份的代价不对称，理由写在那个文件的头部）。
-import { norm, underDir } from './path-norm.mjs'
+import { dirname, resolve } from 'node:path'
+import { exoticPath, norm, underDir } from './path-norm.mjs'
 import { isControlFile } from './control-files.mjs'
 import { isContractWriter } from './contract-guard.mjs'
 import { stageRoles, expandProduces } from './stages.mjs'
@@ -77,6 +78,18 @@ export function stageOwnerOfRunPath(stages, rd, target) {
 export function decideWritePath({ role, filePath, project, runDir, stages, agentTeamDir }) {
   if (typeof filePath !== 'string' || !filePath) return { decision: 'allow' }
 
+  // M3q（docs/25）：解析不了的写法（流后缀、结尾带点或空格、项目不在网络共享上却写网络路径）
+  // 排在一切比对之前拒掉——下面的每一条判据都要先认出「这是哪个文件」，而这些写法认不出来，
+  // 落到哪一条都可能是放行。排在 norm() 之前还因为网络路径不能碰：norm 会去 lstat 它。
+  const projectRoot = agentTeamDir ? dirname(agentTeamDir) : runDir ? resolve(runDir, '..', '..', '..') : null
+  const exotic = exoticPath(filePath, projectRoot)
+  if (exotic) {
+    return {
+      decision: 'deny',
+      reason: `${role} 不得写 ${filePath}——${exotic}。请用项目里普通的本地绝对路径。`,
+    }
+  }
+
   const target = norm(filePath)
 
   // docs/09 账一（规格 §6.2.1）：控制文件与阶段产物是两类东西，判据不同。
@@ -95,8 +108,8 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 「没有角色能把 at-pm 当派发目标」这条花名册不变量，由
   // tests/roster-closure.test.mjs 钉住，完整论证在 contract-guard.mjs 头部。
   //
-  // agentTeamDir 缺省时这一段整体不触发，回落到既有行为——纯函数不该假设调用方
-  // 一定传全参数，而 gate.mjs 那条路径上它总是来自 ctx.agentTeamDir。
+  // agentTeamDir 缺省时这一段整体不触发，回落到既有行为——导出的判定函数不该假设
+  // 调用方一定传全参数，而 gate.mjs 那条路径上它总是来自 ctx.agentTeamDir。
   if (isControlFile(filePath, agentTeamDir)) {
     if (isContractWriter(role)) return { decision: 'allow' }
     return {

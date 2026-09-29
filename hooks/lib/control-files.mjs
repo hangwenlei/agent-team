@@ -53,3 +53,16 @@ export function isControlFile(filePath, agentTeamDir) {
   const rel = target.slice(base.length + 1).split('/')
   return CONTROL_FILES.some((p) => matchesPattern(rel, p))
 }
+
+
+/**
+ * 这条路径的最后一段可能就是某个 run 的 state.json 吗——按名字判，不管在哪个目录下。
+ * 给 H6 用（M3q，docs/25）：门禁认不出的写法（网络路径、流后缀、结尾带点……）拿 norm() 比不出
+ * 是不是 state.json，只能看名字。先剥掉流后缀与结尾的点、空格，再看是 state.json，或者像它的
+ * 8.3 短名（带 ~ 且扩展名是 .JSO）。宁可多认：多认只是多拦一次认不出的写法。
+ */
+export function mayBeStateFile(filePath) {
+  if (typeof filePath !== 'string' || !filePath) return false
+  const leaf = filePath.split(/[\\/]/).pop().split(':')[0].replace(/[. ]+$/, '').toLowerCase()
+  return leaf === 'state.json' || (leaf.includes('~') && leaf.endsWith('.jso'))
+}

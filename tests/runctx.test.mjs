@@ -75,13 +75,13 @@ test('current-run 是空文件时返回 ok:false，kind 是 unreadable（不是 
   }
 })
 
-// ——— M3c 这一格：current-run **根本不在**，而 .agent-team/runs/ 下非空 ———
+// ——— M3c 这一格：current-run **根本不在**，而 .agent-team/runs/ 下有子目录（M3q 起只数子目录与链接）———
 //
 // 与上面两条是同一条理由的第三个实物，轴是「有没有人建过 run」而不是「pointer 在不在」
 // （完整论证在 hooks/lib/runctx.mjs 头部 ③ 那一段）。它此前归 no-run，于是 H3/H4 这两个
 // fail-closed 的检查项在这一个输入状态下对**所有角色** fail open——子进程级的前后行为由
 // tests/gate-writepath.test.mjs 与 tests/gate-contract.test.mjs 里那几条「丢指针」用例钉着。
-test('current-run 不在、而 runs/ 下非空时返回 ok:false，kind 是 unreadable（不是 no-run）', () => {
+test('current-run 不在、而 runs/ 下有一个 run 目录时返回 ok:false，kind 是 unreadable（不是 no-run）', () => {
   const dirs = makeRun({ runId: 'r1', stages: STAGES })
   try {
     rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })

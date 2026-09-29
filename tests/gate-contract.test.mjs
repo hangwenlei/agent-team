@@ -1,5 +1,5 @@
 // H4（contract）在 gate.mjs 里，tests/contract-guard.test.mjs 覆盖不到的逻辑：
-// decideContractGuard 是纯函数，从不知道 ctx.ok/ctx.kind 是什么、从不知道
+// decideContractGuard 是判定函数，从不知道 ctx.ok/ctx.kind 是什么、从不知道
 // tool_input 的字段到底叫 file_path 还是 notebook_path、也从不经过
 // denyAndExit——这些全部活在 gate.mjs 自己的 CHECK === 'contract' 分支里。
 // 结构照抄 tests/gate-writepath.test.mjs（Task 3 评审 Important 1 的教训：

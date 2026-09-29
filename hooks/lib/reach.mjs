@@ -11,8 +11,8 @@
 // 越容易互相拆台）。这里缺的不是拦截，是**可见性**：没人算过这个数，所以没人发现
 // 它变了。
 //
-// 纯数据推导，不碰文件系统——跟 decideDelegation / decideWritePath 同一层，能脱离
-// Claude Code 单测。
+// 纯数据推导，不碰文件系统，能脱离 Claude Code 单测——跟 decideDelegation 同一层。
+// （decideWritePath 从 M3q 起经 norm() 读文件系统解析路径，不再是同一层。）
 //
 // ⚠️ 这一段原本写的是「**不 import 任何东西**、不碰文件系统」。M2b 终审 A2 把本模块
 // 私有的那份 isPlainObject 换成了 import，那半句当场变假，所以一并改掉——不留一句

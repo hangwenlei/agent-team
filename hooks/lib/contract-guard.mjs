@@ -1,4 +1,4 @@
-// H4 契约保护（纯函数）。规格 §5.3：契约唯一写者是用户，经 PM（项目经理）
+// H4 契约保护（判定函数：不读 stdin、不写输出、不退出进程；路径经 path-norm 的 norm() 解析到物理位置，会读文件系统——M3q）。规格 §5.3：契约唯一写者是用户，经 PM（项目经理）
 // 在主会话里转写；任何 subagent 不得写 00-contract.md。fail closed。
 //
 // 为什么这不是一条普通校验：S1 把用户原话固化进 00-contract.md，S7 验收前
@@ -26,7 +26,8 @@
 // I1 证明了那两个文件的假设确实会分叉，而这一侧判错的方向是**漏拦**（大小写
 // 没对齐 → 真实的契约写入被判成"目标不是契约文件"而放行，这道闸自己被绕过），
 // 是安全洞不是噪音。完整论证见 hooks/lib/path-norm.mjs 头部。
-import { norm } from './path-norm.mjs'
+import { resolve } from 'node:path'
+import { exoticPath, norm } from './path-norm.mjs'
 import { MAIN, callerOf } from './decide.mjs'
 
 const CONTRACT = '00-contract.md'
@@ -76,7 +77,7 @@ const CONTRACT = '00-contract.md'
 // 漏一处（Task 5 评审 Important 1）。这不是说两处调用点本身多余：gate.mjs
 // 的短路一旦命中就 exit(0)，decideContractGuard 内部这次调用从 gate.mjs
 // 这条入口路径上确实永远走不到第二遍；但 decideContractGuard 是导出的
-// 纯函数，任何调用方都可能不经过 gate.mjs 直接调用它——
+// 判定函数，任何调用方都可能不经过 gate.mjs 直接调用它——
 // tests/contract-guard.test.mjs 的简报给定用例（`agentType: undefined` →
 // allow）就是这样测的，不经过 gate.mjs 的短路——所以内部这次调用不是
 // 摆设，是这个函数自身对"不管谁调用我都要给对答案"的契约，两处调用点
@@ -89,10 +90,19 @@ export function isContractWriter(agentType) {
 export function decideContractGuard({ agentType, filePath, runDir }) {
   // 没有 runDir 就没有"契约在哪"这件事可言，不表态——正常情况下 gate.mjs
   // 只会在 ctx.ok 为 true（这时才有真实 runDir）时调用到这里，这一行是
-  // 纯函数自己的防线，不依赖调用方守规矩。
+  // 这个函数自己的防线，不依赖调用方守规矩。
   if (!runDir) return { decision: 'allow' }
   if (typeof filePath !== 'string' || !filePath) return { decision: 'allow' }
   if (isContractWriter(agentType)) return { decision: 'allow' }
+
+  // M3q（docs/25）：认不出是哪个文件的写法，不能当成「不是契约」放行。
+  const exotic = exoticPath(filePath, resolve(runDir, '..', '..', '..'))
+  if (exotic) {
+    return {
+      decision: 'deny',
+      reason: `不得写 ${filePath}——${exotic}。门禁认不出它是不是契约，按安全边界拒绝；请用普通的本地绝对路径。`,
+    }
+  }
 
   if (norm(filePath) !== norm(`${runDir}/${CONTRACT}`)) return { decision: 'allow' }
 

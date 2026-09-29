@@ -55,7 +55,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   `projectRootFrom`，`docs/24` §2.1）。子进程测试的环境由 `tests/helpers/gate-runner.mjs` 的 `hermeticEnv` 剥掉 `CLAUDE_PROJECT_DIR` 与留痕开关；
   要测「变量生效」的用例自己加回来。
 - **只在这台机器上成立的假设，CI 一跑就露**：macOS 的 `tmpdir()` 在 `/var` 软链接下，子进程 `process.cwd()` 给的是解析后的路径；
-  GitHub 的 Windows runner 签出在 D 盘。夹具一律发 realpath，不写死盘符。**产品侧同族的路径别名问题还开着**（`docs/24` §3，下一轮优先）。
+  GitHub 的 Windows runner 签出在 D 盘。夹具一律发 realpath，不写死盘符。产品侧同族的路径别名问题在 M3q 修了（`docs/25`）；还开着的边角登记在 `docs/25` §4。
 - 用脚本往文件里写带 `\0` 之类转义的文字时，落盘后照样扫控制字节——这一轮就有一个真的 NUL 字节混进了注释。
 
 - **换行符是混的**（`docs/11` §5.28）：索引统一 LF，`core.autocrlf=true` 让签出副本是 CRLF，被工具重写过的文件停在 LF。
