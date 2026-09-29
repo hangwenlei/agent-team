@@ -109,7 +109,8 @@
 // 的 deny 发生在**看路径之前**），与既有的每一个 unreadable 状态同一个爆炸半径。
 // 完整实测数据与那次反例表在 docs/11 §5.27，不在这里抄第二份。
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { norm, underDir } from './path-norm.mjs'
 
 function readJson(path) {
   let value
@@ -150,24 +151,57 @@ export function readProjectConfig(projectDir) {
 }
 
 /**
- * 用户项目根：平台注入的 CLAUDE_PROJECT_DIR 优先，缺失或为空串时才退回 cwd。
+ * 用户项目根：从 cwd 往上找最近的一个带 .agent-team 的目录（M3p，docs/24 §2.1）。
  *
- * 不能只用 cwd（docs/24 §2.1）：平台按会话**当前** cwd 起 hook 进程，主线程 Bash 做过
- * cd 之后这个 cwd 一直停在子目录里，而 at-pm 就是持有 Bash 的主线程。那之后
- * `<子目录>/.agent-team` 里找不到 run，readRunContext 判 no-run，H2–H6 全部 fail open。
- * CLAUDE_PROJECT_DIR 在整个会话里固定指向项目根，不随 cd 漂移。
+ * 为什么不直接用 cwd：平台按会话**当前** cwd 起 hook 进程，主线程 Bash 做过 cd 之后这个
+ * cwd 一直停在子目录里，而 at-pm 就是持有 Bash 的主线程。那之后 `<子目录>/.agent-team`
+ * 里找不到 run，readRunContext 判 no-run，H2–H6 全部 fail open。
  *
- * 退回 cwd 只为两种调用方：直接跑 gate.mjs 的子进程测试，以及没有注入这个变量的宿主。
- * 本插件的 hooks.json 用的 args 写法要 Claude Code 2.1.139 以上，这些版本都注入它，
- * 所以真实会话里走不到这条退路。
+ * 为什么也不直接用 CLAUDE_PROJECT_DIR：它是**会话启动时**的项目根，不随 cd 漂移——这正是
+ * 上面那种情形要的；但用户 /cd 到另一个项目之后它也不跟着走（平台文档原话：move 之后的
+ * hook「still receive ${CLAUDE_PROJECT_DIR} set to the project root where the session
+ * started」），那边的 run 就被整个看丢了，是同一类 fail open。
  *
- * 不向上逐级查找 .agent-team：变量在，就用不上逐级查找；变量不在，往上查可能撞上一个
- * 不相干的祖先目录（嵌套仓库、home 目录），错读别人的 run 比读不到更糟。
- * 与本文件其它导出一样绝不抛。
+ * 所以两个信号都用：
+ *   - 往上找的起点是 cwd——会话实际在哪个项目里干活，就用哪个项目的 run；
+ *   - cwd 还在 CLAUDE_PROJECT_DIR 之内时，找到它为止、不越界：祖先目录（home、外层仓库）
+ *     里要是躺着一个不相干的 .agent-team，错读别人的 run 比读不到更糟；
+ *   - cwd 已经离开启动项目（/cd 之后）时不设上界；
+ *   - 哪里都没有 .agent-team 时退回 CLAUDE_PROJECT_DIR，再没有就是 cwd——之后照旧由
+ *     readRunContext 判 no-run。
+ * 离得最近的那个赢：嵌套的子项目自己建过 run，就用它的。
+ *
+ * 已知边界（docs/24 §4）：会话中途进了启动项目之下的 git worktree（.claude/worktrees/…）、
+ * 而 worktree 里没有 .agent-team 时，往上找会找回启动项目的 run，拿它去判 worktree 里的
+ * 写入。团队自己进不了 worktree（没有角色持有 EnterWorktree，H1 拒绝带 isolation 的派发）。
+ *
+ * hasAgentTeam 注入只为单测；绝不抛——探测出错时退回 CLAUDE_PROJECT_DIR / cwd。
  */
-export function projectRootFrom(env, cwd) {
+export function projectRootFrom(env, cwd, hasAgentTeam = hasAgentTeamDir) {
   const dir = env !== null && typeof env === 'object' ? env.CLAUDE_PROJECT_DIR : undefined
-  return typeof dir === 'string' && dir !== '' ? dir : cwd
+  const home = typeof dir === 'string' && dir !== '' ? dir : null
+  const fallback = home ?? cwd
+  try {
+    if (typeof cwd !== 'string' || cwd === '') return fallback
+    const bound = home !== null && underDir(cwd, home) ? norm(home) : null
+    for (let d = resolve(cwd); ; ) {
+      if (hasAgentTeam(d)) return d
+      if (bound !== null && norm(d) === bound) return fallback
+      const parent = dirname(d)
+      if (parent === d) return fallback
+      d = parent
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function hasAgentTeamDir(dir) {
+  try {
+    return statSync(join(dir, '.agent-team')).isDirectory()
+  } catch {
+    return false
+  }
 }
 
 // projectDir：用户仓库根，放 .agent-team（current-run / state.json / project.json），

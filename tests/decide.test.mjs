@@ -220,6 +220,19 @@ test('isolation 的拒绝理由点名这个参数，并告诉调用者去掉它�
   assert.match(r.reason, /去掉/)
 })
 
+// 后台会话（claude --bg 等）在 git 仓库里默认不许写共享检出，平台给子代理指的出路恰好是
+// 带 isolation 重派——那正是上面拒的。拒绝理由要把真正的出路交给用户，而不是让模型在
+// 「平台叫它加、门禁叫它去掉」之间来回（docs/24 §4）。
+test('isolation 的拒绝理由说清后台会话那种情形要停下来交给用户，并点名那个设置', () => {
+  const r = decideDelegation(
+    { agent_type: 'at-architect', tool_input: { subagent_type: 'at-worker-a', isolation: 'worktree' } },
+    ROSTER,
+  )
+  assert.match(r.reason, /后台会话/)
+  assert.match(r.reason, /bgIsolation/)
+  assert.match(r.reason, /用户/)
+})
+
 test('花名册外的调用者带 isolation 派发不归本门禁管，照旧放行', () => {
   const r = decideDelegation(
     { agent_type: 'someone-else', tool_input: { subagent_type: 'Explore', isolation: 'worktree' } },

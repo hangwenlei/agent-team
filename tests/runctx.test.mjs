@@ -250,7 +250,8 @@ test('artifactExists 对嵌套路径的产物能判定，且目录本身不算�
   }
 })
 
-// I3：真实调用形如 readRunContext(process.cwd(), process.env.CLAUDE_PLUGIN_ROOT)。
+// I3：真实调用形如 readRunContext(<项目根>, process.env.CLAUDE_PLUGIN_ROOT)（项目根由
+// hooks/lib/runctx.mjs 的 projectRootFrom 定出来，M3p）。
 // CLAUDE_PLUGIN_ROOT 没设置时就是 undefined，join(undefined, 'stages.json')
 // 在旧实现里会同步抛 TypeError，直接冲出 readRunContext——这正是模块头部注释
 // 自己承诺「绝不抛异常」所不允许的事。projectDir 给一个真实存在的目录，

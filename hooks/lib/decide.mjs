@@ -115,7 +115,10 @@ export function decideDelegation(input, roster) {
       return deny(
         `角色 ${caller} 派发 ${target} 时带了 isolation: ${JSON.stringify(isolation)}。` +
           `团队角色必须在同一棵工作树里干活：隔离出去的子代理写的是另一份检出，门禁读不到` +
-          `这趟 run，它的产物也落不回 run 目录。去掉 isolation 参数重新派发。`,
+          `这趟 run，它的产物也落不回 run 目录。去掉 isolation 参数重新派发。` +
+          `如果加它是因为平台说后台会话不能写共享检出：这支团队在那种会话里跑不起来，` +
+          `停下来告诉用户——出路是用户在项目设置里把 worktree.bgIsolation 设为 "none"，` +
+          `或者换成前台会话；不要自己去改设置。`,
       )
     }
     return allow()

@@ -11,7 +11,7 @@
 // 本身（deny.mjs）坏掉各有一组，因为 boot.mjs 对它们各有一条退路。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { appendFileSync, cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { appendFileSync, cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, decisionOf, hermeticEnv } from './helpers/gate-runner.mjs'
@@ -145,13 +145,43 @@ test('deny.mjs 本身坏掉时，boot.mjs 的内置退路产出的 JSON 与 deny
 })
 
 // ---- boot.mjs 自己不能依赖任何可能坏掉的东西 ----
+//
+// 行为判据，不靠正则抠 import 语句（M3p 复核：正则漏了 `export … from` 与 `import{…}from'…'`
+// 两种写法，往 boot.mjs 里加一行静态依赖，全套照样绿）。把 hooks/lib/ 整个删掉：boot.mjs 只要
+// 静态依赖了其中任何一个文件，它自己就加载不起来、exit 1、stdout 为空，下面两条当场红。
 
-test('boot.mjs 的静态 import 只有 node: 内建模块——插件自己的文件一律动态 import', () => {
-  const text = readFileSync(new URL('../hooks/boot.mjs', import.meta.url), 'utf8')
-  const statics = [...text.matchAll(/^\s*import\s[^('"]*?from\s*['"]([^'"]+)['"]/gm)].map((m) => m[1])
-  const bare = [...text.matchAll(/^\s*import\s*['"]([^'"]+)['"]/gm)].map((m) => m[1])
-  assert.ok(statics.length > 0, '一条静态 import 都没抠出来——先看正则，别让这条判据空转')
-  for (const spec of [...statics, ...bare]) {
-    assert.ok(spec.startsWith('node:'), `boot.mjs 静态 import 了 ${spec}；它坏掉时 boot.mjs 自己也加载不起来`)
-  }
+const noLib = (dir) => rmSync(join(dir, 'hooks', 'lib'), { recursive: true, force: true })
+
+test('hooks/lib/ 整个不在：PreToolUse 上的每一道门禁仍由 boot.mjs 的内置退路拒绝', () => {
+  withBrokenPlugin(noLib, (gate) => {
+    for (const check of Object.keys(INPUTS).filter((c) => INPUTS[c].hook_event_name === 'PreToolUse')) {
+      assert.equal(decisionOf(gate(check, INPUTS[check]).stdout)?.permissionDecision, 'deny', check)
+    }
+  })
+})
+
+test('hooks/lib/ 整个不在：其它事件上的门禁放行并以 exit 1 报错，而不是 boot.mjs 自己崩掉', () => {
+  withBrokenPlugin(noLib, (gate) => {
+    for (const check of Object.keys(INPUTS).filter((c) => INPUTS[c].hook_event_name !== 'PreToolUse')) {
+      const { stdout, stderr, status } = gate(check, INPUTS[check])
+      assert.equal(stdout, '', check)
+      assert.equal(status, 1, check)
+      assert.match(stderr, /加载失败/, `${check}：exit 1 必须来自 boot.mjs 的退路，不是它自己加载不起来`)
+    }
+  })
+})
+
+test('失败策略表读不到、hook 输入里也没有 hook_event_name 时，按 PreToolUse 取安全方向：拒', () => {
+  withBrokenPlugin(missingChecks, (gate) => {
+    const { hook_event_name, ...input } = INPUTS.writepath
+    assert.equal(decisionOf(gate('writepath', input).stdout)?.permissionDecision, 'deny')
+  })
+})
+
+test('拒绝理由带上错误的种类，stderr 带上完整的栈——排查时知道是哪个文件坏了', () => {
+  withBrokenPlugin(missingLib, (gate) => {
+    const { stdout, stderr } = gate('writepath', INPUTS.writepath)
+    assert.match(decisionOf(stdout)?.permissionDecisionReason ?? '', /ERR_MODULE_NOT_FOUND/)
+    assert.match(stderr, /rework-guard.mjs/)
+  })
 })

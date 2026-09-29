@@ -77,3 +77,13 @@ test('crashNotice：说明这是 fail open、本次没有拦截', () => {
   assert.match(text, /fail open/)
   assert.match(text, /没有拦截/)
 })
+
+// M3p：gate.mjs 最外层 catch 自己不能再抛——那一层再抛，异常就掉进 hooks/boot.mjs 的
+// 加载失败退路，一次运行期崩溃会被报成「门禁代码加载失败，重装插件」。throw 出来的不一定
+// 是 Error：`throw undefined` / `throw null` 时 err.message 本身就会抛。
+test('crashNotice：接到的异常是 undefined 或 null 时不抛，照样产出一行说明', () => {
+  for (const err of [undefined, null, 'plain string']) {
+    const text = crashNotice('deliverable', err)
+    assert.match(text, /deliverable/)
+  }
+})

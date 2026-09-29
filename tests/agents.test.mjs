@@ -1113,3 +1113,22 @@ test('故意不认领 project.paths 的角色，正文里必须写明写路径�
     )
   }
 })
+
+// M3p（docs/24 §2.1 复核）：frontmatter 的顶层键只许这五个。平台让子代理进隔离检出有两个入口：
+// Agent 调用参数里的 isolation（H1 拒），与 agent 定义 frontmatter 里的 isolation: worktree
+// ——插件 agent 的这一项平台照样生效，而 PreToolUse 看到的 tool_input 里不会有它，H1 管不到。
+// 团队角色必须在同一棵工作树里干活，所以这一半由这条判据管：多出任何键（isolation、
+// permissionMode、hooks……）都红，加键的人得先回来论证它不破坏那条不变量。
+const FRONTMATTER_KEYS = ['name', 'description', 'tools', 'model', 'skills']
+test('角色 frontmatter 的顶层键只在白名单里——尤其不许 isolation', () => {
+  for (const f of AGENTS) {
+    const keys = fmOf(f)
+      .split(/\r?\n/)
+      .map((l) => /^([A-Za-z][\w-]*)\s*:/.exec(l)?.[1])
+      .filter(Boolean)
+    assert.ok(keys.length > 0, `${f}：一个键都没抠出来——先看解析，别让这条判据空转`)
+    for (const k of keys) {
+      assert.ok(FRONTMATTER_KEYS.includes(k), `${f} 的 frontmatter 有白名单外的键 ${k}`)
+    }
+  }
+})
