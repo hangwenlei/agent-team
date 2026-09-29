@@ -141,6 +141,9 @@ flowchart TB
 > **不要用 `claude plugin disable` 或 `claude plugin enable` 开关插件。** 一个会话的工具面在它的生命周期内是固定的，disable 不会把它还回来；enable 会接管已经在跑的会话。用完就结束会话，不再需要就卸载。
 
 > [!NOTE]
+> 在用着这支团队的项目里，门禁会拒绝它认不出指向哪个文件的写法：网络路径（项目不在同一个共享上时）、带流后缀或以点、空格结尾的 Windows 路径、不带盘符的设备路径；项目放在网络共享上时，写本地盘路径同样被拒。需要写这些位置时由你自己来写。
+
+> [!NOTE]
 > 门禁放行时默认不留记录。要让每次门禁调用都在会话转录里留一行，起会话时加 `--settings '{"env":{"AGENT_TEAM_GATE_TRACE":"1"}}'`。
 
 ## 开发
@@ -301,6 +304,9 @@ You can watch a role but not talk to it: roles report their questions to the pro
 
 > [!CAUTION]
 > **Don't toggle the plugin with `claude plugin disable` or `claude plugin enable`.** A session's tool surface is fixed for its lifetime, and disabling does not hand it back; enabling takes over sessions that are already running. End the session when you are done, and uninstall when you no longer need it.
+
+> [!NOTE]
+> In a project that uses the team, the gates refuse writes whose target they cannot pin down: network paths (unless the project sits on that same share), Windows paths with a stream suffix or a segment ending in a dot or space, and device paths without a drive letter; with the project on a network share, local-drive paths are refused too. Write to such locations yourself.
 
 > [!NOTE]
 > A gate that lets a call through leaves no record by default. To log one line per gate invocation in the session transcript, start the session with `--settings '{"env":{"AGENT_TEAM_GATE_TRACE":"1"}}'`.
