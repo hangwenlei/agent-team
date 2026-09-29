@@ -7,14 +7,20 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs", "delegation"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "delegation"
+            ],
             "timeout": 30,
             "statusMessage": "校验派发白名单…"
           },
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs", "readiness"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "readiness"
+            ],
             "timeout": 30,
             "statusMessage": "校验前置产物…"
           }
@@ -26,21 +32,30 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs", "writepath"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "writepath"
+            ],
             "timeout": 30,
             "statusMessage": "校验写路径归属…"
           },
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs", "contract"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "contract"
+            ],
             "timeout": 30,
             "statusMessage": "校验契约保护…"
           },
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs", "rework"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "rework"
+            ],
             "timeout": 30,
             "statusMessage": "校验返工预算…"
           }
@@ -53,7 +68,10 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs", "stop-gate"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "stop-gate"
+            ],
             "timeout": 30,
             "statusMessage": "校验交付物…"
           }
@@ -67,7 +85,10 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs", "deliverable"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "deliverable"
+            ],
             "timeout": 30,
             "statusMessage": "记录交付物校验…"
           }
@@ -79,9 +100,23 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs", "ledger"],
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "ledger"
+            ],
             "timeout": 30,
             "statusMessage": "回传契约哈希与触达表…"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'agent-team reminder: before the first Agent dispatch or the first write under .agent-team in this turn, run the gate self-check from your role file. Earlier results do not count: this session may have been resumed in another process.'",
+            "timeout": 10
           }
         ]
       }

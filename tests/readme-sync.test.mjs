@@ -27,6 +27,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { MIN_MAJOR_MINOR } from './helpers/min-node.mjs'
 import { fileURLToPath } from 'node:url'
 import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 import { EXPECTED_AGENTS } from './helpers/expected-agents.mjs'
@@ -1511,3 +1512,58 @@ for (const f of [README_EN, README_ZH]) {
     )
   })
 }
+
+// ---------------------------------------------------------------------------
+// 运行前提（M3t，docs/28，全量审查第 4 条）
+// ---------------------------------------------------------------------------
+//
+// 门禁要靠 Claude Code 启动时 PATH 上的 node 起进程，而原生安装的 Claude Code 自己并不需要 Node；
+// 前提不满足时平台一律放行、不告诉任何人。所以两半的安装一节都要写明 Node 与 Claude Code 的下限，
+// 以及门禁自检是怎么回事。下限各有一个真源：Node 是 hooks/boot.mjs 的 MIN_NODE（门禁代码强制它）；
+// Claude Code 的下限在代码里没有真源（门禁拿不到可靠的 CLI 版本），真源是 docs/28 记下它的那一行
+// ——改下限要先补实测记录。agents/at-pm.md 的排查清单也写着这两个数，一起对账。
+
+const DOCS28 = 'docs/28-运行前提.md'
+const nodeVersionsIn = (text) => [...text.matchAll(/Node(?:\.js)?\s*(?:≥|>=)?\s*(\d+\.\d+)/g)].map((m) => m[1])
+const cliVersionsIn = (text) => [...new Set(text.match(/\b2\.1\.\d+\b/g) ?? [])]
+
+test('自检：nodeVersionsIn() 认得出几种写法，cliVersionsIn() 去重', () => {
+  assert.deepEqual(nodeVersionsIn('要 Node 16.9 或更新；Node.js ≥ 18.2；Node >= 20.1'), ['16.9', '18.2', '20.1'])
+  assert.deepEqual(cliVersionsIn('2.1.276 或更新，2.1.276'), ['2.1.276'])
+})
+
+test('两半的安装一节都写了 Node 的下限，且等于 hooks/boot.mjs 的 MIN_NODE', () => {
+  for (const [half, heading] of [[README_EN, pairOf('## Installation')[0]], [README_ZH, pairOf('## Installation')[1]]]) {
+    const found = nodeVersionsIn(installSectionOf(read(half), heading) ?? '')
+    assert.ok(found.length > 0, `${half} 的安装一节没写 Node 要多新`)
+    assert.deepEqual([...new Set(found)], [MIN_MAJOR_MINOR], half)
+  }
+})
+
+test('Claude Code 的下限：两半的安装一节、at-pm.md 的排查清单与 docs/28 记的那一行是同一个数', () => {
+  const recorded = /^\*\*Claude Code 下限\*\*\s+(2\.1\.\d+)\s*$/m.exec(read(DOCS28))?.[1]
+  assert.ok(recorded, `${DOCS28} 里没有「**Claude Code 下限** 2.1.x」那一行`)
+  for (const [where, text] of [
+    [README_EN, installSectionOf(read(README_EN), pairOf('## Installation')[0]) ?? ''],
+    [README_ZH, installSectionOf(read(README_ZH), pairOf('## Installation')[1]) ?? ''],
+    ['agents/at-pm.md', read('agents/at-pm.md')],
+  ]) {
+    assert.deepEqual(cliVersionsIn(text), [recorded], where)
+  }
+})
+
+test('两半的安装一节都讲了门禁自检，并点名只读的 /agent-team:at-status 不做', () => {
+  const en = installSectionOf(read(README_EN), pairOf('## Installation')[0]) ?? ''
+  const zh = installSectionOf(read(README_ZH), pairOf('## Installation')[1]) ?? ''
+  assert.match(en, /self-check/)
+  assert.match(zh, /门禁自检/)
+  for (const s of [en, zh]) assert.ok(s.includes('/agent-team:at-status'), s.slice(0, 80))
+})
+
+// 「零运行时依赖」在门禁要靠 PATH 上的 node 的那一刻起就不成立。
+const RETIRED_RUNTIME_CLAIMS = ['零运行时依赖', 'Zero runtime dependencies', 'runtime%20deps-0']
+
+test('README 不再说「零运行时依赖」——门禁要靠 PATH 上的 Node', () => {
+  const text = read(README)
+  assert.deepEqual(RETIRED_RUNTIME_CLAIMS.filter((c) => text.includes(c)), [])
+})

@@ -8,9 +8,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from '../hooks/lib/checks.mjs'
+import { REMINDER_EVENT, REMINDER_TEXT, REMINDER_COMMAND } from '../hooks/lib/gate-check.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
@@ -76,9 +78,14 @@ test('args[1] 是 gate.mjs 的 KNOWN_CHECKS 认得的检查名', () => {
 // 这条测试必错。writepath 本来在 Task 1 就注册，评审时撤回并挪到了 Task 4
 // （判定逻辑落地的那一步）：判定逻辑不在就注册，等于提前打开一条「读不到
 // stdin 就拒绝真实 Edit/Write」的 fail-closed 路径。
+// 门禁自检的提醒（M3t，docs/28）不是检查项：它故意不走 node，所以单列，不进下面这些判据；
+// 它自己的判据在本文件末尾。认它按事件与逐字的命令，不按「长得像」。
+const isReminder = (event, hook) => event === REMINDER_EVENT && hook?.command === REMINDER_COMMAND
+
 function allHookCommands() {
-  const groups = Object.values(hooksConfig.hooks ?? {}).flat()
-  return groups.flatMap((group) => group.hooks ?? [])
+  return Object.entries(hooksConfig.hooks ?? {}).flatMap(([event, groups]) =>
+    groups.flatMap((group) => (group.hooks ?? []).filter((hook) => !isReminder(event, hook))),
+  )
 }
 
 test('hooks.json 里的每一个注册项都是零依赖 node 调用、参数完整、指向真实文件与已知检查名', () => {
@@ -202,6 +209,7 @@ function registrations() {
   for (const [event, groups] of Object.entries(hooksConfig.hooks ?? {})) {
     for (const group of groups) {
       for (const hook of group.hooks ?? []) {
+        if (isReminder(event, hook)) continue
         out.push({ event, matcher: group.matcher, check: hook.args?.[1], entry: hook.args?.[0] })
       }
     }
@@ -269,4 +277,55 @@ test('接线：每一条 hook 都经 hooks/boot.mjs 进门，不直接跑 gate.m
         'exit 1 放行——fail closed 的门禁整体消失（docs/24 §2.2）；boot.mjs 是接住这类失败的那一层',
     )
   }
+})
+
+// ---- 门禁自检的提醒（M3t，docs/28，全量审查第 4 条）----
+//
+// 门禁起不来时平台一律放行、PM 看不见。门禁自检（agents/at-pm.md）能查出来，但得有人记得做：续会话
+// 之后用户直接说「继续」、压缩之后接着跑，都不经过任何命令。这条 UserPromptSubmit hook 每轮往上下文里
+// 放一句提醒，让 PM 在这一轮第一次派发或写 .agent-team 之前自检。它故意不走 node——要在 node 缺失、
+// Claude Code 太旧（丢掉 args）时照样出现，所以是 shell 形式的一行 echo：纯 ASCII（Windows 没有 Git Bash
+// 时退到 PowerShell 5.1，中文会乱码），整句单引号（bash 与 PowerShell 里都是字面量）。
+
+function reminderEntries() {
+  return (hooksConfig.hooks?.[REMINDER_EVENT] ?? []).flatMap((g) => (g.hooks ?? []).map((hook) => ({ group: g, hook })))
+}
+
+test('自检提醒：UserPromptSubmit 上恰好这一条，逐字等于 gate-check.mjs 的 REMINDER_COMMAND', () => {
+  const entries = reminderEntries()
+  assert.equal(entries.length, 1, JSON.stringify(entries))
+  assert.equal(entries[0].hook.type, 'command')
+  assert.equal(entries[0].hook.command, REMINDER_COMMAND)
+  assert.equal(entries[0].group.matcher, undefined, 'UserPromptSubmit 没有 matcher 可言')
+})
+
+test('自检提醒：shell 形式、不带 args、不调 node——它要在门禁起不来的时候照样出现', () => {
+  const { hook } = reminderEntries()[0]
+  assert.equal(hook.args, undefined, '带了 args 就成了 exec 形式：CLI 早于 2.1.139 时整条退化')
+  assert.doesNotMatch(hook.command, /\bnode\b/)
+  assert.ok(hook.command.startsWith("echo '") && hook.command.endsWith("'"), hook.command)
+})
+
+test('自检提醒：文字纯 ASCII、不含单引号——PowerShell 5.1 输出中文会乱码，单引号会提前闭合', () => {
+  assert.match(REMINDER_TEXT, /^[\x20-\x7e]+$/)
+  assert.ok(!REMINDER_TEXT.includes("'"), REMINDER_TEXT)
+  assert.ok(REMINDER_TEXT.startsWith('agent-team reminder:'), REMINDER_TEXT)
+})
+
+// 按平台的实际选择去跑：Windows 上找得到 Git Bash 用 bash，找不到退到 PowerShell（从不用 cmd.exe，
+// 单引号在 cmd.exe 里是字面字符）；两个都在就两个都跑。macOS / Linux 用 sh。
+const SHELLS = process.platform === 'win32'
+  ? [['C:/Program Files/Git/bin/bash.exe', ['-c']], ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command']]]
+  : [['sh', ['-c']]]
+
+test('自检提醒：平台会用的每一种 shell 都把它原样打出来', () => {
+  let ran = 0
+  for (const [shell, pre] of SHELLS) {
+    const out = spawnSync(shell, [...pre, REMINDER_COMMAND], { encoding: 'utf8' })
+    if (out.error?.code === 'ENOENT') continue
+    ran++
+    assert.equal(out.status, 0, `${shell}：${out.stderr}`)
+    assert.equal(out.stdout.trim(), REMINDER_TEXT, shell)
+  }
+  assert.ok(ran > 0, '一种 shell 都没找到——这条判据什么都没测')
 })

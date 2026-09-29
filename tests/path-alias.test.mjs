@@ -12,7 +12,7 @@
 // 共享上却写网络路径）由 exoticPath() 认出来，门禁直接拒。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync, spawnSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -21,7 +21,7 @@ import { decideContractGuard } from '../hooks/lib/contract-guard.mjs'
 import { readRunContext } from '../hooks/lib/runctx.mjs'
 import { run, decisionOf, GATE, hermeticEnv } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
 // readRunContext 还要读插件根下的 stages.json；makeRun 造的临时插件目录是空的，拿它当插件根，
 // 任何用例都会先因为读不到 stages.json 判 unreadable——那样测到的就不是 run id 这一条。
@@ -461,17 +461,14 @@ test('decideContractGuard：PM 写一个认不出的写法照样放行——PM �
 
 // ---- 门禁绝不碰网络路径 ----
 //
-// tests/helpers/no-network.mjs 预加载进门禁进程：拿网络路径调 fs 就在 stderr 留 NET-TOUCH。
-
-const NO_NET = pathToFileURL(fileURLToPath(new URL('./helpers/no-network.mjs', import.meta.url))).href
+// tests/helpers/no-network.cjs 预加载进门禁进程：拿网络路径调 fs 就在 stderr 留 NET-TOUCH。
+// 经 gate-runner 的出口起（M3t）；垫片装上时打一行 NO-NET-SHIM，没看到就说明它没装上——那样
+// 「没有 NET-TOUCH」什么都证明不了。
+const NO_NET = fileURLToPath(new URL('./helpers/no-network.cjs', import.meta.url))
 function gateNoNet(check, input, cwd) {
-  const r = spawnSync(process.execPath, ['--import', NO_NET, GATE, check], {
-    input: JSON.stringify(input),
-    encoding: 'utf8',
-    cwd,
-    env: hermeticEnv(),
-  })
-  return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status }
+  const r = run(check, input, GATE, cwd, hermeticEnv(), { nodeArgs: ['-r', NO_NET] })
+  assert.match(r.stderr, /NO-NET-SHIM/, '断网垫片没装上——下面对 NET-TOUCH 的断言会空转')
+  return r
 }
 
 const NET_PATHS = [

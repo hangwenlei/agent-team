@@ -6,7 +6,7 @@
 
 项目经理就是你的主会话：分层派发任务，执行顺序由门禁强制，业务验收独立成线。
 
-[![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fhangwenlei%2Fagent-team%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=blue)](.claude-plugin/plugin.json) [![license](https://img.shields.io/github/license/hangwenlei/agent-team)](./LICENSE) ![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757) ![runtime deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen)
+[![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fhangwenlei%2Fagent-team%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&color=blue)](.claude-plugin/plugin.json) [![license](https://img.shields.io/github/license/hangwenlei/agent-team)](./LICENSE) ![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757)
 
 **简体中文** · [English](#english)
 
@@ -20,7 +20,7 @@
 - 🚦 **顺序由门禁强制**：六道 hook 门禁——派发白名单、前置就绪、写路径隔离、契约保护、交付物核验、返工预算——拦下越级派发与越界写入。
 - ✅ **业务验收独立成线**：测试之外，还有一道对着你的原话逐条核对的业务验收。
 - 👀 **过程看得见**：在桌面应用里，每个角色的完整过程都能单独查看；同一阶段的角色并行干活。
-- 📦 **零运行时依赖**：纯插件，不起服务、不监听端口。
+- 📦 **零 npm 依赖**：纯插件，只要 PATH 上有 Node；不起服务、不监听端口。
 
 ## 安装
 
@@ -32,6 +32,13 @@ claude plugin install agent-team@agent-team-marketplace --scope local
 ```
 
 装好后在这个目录里新开一个会话，主会话就是项目经理。插件只对这一个项目生效，不影响别的项目。
+
+**前提**：
+
+- **Node 16.9 或更新**，而且要在 Claude Code 启动时的 PATH 上——门禁就是用它跑的。原生安装的 Claude Code 自己不需要 Node，所以要单独确认。桌面端和 IDE 起的会话用的是它们自己的环境，不一定和你终端里的一致；装完或换了 Node，要重开 Claude Code（桌面端要完全退出再打开）。
+- **Claude Code 2.1.276 或更新**。桌面端保持应用为最新即可。
+
+前提不满足时，平台不拦任何调用，门禁一道都不生效，也不会告诉你。所以项目经理在起跑、续跑与勘察这三条命令开头，以及续会话之后第一次动手之前，会做一次**门禁自检**：故意写一个门禁一定会拦下的文件。界面上会出现一条被拦下的写入（显示为一条错误），那就是自检，属预期。门禁没拦下它，项目经理会停下来，告诉你怎么查。`/agent-team:at-status` 只读，不做这项检查。
 
 **更新**——版本号变了才会拉到新版，已经开着的会话要重开才生效：
 
@@ -185,7 +192,7 @@ The project manager is your main session: it dispatches work through a layered h
 - 🚦 **Gates enforce the order.** Six hook gates — dispatch whitelist, readiness, write-path isolation, contract protection, deliverable checks and rework budget — stop out-of-order dispatch and out-of-bounds writes.
 - ✅ **Business acceptance is its own track.** Beyond testing, a separate acceptance pass checks the result against your original words, clause by clause.
 - 👀 **You can watch every role.** In the desktop app each role's full run can be viewed on its own, and roles in the same stage work in parallel.
-- 📦 **Zero runtime dependencies.** A pure plugin: no services, no open ports.
+- 📦 **No npm dependencies.** A pure plugin that only needs Node on the PATH: no services, no open ports.
 
 ## Installation
 
@@ -197,6 +204,13 @@ claude plugin install agent-team@agent-team-marketplace --scope local
 ```
 
 Then start a new session in that directory — the main session is the project manager. The plugin applies to this one project only.
+
+**Requirements:**
+
+- **Node 16.9 or later** on the PATH that Claude Code starts with — the gates run on it. A native install of Claude Code does not need Node itself, so check it separately. Sessions started from the desktop app or an IDE use that app's environment, which may differ from your terminal's; after installing or switching Node, restart Claude Code (quit the desktop app completely and reopen it).
+- **Claude Code 2.1.276 or later.** For the desktop app, keeping the app up to date is enough.
+
+When a requirement is not met, the platform blocks nothing: no gate takes effect, and nothing tells you so. That is why the project manager runs a **gate self-check** at the start of the run, resume and survey commands, and before its first action after a session is resumed: it deliberately writes a file the gates always block. You will see one blocked write (shown as an error) — that is the self-check, and it is expected. If the gates fail to block it, the project manager stops and tells you what to check. `/agent-team:at-status` is read-only and skips this check.
 
 **Update** — a new release arrives only when its version number changes, and sessions already open need a restart:
 

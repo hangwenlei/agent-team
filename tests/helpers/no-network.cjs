@@ -1,4 +1,6 @@
-// 以 `node --import <本文件> hooks/boot.mjs <检查项>` 预加载：门禁进程里任何一次拿网络路径去
+// 以 `node -r <本文件> hooks/boot.mjs <检查项>` 预加载（M3t 从 --import 的 .mjs 改成 -r 的 .cjs：--import
+// 要 Node 18.18 起才有，CI 的最低版本作业上子进程会在「bad option」上直接退出、判据空转）。
+// 加载时往 stderr 打一行 NO-NET-SHIM，调用方据此确认它真的装上了。门禁进程里任何一次拿网络路径去
 // 调 fs（lstat、stat、realpath、readlink、exists、readFile、readdir），都往 stderr 写一行
 // `NET-TOUCH <函数> <路径>` 并当作不存在处理，不真的去连 SMB。
 //
@@ -6,8 +8,8 @@
 // 确认；它对 \\server\share 做一次 lstat，就会在用户来得及拒绝之前发出 SMB 连接——慢（服务器
 // 不通时逼近 hooks.json 的 30 秒超时），还可能泄露 NTLM 凭据。平台自己的 Write 也特意对网络
 // 路径跳过 stat。只断言「拒了」钉不住这一点：先 lstat 再拒，结论一样。
-import fs from 'node:fs'
-import { syncBuiltinESMExports } from 'node:module'
+const fs = require('fs')
+const { syncBuiltinESMExports } = require('module')
 
 // 网络路径：\\server\share、\\?\UNC\…、\\.\UNC\…、\??\…，以及不带盘符的设备路径。
 // 带盘符的设备前缀（\\?\C:\…）不算——那是本地文件。
@@ -45,3 +47,4 @@ const realpath = wrap('realpathSync', fs.realpathSync, enoent)
 realpath.native = wrap('realpathSync.native', realpathNative, enoent)
 fs.realpathSync = realpath
 syncBuiltinESMExports()
+process.stderr.write('NO-NET-SHIM\n')

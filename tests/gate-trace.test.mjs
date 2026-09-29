@@ -26,6 +26,7 @@ import { join } from 'node:path'
 import { run, GATE, hermeticEnv } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { CHECKS } from '../hooks/lib/checks.mjs'
+import { REMINDER_EVENT, REMINDER_COMMAND } from '../hooks/lib/gate-check.mjs'
 import { TRACE_ENV, TRACE_PREFIX, traceEnabled, traceLine, installTrace } from '../hooks/lib/trace.mjs'
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8')
@@ -521,8 +522,14 @@ function traceTableOf(doc) {
 function hooksJsonPairs() {
   const hooks = JSON.parse(read('hooks/hooks.json')).hooks
   const pairs = []
-  for (const groups of Object.values(hooks)) {
-    for (const g of groups) for (const h of g.hooks) pairs.push(`${h.args[1]} ⇄ ${h.statusMessage}`)
+  for (const [event, groups] of Object.entries(hooks)) {
+    for (const g of groups) {
+      for (const h of g.hooks) {
+        // 门禁自检的提醒（M3t）不是检查项、不经 boot.mjs，没有留痕可判读。
+        if (event === REMINDER_EVENT && h.command === REMINDER_COMMAND) continue
+        pairs.push(`${h.args[1]} ⇄ ${h.statusMessage}`)
+      }
+    }
   }
   return pairs
 }

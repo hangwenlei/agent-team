@@ -14,7 +14,10 @@ import assert from 'node:assert/strict'
 import { appendFileSync, cpSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { run, decisionOf, hermeticEnv } from './helpers/gate-runner.mjs'
+import { fileURLToPath } from 'node:url'
+import { run, decisionOf, hermeticEnv, GATE } from './helpers/gate-runner.mjs'
+import { MIN_NODE, MIN_PARTS, versionBefore } from './helpers/min-node.mjs'
+import { GATE_CHECK_PATH, GATE_CHECK_ONLINE } from '../hooks/lib/gate-check.mjs'
 import { CHECKS } from '../hooks/lib/checks.mjs'
 import { denyOutput } from '../hooks/lib/deny.mjs'
 
@@ -185,3 +188,113 @@ test('拒绝理由带上错误的种类，stderr 带上完整的栈——排查�
     assert.match(stderr, /rework-guard.mjs/)
   })
 })
+
+// ---- Node 太旧（M3t，docs/28，全量审查第 4 条）----
+//
+// 门禁代码要 Node MIN_NODE 起才跑得对：低于它时 gate.mjs 要么解析不了（静默放行），要么能加载、却在
+// 运行时缺内建 API——H1 拒掉一切派发、理由不提 Node，门禁自检还会报「在线」。boot.mjs 先查版本，
+// 太旧就不加载 gate.mjs，按失败策略表收尾。这里用预加载伪造 process.versions.node；真的旧 Node 只在
+// CI 上有（tests/boot-old-node.test.mjs）。边界用例从 MIN_NODE 派生，不写死。
+
+const FAKE = fileURLToPath(new URL('./helpers/fake-node-version.cjs', import.meta.url))
+
+function withFakeNode(version, body) {
+  const projectDir = mkdtempSync(join(tmpdir(), 'agent-team-boot-ver-'))
+  try {
+    const env = { ...hermeticEnv(), AGENT_TEAM_FAKE_NODE: version }
+    body(
+      (check, input) => run(check, input, GATE, projectDir, env, { nodeArgs: ['-r', FAKE] }),
+      projectDir,
+    )
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+  }
+}
+
+const gateCheckWrite = (dir, agent) => ({
+  hook_event_name: 'PreToolUse',
+  tool_name: 'Write',
+  ...(agent ? { agent_type: agent } : {}),
+  tool_input: { file_path: join(dir, GATE_CHECK_PATH), content: 'x' },
+})
+
+// 低于 MIN 的几档：紧挨着的前一个版本，跨位数的（字符串比较会把 9.0.0 判得比 16.9.0 大），
+// 以及真实会碰到的旧版本（Ubuntu 22.04 apt 的 12.22、boot 旧写法能加载的最低 14.13.1）。
+const TOO_OLD = [...new Set([versionBefore(MIN_NODE), '9.0.0', '12.22.12', '14.13.1'])].filter(
+  (v) => versionBefore(MIN_NODE) === v || v.split('.')[0] < MIN_PARTS[0] || (Number(v.split('.')[0]) === MIN_PARTS[0] && Number(v.split('.')[1]) < MIN_PARTS[1]),
+)
+
+test('前置：伪造的「太旧」各档都真的低于 MIN_NODE，且至少有紧挨着的那一档', () => {
+  assert.ok(TOO_OLD.includes(versionBefore(MIN_NODE)))
+  assert.ok(TOO_OLD.length >= 2, TOO_OLD.join(' '))
+})
+
+for (const v of TOO_OLD) {
+  test(`Node v${v}（低于 ${MIN_NODE}）：fail closed 的每一道都拒，理由写明要的版本与门禁用的版本`, () => {
+    withFakeNode(v, (gate) => {
+      for (const check of FAIL_CLOSED) {
+        const { stdout, status } = gate(check, INPUTS[check])
+        const reason = decisionOf(stdout)?.permissionDecisionReason ?? ''
+        assert.equal(decisionOf(stdout)?.permissionDecision, 'deny', `${check}：${stdout}`)
+        assert.equal(status, 0, check)
+        assert.ok(reason.includes(MIN_NODE) && reason.includes(`v${v}`), `${check}：${reason}`)
+      }
+    })
+  })
+
+  test(`Node v${v}（低于 ${MIN_NODE}）：fail open 的每一道放行，但 exit 1、stderr 写明版本`, () => {
+    withFakeNode(v, (gate) => {
+      for (const check of FAIL_OPEN) {
+        const { stdout, stderr, status } = gate(check, INPUTS[check])
+        assert.equal(stdout, '', check)
+        assert.equal(status, 1, check)
+        assert.ok(stderr.includes(MIN_NODE) && stderr.includes(`v${v}`), `${check}：${stderr}`)
+      }
+    })
+  })
+
+  // 这一刀防的是「把自检挪到版本检查之前」：Node 14.13–16.8 上 H3 那一支走不到缺失的内建，没有
+  // 版本检查就会报「在线」，而 H1 正在拒一切派发。
+  test(`Node v${v}（低于 ${MIN_NODE}）：写自检文件拿不到「在线」`, () => {
+    withFakeNode(v, (gate, dir) => {
+      for (const agent of [undefined, 'agent-team:at-pm']) {
+        const { stdout } = gate('writepath', gateCheckWrite(dir, agent))
+        const reason = decisionOf(stdout)?.permissionDecisionReason ?? ''
+        assert.equal(decisionOf(stdout)?.permissionDecision, 'deny', stdout)
+        assert.ok(!reason.includes(GATE_CHECK_ONLINE), reason)
+        assert.ok(reason.includes(MIN_NODE), reason)
+      }
+    })
+  })
+}
+
+test(`Node 恰好 ${MIN_NODE}，以及更高的跨位数版本：照常判定——自检拿到「在线」`, () => {
+  for (const v of [MIN_NODE, `${MIN_PARTS[0] + 90}.0.0`]) {
+    withFakeNode(v, (gate, dir) => {
+      const { stdout, stderr } = gate('writepath', gateCheckWrite(dir, 'agent-team:at-pm'))
+      assert.ok(decisionOf(stdout)?.permissionDecisionReason?.startsWith(GATE_CHECK_ONLINE), `v${v}：${stdout}${stderr}`)
+      assert.ok(!stderr.includes('需要 Node'), stderr)
+    })
+  }
+})
+
+// 各种加载失败下，写自检文件也拿不到「在线」——这一刀防的是「把自检挪进 boot.mjs、排在 import(gate.mjs)
+// 之前」：那样门禁代码根本没跑起来，自检却说在线。
+for (const [label, damage] of [
+  ['lib 文件缺失', missingLib],
+  ['lib 有语法错误', syntaxError],
+  ['lib 在模块顶层抛错', topLevelThrow],
+  ['checks.mjs 缺失', missingChecks],
+  ['deny.mjs 缺失', (dir) => rmSync(join(dir, 'hooks', 'lib', 'deny.mjs'))],
+  ['hooks/lib/ 整个不在', noLib],
+]) {
+  test(`${label}：写自检文件拿不到「在线」`, () => {
+    withBrokenPlugin(damage, (gate) => {
+      for (const agent of [undefined, 'agent-team:at-pm']) {
+        const { stdout } = gate('writepath', gateCheckWrite(tmpdir(), agent))
+        assert.equal(decisionOf(stdout)?.permissionDecision, 'deny', `${agent ?? '主线程'}：${stdout}`)
+        assert.ok(!stdout.includes(GATE_CHECK_ONLINE), stdout)
+      }
+    })
+  })
+}
