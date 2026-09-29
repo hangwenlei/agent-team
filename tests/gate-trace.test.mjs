@@ -23,7 +23,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { run, GATE, envWithoutTrace } from './helpers/gate-runner.mjs'
+import { run, GATE, hermeticEnv } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { CHECKS } from '../hooks/lib/checks.mjs'
 import { TRACE_ENV, TRACE_PREFIX, traceEnabled, traceLine, installTrace } from '../hooks/lib/trace.mjs'
@@ -151,8 +151,8 @@ test('installTrace：proc 本身缺失或残缺，不漏异常', () => {
 // 格子选的是每个检查项在真实会话里会走到的那几种形状：静默放行、stderr 留痕、
 // stdout 上的拒绝 JSON、stdout 上的 additionalContext、SubagentStop 的 exit 2。
 
-const ENV_OFF = envWithoutTrace()
-const ENV_ON = { ...envWithoutTrace(), [TRACE_ENV]: '1' }
+const ENV_OFF = hermeticEnv()
+const ENV_ON = { ...hermeticEnv(), [TRACE_ENV]: '1' }
 
 function cleanDir() {
   const cwd = mkdtempSync(join(tmpdir(), 'agent-team-trace-cwd-'))

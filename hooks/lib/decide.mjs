@@ -105,7 +105,24 @@ export function decideDelegation(input, roster) {
     )
   }
 
-  if (allowed.includes(target)) return allow()
+  if (allowed.includes(target)) {
+    // M3p（docs/24 §2.1）：isolation 把子代理搬进另一份检出（'worktree'）或另一台机器
+    // （'remote'）。团队的全部判据都建立在「所有角色共用一棵工作树、一个 .agent-team」上——
+    // 隔离出去的子代理那边要么找不到 run、门禁整体 fail open，要么写回的路径被判成无人
+    // 认领；它交的产物也落不进 run 目录。排在白名单之后：目标本身不许派时，那条理由更根本。
+    const isolation = input?.tool_input?.isolation
+    if (isolation) {
+      return deny(
+        `角色 ${caller} 派发 ${target} 时带了 isolation: ${JSON.stringify(isolation)}。` +
+          `团队角色必须在同一棵工作树里干活：隔离出去的子代理写的是另一份检出，门禁读不到` +
+          `这趟 run，它的产物也落不回 run 目录。去掉 isolation 参数重新派发。` +
+          `如果加它是因为平台说后台会话不能写共享检出：这支团队在那种会话里跑不起来，` +
+          `停下来告诉用户——出路是用户在项目设置里把 worktree.bgIsolation 设为 "none"，` +
+          `或者换成前台会话；不要自己去改设置。`,
+      )
+    }
+    return allow()
+  }
 
   return deny(
     `角色 ${caller} 不得派发给 ${target}。它可以派发的角色是：${fmt(allowed)}。` +

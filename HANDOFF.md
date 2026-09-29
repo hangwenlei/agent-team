@@ -24,13 +24,14 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 
 ## 📁 重要文件
 
-- `hooks/gate.mjs` — 全部门禁的入口，按 argv 分派检查项；`hooks/hooks.json` — 事件到检查项的注册。
+- `hooks/boot.mjs` — 门禁的进程入口（`hooks/hooks.json` 注册的是它），只动态 import `gate.mjs`，判定代码加载失败时照 `checks.mjs` 的失败策略表收尾。
+- `hooks/gate.mjs` — 门禁的判定主体，按 argv 分派检查项；`hooks/hooks.json` — 事件到检查项的注册。
 - `hooks/lib/` — 判定用的纯函数（`runctx.mjs` 读运行上下文、`trace.mjs` 门禁留痕、`retry-budget.mjs` 那份重试上限说明的单一真源等）。
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/23` — 带日期的实测记录。
-- `tests/` — 全部判据。
+- `docs/13`…`docs/24` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查逐条的现状（原文在它的附录），下一轮从那里挑。
+- `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`。
 
 ## 🧠 长期决策与理由
 
@@ -38,7 +39,9 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **任何角色都不授予 `Skill` / `SendMessage` / `ListAgents`**（规格 §6.1）。frontmatter 的 `skills:` 键是另一回事，允许。插件自带的 skill 不得声明 `context: fork`。
 - **`at-outsider` 永远不进任何角色的 `Agent(...)` 宇宙，也不进任何 `can_delegate_to`。**
 - **发布纪律：每次推 `main` 都挪 `version`** —— 只碰散文 / `docs/` / `tests/` 挪最后一位，碰插件会加载的东西挪中间一位，任何一位不长到 `10`。
-  理由：`claude plugin update` 比的是 `version` 字符串，不是 commit。它是纪律不是机制，没有判据兜底。
+  理由：`claude plugin update` 比的是 `version` 字符串，不是 commit。CI 在推 main / 向 main 提 PR 时核它（`scripts/check-version-bump.mjs`，
+  「插件会加载的」清单的单一真源是 `scripts/lib/version-bump.mjs` 的 `PLUGIN_LOADED`）。main 没开分支保护，所以那是**事后**告警：
+  先推功能分支、等 CI 全绿，再合进 main 推送。
 - **`docs/11` §1–§4 原文一字不改，只追加 §5.x；带日期的实测记录正文不改，订正与收口写在旁边 —— 而且写在原话的标题底下**，只在新一节里指称它的收口，扫标题的人读不到。
 - **一条注释不是一条判据。** 要防的事配判据；写不出来就按 `docs/16` §3 开头那条付三样（拒绝的判据长什么样、它打不红的那一刀、什么会让答案改变）。
 - **列举，不报总数**（`docs/16` §3.1）。失效条件写成可观测状态或归属规则，不写成要人去数的阈值。
@@ -47,6 +50,13 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   被 `tests/readme-sync.test.mjs` 钉着的那几条事实换成不带过程的说法保留。过程与证据留在 `docs/`。
 
 ## ⚠️ 注意事项 / 坑
+
+- **门禁的项目根不是 cwd**：从 cwd 往上找最近的 `.agent-team`，cwd 在启动项目（`CLAUDE_PROJECT_DIR`）里时不越过它（`hooks/lib/runctx.mjs` 的
+  `projectRootFrom`，`docs/24` §2.1）。子进程测试的环境由 `tests/helpers/gate-runner.mjs` 的 `hermeticEnv` 剥掉 `CLAUDE_PROJECT_DIR` 与留痕开关；
+  要测「变量生效」的用例自己加回来。
+- **只在这台机器上成立的假设，CI 一跑就露**：macOS 的 `tmpdir()` 在 `/var` 软链接下，子进程 `process.cwd()` 给的是解析后的路径；
+  GitHub 的 Windows runner 签出在 D 盘。夹具一律发 realpath，不写死盘符。**产品侧同族的路径别名问题还开着**（`docs/24` §3，下一轮优先）。
+- 用脚本往文件里写带 `\0` 之类转义的文字时，落盘后照样扫控制字节——这一轮就有一个真的 NUL 字节混进了注释。
 
 - **换行符是混的**（`docs/11` §5.28）：索引统一 LF，`core.autocrlf=true` 让签出副本是 CRLF，被工具重写过的文件停在 LF。
   锚串替换要**断言命中数，并核对命中的是你要的那一处** —— 同一个实参有几处合法命中时，断言防不了砍错的那一刀。落盘后扫控制字节与行尾混用。
@@ -83,3 +93,5 @@ node --test
 
 - 开发期加载：`claude --plugin-dir .`
 - 打开门禁留痕：`claude --settings '{"env":{"AGENT_TEAM_GATE_TRACE":"1"}}'`
+- 推 main 之前自查版本号：`node scripts/check-version-bump.mjs origin/main HEAD`
+- 看 CI：`gh run list --branch <分支>`、`gh run view <id> --log-failed`

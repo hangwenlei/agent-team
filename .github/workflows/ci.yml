@@ -1,0 +1,49 @@
+# 推 main 就是发布（HANDOFF.md「运行现状」），所以 main 上的每一个提交都要在三个系统上
+# 跑过全部判据。docs/24 §2.3。
+# ⚠️ 只要 main 没开分支保护，这里对「推 main」就只是**事后**告警——用户那时已经能 update 了。
+# 要在发布之前拦住：先推功能分支、等这里全绿，再合进 main 推送（HANDOFF.md「常用命令」）。
+name: ci
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: node --test (${{ matrix.os }}, node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # 仍在维护期的两条 LTS 线。
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      # 裸跑，不带路径参数（HANDOFF.md「注意事项」：带路径参数会报出一个假的 pass 0 / fail 1）。
+      - run: node --test
+
+  # 发布纪律（docs/24 §2.3，改判 docs/19 §9.2）：推 main、或向 main 提 PR 时，version 必须往前挪；
+  # 碰了插件会加载的东西要挪中间一位。只在这两个事件上跑——开发中的提交本来就不挪版本号。
+  version-bump:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: check version bump
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/check-version-bump.mjs "$BASE" "$HEAD"

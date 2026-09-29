@@ -3,7 +3,7 @@
 // 而不是被一个异常替它决定。
 //
 // 「绝不抛异常」是这个模块对外的硬契约，不是「代码顺手没写会抛的地方」：
-// Task 3-6 的真实调用形如 readRunContext(process.cwd(), process.env.CLAUDE_PLUGIN_ROOT)，
+// Task 3-6 的真实调用形如 readRunContext(<项目根>, process.env.CLAUDE_PLUGIN_ROOT)，
 // CLAUDE_PLUGIN_ROOT 没设置时就是 undefined，传给 path.join 会同步抛 TypeError。
 // 这类问题必须由这个函数自己兜住（下面整个函数体包一层 try/catch），而不是
 // 指望四个下游调用方各自防一遍——防漏一处，fail-closed 的检查项就会把
@@ -109,7 +109,8 @@
 // 的 deny 发生在**看路径之前**），与既有的每一个 unreadable 状态同一个爆炸半径。
 // 完整实测数据与那次反例表在 docs/11 §5.27，不在这里抄第二份。
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { norm, underDir } from './path-norm.mjs'
 
 function readJson(path) {
   let value
@@ -149,9 +150,64 @@ export function readProjectConfig(projectDir) {
   }
 }
 
-// projectDir：用户仓库根，放 .agent-team（current-run / state.json / project.json）。
-// pluginDir：插件根，放 stages.json。两者不是同一个目录——hook 以用户项目为 cwd 运行，
-// 插件文件要用 ${CLAUDE_PLUGIN_ROOT} 定位。混用会在真实环境里读不到东西而单测照样绿。
+/**
+ * 用户项目根：从 cwd 往上找最近的一个带 .agent-team 的目录（M3p，docs/24 §2.1）。
+ *
+ * 为什么不直接用 cwd：平台按会话**当前** cwd 起 hook 进程，主线程 Bash 做过 cd 之后这个
+ * cwd 一直停在子目录里，而 at-pm 就是持有 Bash 的主线程。那之后 `<子目录>/.agent-team`
+ * 里找不到 run，readRunContext 判 no-run，H2–H6 全部 fail open。
+ *
+ * 为什么也不直接用 CLAUDE_PROJECT_DIR：它是**会话启动时**的项目根，不随 cd 漂移——这正是
+ * 上面那种情形要的；但用户 /cd 到另一个项目之后它也不跟着走（平台文档原话：move 之后的
+ * hook「still receive ${CLAUDE_PROJECT_DIR} set to the project root where the session
+ * started」），那边的 run 就被整个看丢了，是同一类 fail open。
+ *
+ * 所以两个信号都用：
+ *   - 往上找的起点是 cwd——会话实际在哪个项目里干活，就用哪个项目的 run；
+ *   - cwd 还在 CLAUDE_PROJECT_DIR 之内时，找到它为止、不越界：祖先目录（home、外层仓库）
+ *     里要是躺着一个不相干的 .agent-team，错读别人的 run 比读不到更糟；
+ *   - cwd 已经离开启动项目（/cd 之后）时不设上界；
+ *   - 哪里都没有 .agent-team 时退回 CLAUDE_PROJECT_DIR，再没有就是 cwd——之后照旧由
+ *     readRunContext 判 no-run。
+ * 离得最近的那个赢：嵌套的子项目自己建过 run，就用它的。
+ *
+ * 已知边界（docs/24 §4）：会话中途进了启动项目之下的 git worktree（.claude/worktrees/…）、
+ * 而 worktree 里没有 .agent-team 时，往上找会找回启动项目的 run，拿它去判 worktree 里的
+ * 写入。团队自己进不了 worktree（没有角色持有 EnterWorktree，H1 拒绝带 isolation 的派发）。
+ *
+ * hasAgentTeam 注入只为单测；绝不抛——探测出错时退回 CLAUDE_PROJECT_DIR / cwd。
+ */
+export function projectRootFrom(env, cwd, hasAgentTeam = hasAgentTeamDir) {
+  const dir = env !== null && typeof env === 'object' ? env.CLAUDE_PROJECT_DIR : undefined
+  const home = typeof dir === 'string' && dir !== '' ? dir : null
+  const fallback = home ?? cwd
+  try {
+    if (typeof cwd !== 'string' || cwd === '') return fallback
+    const bound = home !== null && underDir(cwd, home) ? norm(home) : null
+    for (let d = resolve(cwd); ; ) {
+      if (hasAgentTeam(d)) return d
+      if (bound !== null && norm(d) === bound) return fallback
+      const parent = dirname(d)
+      if (parent === d) return fallback
+      d = parent
+    }
+  } catch {
+    return fallback
+  }
+}
+
+function hasAgentTeamDir(dir) {
+  try {
+    return statSync(join(dir, '.agent-team')).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+// projectDir：用户仓库根，放 .agent-team（current-run / state.json / project.json），
+// 由 projectRootFrom 定出来。
+// pluginDir：插件根，放 stages.json。两者不是同一个目录——插件文件要用
+// ${CLAUDE_PLUGIN_ROOT} 定位。混用会在真实环境里读不到东西而单测照样绿。
 export function readRunContext(projectDir, pluginDir) {
   try {
     const base = join(projectDir, '.agent-team')

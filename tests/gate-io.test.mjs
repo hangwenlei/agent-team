@@ -142,7 +142,7 @@ test('经 junction 挂载路径执行仍然 deny（回归：入口守卫曾让 m
   }
 
   try {
-    const gateViaLink = join(linkPath, 'hooks', 'gate.mjs')
+    const gateViaLink = join(linkPath, 'hooks', 'boot.mjs')
     const input = { tool_name: 'Agent', tool_input: { subagent_type: 'at-outsider' } }
     const { stdout } = run('delegation', input, gateViaLink)
     const out = decisionOf(stdout)

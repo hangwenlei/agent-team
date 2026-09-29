@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-// hook 单入口。第一个参数选择检查项。
+// 门禁的判定主体。第一个参数选择检查项。
+// 进程入口是 ./boot.mjs（hooks.json 注册的是它）：它动态 import 本文件，本文件任何一个
+// 静态依赖加载失败时，由它按 checks.mjs 的失败策略表收尾（M3p，docs/24 §2.2）。本文件
+// 被 import 时顶层照常跑 main()，直接 `node gate.mjs <检查项>` 也照常能跑。
 // 约定：exit 0 + stdout 上的 JSON 决策 = 生效；无输出 = 走正常权限流程。
 // SubagentStop 是例外——它的拒绝走 exit 2 + stderr，不是这套 JSON，
 // 见 hooks/lib/deny.mjs 的 denyOutput（拒绝输出契约的唯一真源）。
@@ -13,7 +16,7 @@ import { dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
 import { MAIN, callerOf, decideDelegation, stripPluginPrefix } from './lib/decide.mjs'
 import { denyOutput, crashNotice } from './lib/deny.mjs'
-import { readProjectConfig, readRunContext } from './lib/runctx.mjs'
+import { projectRootFrom, readProjectConfig, readRunContext } from './lib/runctx.mjs'
 import { decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
@@ -35,10 +38,13 @@ import { installTrace } from './lib/trace.mjs'
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..')
-// 门禁读的运行状态在**用户项目**里，不在插件目录里。
-// hook 以用户项目为 cwd 运行，所以用 process.cwd()；
+// 门禁读的运行状态在**用户项目**里，不在插件目录里。项目根是从 cwd 往上最近的那个
+// .agent-team，cwd 在启动项目（CLAUDE_PROJECT_DIR）里时不越过它——hook 进程的 cwd 是会话
+// **当前**的 cwd，主线程 Bash 做过 cd 就停在子目录里，直接拿它当项目根会让 H2–H6 全部
+// fail open；只拿 CLAUDE_PROJECT_DIR 又会在用户 /cd 到别的项目后看丢那边的 run
+// （M3p，docs/24 §2.1；口径与理由在 hooks/lib/runctx.mjs 的 projectRootFrom）。
 // 插件自身的文件（roster.json、stages.json）仍用 ROOT。
-const ROOT_PROJECT = process.cwd()
+const ROOT_PROJECT = projectRootFrom(process.env, process.cwd())
 
 // 门禁留痕（M3l，默认关）：打开时每次 exit 0 往 stderr 多写一行，让静默放行在转录里
 // 留下 CLI 自己写的记录。纯旁路——不碰 stdout、不碰退出码、exit 2 那一支一个字不加、
@@ -1266,9 +1272,10 @@ function main() {
   process.exit(0)
 }
 
-// gate.mjs 现在是纯粹的可执行入口，不再被任何测试或模块 import——
-// KNOWN_CHECKS/CHECKS 已经拆到 ./lib/checks.mjs，需要它们的测试从那里 import。
-// 因此这里不需要「我是不是被当作 hook 直接执行」的守卫，main() 无条件跑。
+// 测试不 import gate.mjs——KNOWN_CHECKS/CHECKS 已经拆到 ./lib/checks.mjs，需要它们的
+// 测试从那里 import。唯一 import 它的是进程入口 ./boot.mjs（M3p），而它 import 就是为了
+// 让这里跑。因此 main() 无条件跑，不加「我是不是被当作 hook 直接执行」的守卫——现在
+// 更不能加：argv[1] 是 boot.mjs，按 argv[1] 判断的守卫在任何路径下都会判成「被 import」。
 //
 // 历史教训（曾经加过这样一道守卫，已整体删除）：判断用的是
 // `resolve(process.argv[1]) === fileURLToPath(import.meta.url)`。
@@ -1285,7 +1292,8 @@ try {
   // CHECK 此刻按理已经通过 main() 顶部的 KNOWN_CHECKS 校验，spec 应该总是存在；
   // 万一不存在（防御性兜底），按最严格的 fail closed 处理，安全边界优先于精确。
   if (!spec || spec.failClosed) {
-    denyAndExit(`agent-team 门禁异常，按安全边界拒绝：${err.message}`, event)
+    // err?.message：throw 出来的不一定是 Error，这一层自己再抛就会掉进 boot.mjs 的加载失败退路。
+    denyAndExit(`agent-team 门禁异常，按安全边界拒绝：${err?.message ?? String(err)}`, event)
   }
   // fail open 的检查项（spec.failClosed === false，此刻 spec 必然存在，见上面
   // 那条分支）此前这里直接 process.exit(0)——零 stdout、零 stderr，跟「判定

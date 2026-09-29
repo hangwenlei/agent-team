@@ -185,3 +185,66 @@ test('原型链键不被当成花名册条目——走未登记调用者放行',
   )
   assert.equal(r.decision, 'allow')
 })
+
+// ---- isolation：团队角色不许被隔离出去（M3p，docs/24 §2.1）----
+//
+// Agent 工具的 isolation 参数（'worktree' / 'remote'）把子代理搬进另一份检出里干活。
+// 团队的全部判据都建立在「所有角色共用同一棵工作树、同一个 .agent-team」之上：隔离出去
+// 的子代理写的是另一份拷贝，门禁要么在那边找不到 run（整体 fail open），要么把它写回的
+// 路径判成无人认领；它交的产物也落不进 run 目录，H5 永远判不齐。所以受管辖的调用者
+// 派发时带 isolation 一律拒，理由里写清楚怎么改。
+// 删掉 decideDelegation 里 isolation 那一段，下面前三条红。
+
+test('受管辖的调用者带 isolation: worktree 派发，即使目标在白名单里也拒绝', () => {
+  const r = decideDelegation(
+    { agent_type: 'at-architect', tool_input: { subagent_type: 'at-worker-a', isolation: 'worktree' } },
+    ROSTER,
+  )
+  assert.equal(r.decision, 'deny')
+})
+
+test('主线程带 isolation: remote 派发同样拒绝——不只拦 worktree 一种写法', () => {
+  const r = decideDelegation(
+    { tool_input: { subagent_type: 'agent-team:at-product', isolation: 'remote' } },
+    ROSTER,
+  )
+  assert.equal(r.decision, 'deny')
+})
+
+test('isolation 的拒绝理由点名这个参数，并告诉调用者去掉它重派', () => {
+  const r = decideDelegation(
+    { agent_type: 'at-architect', tool_input: { subagent_type: 'at-worker-a', isolation: 'worktree' } },
+    ROSTER,
+  )
+  assert.match(r.reason, /isolation/)
+  assert.match(r.reason, /去掉/)
+})
+
+// 后台会话（claude --bg 等）在 git 仓库里默认不许写共享检出，平台给子代理指的出路恰好是
+// 带 isolation 重派——那正是上面拒的。拒绝理由要把真正的出路交给用户，而不是让模型在
+// 「平台叫它加、门禁叫它去掉」之间来回（docs/24 §4）。
+test('isolation 的拒绝理由说清后台会话那种情形要停下来交给用户，并点名那个设置', () => {
+  const r = decideDelegation(
+    { agent_type: 'at-architect', tool_input: { subagent_type: 'at-worker-a', isolation: 'worktree' } },
+    ROSTER,
+  )
+  assert.match(r.reason, /后台会话/)
+  assert.match(r.reason, /bgIsolation/)
+  assert.match(r.reason, /用户/)
+})
+
+test('花名册外的调用者带 isolation 派发不归本门禁管，照旧放行', () => {
+  const r = decideDelegation(
+    { agent_type: 'someone-else', tool_input: { subagent_type: 'Explore', isolation: 'worktree' } },
+    ROSTER,
+  )
+  assert.equal(r.decision, 'allow')
+})
+
+test('目标不在白名单时仍然报白名单那条理由——isolation 不遮蔽更根本的拒绝', () => {
+  const r = decideDelegation(
+    { agent_type: 'at-architect', tool_input: { subagent_type: 'at-outsider', isolation: 'worktree' } },
+    ROSTER,
+  )
+  assert.match(r.reason, /不得派发给 at-outsider/)
+})

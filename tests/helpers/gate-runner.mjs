@@ -12,7 +12,9 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { TRACE_ENV } from '../../hooks/lib/trace.mjs'
 
-export const GATE = fileURLToPath(new URL('../../hooks/gate.mjs', import.meta.url))
+// GATE 是 hooks.json 真正注册的那个进程入口 boot.mjs，不是判定主体 gate.mjs（M3p）：子进程
+// 判据要走平台走的那条路，boot.mjs 再把判定交给 gate.mjs。
+export const GATE = fileURLToPath(new URL('../../hooks/boot.mjs', import.meta.url))
 
 // M3l：子进程的环境**默认剥掉门禁留痕那个开关**（hooks/lib/trace.mjs 的 TRACE_ENV）。
 // 这一整套测试断言的是「开关关着时」的门禁——许多用例逐字比 stderr 是不是空的。
@@ -20,19 +22,27 @@ export const GATE = fileURLToPath(new URL('../../hooks/gate.mjs', import.meta.ur
 // node --test，九条与留痕无关的既有用例会一起红（变异量出来的数：把开关改成默认开，
 // 既有用例恰好红九条，docs/21 §8 的 M1），而红的原因不在它们测的东西里。
 // 要测「开着」的用例（tests/gate-trace.test.mjs）自己传 env 进来。
-export function envWithoutTrace(base = process.env) {
+//
+// M3p：同一个理由再剥一个 CLAUDE_PROJECT_DIR。门禁现在优先用它当项目根
+// （hooks/lib/runctx.mjs 的 projectRootFrom，docs/24 §2.1），而这一整套测试用子进程的
+// cwd 指明夹具项目在哪——跑测试的 shell 若恰好带着这个变量（在 Claude Code 的 hook
+// 或会话环境里跑 node --test 就会），每个夹具都会被悄悄指向那个真实项目。要测
+// 「CLAUDE_PROJECT_DIR 生效」的用例（tests/project-root.test.mjs）自己把它加回来。
+export function hermeticEnv(base = process.env) {
   const env = { ...base }
   delete env[TRACE_ENV]
+  delete env.CLAUDE_PROJECT_DIR
   return env
 }
 
 // cwd 是可选的第四个参数（默认继承调用方进程的 cwd，与此前行为一致）。
-// H2（readiness）用 process.cwd() 当「用户项目根」去找 .agent-team——
+// 门禁在没有 CLAUDE_PROJECT_DIR 时用 process.cwd() 当「用户项目根」去找 .agent-team
+// （缺省 env 把那个变量剥掉了，所以这里的 cwd 就是夹具项目根）——
 // 要单测「项目根没有进行中的 run」这条分支，必须能把子进程的 cwd 钉在一个
 // 干净的临时目录上，不能依赖仓库根此刻恰好有没有 .agent-team（那是环境
 // 状态，不是这条分支的契约）。
-// env 是可选的第五个参数，缺省是「当前环境去掉留痕开关」（见上面 envWithoutTrace）。
-export function run(check, input, gate = GATE, cwd = undefined, env = envWithoutTrace()) {
+// env 是可选的第五个参数，缺省是「当前环境去掉留痕开关与 CLAUDE_PROJECT_DIR」（见上面 hermeticEnv）。
+export function run(check, input, gate = GATE, cwd = undefined, env = hermeticEnv()) {
   const result = spawnSync(process.execPath, [gate, check], {
     input: typeof input === 'string' ? input : JSON.stringify(input),
     encoding: 'utf8',

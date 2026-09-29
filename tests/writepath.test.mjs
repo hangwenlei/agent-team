@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { decideWritePath, stageOwnerOfRunPath } from '../hooks/lib/writepath.mjs'
 import { norm } from '../hooks/lib/path-norm.mjs'
+import { resolve } from 'node:path'
 
 const PROJECT = {
   paths: {
@@ -324,22 +325,35 @@ test('filePath 是空字符串时放行——没有可判定的目标路径', ()
 // 不能只靠 POSIX 风格的字符串测试心理暗示"应该也对"。用单个反斜杠开头
 // （不带盘符）模拟"当前盘符根"，跟 PROJECT/RUN 用的 '/proj/...' 是同一种
 // "无盘符绝对路径"，唯一变量是分隔符本身。
-test('Windows 反斜杠路径与 POSIX 前缀等价放行——分隔符差异不能造成误判', () => {
-  const r = call('at-backend', '\\proj\\src\\server\\api.ts')
-  assert.equal(r.decision, 'allow')
-})
+// 这两条只在 win32 上跑（M3p，CI 第一次在 POSIX 上跑这套判据）：反斜杠只在 Windows 上是
+// 分隔符，在 POSIX 上是合法的文件名字符，'\proj\src\...' 在那里是 cwd 下一个名字里带反斜杠
+// 的相对路径——这两条描述的是 Windows 的语义，在别的系统上断言它们等于断言一件不成立的事。
+test(
+  'Windows 反斜杠路径与 POSIX 前缀等价放行——分隔符差异不能造成误判',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const r = call('at-backend', '\\proj\\src\\server\\api.ts')
+    assert.equal(r.decision, 'allow')
+  },
+)
 
-test('Windows 反斜杠路径写别人地盘同样被拒——不是"反斜杠绕过检查"', () => {
-  const r = call('at-backend', '\\proj\\src\\web\\App.tsx')
-  assert.equal(r.decision, 'deny')
-  assert.match(r.reason, /at-frontend/)
-})
+test(
+  'Windows 反斜杠路径写别人地盘同样被拒——不是"反斜杠绕过检查"',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const r = call('at-backend', '\\proj\\src\\web\\App.tsx')
+    assert.equal(r.decision, 'deny')
+    assert.match(r.reason, /at-frontend/)
+  },
+)
 
 // 整理项 3：这条断言是对的，但原来的理由在生产里不成立，改注释不改断言。
-// 原注释说"否则一个相对路径就能绕过前缀比对"——真实 hook 的 cwd 就是项目根
-// （gate.mjs 用 process.cwd() 当 ROOT_PROJECT），所以角色传相对路径时
-// resolve() 会把它正确锚定在项目根上、合法落进自己的地盘并被放行，那里没有
-// 绕过可言。这条测试实际钉的是另一件事：**比对的是 resolve() 之后的绝对路径，
+// 原注释说"否则一个相对路径就能绕过前缀比对"——相对路径由 resolve() 按 hook 进程的
+// cwd 解析，那正是工具自己解析这个相对路径用的目录，落到哪里就是真的写到哪里，比对的
+// 就是真实落点，那里没有绕过可言。（M3p 订正：这里原先写「真实 hook 的 cwd 就是项目根，
+// gate.mjs 用 process.cwd() 当 ROOT_PROJECT」——两半都不再成立：主线程 cd 之后 cwd 会停在
+// 子目录，项目根现在取 CLAUDE_PROJECT_DIR，见 hooks/lib/runctx.mjs 的 projectRootFrom。）
+// 这条测试实际钉的是另一件事：**比对的是 resolve() 之后的绝对路径，
 // 不是原始字符串**。在这个夹具里 cwd（跑测试的仓库根）与 base（由 runDir 推出
 // 的 /proj）故意不是同一个地方，于是"看着像落在 src/server/ 里"的相对路径解析
 // 后落在完全无关的位置，必须不是 allow——如果哪天有人把实现改成拿原始字符串
@@ -361,11 +375,16 @@ test('相对路径按 cwd 解析，不会被误判成落在调用者自己的地
 // 没有区别；{ skip } 会把它标成 skipped，"这条没跑"这件事看得见。
 // tests/contract-guard.test.mjs 早就改用 { skip } 并在注释里点名了这个差别，
 // 只是没回头改这里。
+//
+// M3p（CI 第一次在别的机器上跑）：盘符取**当前盘**，不写死 C。RUN 是无盘符绝对路径，
+// resolve 时落在 cwd 所在的盘上；GitHub 的 Windows runner 把仓库签出在 D 盘，写死的
+// 'c:\proj' 在那里是跨盘，判 deny 是对的——测到的就不再是「大小写不同」这件事。
+const DRIVE = resolve('/').slice(0, 1)
 test(
   'Windows 盘符大小写不同视为同一路径——不能误判成未认领',
   { skip: process.platform !== 'win32' },
   () => {
-    const r = call('at-backend', 'c:\\proj\\src\\server\\api.ts')
+    const r = call('at-backend', `${DRIVE.toLowerCase()}:\\proj\\src\\server\\api.ts`)
     assert.equal(r.decision, 'allow')
   },
 )
@@ -374,7 +393,7 @@ test(
   'Windows 路径段大小写不同视为同一路径——不能误判成未认领',
   { skip: process.platform !== 'win32' },
   () => {
-    const r = call('at-backend', 'C:\\proj\\SRC\\server\\api.ts')
+    const r = call('at-backend', `${DRIVE.toUpperCase()}:\\proj\\SRC\\server\\api.ts`)
     assert.equal(r.decision, 'allow')
   },
 )

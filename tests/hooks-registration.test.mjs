@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
-import { KNOWN_CHECKS } from '../hooks/lib/checks.mjs'
+import { CHECKS, KNOWN_CHECKS } from '../hooks/lib/checks.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
@@ -168,6 +168,105 @@ test('hooks.json 的 PreToolUse/PostToolUse 没有任何 matcher 能匹配到 "B
         'agents/at-frontend.md，以及主规格 §6.2 与 M1c 设计 §1.2 都在说「Bash 不经任何 ' +
         'hook」，这句话现在不成立了，需要一起改，而且这件事本身说明写路径隔离/账本比对' +
         '现在真的会挡到 Bash 调用，是一次影响面很大的行为变化，不只是文案过时。',
+    )
+  }
+})
+
+// ---------------------------------------------------------------------------
+// 接线判据（M3p，docs/24 §2.4，全量审查第 11 条）
+// ---------------------------------------------------------------------------
+//
+// 上面各条只对账「注册项指向的文件与检查名对不对」，从不对账**挂在哪个事件上、matcher
+// 放进来哪些工具**。审查时的变异：把 H3/H4/H6 那组 matcher 改成 "^(Edit|Write)$"、把
+// stop-gate 挪到 Stop 事件上、把某一条注册删掉复制成两条——套件照样 910/910 全绿，而每
+// 一刀都让一道门禁在真实会话里静默失效或重复触发。
+//
+// 下面把 checks.mjs 里每个检查项自己声明的契约（event、toolNames）当真源，逐条对账
+// hooks.json：事件对得上、matcher 放进来的工具恰好是 toolNames、每个检查项只注册一次、
+// 每条都经 boot.mjs 进门。
+
+// matcher 在平台上是正则源码；判据用 new RegExp(matcher) 对一个工具名宇宙逐个试。
+// 宇宙 = 各检查项声明的工具 + 平台的其它工具 + 几个「差一点就对」的名字——后者专抓
+// 不锚定的 matcher（"Edit|Write" 会放进 MultiEdit、EditX）。
+const DECLARED_TOOLS = [...new Set(Object.values(CHECKS).flatMap((s) => s.toolNames ?? []))]
+const OTHER_TOOLS = [
+  'Bash', 'Read', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'TodoWrite', 'Skill',
+  'AskUserQuestion', 'SendMessage', 'ListAgents', 'Task', 'MultiEdit', 'NotebookRead',
+]
+const NEAR_MISS = ['Agents', 'SubAgent', 'AgentX', 'XEdit', 'EditX', 'Writer', 'NotebookEditX', 'xWrite']
+const TOOL_UNIVERSE = [...DECLARED_TOOLS, ...OTHER_TOOLS, ...NEAR_MISS]
+
+// 每一条注册展开成 { event, matcher, check, entry }。
+function registrations() {
+  const out = []
+  for (const [event, groups] of Object.entries(hooksConfig.hooks ?? {})) {
+    for (const group of groups) {
+      for (const hook of group.hooks ?? []) {
+        out.push({ event, matcher: group.matcher, check: hook.args?.[1], entry: hook.args?.[0] })
+      }
+    }
+  }
+  return out
+}
+
+test('接线前置：展开出来的注册项覆盖了 checks.mjs 的每一个检查项——下面几条不是对空集合说话', () => {
+  const seen = new Set(registrations().map((r) => r.check))
+  assert.deepEqual([...seen].sort(), Object.keys(CHECKS).sort())
+})
+
+test('接线：每个检查项挂在它自己声明的 hook 事件上', () => {
+  for (const r of registrations()) {
+    assert.equal(
+      r.event,
+      CHECKS[r.check]?.event,
+      `${r.check} 注册在 ${r.event} 上，而 checks.mjs 声明它是 ${CHECKS[r.check]?.event} 的检查项——` +
+        '挂错事件时平台要么永远不触发它，要么送来它读不懂的输入形状',
+    )
+  }
+})
+
+test('接线：工具事件上的 matcher 放进来的工具恰好是该检查项声明的 toolNames', () => {
+  for (const r of registrations()) {
+    const declared = CHECKS[r.check]?.toolNames
+    if (declared === null || declared === undefined) continue
+    const matched = TOOL_UNIVERSE.filter((t) => new RegExp(r.matcher ?? '').test(t))
+    assert.deepEqual(
+      matched.sort(),
+      [...declared].sort(),
+      `${r.check} 的 matcher ${JSON.stringify(r.matcher)} 放进来的是 ${JSON.stringify(matched)}，` +
+        `checks.mjs 声明的是 ${JSON.stringify(declared)}。少了的那个工具从此不经这道门禁；` +
+        '多了的那个会送来这道门禁不认得的调用（gate.mjs 对不认得的 tool_name 静默放行）',
+    )
+  }
+})
+
+test('接线：生命周期事件上的检查项（toolNames 为 null）不带 matcher——它要看见每一次事件', () => {
+  for (const r of registrations()) {
+    if (CHECKS[r.check]?.toolNames !== null) continue
+    assert.equal(
+      r.matcher,
+      undefined,
+      `${r.check} 注册时带了 matcher ${JSON.stringify(r.matcher)}；它按角色自己判该不该管，` +
+        'matcher 只会让一部分子代理收尾静默绕过它',
+    )
+  }
+})
+
+test('接线：每个检查项恰好注册一次', () => {
+  const counts = {}
+  for (const r of registrations()) counts[r.check] = (counts[r.check] ?? 0) + 1
+  for (const [check, n] of Object.entries(counts)) {
+    assert.equal(n, 1, `${check} 注册了 ${n} 次——同一次工具调用会被判两遍，账本回传也会发两遍`)
+  }
+})
+
+test('接线：每一条 hook 都经 hooks/boot.mjs 进门，不直接跑 gate.mjs', () => {
+  for (const r of registrations()) {
+    assert.equal(
+      r.entry,
+      '${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs',
+      `${r.check} 的入口是 ${r.entry}。直接跑 gate.mjs 时，任何一个 lib 加载失败都会让进程 ` +
+        'exit 1 放行——fail closed 的门禁整体消失（docs/24 §2.2）；boot.mjs 是接住这类失败的那一层',
     )
   }
 })
