@@ -216,6 +216,8 @@ test('rework：把 rework 改小的 Edit → deny 理由点名 S5', () => {
 // `rework["S1"]` 与 `rework["S2"]` 恰好都是 1。`replace_all:true` 应该把两处都替换成
 // 0；如果这条分支被换成恒 null，afterText 直接变 null、decideRework 会因为"新内容
 // parse 不出来"而放行——预期的 deny 会变成放行，测试变红。
+// （M3r 订正：算不出新内容现在是拒，所以「恒 null」这一刀这条已经测不出来了——结论都是拒。
+// replace_all 的语义改由 tests/rework-guard.test.mjs 里 replayEdit 的用例钉着。）
 test('rework：Edit 的 replace_all:true 对多处出现全部生效，两个阶段都改小 → deny', () => {
   const dirs = makeRun({ runId: 'r1', stage: 'S2' })
   try {
@@ -280,11 +282,9 @@ test('rework：磁盘上还没有这份 state.json（本趟第一次建）→ �
   }
 })
 
-// 同一条 Important 4，另一半——这次新内容本身不是合法 JSON（比如半截被截断）。
-// gate.mjs 的 parseOrNull 必须自己吞掉 JSON.parse 抛出的 SyntaxError、返回 null，
-// 而不是让它冒泡到最外层——冒泡的话同样会被 fail-closed 兜底判成 deny，PM 连"把写坏
-// 的文件修回去"这个动作本身都做不成，正好是 rework-guard.mjs 头部那条 I2 理由要防的。
-test('rework：这次 Write 的新内容不是合法 JSON → 放行，不因为 parse 异常被 fail-closed 兜底拒绝', () => {
+// M3r（docs/26，全量审查第 5 条）：这条原先断言「新内容不是合法 JSON → 放行」。那一半口子就是
+// 两步清零的第一步。现在拒——而且拒得清楚（不是被异常冒泡到最外层兜底）：理由点名要写合法的 JSON 对象。
+test('rework：这次 Write 的新内容不是合法 JSON → 拒，理由说清要写合法的 JSON 对象', () => {
   const dirs = makeRun({ runId: 'r1', stage: 'S2' })
   try {
     const p = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
@@ -294,7 +294,8 @@ test('rework：这次 Write 的新内容不是合法 JSON → 放行，不因为
       GATE,
       dirs.projectDir,
     )
-    assert.equal(stdout.trim(), '')
+    assert.equal(decisionOf(stdout)?.permissionDecision, 'deny')
+    assert.match(decisionOf(stdout)?.permissionDecisionReason ?? '', /JSON 对象/)
   } finally {
     cleanup(dirs)
   }
@@ -305,6 +306,8 @@ test('rework：这次 Write 的新内容不是合法 JSON → 放行，不因为
 // `isControlFile(...) && target.endsWith('/state.json')` 这半句路径判据在不在场，
 // 结果都是放行（461/0 零红，两个子条件各自删掉都不变红）。它证明的只是"这个检查项
 // 对语法错误的输入不 deny"，不是"它真的用路径判据把这个文件排除在外了"——因为错误的
+// （M3r 订正：新内容不是合法 JSON 对象现在是拒，所以去掉路径判据之后 `# PRD` 会被当成
+// state.json 拒掉——这条重新成了路径判据的锚，下面那段「不再声称」的话不再成立。）
 // 原因而绿，形状与 docs/11 §3.1 记的那类问题一样。
 //
 // 保留它是因为它仍然是一条真实、有意义的行为（普通产物文件不受 H6 打扰），但不再声称
@@ -374,6 +377,272 @@ test('rework：路径判据锚点②——project.json 不是 state.json，即�
       dirs.projectDir,
     )
     assert.equal(stdout.trim(), '')
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+// ==== M3r：两步清零与 Edit 重放（docs/26，全量审查第 5、6 条）====
+
+// 一份打过三轮 S5 返工的 state：S5 出现 4 次、rework.S5 = 3。
+const SPENT = {
+  run_id: '20260917-1430-fixture',
+  stage: 'S5',
+  contract_sha: 'PENDING',
+  roster: [],
+  artifacts: {},
+  rework: { S5: 3 },
+  never_invoked: [],
+  escalations: [],
+  history: [
+    { stage: 'S1', at: '2026-09-17T14:30:00Z' },
+    { stage: 'S5', at: '2026-09-17T14:40:00Z' },
+    { stage: 'S5', at: '2026-09-17T14:50:00Z' },
+    { stage: 'S5', at: '2026-09-17T15:00:00Z' },
+    { stage: 'S5', at: '2026-09-17T15:10:00Z' },
+  ],
+}
+// 清零之后的样子：rework 空、history 只剩前两条。
+const WASHED = { ...SPENT, rework: {}, history: SPENT.history.slice(0, 2) }
+
+function statePath(dirs) {
+  return join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+}
+function gateWrite(dirs, content) {
+  return run(
+    'rework',
+    { tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: statePath(dirs), content } },
+    GATE,
+    dirs.projectDir,
+  )
+}
+function gateEdit(dirs, old_string, new_string, extra = {}) {
+  return run(
+    'rework',
+    { tool_name: 'Edit', agent_type: 'at-pm', tool_input: { file_path: statePath(dirs), old_string, new_string, ...extra } },
+    GATE,
+    dirs.projectDir,
+  )
+}
+const isDeny = (r) => decisionOf(r.stdout)?.permissionDecision === 'deny'
+
+test('两步清零的第一步：合法的 state.json 上写 null / [] / 字符串 / 半截 JSON / 空串——每一种都拒', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeJson(statePath(dirs), SPENT)
+    for (const junk of ['null', '[]', '"x"', '{', '', 'garbage']) {
+      assert.ok(isDeny(gateWrite(dirs, junk)), JSON.stringify(junk))
+    }
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('把坏掉的 state.json 修回去：旧的读不出来时，写一份合法的完整 state 放行', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeFileSync(statePath(dirs), '{ oops', 'utf8')
+    assert.equal(gateWrite(dirs, JSON.stringify(SPENT)).stdout, '')
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('旧文件带 UTF-8 BOM：不当成「坏文件」，清零照样拒', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeFileSync(statePath(dirs), '﻿' + JSON.stringify(SPENT, null, 2), 'utf8')
+    assert.ok(isDeny(gateWrite(dirs, JSON.stringify(WASHED))))
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+// CRLF 的缩进 JSON：Windows 上 core.autocrlf、编辑器或 PowerShell 都会写出这种文件。
+function writeCrlf(dirs, obj) {
+  writeFileSync(statePath(dirs), JSON.stringify(obj, null, 2).split('\n').join('\r\n'), 'utf8')
+}
+
+test('CRLF 的 state.json 上，用 LF 写的多行 Edit 把 rework 换成空对象——拒', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeCrlf(dirs, SPENT)
+    const r = gateEdit(dirs, '"rework": {\n    "S5": 3\n  },', '"rework": {},')
+    assert.ok(isDeny(r), r.stdout)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('CRLF 的 state.json 上，replace_all 把每一条 S5 的进入记录都改成 S1——拒', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeCrlf(dirs, SPENT)
+    assert.ok(isDeny(gateEdit(dirs, '"stage": "S5",\n', '"stage": "S1",\n', { replace_all: true })))
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('对照：CRLF 的 state.json 上，合法地推进一段（改 stage、追加一条 history）——放行', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeCrlf(dirs, SPENT)
+    const last = '    {\n      "stage": "S5",\n      "at": "2026-09-17T15:10:00Z"\n    }\n  ]'
+    const appended = '    {\n      "stage": "S5",\n      "at": "2026-09-17T15:10:00Z"\n    },\n    {\n      "stage": "S6",\n      "at": "2026-09-17T15:20:00Z"\n    }\n  ]'
+    const r1 = gateEdit(dirs, last, appended)
+    assert.equal(r1.stdout, '', 'history 追加一条')
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('Edit 的 old_string 在 state.json 里找不到：拒，并让它改用 Write 整份重写', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeCrlf(dirs, SPENT)
+    const r = gateEdit(dirs, '"rework": {"S5": 99}', '"rework": {}')
+    assert.ok(isDeny(r))
+    // 理由要说出真正的原因（old_string 找不到），不是笼统的「新内容不是合法 JSON」——后者是兜底，
+    // 结论一样，却会让 PM 去查一份其实没问题的 JSON。
+    assert.match(decisionOf(r.stdout)?.permissionDecisionReason ?? '', /old_string 在文件里找不到/)
+    assert.match(decisionOf(r.stdout)?.permissionDecisionReason ?? '', /Write/)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+// ledger 那张网（docs/11 §5.31 说写坏的 state.json 会被 ledger 报出来——此前代码里没有）：
+// state.json 读不出来时 readRunContext 判 unreadable，ledger 只往 stderr 写一句 fail-open，
+// 模型和用户都看不见。现在对 state.json 的写入回传一条【state.json】。
+test('ledger：刚写的 state.json 读不出来——回传一条【state.json】，不只往 stderr 写', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeFileSync(statePath(dirs), '{ oops', 'utf8')
+    const { stdout } = run(
+      'ledger',
+      { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: statePath(dirs) } },
+      GATE,
+      dirs.projectDir,
+    )
+    assert.match(stdout, /【state\.json】/)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+// ---- 复核抓到的两条：门禁算出合法 JSON、平台落盘的却是坏文件（docs/26 §3）----
+//
+// 两步清零的第一步只要「H6 以为写完还是合法的、平台实际写坏了」就能做成：第二步旧的一侧读不出来，
+// 走修复那条路放行。下面两条是复核实测过的第一步，都必须拒。
+
+test('两步清零换条路：Edit 的 new_string 以 BOM 开头、插在文件中间——拒（平台原样写进去，文件就坏了）', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeFileSync(statePath(dirs), JSON.stringify(SPENT, null, 2), 'utf8')
+    const r = gateEdit(dirs, '"at": "2026-09-17T15:10:00Z"', '﻿"at": "2026-09-17T15:10:00Z"')
+    assert.ok(isDeny(r), r.stdout)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('两步清零换条路：old_string 用直引号去碰原文里的弯引号——拒（平台会把 new_string 的引号也换成弯的）', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeFileSync(statePath(dirs), JSON.stringify({ ...SPENT, note: '“' }, null, 2), 'utf8')
+    const r = gateEdit(dirs, '"note": """', '"note": "“"')
+    assert.ok(isDeny(r), r.stdout)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('ledger：写坏的是 reach.json 而不是 state.json——不回传【state.json】', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeFileSync(statePath(dirs), '{ oops', 'utf8')
+    const reach = join(dirs.projectDir, '.agent-team', 'reach.json')
+    writeFileSync(reach, '{ oops', 'utf8')
+    const { stdout } = run(
+      'ledger',
+      { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: reach } },
+      GATE,
+      dirs.projectDir,
+    )
+    assert.doesNotMatch(stdout, /【state\.json】/)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+// ---- 第二轮复核补的判据（docs/26 §3）----
+
+test("new_string 在文件末尾插一个 $'——拒（平台按字面写入，文件就坏了；门禁若展开 $ 模式会算成原文）", () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeFileSync(statePath(dirs), JSON.stringify(SPENT, null, 2), 'utf8')
+    assert.ok(isDeny(gateEdit(dirs, '  ]\n}', "  ]\n}$'")))
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('对照：CRLF 的 state.json 上，replace_all 把每条记录的日期都改掉——放行（replace_all 的接线是通的）', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeCrlf(dirs, SPENT)
+    const r = gateEdit(dirs, '2026-09-17T', '2026-09-18T', { replace_all: true })
+    assert.equal(r.stdout, '', r.stdout)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('old_string 出现不止一处、又没带 replace_all：拒，理由说清是这个原因', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeCrlf(dirs, SPENT)
+    const r = gateEdit(dirs, '2026-09-17T', '2026-09-18T')
+    assert.ok(isDeny(r))
+    assert.match(decisionOf(r.stdout)?.permissionDecisionReason ?? '', /不止一处/)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('ledger：run 因为别的原因读不出来（current-run 不在），刚写的 state.json 却是合法的——不回传【state.json】', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    writeFileSync(statePath(dirs), JSON.stringify(SPENT), 'utf8')
+    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'))
+    const { stdout } = run(
+      'ledger',
+      { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: statePath(dirs) } },
+      GATE,
+      dirs.projectDir,
+    )
+    assert.doesNotMatch(stdout, /【state\.json】/)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('ledger：没有 run 时写业务目录里一个叫 state.json 的文件——不回传【state.json】，那不是控制文件', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'))
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs'), { recursive: true, force: true })
+    const p = join(dirs.projectDir, 'src', 'state.json')
+    mkdirSync(dirname(p), { recursive: true })
+    writeFileSync(p, '[]', 'utf8')
+    const { stdout } = run(
+      'ledger',
+      { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: p } },
+      GATE,
+      dirs.projectDir,
+    )
+    assert.doesNotMatch(stdout, /【state\.json】/)
   } finally {
     cleanup(dirs)
   }

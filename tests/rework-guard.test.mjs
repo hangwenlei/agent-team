@@ -7,7 +7,7 @@
 // 替换只有那边能测到）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { decideRework } from '../hooks/lib/rework-guard.mjs'
+import { decideRework, parseStateText, replayEdit } from '../hooks/lib/rework-guard.mjs'
 
 const H = (...stages) => stages.map((s) => ({ stage: s, at: '2026-09-19T00:00:00Z' }))
 const st = (history, rework) => ({ stage: 'S5', history, rework })
@@ -48,9 +48,30 @@ test('旧 state 不存在（本趟第一次写）：放行', () => {
   assert.equal(r.ok, true)
 })
 
-test('新内容不是合法 JSON 对象：放行，不拒——拒了会让人连修回去都做不到', () => {
+// M3r（docs/26，全量审查第 5 条）：原先这条是「新内容不是合法 JSON 对象：放行」。那一半口子
+// 让返工史能用两次 Write 洗掉：先写一份垃圾（新的一侧 parse 不出来，放行），再写一份清零的
+// 合法版本（旧的一侧 parse 不出来，放行）。现在只剩「旧的本来就坏了」这一侧放行——那是把坏文件
+// 修回去的路；新内容必须永远是合法的 JSON 对象，PM 总写得出来，锁不死。
+test('旧的是合法对象、新内容不是合法 JSON 对象：拒——两步清零的第一步', () => {
+  for (const after of [null, [], 'x', 1]) {
+    const r = decideRework({ before: st(H('S1'), {}), after })
+    assert.equal(r.ok, false, JSON.stringify(after))
+  }
+})
+
+test('新内容不是合法 JSON 对象时，理由说清要写一份合法的 JSON 对象', () => {
   const r = decideRework({ before: st(H('S1'), {}), after: null })
+  assert.match(r.reason, /JSON 对象/)
+})
+
+test('旧的本来就坏了、新内容是合法对象：放行——把坏文件修回去这条路不能堵', () => {
+  const r = decideRework({ before: null, after: st(H('S1'), {}) })
   assert.equal(r.ok, true)
+})
+
+test('旧的不在、新内容也不是合法 JSON 对象：拒——第一次建也要写对', () => {
+  const r = decideRework({ before: null, after: null })
+  assert.equal(r.ok, false)
 })
 
 test('拒的时候要说清是哪一条判据、哪个阶段', () => {
@@ -190,4 +211,123 @@ test('rework 改小、走 Write 路径的那一格：拒（与 Edit 路径同判
     after: st(H('S5', 'S5'), { S5: 0 }),
   })
   assert.equal(r.ok, false)
+})
+
+// ---- replayEdit：只镜像平台 Edit 的「精确命中」那一层（M3r，docs/26，全量审查第 6 条）----
+//
+// 平台的 Edit（本机 claude.exe 2.1.283 的实现，docs/26 §5）：读文件时只把 CRLF 折成 LF、UTF-8 BOM
+// 原样留着；匹配分四层——精确、弯引号互认、两层 \uXXXX 转义互认；**只有精确命中时 new_string 原样
+// 写入**，其余几层会改写 new_string（比如把直引号换成弯引号）；多处命中又没带 replace_all 时报错、
+// 不落盘；写回时恢复原来的行尾。
+//
+// H6 此前按字节重放，CRLF 的 state.json 上任何多行 Edit 都匹配不上、放行。第一版修法照「预测平台」
+// 写，复核抓到它剥了 new_string 的 BOM、做了弯引号互认却没做平台随之而来的改写——门禁算出合法 JSON，
+// 平台落盘的却是坏文件，两步清零换条路照样做成。所以现在只镜像第一层：那一层平台一个字不改，门禁算的
+// 就是真实落盘的；其余几层门禁不预测，返回 null，由门禁拒、让它改用 Write。
+
+const CRLF = (s) => s.split('\n').join('\r\n')
+
+test('replayEdit：LF 文件上精确匹配', () => {
+  assert.equal(replayEdit({ before: 'a\nb\nc', oldString: 'b', newString: 'B' }), 'a\nB\nc')
+})
+
+test('replayEdit：CRLF 文件、LF 写的多行 old_string 照样匹配（平台读文件时折 CRLF）', () => {
+  const before = CRLF('{\n  "a": 1,\n  "b": 2\n}')
+  assert.equal(replayEdit({ before, oldString: '"a": 1,\n  "b": 2', newString: '"a": 0' }), '{\n  "a": 0\n}')
+})
+
+test('replayEdit：old_string 写成 CRLF → null（平台只折文件、不折 old_string，匹配不上）', () => {
+  assert.equal(replayEdit({ before: 'x\ny', oldString: 'x\r\ny', newString: 'z' }), null)
+})
+
+test('replayEdit：文件开头的 BOM 原样留着（平台不剥它）', () => {
+  assert.equal(replayEdit({ before: '﻿{"a":1}', oldString: '{"a":1}', newString: '{"a":2}' }), '﻿{"a":2}')
+})
+
+test('replayEdit：new_string 原样放进去——带 BOM、带 CRLF 都不动（平台精确命中时一个字不改）', () => {
+  assert.equal(replayEdit({ before: '{"a":1}', oldString: '1', newString: '﻿1' }), '{"a":﻿1}')
+  assert.equal(replayEdit({ before: '{"a":1}', oldString: '1', newString: '1\r\n' }), '{"a":1\r\n}')
+})
+
+test('replayEdit：old_string 用了弯引号、文件是直引号 → null（那一层平台会改写 new_string，门禁不预测）', () => {
+  const oldString = '“rework”: {“S5”: 3}'
+  assert.equal(replayEdit({ before: '{"rework": {"S5": 3}}', oldString, newString: '"rework": {}' }), null)
+})
+
+test('replayEdit：弯引号与直引号同时在文件里时，只认精确命中的那一处', () => {
+  const before = '“k”=1 "k"=1'
+  assert.equal(replayEdit({ before, oldString: '"k"=1', newString: 'X' }), '“k”=1 X')
+})
+
+test('replayEdit：old_string 出现不止一处、又没带 replace_all → null（平台报错、不落盘）', () => {
+  assert.equal(replayEdit({ before: 'a x a', oldString: 'a', newString: 'b' }), null)
+})
+
+test('replayEdit：replace_all 在 CRLF 文件上替换每一处', () => {
+  assert.equal(replayEdit({ before: CRLF('a\nx\na'), oldString: 'a', newString: 'b', replaceAll: true }), 'b\nx\nb')
+})
+
+test('replayEdit：找不到 old_string → null', () => {
+  assert.equal(replayEdit({ before: 'abc', oldString: 'zzz', newString: 'y' }), null)
+})
+
+test('replayEdit：old_string 为空、文件不在——新建，内容就是 new_string（平台同样）', () => {
+  assert.equal(replayEdit({ before: null, oldString: '', newString: '{"a":1}' }), '{"a":1}')
+})
+
+test('replayEdit：old_string 为空、文件只有空白——整份写成 new_string（平台同样）', () => {
+  assert.equal(replayEdit({ before: ' \r\n', oldString: '', newString: '{"a":1}' }), '{"a":1}')
+})
+
+test('replayEdit：old_string 为空、文件有内容——null（平台报错）', () => {
+  assert.equal(replayEdit({ before: '{"a":1}', oldString: '', newString: '{"a":2}' }), null)
+})
+
+test('replayEdit：文件不在、old_string 不为空 → null（平台的 Edit 自己也会失败）', () => {
+  assert.equal(replayEdit({ before: null, oldString: 'a', newString: 'b' }), null)
+})
+
+test('replayEdit：参数不是字符串 → null', () => {
+  assert.equal(replayEdit({ before: 'a', oldString: undefined, newString: 'b' }), null)
+})
+
+// ---- parseStateText ----
+
+test('parseStateText：开头的 BOM 剥掉；中间的 BOM 不剥（那就是坏文件）', () => {
+  assert.deepEqual(parseStateText('﻿{"a":1}'), { a: 1 })
+  assert.equal(parseStateText('{"a":﻿1}'), null)
+})
+
+test('parseStateText：合法 JSON 但不是对象（数组、字符串、null）→ null', () => {
+  for (const text of ['[]', '"x"', 'null', '1']) assert.equal(parseStateText(text), null, text)
+})
+
+// ---- 第二轮复核补的判据：实现是对的，但这几件事此前没有判据钉着（docs/26 §3）----
+
+// 平台精确命中时用函数替换（a.replace(c, () => u)），new_string 里的 $' $& $` $$ 一律按字面写入。
+// 把 split/join 换成字符串替换（replaceAll(o, n)）是最顺手的重构，而那会展开 $ 模式——门禁算的与
+// 平台落盘的不再一样，两步清零重新打开。
+test("replayEdit：new_string 里的 $' 按字面写入，不当替换模式", () => {
+  assert.equal(replayEdit({ before: '{"a":1}', oldString: '1}', newString: "1}$'" }), "{\"a\":1}$'")
+})
+
+test('replayEdit：new_string 里的 $& 按字面写入', () => {
+  assert.equal(replayEdit({ before: '{"a":1}', oldString: '1', newString: '$&2' }), '{"a":$&2}')
+})
+
+test('replayEdit：new_string 里的 $$ 按字面写入', () => {
+  assert.equal(replayEdit({ before: '{"a":1}', oldString: '1', newString: '$$' }), '{"a":$$}')
+})
+
+// 平台读文件只折成对的 CRLF，孤立的 \r 原样留着。
+test('replayEdit：孤立的 \\r 不当换行——old_string 里的 \\n 碰不上它', () => {
+  assert.equal(replayEdit({ before: 'x\ry', oldString: 'x\ny', newString: 'z' }), null)
+})
+
+test('replayEdit：孤立的 \\r 也不删——old_string 跳过它就碰不上', () => {
+  assert.equal(replayEdit({ before: 'x\ry', oldString: 'xy', newString: 'z' }), null)
+})
+
+test('replayEdit：只折成对的 CRLF，孤立的 \\r 原样留在结果里', () => {
+  assert.equal(replayEdit({ before: 'a\rb\r\nc', oldString: 'b\nc', newString: 'X' }), 'a\rX')
 })

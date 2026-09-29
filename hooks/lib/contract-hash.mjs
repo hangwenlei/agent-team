@@ -14,11 +14,11 @@
 // 只替换成对的 \r\n，不碰孤立的 \r：那种字符在正文里是真实内容（老 Mac 行尾在这个
 // 项目里不会出现，但一个被当成数据粘进来的字符串可能含它），抹掉它就是抹掉语义。
 import { createHash } from 'node:crypto'
+import { normalizeText } from './text-norm.mjs'
 
+// 归一化本身在 text-norm.mjs（M3r 抽出去的单一真源，理由见那里）；这个名字留着，是契约这一侧的调用点。
 export function normalizeContract(buf) {
-  let s = Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf)
-  if (s.charCodeAt(0) === 0xfeff) s = s.slice(1)
-  return s.replace(/\r\n/g, '\n')
+  return normalizeText(buf)
 }
 
 export function sha256OfContract(buf) {

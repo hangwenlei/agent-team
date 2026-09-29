@@ -113,11 +113,14 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { norm, underDir } from './path-norm.mjs'
+import { normalizeText } from './text-norm.mjs'
 
 function readJson(path) {
   let value
   try {
-    value = JSON.parse(readFileSync(path, 'utf8'))
+    // normalizeText 剥 BOM（M3r，审查第 32 条）：带 BOM 的 state.json / project.json 此前
+    // JSON.parse 直接失败，整趟 run 被判 unreadable。与 H6 读 state.json 同一份归一化。
+    value = JSON.parse(normalizeText(readFileSync(path, 'utf8')))
   } catch (err) {
     return { ok: false, reason: `读取 ${path} 失败：${err.message}` }
   }
