@@ -28,13 +28,13 @@
 // 没错"（拿到 'SubagentStop' 就该产出 exit 2 + stderr 这个形状），两者答的
 // 是不同的问题，不是同一件事测了两遍。
 
+import { quote } from './trusted.mjs'
+
 /**
  * @param {string} reason 拒绝理由
  * @param {string} event hook 事件名（CHECKS[name].event）
  * @returns {{ stream: 'stdout' | 'stderr', text: string, exitCode: number }}
  */
-import { quote } from './trusted.mjs'
-
 export function denyOutput(reason, event) {
   if (event === 'PreToolUse') {
     return {

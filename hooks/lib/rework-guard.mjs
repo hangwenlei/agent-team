@@ -22,8 +22,8 @@ import { reworkFromHistory, REWORK_LIMIT, isNonNegativeInteger } from './state.m
 // isPlainObject 走 stages.mjs 同一份（M2b 终审 A2），原先是这里的私有拷贝。
 import { isPlainObject } from './stages.mjs'
 import { normalizeText } from './text-norm.mjs'
-// 拒绝理由会被模型读到；阶段名与计数值来自 state.json（磁盘或这次写入的内容），一律过 inline / quote（M3s，docs/27）。
-import { inline, quote } from './trusted.mjs'
+// 拒绝理由会被模型读到；阶段名与计数值来自 state.json（磁盘或这次写入的内容），一律过 quote（M3s，docs/27）。
+import { quote } from './trusted.mjs'
 
 function counts(history) {
   const c = {}
@@ -57,7 +57,7 @@ export function decideRework({ before, after }) {
   const ca = counts(ha)
   for (const [stage, n] of Object.entries(cb)) {
     if ((ca[stage] ?? 0) < n) {
-      return { ok: false, reason: `history 里 ${inline(stage)} 的出现次数从 ${n} 变成 ${ca[stage] ?? 0}——只许追加，不许删。` }
+      return { ok: false, reason: `history 里 ${quote(stage)} 的出现次数从 ${n} 变成 ${ca[stage] ?? 0}——只许追加，不许删。` }
     }
   }
 
@@ -82,7 +82,7 @@ export function decideRework({ before, after }) {
     const raw = rw[stage] ?? 0
     const v = Number(raw)
     if (v < n) {
-      return { ok: false, reason: `rework[${quote(stage)}] 写成 ${quote(raw)}，但 history 里 ${inline(stage)} 出现 ${n + 1} 次、派生值是 ${n}——返工计数不可重置（规格 §4.2 ③）。` }
+      return { ok: false, reason: `rework[${quote(stage)}] 写成 ${quote(raw)}，但 history 里 ${quote(stage)} 出现 ${n + 1} 次、派生值是 ${n}——返工计数不可重置（规格 §4.2 ③）。` }
     }
   }
   for (const [stage, raw] of Object.entries(rw)) {

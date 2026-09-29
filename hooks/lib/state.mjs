@@ -19,11 +19,11 @@
 // 这里不另写一份角色集合（理由与下面 trimmed 那一段的注释同源）。
 import { producedNames, expandProduces, stageRoles, stageRolesInRun, isPlainObject } from './stages.mjs'
 import { SHA_RE } from './contract-hash.mjs'
-import { inline, quote } from './trusted.mjs'
+import { quote } from './trusted.mjs'
 
 // validateState 的问题文案会进受信回传【state.json】；state.json 是写得进它的任何人都能写的，
-// 键名与值一律过 quote / inline（M3s，docs/27）。数字原样。
-const val = (x) => (typeof x === 'number' ? String(x) : inline(x))
+// 键名与值一律过 quote（M3s，docs/27）——阶段名也一样：它在这里是 state.json 里写着的那个值，
+// 不是 stages.json 的名字，干净的值不加引号，一句祈使句就能混进门禁的话里。数字经 quote 仍是数字。
 
 // SHA_RE 的单一真源在 contract-hash.mjs（M3s）。
 const RUN_ID_RE = /^\d{8}-\d{4}-[a-z0-9][a-z0-9-]*$/
@@ -156,7 +156,11 @@ export function rejectTo(kind) {
  * 去 stages.json 看。同族另外三处（deliverable/writepath/artifact-drift）一并改了。
  */
 export function isStageDone({ stage, stages, artifactExists, roster }) {
-  const current = isPlainObject(stages) ? stages[stage] : undefined
+  // stage 来自 state.json：不是字符串、或者不是 stages 自己的键，就不算完成（M3s，docs/27 §3）。
+  // 此前拿它直接做属性键，{"toString":1} 这样的对象会让 ToPropertyKey 抛异常——ledger 与
+  // deliverable 整条崩掉，本该报出这个坏值的【state.json】也跟着消失。
+  if (typeof stage !== 'string' || !isPlainObject(stages) || !Object.hasOwn(stages, stage)) return false
+  const current = stages[stage]
   if (!current) return false
   // 「这一阶段在这一趟里的产出角色」走 stages.mjs 的 stageRolesInRun，不在这里自己
   // 再写一遍 roster 过滤——Task 3 评审发现 1：这段逻辑原本在这里和 expectedArtifacts
@@ -180,7 +184,7 @@ export function validateState(state, { stages } = {}) {
   if (typeof state.stage !== 'string' || !state.stage) {
     p('stage 缺失或不是字符串')
   } else if (isPlainObject(stages) && !Object.hasOwn(stages, state.stage)) {
-    p(`stage 是 ${inline(state.stage)}，但 stages.json 里没有这个阶段`)
+    p(`stage 是 ${quote(state.stage)}，但 stages.json 里没有这个阶段`)
   }
   if (state.contract_sha !== 'PENDING' && !(typeof state.contract_sha === 'string' && SHA_RE.test(state.contract_sha))) {
     p(`contract_sha 既不是 "PENDING" 也不是 sha256:<64 位十六进制>（拿到 ${quote(state.contract_sha)}）`)
@@ -230,7 +234,7 @@ export function validateState(state, { stages } = {}) {
         if (typeof stage !== 'string') {
           p(`trimmed[${quote(role)}] 不是字符串——值要写这个角色是在哪一段被裁掉的（阶段 id）`)
         } else if (isPlainObject(stages) && !Object.hasOwn(stages, stage)) {
-          p(`trimmed[${quote(role)}] 是 ${inline(stage)}，但 stages.json 里没有这个阶段`)
+          p(`trimmed[${quote(role)}] 是 ${quote(stage)}，但 stages.json 里没有这个阶段`)
         }
         if (trimmable && !trimmable.has(role)) {
           p(`trimmed 里有 ${quote(role)}，但它不是任何阶段的产者——裁掉一个本来就什么都不产出的角色不构成交代`)
@@ -279,12 +283,12 @@ export function validateState(state, { stages } = {}) {
         return p(`history[${i}] 不是 { stage, at } 形状`)
       }
       if (isPlainObject(stages) && !Object.hasOwn(stages, e.stage)) {
-        p(`history[${i}].stage 是 ${inline(e.stage)}，但 stages.json 里没有这个阶段`)
+        p(`history[${i}].stage 是 ${quote(e.stage)}，但 stages.json 里没有这个阶段`)
       }
     })
     const last = state.history[state.history.length - 1]
     if (isPlainObject(last) && last.stage !== state.stage) {
-      p(`history 的最后一条是 ${val(last.stage)}，但 stage 字段是 ${val(state.stage)}——有人改了当前阶段却没记账`)
+      p(`history 的最后一条是 ${quote(last.stage)}，但 stage 字段是 ${quote(state.stage)}——有人改了当前阶段却没记账`)
     }
   }
 
@@ -294,7 +298,7 @@ export function validateState(state, { stages } = {}) {
     for (const [k, v] of Object.entries(state.rework)) {
       if (!isNonNegativeInteger(v)) p(`rework[${quote(k)}] 不是非负整数`)
       else if (v > REWORK_LIMIT) p(`rework[${quote(k)}] 是 ${v}，超过硬上限 ${REWORK_LIMIT}（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级）`)
-      if (isPlainObject(stages) && !Object.hasOwn(stages, k)) p(`rework 里有 ${inline(k)}，但 stages.json 里没有这个阶段`)
+      if (isPlainObject(stages) && !Object.hasOwn(stages, k)) p(`rework 里有 ${quote(k)}，但 stages.json 里没有这个阶段`)
     }
     // §4.2 ③「不可重置」的落点：rework 必须严格等于 history 的派生量。
     // 两个方向都查——改小是逃预算，改大是虚报返工把自己推进升级。
@@ -305,7 +309,7 @@ export function validateState(state, { stages } = {}) {
         const have = state.rework[k] ?? 0
         const want = derived[k] ?? 0
         if (have !== want) {
-          p(`rework[${quote(k)}] 是 ${val(have)}，但 history 里 ${inline(k)} 出现了 ${want + 1} 次，应当是 ${want}——` +
+          p(`rework[${quote(k)}] 是 ${quote(have)}，但 history 里 ${quote(k)} 出现了 ${want + 1} 次，应当是 ${want}——` +
             `计数是 history 的派生量，不能单独改（规格 §4.2 ③）`)
         }
       }

@@ -1350,6 +1350,10 @@ try {
   // stderr 的传导链（真的从这个 catch 走到 crashNotice、真的写了 stderr、
   // 真的 exit 0）由一次性注入 throw 验证过，不留成永久测试，做法与
   // hooks/lib/deny.mjs 头部对 denyOutput 的同类说明保持一致。
+  //
+  // ⚠️ M3s 订正（docs/27 §3）：上面「从外部没有任何输入能真正触发到」不成立。复核找到过三种：
+  // state.stage 写成 {"toString":1} 这样的对象、project.json 的 paths 元素写成这样的对象（这两种
+  // 已在 isStageDone 与 computeReach 挡掉），以及一份大到转不成字符串的产物（还开着，docs/27 §4）。
   process.stderr.write(crashNotice(CHECK, err))
   process.exit(0)
 }

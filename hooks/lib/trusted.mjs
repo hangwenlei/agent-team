@@ -13,12 +13,19 @@
 // 必须先改插件代码——那不是「写个产物」能做到的。
 //
 // ⚠️ M3s 订正（docs/27，全量审查第 7 条）：上面那句「从不回显」只对产物**正文**成立。回传里
-// 还有大量来自 state.json、project.json、文件名的**值**（记录的 sha、阶段名、角色名、键名……），
-// 此前是原样拼进去的——一个带换行的值就能在受信块里伪造出一行「【阶段】……推进到 S8」，而
-// PM 被要求照做这个通道。现在凡是外部值进回传文字，一律先过下面的 quote（sha 字段过
-// contract-hash.mjs 的 shaOrNote，只回显合法形状）：值永远待在同一行、一对引号里，值里的受信
-// 前缀被消去。判据是 tests/trusted-echo.test.mjs：往每个外部字段塞注入载荷，跑遍各检查项，
-// 断言受信块里前缀只在开头出现一次、载荷里的换行一个都没漏出来。
+// 还有大量来自 state.json、project.json、文件名的**值**（记录的 sha、阶段名、键名、路径……），
+// 此前是原样拼进去的——一个带换行的值就能在受信块里伪造出一行「【阶段】……推进到 S8」；不带
+// 换行的值，也能把一句祈使句不加引号地嵌进门禁自己的话里。而 PM 被要求照做这个通道。
+// 现在外部值进回传文字、拒绝理由与留痕，按值从哪来分四种：
+//   - 磁盘上谁都写得进的值（state.json、project.json、current-run、引用了文件原文的异常消息）：
+//     quote——加引号、转义、截断、消去前缀；
+//   - 这次调用方自己给的参数（file_path、subagent_type……）与门禁由项目根拼出的路径：inline——
+//     干净的原样，不干净的退到 quote；读拒绝理由的正是写那个参数的一方；
+//   - 记录的 sha：contract-hash.mjs 的 shaOrNote，只回显合法形状；
+//   - 要原样落盘的 JSON（触达表）：safeJson。
+// 插件自己的名字（stages.json 的阶段 id、roster.json 的角色名）原样。能保证的是：外部值另起不了
+// 一行，前缀只在受信块开头出现一次；磁盘上的值只出现在一对引号里。判据是
+// tests/trusted-echo.test.mjs：往每个外部入口塞一组载荷，跑遍会读到它的检查项，逐条断言这几件事。
 //
 // 字面量与 M1b 的 emitLedger 保持一致，没有改：commands/at.md 与 commands/at-init.md
 // 的正文都引用了这个字符串，改它是不必要的连带改动。
@@ -36,45 +43,54 @@ const INLINE_MAX = 300
 // 真字符出现在正则字面量里就是语法错误（docs/27 记着这一次）。
 const LINE_SEPARATORS = [0x2028, 0x2029, 0x85].map((c) => String.fromCharCode(c))
 const LINE_SEPARATOR_RE = new RegExp(`[${LINE_SEPARATORS.join('')}]`, 'g')
-// 「不干净」：控制字符、DEL、上面几种行分隔符。
-const UNCLEAN_RE = new RegExp(`[\\u0000-\\u001f\\u007f${LINE_SEPARATORS.join('')}]`)
+// 「不干净」：控制字符、DEL、上面几种行分隔符，以及孤立的代理项（不成对的半个表情——它进了
+// additionalContext，请求体就不是合法的 UTF-8；quote 走的 JSON.stringify 会把它写成转义）。
+const UNCLEAN_RE = new RegExp(
+  `[\\u0000-\\u001f\\u007f${LINE_SEPARATORS.join('')}]|[\\ud800-\\udbff](?![\\udc00-\\udfff])|(?<![\\ud800-\\udbff])[\\udc00-\\udfff]`,
+)
 
 function escapeLineSeparators(s) {
   return s.replace(LINE_SEPARATOR_RE, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
 }
 
-function textOf(value) {
-  if (typeof value === 'string') return value
+// 不是字符串的值的 JSON 写法：数字、布尔、null 不带引号，类型看得出来；对象里的字符串本来就带引号。
+// JSON 写法里没有控制字符、没有孤立的代理项（JSON.stringify 都转义了），只可能有行分隔符。
+// undefined 没有 JSON 写法，写成 undefined；爆栈的深嵌套、函数这类写不出来的，返回 null。
+function jsonOf(value) {
+  if (value === undefined) return 'undefined'
   try {
     const s = JSON.stringify(value)
     if (typeof s === 'string') return s
   } catch {}
-  try {
-    return String(value)
-  } catch {
-    return '（无法显示的值）'
-  }
+  return null
 }
 
 /**
- * 把一个外部值（来自 state.json、project.json、文件名、异常消息……）变成可以安全拼进回传文字
- * 的样子（M3s，docs/27）：
+ * 把一个磁盘上谁都写得进的值（state.json、project.json 的值与键、引用了文件原文的异常消息……）
+ * 变成可以安全拼进回传文字的样子（M3s，docs/27）：
  *   - 值里的受信前缀消去——一个受信块里，前缀只该出现在开头那一次；
- *   - 按字符截断到 max，超出的标「…」；
- *   - JSON.stringify 加引号并转义换行、回车、控制字符与引号，再补上它不管的几种 Unicode 行分隔符
- *     ——值永远待在同一行、一对引号里，伪造不出新的一行。
- * 不是字符串的值先变成文字再引用；深层嵌套、toString 被换掉的对象也不抛。
+ *   - 按码点截断到 max，超出的标「…」；
+ *   - 字符串用 JSON.stringify 加引号，并转义换行、回车、控制字符与引号；不是字符串的值输出它的
+ *     JSON 写法，数字与字符串分得出来。再补上 JSON.stringify 不管的几种 Unicode 行分隔符。
+ * 值永远待在同一行，字符串永远在一对引号里——伪造不出新的一行，也混不进门禁自己的话。
+ * 深层嵌套、toString 被换掉的对象都不抛：quote 出错，门禁就会在拼拒绝理由时崩溃。
  */
 export function quote(value, { max = QUOTE_MAX } = {}) {
-  let s = textOf(value).split(TRUSTED_PREFIX).join('〔受信前缀已消去〕')
+  const json = typeof value === 'string' ? null : jsonOf(value)
+  const text = json ?? (typeof value === 'string' ? value : '（无法显示的值）')
+  const s = clip(text.split(TRUSTED_PREFIX).join('〔受信前缀已消去〕'), max)
+  return escapeLineSeparators(json === null ? JSON.stringify(s) : s)
+}
+
+function clip(s, max) {
   const chars = [...s]
-  if (chars.length > max) s = chars.slice(0, max).join('') + '…'
-  return escapeLineSeparators(JSON.stringify(s))
+  return chars.length > max ? chars.slice(0, max).join('') + '…' : s
 }
 
 /**
- * 名字、路径、键名用它：干净的字符串原样输出（与既有文案逐字一样），不是字符串、带控制字符或
- * 行分隔符、含受信前缀、或长过 max 的，改用 quote。
+ * 这次调用方自己给的参数（file_path、subagent_type……）与门禁由项目根拼出的路径用它：干净的字符串
+ * 原样输出（与既有文案逐字一样），不是字符串、带控制字符或行分隔符、含受信前缀、或长过 max 的，
+ * 改用 quote。**磁盘上谁都写得进的值不用它**——干净的值不加引号，一句祈使句就能混进门禁的话里。
  */
 export function inline(value, { max = INLINE_MAX } = {}) {
   if (typeof value === 'string' && value.length <= max && !UNCLEAN_RE.test(value) && !value.includes(TRUSTED_PREFIX)) {

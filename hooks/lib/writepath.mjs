@@ -223,7 +223,7 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     return {
       decision: 'deny',
       reason:
-        `${who} 不得写 ${fp}——这条路径归 ${inline(claimant[0])}。` +
+        `${who} 不得写 ${fp}——这条路径归 ${quote(claimant[0])}。` +
         `跨角色的改动要经上级协调，不要直接动别人的地盘。`,
     }
   }

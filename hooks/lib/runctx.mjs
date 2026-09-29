@@ -132,7 +132,7 @@ function readJson(path) {
   // isValidInput 就是为了挡同一类输入才加的，这里不能是唯一的例外
   // （Task 2 评审 I2）。
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return { ok: false, reason: `读取 ${path} 失败：内容不是一个 JSON 对象` }
+    return { ok: false, reason: `读取 ${inline(path)} 失败：内容不是一个 JSON 对象` }
   }
   return { ok: true, value }
 }
@@ -254,7 +254,7 @@ export function readRunContext(projectDir, pluginDir) {
             ok: false,
             kind: 'unreadable',
             agentTeamDir: base,
-            reason: `找不到 ${pointer}，而 ${runsDir} 读不出来：${quote(err.message, { max: 120 })}`,
+            reason: `找不到 ${inline(pointer)}，而 ${inline(runsDir)} 读不出来：${quote(err.message, { max: 120 })}`,
           }
         }
         if (entries.length > 0) {
@@ -262,7 +262,7 @@ export function readRunContext(projectDir, pluginDir) {
             ok: false,
             kind: 'unreadable',
             agentTeamDir: base,
-            reason: `找不到 ${pointer}，但 ${runsDir} 下非空——有人建过 run 而指针不在，不是没有 run`,
+            reason: `找不到 ${inline(pointer)}，但 ${inline(runsDir)} 下非空——有人建过 run 而指针不在，不是没有 run`,
           }
         }
       }
@@ -270,7 +270,7 @@ export function readRunContext(projectDir, pluginDir) {
         ok: false,
         kind: 'no-run',
         agentTeamDir: base,
-        reason: `找不到 ${pointer}——当前没有进行中的 run`,
+        reason: `找不到 ${inline(pointer)}——当前没有进行中的 run`,
       }
     }
 
@@ -323,7 +323,7 @@ export function readRunContext(projectDir, pluginDir) {
         ok: false,
         kind: 'unreadable',
         agentTeamDir: base,
-        reason: `current-run 指向 ${runId}，但 ${runDir} 不存在`,
+        reason: `current-run 指向 ${inline(runId)}，但 ${inline(runDir)} 不存在`,
       }
     }
 

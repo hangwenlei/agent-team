@@ -26,7 +26,10 @@ export function computeReach({ roster, paths }) {
   const owners = isPlainObject(paths) ? paths : {}
   // project.json 是用户手写的配置，形状不该指望它总是对的——某个角色的值写成字符串
   // 或 null 时当作「没认领任何路径」，不抛（与 writepath.mjs 的 underAny 同一种防御）。
-  const ownOf = (role) => (Array.isArray(owners[role]) ? owners[role] : [])
+  // 数组里不是字符串的元素同样跳过（M3s，docs/27 §3）：它会被拿去做 widenedBy 的属性键，
+  // {"toString":1} 这样的对象让 ToPropertyKey 抛异常，【触达表】整条消失。形状校验本身是
+  // 全量审查第 10 条的事。
+  const ownOf = (role) => (Array.isArray(owners[role]) ? owners[role].filter((p) => typeof p === 'string') : [])
 
   for (const role of Object.keys(roster)) {
     const own = ownOf(role)
