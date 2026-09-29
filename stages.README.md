@@ -311,5 +311,10 @@ M1a 在 `hooks/lib/writepath.mjs` 里记过一条 I3：稳态下被 `settings.js
 
 两道校验都要在，不是新的取代旧的：H6 挡的是「这一次写入本身」；`validateState` 兜的
 是 H6 覆盖不到的路径（比如没有经过 Edit/Write 而是被别的手段写坏的 `state.json`）。
+
+M3r（`docs/26`，全量审查第 5、6 条）补了两条，都是「H6 算不准的时候不再放行」：新内容必须是
+合法的 JSON 对象（只有旧的一侧本来就读不出来时放行，那是把坏文件修回去的路）；`Edit` 由
+`replayEdit` 只镜像平台「精确命中」那一层来算新内容，算不出来就拒、让它改用 `Write`。写进去
+读不出来的 `state.json` 由 ledger 回传一条【state.json】——`validateState` 读不出文件，兜不了这一种。
 完整设计与判据逐条理由见 `hooks/lib/rework-guard.mjs` 头部——不在这里重复第二遍，
 这份文件已经记着「重复会分叉」的教训（见本文件其它小节）。
