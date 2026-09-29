@@ -15,6 +15,8 @@ import { CHECKS } from '../hooks/lib/checks.mjs'
 import { GATE_CHECK_PATH, GATE_CHECK_ONLINE, isGateCheck, gateCheckReason } from '../hooks/lib/gate-check.mjs'
 
 const BS = String.fromCharCode(92)
+// 反斜杠只在 Windows 上是分隔符：Linux / macOS 上 `.agent-team\gate-check` 是一个字面名字的文件，本来就不算自检。
+const WIN = process.platform === 'win32'
 
 // ---- 路径判定 ----
 
@@ -27,7 +29,7 @@ test('isGateCheck：末两段恰好是 .agent-team/gate-check 才算——写法
       `${base}/.agent-team/gate-check`,
       join(base, '.AGENT-TEAM', 'Gate-Check'),
       GATE_CHECK_PATH,
-      GATE_CHECK_PATH.split('/').join(BS),
+      ...(WIN ? [GATE_CHECK_PATH.split('/').join(BS)] : []),
     ]) {
       assert.ok(isGateCheck(p), p)
     }
@@ -126,7 +128,7 @@ test('H3：CLAUDE_PROJECT_DIR 指向别处、目标项目里还没有 .agent-tea
 test('H3：路径写成反斜杠、大写、相对路径——照样拿到「在线」', () => {
   withProject('ok', (p) => {
     for (const fp of [
-      `${p}${BS}.agent-team${BS}gate-check`,
+      ...(WIN ? [`${p}${BS}.agent-team${BS}gate-check`] : []),
       join(p, '.AGENT-TEAM', 'GATE-CHECK'),
       GATE_CHECK_PATH,
     ]) {
