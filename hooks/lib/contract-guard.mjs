@@ -29,6 +29,7 @@
 import { resolve } from 'node:path'
 import { exoticPath, norm } from './path-norm.mjs'
 import { MAIN, callerOf } from './decide.mjs'
+import { inline } from './trusted.mjs'
 
 const CONTRACT = '00-contract.md'
 
@@ -100,7 +101,7 @@ export function decideContractGuard({ agentType, filePath, runDir }) {
   if (exotic) {
     return {
       decision: 'deny',
-      reason: `不得写 ${filePath}——${exotic}。门禁认不出它是不是契约，按安全边界拒绝；请用普通的本地绝对路径。`,
+      reason: `不得写 ${inline(filePath)}——${exotic}。门禁认不出它是不是契约，按安全边界拒绝；请用普通的本地绝对路径。`,
     }
   }
 

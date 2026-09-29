@@ -11,6 +11,9 @@ import { exoticPath, norm, underDir } from './path-norm.mjs'
 import { isControlFile } from './control-files.mjs'
 import { isContractWriter } from './contract-guard.mjs'
 import { stageRoles, expandProduces } from './stages.mjs'
+// 拒绝理由会被模型读到；角色名（hook 输入的 agent_type）、路径（tool_input）、project.json 的键与值
+// 一律过 inline / quote（M3s，docs/27）。
+import { inline, quote } from './trusted.mjs'
 
 function underAny(target, prefixes, base) {
   // 评审三轮 Minor 3：prefixes 理论上总是数组（project.paths 的值），但
@@ -77,6 +80,8 @@ export function stageOwnerOfRunPath(stages, rd, target) {
 
 export function decideWritePath({ role, filePath, project, runDir, stages, agentTeamDir }) {
   if (typeof filePath !== 'string' || !filePath) return { decision: 'allow' }
+  const who = inline(role)
+  const fp = inline(filePath)
 
   // M3q（docs/25）：解析不了的写法（流后缀、结尾带点或空格、项目不在网络共享上却写网络路径）
   // 排在一切比对之前拒掉——下面的每一条判据都要先认出「这是哪个文件」，而这些写法认不出来，
@@ -86,7 +91,7 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   if (exotic) {
     return {
       decision: 'deny',
-      reason: `${role} 不得写 ${filePath}——${exotic}。请用项目里普通的本地绝对路径。`,
+      reason: `${who} 不得写 ${fp}——${exotic}。请用项目里普通的本地绝对路径。`,
     }
   }
 
@@ -115,7 +120,7 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     return {
       decision: 'deny',
       reason:
-        `${role} 不得写 ${filePath}——这是编排层的控制文件（run 指针、项目配置、` +
+        `${who} 不得写 ${fp}——这是编排层的控制文件（run 指针、项目配置、` +
         `触达表、运行状态），只有 PM（项目经理）能写。控制文件不是任何阶段的产物，` +
         `不参与角色认领：流程状态该由编排层记账，不该由执行角色自己改。你如果认为` +
         `流程状态不对（比如阶段该推进了、返工计数不对），把它冒泡给上级，由 PM 落盘。`,
@@ -168,14 +173,14 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
         return {
           decision: 'deny',
           reason:
-            `${role} 不得写 ${filePath}——这是 ${owner.stageId} 的产物（${owner.produces}），` +
+            `${who} 不得写 ${fp}——这是 ${owner.stageId} 的产物（${owner.produces}），` +
             `归 ${owner.role}。跨角色的改动要经上级协调，不要直接动别人的地盘。`,
         }
       }
       return {
         decision: 'deny',
         reason:
-          `${role} 不得写 ${filePath}——run 目录下只有自己阶段的产物可写，这条路径不是任何` +
+          `${who} 不得写 ${fp}——run 目录下只有自己阶段的产物可写，这条路径不是任何` +
           `阶段的 produces（比如运行状态文件 state.json 就不是流程产物，不能被角色直接改）。`,
       }
     }
@@ -199,8 +204,8 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     return {
       decision: 'deny',
       reason:
-        `${role} 不得写 ${filePath}——.agent-team/project.json 里 paths.${role} 不是数组` +
-        `（是 ${JSON.stringify(myPaths)}），这是配置错误，不是这次调用的问题。`,
+        `${who} 不得写 ${fp}——.agent-team/project.json 里 paths.${who} 不是数组` +
+        `（是 ${quote(myPaths)}），这是配置错误，不是这次调用的问题。`,
     }
   }
 
@@ -218,7 +223,7 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     return {
       decision: 'deny',
       reason:
-        `${role} 不得写 ${filePath}——这条路径归 ${claimant[0]}。` +
+        `${who} 不得写 ${fp}——这条路径归 ${quote(claimant[0])}。` +
         `跨角色的改动要经上级协调，不要直接动别人的地盘。`,
     }
   }
@@ -226,7 +231,7 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   return {
     decision: 'deny',
     reason:
-      `${role} 不得写 ${filePath}——这条路径在 .agent-team/project.json 里没有被任何角色认领。` +
+      `${who} 不得写 ${fp}——这条路径在 .agent-team/project.json 里没有被任何角色认领。` +
       `先在 project.json 的 paths 里把它划给某个角色，再动它。`,
   }
 }

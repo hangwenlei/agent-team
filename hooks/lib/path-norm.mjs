@@ -26,6 +26,7 @@
 // 只有持 Bash 的角色建得出来，而 Bash 本来就不经门禁。
 import { lstatSync, readlinkSync, realpathSync, statSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
+import { inline } from './trusted.mjs'
 
 // 同一个进程里对同一条路径只解析一次：一次门禁判定里 norm() 会被拿同样的前缀调很多遍
 // （stageOwnerOfRunPath 逐阶段逐产者、underAny 逐前缀），而门禁进程只活一次调用。
@@ -162,28 +163,28 @@ export function exoticPath(p, projectRoot, { platform = process.platform } = {})
   if (platform !== 'win32' || typeof p !== 'string' || !p) return null
   const s = p.replace(/\//g, '\\')
   if (/^\\\?\?\\/.test(s)) {
-    return `这是 NT 名字空间前缀（\\??\\）的写法，门禁认不出它指向哪个文件：${p}`
+    return `这是 NT 名字空间前缀（\\??\\）的写法，门禁认不出它指向哪个文件：${inline(p)}`
   }
   const unc = uncShare(s)
   if (!unc && /^\\\\[?.]\\/.test(s) && !/^\\\\[?.]\\[A-Za-z]:(\\|$)/.test(s)) {
-    return `这是不带盘符的设备路径，门禁认不出它指向哪个文件：${p}`
+    return `这是不带盘符的设备路径，门禁认不出它指向哪个文件：${inline(p)}`
   }
   // 去掉网络共享前缀或带盘符的设备前缀之后的那一段；冒号只许出现在盘符位置。
   const rest = unc ? s.slice(unc.length) : s.replace(/^\\\\[?.]\\/, '')
   const colonFrom = !unc && /^[A-Za-z]:/.test(rest) ? 2 : 0
   if (rest.indexOf(':', colonFrom) !== -1) {
-    return `路径里带流后缀（冒号之后的部分）：${p}`
+    return `路径里带流后缀（冒号之后的部分）：${inline(p)}`
   }
   const segs = rest.split('\\')
   if (segs.some((x) => x !== '.' && x !== '..' && x !== '' && /[. ]$/.test(x))) {
-    return `路径里有以点或空格结尾的段（Windows 上指向的可能是另一个名字）：${p}`
+    return `路径里有以点或空格结尾的段（Windows 上指向的可能是另一个名字）：${inline(p)}`
   }
   const rootShare = typeof projectRoot === 'string' ? uncShare(projectRoot.replace(/\//g, '\\')) : null
   if (unc && (!rootShare || rootShare.toLowerCase() !== unc.toLowerCase())) {
-    return `这是网络路径（${unc}），而项目不在这个共享上——它可能绕回本机的任何文件：${p}`
+    return `这是网络路径（${inline(unc)}），而项目不在这个共享上——它可能绕回本机的任何文件：${inline(p)}`
   }
   if (!unc && rootShare) {
-    return `项目在网络共享上（${rootShare}），这却是本地盘路径——它可能经本机共享绕回项目里的任何文件：${p}`
+    return `项目在网络共享上（${inline(rootShare)}），这却是本地盘路径——它可能经本机共享绕回项目里的任何文件：${inline(p)}`
   }
   return null
 }

@@ -28,6 +28,8 @@
 // 没错"（拿到 'SubagentStop' 就该产出 exit 2 + stderr 这个形状），两者答的
 // 是不同的问题，不是同一件事测了两遍。
 
+import { quote } from './trusted.mjs'
+
 /**
  * @param {string} reason 拒绝理由
  * @param {string} event hook 事件名（CHECKS[name].event）
@@ -87,7 +89,7 @@ export function denyOutput(reason, event) {
  */
 export function crashNotice(check, err) {
   return (
-    `agent-team ${check} 检查项在判定过程中异常崩溃（${err?.message ?? String(err)}），本次放行、` +
+    `agent-team ${check} 检查项在判定过程中异常崩溃（${quote(err?.message ?? err, { max: 120 })}），本次放行、` +
     `没有拦截——这个检查项是 fail open 的。这类崩溃通常来自插件自带文件读坏或形状不对，` +
     `先检查 roster.json 与 stages.json 能否被 JSON.parse。\n`
   )

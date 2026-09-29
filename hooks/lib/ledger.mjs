@@ -12,7 +12,8 @@
 //
 // 本模块只做格式化，一切 I/O 在 gate.mjs 里；判据本身来自 contract-hash.mjs /
 // reach.mjs / state.mjs 三个纯函数模块。
-import { compareContractSha } from './contract-hash.mjs'
+import { compareContractSha, shaOrNote } from './contract-hash.mjs'
+import { inline, quote, safeJson } from './trusted.mjs'
 import { nextStage } from './state.mjs'
 
 // 「这个动作只能由 PM 执行、非 PM 请回报上级」——stageDone 与 produce 两个分支都要
@@ -67,7 +68,8 @@ export function buildLedgerNotices({
     for (const [role, r] of Object.entries(reach)) {
       if (!r || !r.widened) continue
       for (const [prefix, via] of Object.entries(r.widenedBy ?? {})) {
-        lines.push(`  ${role} 还能写到 ${prefix}（经 ${via}）`)
+        // 角色与经由链来自 roster.json（插件自己的名字）；前缀来自 project.json，谁都写得进，加引号。
+        lines.push(`  ${inline(role)} 还能写到 ${quote(prefix)}（经 ${inline(via)}）`)
       }
     }
     // 措辞：这是「当前配置下各角色实际能写到哪些地方」，不是「限制」
@@ -85,7 +87,7 @@ export function buildLedgerNotices({
     out.push(
       `【触达表】${body}\n` +
         `把下面这份 JSON 原样写进 .agent-team/reach.json：\n` +
-        `${JSON.stringify(reach, null, 2)}`,
+        `${safeJson(reach)}`,
     )
   }
 
@@ -109,7 +111,7 @@ export function buildLedgerNotices({
         (recorded === undefined
           ? `【产物】${produceName} 的 sha256 是 ${produceSha}，state.json 的 artifacts 里还没有记。` +
             `把这一条原样写进去——不要自己拼一个。它是 §6.2 内容比对的基线，也是 /at-status 对账的依据。`
-          : `【产物】${produceName} 的 sha256 是 ${produceSha}，而 artifacts 里记的是 ${recorded}。` +
+          : `【产物】${produceName} 的 sha256 是 ${produceSha}，而 artifacts 里记的是 ${shaOrNote(recorded)}。` +
             `这份产物在记账之后被改过——如果是有意的，把新值写进去；如果不是，去看看是谁改的。`
         ) + who,
       )

@@ -1,6 +1,9 @@
 // 纯函数决策核心。不读 stdin、不写 stdout、不调 process.exit，
 // 因此可以脱离 Claude Code 直接单测。
 
+// 拒绝理由里模型给的目标名、isolation 值过 inline / quote（M3s，docs/27）。
+import { inline, quote } from './trusted.mjs'
+
 export const MAIN = '__main__'
 
 // 插件提供的 agent 在平台上的注册名带插件前缀（agent-team:at-pm），花名册用裸名书写。
@@ -113,7 +116,7 @@ export function decideDelegation(input, roster) {
     const isolation = input?.tool_input?.isolation
     if (isolation) {
       return deny(
-        `角色 ${caller} 派发 ${target} 时带了 isolation: ${JSON.stringify(isolation)}。` +
+        `角色 ${caller} 派发 ${target} 时带了 isolation: ${quote(isolation)}。` +
           `团队角色必须在同一棵工作树里干活：隔离出去的子代理写的是另一份检出，门禁读不到` +
           `这趟 run，它的产物也落不回 run 目录。去掉 isolation 参数重新派发。` +
           `如果加它是因为平台说后台会话不能写共享检出：这支团队在那种会话里跑不起来，` +
@@ -125,7 +128,7 @@ export function decideDelegation(input, roster) {
   }
 
   return deny(
-    `角色 ${caller} 不得派发给 ${target}。它可以派发的角色是：${fmt(allowed)}。` +
-      `如果这项工作确实需要 ${target}，把它冒泡给上级，不要绕过花名册。`,
+    `角色 ${caller} 不得派发给 ${inline(target)}。它可以派发的角色是：${fmt(allowed)}。` +
+      `如果这项工作确实需要 ${inline(target)}，把它冒泡给上级，不要绕过花名册。`,
   )
 }
