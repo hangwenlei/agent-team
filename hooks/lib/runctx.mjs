@@ -149,9 +149,31 @@ export function readProjectConfig(projectDir) {
   }
 }
 
-// projectDir：用户仓库根，放 .agent-team（current-run / state.json / project.json）。
-// pluginDir：插件根，放 stages.json。两者不是同一个目录——hook 以用户项目为 cwd 运行，
-// 插件文件要用 ${CLAUDE_PLUGIN_ROOT} 定位。混用会在真实环境里读不到东西而单测照样绿。
+/**
+ * 用户项目根：平台注入的 CLAUDE_PROJECT_DIR 优先，缺失或为空串时才退回 cwd。
+ *
+ * 不能只用 cwd（docs/24 §2.1）：平台按会话**当前** cwd 起 hook 进程，主线程 Bash 做过
+ * cd 之后这个 cwd 一直停在子目录里，而 at-pm 就是持有 Bash 的主线程。那之后
+ * `<子目录>/.agent-team` 里找不到 run，readRunContext 判 no-run，H2–H6 全部 fail open。
+ * CLAUDE_PROJECT_DIR 在整个会话里固定指向项目根，不随 cd 漂移。
+ *
+ * 退回 cwd 只为两种调用方：直接跑 gate.mjs 的子进程测试，以及没有注入这个变量的宿主。
+ * 本插件的 hooks.json 用的 args 写法要 Claude Code 2.1.139 以上，这些版本都注入它，
+ * 所以真实会话里走不到这条退路。
+ *
+ * 不向上逐级查找 .agent-team：变量在，就用不上逐级查找；变量不在，往上查可能撞上一个
+ * 不相干的祖先目录（嵌套仓库、home 目录），错读别人的 run 比读不到更糟。
+ * 与本文件其它导出一样绝不抛。
+ */
+export function projectRootFrom(env, cwd) {
+  const dir = env !== null && typeof env === 'object' ? env.CLAUDE_PROJECT_DIR : undefined
+  return typeof dir === 'string' && dir !== '' ? dir : cwd
+}
+
+// projectDir：用户仓库根，放 .agent-team（current-run / state.json / project.json），
+// 由 projectRootFrom 定出来。
+// pluginDir：插件根，放 stages.json。两者不是同一个目录——插件文件要用
+// ${CLAUDE_PLUGIN_ROOT} 定位。混用会在真实环境里读不到东西而单测照样绿。
 export function readRunContext(projectDir, pluginDir) {
   try {
     const base = join(projectDir, '.agent-team')

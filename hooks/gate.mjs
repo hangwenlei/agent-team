@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
 import { MAIN, callerOf, decideDelegation, stripPluginPrefix } from './lib/decide.mjs'
 import { denyOutput, crashNotice } from './lib/deny.mjs'
-import { readProjectConfig, readRunContext } from './lib/runctx.mjs'
+import { projectRootFrom, readProjectConfig, readRunContext } from './lib/runctx.mjs'
 import { decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
@@ -35,10 +35,12 @@ import { installTrace } from './lib/trace.mjs'
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..')
-// 门禁读的运行状态在**用户项目**里，不在插件目录里。
-// hook 以用户项目为 cwd 运行，所以用 process.cwd()；
+// 门禁读的运行状态在**用户项目**里，不在插件目录里。项目根取平台注入的
+// CLAUDE_PROJECT_DIR，缺失时才退回 process.cwd()——hook 进程的 cwd 是会话**当前**的
+// cwd，主线程 Bash 做过 cd 就停在子目录里，拿它当项目根会让 H2–H6 全部 fail open
+// （M3p，docs/24 §2.1；口径与理由在 hooks/lib/runctx.mjs 的 projectRootFrom）。
 // 插件自身的文件（roster.json、stages.json）仍用 ROOT。
-const ROOT_PROJECT = process.cwd()
+const ROOT_PROJECT = projectRootFrom(process.env, process.cwd())
 
 // 门禁留痕（M3l，默认关）：打开时每次 exit 0 往 stderr 多写一行，让静默放行在转录里
 // 留下 CLI 自己写的记录。纯旁路——不碰 stdout、不碰退出码、exit 2 那一支一个字不加、
