@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { decideWritePath, stageOwnerOfRunPath } from '../hooks/lib/writepath.mjs'
 import { norm } from '../hooks/lib/path-norm.mjs'
+import { resolve } from 'node:path'
 
 const PROJECT = {
   paths: {
@@ -374,11 +375,16 @@ test('相对路径按 cwd 解析，不会被误判成落在调用者自己的地
 // 没有区别；{ skip } 会把它标成 skipped，"这条没跑"这件事看得见。
 // tests/contract-guard.test.mjs 早就改用 { skip } 并在注释里点名了这个差别，
 // 只是没回头改这里。
+//
+// M3p（CI 第一次在别的机器上跑）：盘符取**当前盘**，不写死 C。RUN 是无盘符绝对路径，
+// resolve 时落在 cwd 所在的盘上；GitHub 的 Windows runner 把仓库签出在 D 盘，写死的
+// 'c:\proj' 在那里是跨盘，判 deny 是对的——测到的就不再是「大小写不同」这件事。
+const DRIVE = resolve('/').slice(0, 1)
 test(
   'Windows 盘符大小写不同视为同一路径——不能误判成未认领',
   { skip: process.platform !== 'win32' },
   () => {
-    const r = call('at-backend', 'c:\\proj\\src\\server\\api.ts')
+    const r = call('at-backend', `${DRIVE.toLowerCase()}:\\proj\\src\\server\\api.ts`)
     assert.equal(r.decision, 'allow')
   },
 )
@@ -387,7 +393,7 @@ test(
   'Windows 路径段大小写不同视为同一路径——不能误判成未认领',
   { skip: process.platform !== 'win32' },
   () => {
-    const r = call('at-backend', 'C:\\proj\\SRC\\server\\api.ts')
+    const r = call('at-backend', `${DRIVE.toUpperCase()}:\\proj\\SRC\\server\\api.ts`)
     assert.equal(r.decision, 'allow')
   },
 )

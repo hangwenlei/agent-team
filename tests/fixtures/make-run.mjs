@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 
@@ -41,8 +41,12 @@ import { join, dirname } from 'node:path'
 //     顺带覆盖那条真实存在的形状。要测「声明过的裁剪」就显式传进来。
 export function makeRun({ runId = 'r1', stage = 'S2', artifacts = [], project = null, stages = null, roster = [], history = null, trimmed = null } = {}) {
   // 两个根分开造：projectDir 模拟用户仓库，pluginDir 模拟插件安装目录。
-  const projectDir = mkdtempSync(join(tmpdir(), 'agent-team-proj-'))
-  const pluginDir = mkdtempSync(join(tmpdir(), 'agent-team-plug-'))
+  // realpath（M3p，CI 第一次在 macOS 上跑）：macOS 的 tmpdir() 是 /var/folders/...，而 /var 是
+  // /private/var 的软链接。门禁按字面比较路径，子进程的 process.cwd() 给的是解析后的
+  // /private/var/...，夹具交给测试的却是 /var/...——两边对不上，「这是不是契约 / run 目录」
+  // 全判成「不是」，门禁子进程测试成片地红。夹具只发规范路径，不在夹具这一层制造别名。
+  const projectDir = realpathSync(mkdtempSync(join(tmpdir(), 'agent-team-proj-')))
+  const pluginDir = realpathSync(mkdtempSync(join(tmpdir(), 'agent-team-plug-')))
 
   const runDir = join(projectDir, '.agent-team', 'runs', runId)
   mkdirSync(runDir, { recursive: true })
