@@ -24,34 +24,80 @@
 //
 // 仍然认不出来的（登记在 docs/25）：硬链接与 bind mount——同一个 inode、两条互不相干的路径，
 // 只有持 Bash 的角色建得出来，而 Bash 本来就不经门禁。
-import { lstatSync, readlinkSync, realpathSync } from 'node:fs'
+import { lstatSync, readlinkSync, realpathSync, statSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 
 // 同一个进程里对同一条路径只解析一次：一次门禁判定里 norm() 会被拿同样的前缀调很多遍
 // （stageOwnerOfRunPath 逐阶段逐产者、underAny 逐前缀），而门禁进程只活一次调用。
 const CANON = new Map()
+const FOLDS = new Map()
 
 /**
- * 大小写不敏感的平台：Windows（NTFS）与 macOS（APFS / HFS+ 的默认格式）。
- * 导出是为了能脱离当前平台单测这条口径。
+ * 探测不了时的平台默认：Windows（NTFS）与 macOS（APFS / HFS+ 的默认格式）不区分大小写。
+ * 真正的口径按目录探测（probeFoldsCase）——大小写敏感是文件系统、甚至是目录的属性：WSL 的
+ * /mnt/c、vfat、CIFS 在 Linux 上不区分，大小写敏感的 APFS 卷与开了按目录区分大小写的 NTFS
+ * 目录又区分。
  */
 export function foldsCase(platform) {
   return platform === 'win32' || platform === 'darwin'
 }
 
+/**
+ * dir（已存在、已 realpath）所在的目录区不区分大小写：把路径里最后一个带字母的段翻转大小写，
+ * 看是不是同一个对象（dev + ino）。翻转后不存在、或是另一个对象 → false；路径里没有字母可翻
+ * （盘根）或 dir 本身读不出来 → null，交给平台默认。stat 注入只为单测。
+ */
+export function probeFoldsCase(dir, stat = (p) => statSync(p, { bigint: true })) {
+  const segs = dir.split(/([\\/])/)
+  let i = segs.length - 1
+  for (; i >= 0; i--) if (/[A-Za-z]/.test(segs[i]) && !/^[A-Za-z]:$/.test(segs[i])) break
+  if (i < 0) return null
+  const flip = [...segs[i]].map((c) => (c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase())).join('')
+  let a
+  try {
+    a = stat(dir)
+  } catch {
+    return null
+  }
+  try {
+    const b = stat([...segs.slice(0, i), flip, ...segs.slice(i + 1)].join(''))
+    return a.dev === b.dev && a.ino === b.ino
+  } catch {
+    return false
+  }
+}
+
 export function norm(p) {
-  const real = canonical(resolve(p)).split(sep).join('/')
-  if (process.platform === 'darwin') return real.normalize('NFC').toLowerCase()
-  return foldsCase(process.platform) ? real.toLowerCase() : real
+  const raw = typeof p === 'string' ? p : String(p)
+  // 网络路径与不带盘符的设备路径：一次 fs 都不调（M3q 复核）。门禁在 PreToolUse 上跑，早于平台
+  // 对网络路径的人工确认；对 \\server\share 做一次 lstat 就会在用户来得及拒绝之前发出 SMB 连接，
+  // 服务器不通时逼近 30 秒超时，还可能泄露 NTLM 凭据。这些写法只做字面规范化；它们要不要拦由
+  // exoticPath() 管。代价：项目本身在网络共享上时，共享里的链接看不穿（登记在 docs/25）。
+  if (process.platform === 'win32' && isNetworkish(raw)) {
+    const lexical = raw.replace(/\//g, '\\').replace(/^\\\\[?.]\\UNC\\/i, '\\\\')
+    const out = (/^\\\\(?![?.]\\)/.test(lexical) ? resolve(lexical) : lexical).split(sep).join('/')
+    return out.toLowerCase()
+  }
+  const { real, prefix } = canonical(resolve(raw))
+  const out = real.split(sep).join('/')
+  const folds = prefix === null ? foldsCase(process.platform) : foldsAt(prefix)
+  if (process.platform === 'darwin') return folds ? out.normalize('NFC').toLowerCase() : out.normalize('NFC')
+  return folds ? out.toLowerCase() : out
+}
+
+function foldsAt(dir) {
+  if (!FOLDS.has(dir)) FOLDS.set(dir, probeFoldsCase(dir) ?? foldsCase(process.platform))
+  return FOLDS.get(dir)
 }
 
 // 已存在的最长前缀做 realpath.native（解析链接、8.3 短名、设备前缀、磁盘上的真实大小写），
 // 还不存在的尾巴原样拼回去。按 lstat 找前缀而不是 existsSync：后者跟随链接，一条悬空的链接
 // 会被当成「不存在」，可往它里面写恰恰会把目标建出来——所以悬空链接要自己 readlink 跟过去。
-// 绝不抛：任何一步出错都退回字面形式，比较照旧按字面进行。
+// 返回 { real, prefix }：prefix 是解析后那个已存在的目录（大小写探测在它上面做），一路都不存在时
+// 为 null。绝不抛：任何一步出错都退回字面形式，比较照旧按字面进行。
 function canonical(abs, depth = 0) {
   if (CANON.has(abs)) return CANON.get(abs)
-  let out = abs
+  let out = { real: abs, prefix: null }
   try {
     const tail = []
     let head = abs
@@ -67,12 +113,13 @@ function canonical(abs, depth = 0) {
         } catch {
           // 悬空链接：realpath 找不到目标。顺着链接自己走一步（有深度上限，防环）。
           if (st.isSymbolicLink() && depth < 16) {
-            real = canonical(resolve(dirname(head), readlinkSync(head)), depth + 1)
-          } else {
-            real = head
+            out = canonical(join(resolve(dirname(head), readlinkSync(head)), ...tail), depth + 1)
+            break
           }
+          real = head
         }
-        out = tail.length ? join(real, ...tail) : real
+        const isDir = st.isDirectory() || (st.isSymbolicLink() && tail.length > 0)
+        out = { real: tail.length ? join(real, ...tail) : real, prefix: isDir ? real : dirname(real) }
         break
       }
       const parent = dirname(head)
@@ -81,27 +128,42 @@ function canonical(abs, depth = 0) {
       head = parent
     }
   } catch {
-    out = abs
+    out = { real: abs, prefix: null }
   }
   CANON.set(abs, out)
   return out
 }
 
+// 网络路径、NT 名字空间前缀、不带盘符的设备路径：norm() 不碰、exoticPath() 要认的那一类。
+// 带盘符的设备前缀（\\?\C:\…、\\.\C:\…）不在其中——那是本地文件，realpath 会把它解析回普通写法。
+function isNetworkish(p) {
+  const s = p.replace(/\//g, '\\')
+  if (/^\\\?\?\\/.test(s)) return true
+  if (/^\\\\[?.]\\[A-Za-z]:(\\|$)/.test(s)) return false
+  return /^\\\\/.test(s)
+}
+
 /**
  * 解析不了、也没有正当用途的写法：返回一句理由；普通路径返回 null。只在 Windows 上有这些形式——
  * POSIX 上冒号、结尾的点与空格都是合法的文件名字符。
- *   - 流后缀（`::$DATA`、`:名字`）：冒号在 Windows 文件名里只可能是流分隔符。写主流等于写文件
- *     本身，写别的流则把数据挂在同一个文件上；两种都不是任何角色该做的事。
- *   - 路径段结尾带点或空格：Win32 会把它们剥掉，`state.json.` 就是 `state.json`。
- *   - 网络路径（`\\server\share`、`\\?\UNC\…`、`\\.\UNC\…`，含本机管理共享 `\\localhost\C$`）
- *     而项目不在同一个共享上：它可能绕回本机的任何一个文件，而门禁没法不碰网络就认出来是哪一个。
- *   - 不带盘符的设备路径（`\\?\GLOBALROOT\…`、`\\?\Volume{…}\…`、`\\.\pipe\…`）：同理认不出。
+ *   - 流后缀（`::$DATA`、`:名字`）：冒号在 Windows 文件名里只可能是流分隔符。
+ *   - 路径段结尾带点或空格：写入方不同，结果不同——不带 `\\?\` 前缀的 Win32 调用会把它们剥掉，
+ *     `state.json.` 就是 `state.json`；Node 与 Bun 的 fs 会加上前缀、建出一个字面名字的新文件。
+ *     门禁不知道写入方怎么处理，一律拒。
+ *   - 网络路径（`\\server\share`、`\\?\UNC\…`、`\\.\UNC\…`，含本机管理共享 `\\localhost\C$`）而
+ *     项目不在同一个共享上：它可能绕回本机的任何一个文件，而门禁没法不碰网络就认出来是哪一个。
+ *   - 反过来，项目在网络共享上、却写本地盘路径：同理，可能经本机共享绕回项目里的任何文件。
+ *   - NT 名字空间前缀（`\??\…`）与不带盘符的设备路径（`\\?\GLOBALROOT\…`、`\\?\Volume{…}\…`、
+ *     `\\.\pipe\…`）：同理认不出。
  * 带盘符的设备前缀（`\\?\C:\…`、`\\.\C:\…`）不在这里——norm() 会把它解析回普通写法。
  * 纯字符串判断，不碰文件系统（网络路径尤其不能碰：那会去连 SMB）。
  */
 export function exoticPath(p, projectRoot, { platform = process.platform } = {}) {
   if (platform !== 'win32' || typeof p !== 'string' || !p) return null
   const s = p.replace(/\//g, '\\')
+  if (/^\\\?\?\\/.test(s)) {
+    return `这是 NT 名字空间前缀（\\??\\）的写法，门禁认不出它指向哪个文件：${p}`
+  }
   const unc = uncShare(s)
   if (!unc && /^\\\\[?.]\\/.test(s) && !/^\\\\[?.]\\[A-Za-z]:(\\|$)/.test(s)) {
     return `这是不带盘符的设备路径，门禁认不出它指向哪个文件：${p}`
@@ -114,13 +176,14 @@ export function exoticPath(p, projectRoot, { platform = process.platform } = {})
   }
   const segs = rest.split('\\')
   if (segs.some((x) => x !== '.' && x !== '..' && x !== '' && /[. ]$/.test(x))) {
-    return `路径里有以点或空格结尾的段（Windows 会把它们剥掉，指向的是另一个名字）：${p}`
+    return `路径里有以点或空格结尾的段（Windows 上指向的可能是另一个名字）：${p}`
   }
-  if (unc) {
-    const rootShare = typeof projectRoot === 'string' ? uncShare(projectRoot.replace(/\//g, '\\')) : null
-    if (!rootShare || rootShare.toLowerCase() !== unc.toLowerCase()) {
-      return `这是网络路径（${unc}），而项目不在这个共享上——它可能绕回本机的任何文件：${p}`
-    }
+  const rootShare = typeof projectRoot === 'string' ? uncShare(projectRoot.replace(/\//g, '\\')) : null
+  if (unc && (!rootShare || rootShare.toLowerCase() !== unc.toLowerCase())) {
+    return `这是网络路径（${unc}），而项目不在这个共享上——它可能绕回本机的任何文件：${p}`
+  }
+  if (!unc && rootShare) {
+    return `项目在网络共享上（${rootShare}），这却是本地盘路径——它可能经本机共享绕回项目里的任何文件：${p}`
   }
   return null
 }

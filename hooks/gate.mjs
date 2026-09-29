@@ -23,7 +23,7 @@ import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideRework } from './lib/rework-guard.mjs'
 import { decideDeliverable } from './lib/deliverable.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
-import { isControlFile } from './lib/control-files.mjs'
+import { isControlFile, mayBeStateFile } from './lib/control-files.mjs'
 import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
 import { sha256OfContract } from './lib/contract-hash.mjs'
@@ -766,9 +766,10 @@ function main() {
 
     // M3q（docs/25）：认不出是哪个文件的写法（流后缀、结尾带点或空格、网络路径），可能正是
     // 某个 run 的 state.json——H6 认不出来就等于放行一次清零。只在这个项目确实用着这支团队
-    // （.agent-team 在）时拦：H6 挂在每一次 Edit/Write 上，别的项目不归它管。排在 norm() 之前，
-    // 网络路径不能碰。
-    const exotic = existsSync(agentTeamDir) ? exoticPath(filePath, ROOT_PROJECT) : null
+    // （.agent-team 在）、且最后一段可能就是 state.json（含 8.3 短名）时拦：H6 挂在每一次
+    // Edit/Write 上，主线程写网络上一个不相干的文件不归它管。排在 norm() 之前，网络路径不能碰。
+    const exotic =
+      existsSync(agentTeamDir) && mayBeStateFile(filePath) ? exoticPath(filePath, ROOT_PROJECT) : null
     if (exotic) {
       denyAndExit(
         `agent-team H6 返工预算：不得写 ${filePath}——${exotic}。门禁认不出它是不是 state.json，` +

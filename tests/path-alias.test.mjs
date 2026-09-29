@@ -12,15 +12,16 @@
 // 共享上却写网络路径）由 exoticPath() 认出来，门禁直接拒。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { norm, exoticPath, foldsCase } from '../hooks/lib/path-norm.mjs'
+import { norm, exoticPath, foldsCase, probeFoldsCase } from '../hooks/lib/path-norm.mjs'
+import { decideContractGuard } from '../hooks/lib/contract-guard.mjs'
 import { readRunContext } from '../hooks/lib/runctx.mjs'
 import { run, decisionOf, GATE, hermeticEnv } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 // readRunContext 还要读插件根下的 stages.json；makeRun 造的临时插件目录是空的，拿它当插件根，
 // 任何用例都会先因为读不到 stages.json 判 unreadable——那样测到的就不是 run id 这一条。
@@ -127,7 +128,7 @@ test('norm：macOS 默认卷上大小写变体得到同一个结果', { skip: !M
   }
 })
 
-test('foldsCase：win32 与 darwin 折叠大小写，linux 不折叠', () => {
+test('foldsCase（探测不了时的平台默认）：win32 与 darwin 折叠大小写，linux 不折叠', () => {
   assert.equal(foldsCase('win32'), true)
   assert.equal(foldsCase('darwin'), true)
   assert.equal(foldsCase('linux'), false)
@@ -286,7 +287,7 @@ test('门禁：at-acceptance 写 current-run::$DATA——H3 拒；PM 写 state.j
   })
 })
 
-test('门禁：at-acceptance 经本机管理共享写 project.json——H3 拒，而且不去碰网络', { skip: !WIN }, () => {
+test('门禁：at-acceptance 经本机管理共享写 project.json——H3 拒', { skip: !WIN }, () => {
   withRun(({ p, gate }) => {
     const unc = `\\\\localhost\\${p[0]}$${p.slice(2)}\\.agent-team\\project.json`
     assert.ok(denied(gate('writepath', write('agent-team:at-acceptance', unc))))
@@ -373,4 +374,252 @@ test('门禁：at-acceptance 写 00-contract.md.（结尾带点）——H4 自�
   withRun(({ gate, runDir }) => {
     assert.ok(denied(gate('contract', write('agent-team:at-acceptance', `${join(runDir, '00-contract.md')}.`))))
   })
+})
+
+// ==== M3q 复核轮（docs/25 §3）====
+
+// ---- 大小写：按目录探测，不按平台写死 ----
+//
+// 大小写敏感是文件系统、甚至是目录的属性：WSL 的 /mnt/c、vfat、CIFS 在 Linux 上不区分大小写；
+// 大小写敏感的 APFS 卷、开了按目录区分大小写的 NTFS 目录又区分。按平台写死，前者漏拦、后者
+// 多拦。现在对已存在的最长前缀翻转一段的大小写，看是不是同一个对象。
+
+test('probeFoldsCase：翻转大小写后指向同一个对象 → 折叠', () => {
+  const same = { dev: 1n, ino: 7n }
+  assert.equal(probeFoldsCase('/m/Proj', () => same), true)
+})
+
+test('probeFoldsCase：翻转大小写后不存在 → 不折叠', () => {
+  const stat = (p) => {
+    if (p === '/m/Proj') return { dev: 1n, ino: 7n }
+    const e = new Error('ENOENT')
+    e.code = 'ENOENT'
+    throw e
+  }
+  assert.equal(probeFoldsCase('/m/Proj', stat), false)
+})
+
+test('probeFoldsCase：翻转后是另一个对象（两个只差大小写的目录）→ 不折叠', () => {
+  const stat = (p) => (p === '/m/Proj' ? { dev: 1n, ino: 7n } : { dev: 1n, ino: 8n })
+  assert.equal(probeFoldsCase('/m/Proj', stat), false)
+})
+
+test('probeFoldsCase：路径里没有字母可翻（如盘根）→ null，交给平台默认', () => {
+  assert.equal(probeFoldsCase('/', () => ({ dev: 1n, ino: 1n })), null)
+})
+
+test('norm：在真实临时目录上，大小写变体是否得到同一个结果，与这个卷实际区不区分大小写一致', () => {
+  const d = tempDir('agent-team-case-')
+  try {
+    mkdirSync(join(d, 'CaseDir'))
+    let insensitive
+    try {
+      insensitive = realpathSync(join(d, 'casedir')) !== undefined
+    } catch {
+      insensitive = false
+    }
+    assert.equal(norm(join(d, 'CaseDir', 'x.md')) === norm(join(d, 'casedir', 'x.md')), insensitive)
+  } finally {
+    rmSync(d, { recursive: true, force: true })
+  }
+})
+
+// ---- exoticPath：补上的两种形状 ----
+
+test('exoticPath：单反斜杠的 NT 名字空间前缀 \\??\\ 认得出来', () => {
+  assert.ok(exoticPath('\\??\\UNC\\localhost\\C$\\p\\x', 'C:\\p', W))
+  assert.ok(exoticPath('\\??\\GLOBALROOT\\Device\\HarddiskVolume3\\p\\x', 'C:\\p', W))
+  assert.ok(exoticPath('\\??\\C:\\p\\x', 'C:\\p', W))
+})
+
+test('exoticPath：项目在网络共享上，却写本地盘路径——可能经本机共享绕回项目里的任何文件', () => {
+  assert.ok(exoticPath('C:\\Users\\u\\p\\.agent-team\\project.json', '\\\\localhost\\C$\\Users\\u\\p', W))
+})
+
+test('exoticPath：正斜杠写法的网络路径同样认得出来', () => {
+  assert.ok(exoticPath('//localhost/C$/p/x', 'C:\\p', W))
+})
+
+test('exoticPath：. 与 .. 这两个段不算「以点结尾」', () => {
+  assert.equal(exoticPath('C:\\p\\.\\a.txt', 'C:\\p', W), null)
+  assert.equal(exoticPath('C:\\p\\..\\p\\a.txt', 'C:\\p', W), null)
+})
+
+test('exoticPath：同一个共享的大小写变体、\\\\?\\UNC\\ 写法、正斜杠写法都算同一个共享', () => {
+  const root = '\\\\srv\\share\\p'
+  assert.equal(exoticPath('\\\\SRV\\Share\\p\\a.ts', root, W), null)
+  assert.equal(exoticPath('\\\\?\\UNC\\srv\\share\\p\\a.ts', root, W), null)
+  assert.equal(exoticPath('//srv/share/p/a.ts', root, W), null)
+})
+
+// ---- H4：PM 的豁免排在 exoticPath 之前 ----
+
+test('decideContractGuard：PM 写一个认不出的写法照样放行——PM 本来就能写契约', () => {
+  const r = decideContractGuard({ agentType: 'at-pm', filePath: 'C:\\p\\x.md.', runDir: 'C:\\p\\.agent-team\\runs\\r1' })
+  assert.equal(r.decision, 'allow')
+})
+
+// ---- 门禁绝不碰网络路径 ----
+//
+// tests/helpers/no-network.mjs 预加载进门禁进程：拿网络路径调 fs 就在 stderr 留 NET-TOUCH。
+
+const NO_NET = pathToFileURL(fileURLToPath(new URL('./helpers/no-network.mjs', import.meta.url))).href
+function gateNoNet(check, input, cwd) {
+  const r = spawnSync(process.execPath, ['--import', NO_NET, GATE, check], {
+    input: JSON.stringify(input),
+    encoding: 'utf8',
+    cwd,
+    env: hermeticEnv(),
+  })
+  return { stdout: r.stdout ?? '', stderr: r.stderr ?? '', status: r.status }
+}
+
+const NET_PATHS = [
+  '\\\\192.0.2.1\\share\\notes.md',
+  '\\\\?\\UNC\\192.0.2.1\\share\\notes.md',
+  '\\\\.\\UNC\\192.0.2.1\\share\\notes.md',
+  '\\??\\UNC\\192.0.2.1\\share\\notes.md',
+]
+
+test('门禁：有 run 的项目里，H3/H4/H6/ledger 对网络路径一次 fs 都不调', { skip: !WIN }, () => {
+  withRun(({ p }) => {
+    for (const fp of NET_PATHS) {
+      for (const [check, agent, event] of [
+        ['writepath', 'agent-team:at-acceptance', 'PreToolUse'],
+        ['contract', 'agent-team:at-acceptance', 'PreToolUse'],
+        ['rework', 'at-pm', 'PreToolUse'],
+        ['rework', undefined, 'PreToolUse'],
+        ['ledger', 'at-pm', 'PostToolUse'],
+      ]) {
+        const r = gateNoNet(check, { ...write(agent, fp), hook_event_name: event }, p)
+        assert.doesNotMatch(r.stderr, /NET-TOUCH/, `${check}（${agent ?? '主线程'}）碰了 ${fp}`)
+      }
+    }
+  })
+})
+
+test('门禁：没有 .agent-team 的项目里，H6 与 ledger 对网络路径一次 fs 都不调', { skip: !WIN }, () => {
+  const d = tempDir('agent-team-nonet-')
+  try {
+    for (const fp of NET_PATHS) {
+      for (const [check, event] of [['rework', 'PreToolUse'], ['ledger', 'PostToolUse']]) {
+        const r = gateNoNet(check, { ...write(undefined, fp), hook_event_name: event }, d)
+        assert.doesNotMatch(r.stderr, /NET-TOUCH/, `${check} 碰了 ${fp}`)
+      }
+    }
+  } finally {
+    rmSync(d, { recursive: true, force: true })
+  }
+})
+
+// ---- H6 只拦「可能就是 state.json」的写法 ----
+//
+// H6 挂在每一次 Edit/Write 上，主线程也在内。它要防的是经认不出的写法清零返工史，所以只对
+// 最后一段可能是 state.json（含 8.3 短名 STATE~n.JSO）的写法拒；写网络上一个不相干的文件不归它管。
+
+test('门禁：主线程在团队项目里写网络上一个不相干的文件——H6 放行', { skip: !WIN }, () => {
+  withRun(({ p }) => {
+    assert.equal(gateNoNet('rework', write(undefined, '\\\\192.0.2.1\\backup\\notes.md'), p).stdout, '')
+  })
+})
+
+test('门禁：PM 经网络路径、以 state.json 或它的 8.3 短名结尾写——H6 拒', { skip: !WIN }, () => {
+  withRun(({ p, runDir }) => {
+    for (const leaf of ['state.json', 'STATE~1.JSO', 'state.json.', 'state.json::$DATA']) {
+      const fp = `\\\\192.0.2.1\\C$\\x\\runs\\r1\\${leaf}`
+      assert.ok(denied(gateNoNet('rework', write('at-pm', fp, shrunkState(runDir)), p)), leaf)
+    }
+  })
+})
+
+// ---- 项目本身在网络共享上 ----
+//
+// 经本机管理共享打开项目（\\localhost\C$\…）来模拟；拿不到这个共享的机器上跳过。
+
+function uncOf(p) {
+  return `\\\\localhost\\${p[0]}$${p.slice(2)}`
+}
+function adminShareReachable(p) {
+  try {
+    return realpathSync(uncOf(p)) !== undefined
+  } catch {
+    return false
+  }
+}
+
+test('门禁：项目在网络共享上时，同一个共享下的合法写入放行、别人的地盘与契约照拦', { skip: !WIN }, (t) => {
+  withRun(({ p }) => {
+    if (!adminShareReachable(p)) {
+      t.skip('这台机器上拿不到本机管理共享')
+      return
+    }
+    const root = uncOf(p)
+    const env = { ...hermeticEnv(), CLAUDE_PROJECT_DIR: root }
+    const g = (check, input) => run(check, input, GATE, root, env)
+    for (const fp of [
+      `${root}\\src\\server\\api.ts`,
+      `\\\\?\\UNC\\localhost\\${p[0]}$${p.slice(2)}\\src\\server\\api.ts`,
+      `${root.toUpperCase()}\\src\\server\\api.ts`,
+    ]) {
+      assert.equal(g('writepath', write('agent-team:at-backend', fp)).stdout, '', fp)
+    }
+    assert.ok(denied(g('writepath', write('agent-team:at-frontend', `${root}\\src\\server\\api.ts`))))
+    assert.ok(denied(g('contract', write('agent-team:at-acceptance', `${root}\\.agent-team\\runs\\r1\\00-contract.md`))))
+    // 反方向的别名：项目经共享打开，却用本地盘写法写契约。
+    const local = write('agent-team:at-acceptance', join(p, '.agent-team', 'runs', 'r1', '00-contract.md'))
+    assert.ok(denied(g('writepath', local)), 'writepath')
+    assert.ok(denied(g('contract', local)), 'contract')
+  })
+})
+
+// ---- 剩下几刀存活的变异 ----
+
+test('runs/ 下只有一个链接（可能指向真的 run）、指针不在：从严判 unreadable', () => {
+  const dirs = makeRun({ project: PROJECT })
+  try {
+    const base = join(dirs.projectDir, '.agent-team')
+    rmSync(join(base, 'current-run'))
+    rmSync(join(base, 'runs'), { recursive: true, force: true })
+    mkdirSync(join(base, 'runs'))
+    const elsewhere = tempDir('agent-team-runlink-')
+    try {
+      linkDir(elsewhere, join(base, 'runs', 'r1'))
+      assert.equal(readRunContext(dirs.projectDir, PLUGIN_ROOT).kind, 'unreadable')
+    } finally {
+      rmSync(join(base, 'runs', 'r1'), { force: true, recursive: false })
+      rmSync(elsewhere, { recursive: true, force: true })
+    }
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('norm：悬空的相对软链接按链接所在目录解析目标', { skip: WIN }, () => {
+  const d = tempDir('agent-team-alias-')
+  try {
+    mkdirSync(join(d, 'a', 'real'), { recursive: true })
+    symlinkSync(join('real', 'later'), join(d, 'a', 'lnk'), 'dir')
+    assert.equal(norm(join(d, 'a', 'lnk', 'z.md')), norm(join(d, 'a', 'real', 'later', 'z.md')))
+  } finally {
+    rmSync(d, { recursive: true, force: true })
+  }
+})
+
+// 探测那条接线：在 Windows 上把一个目录设成区分大小写（fsutil，WSL 常用），Ab 与 ab 是两个名字，
+// norm() 不能折叠——按平台写死「win32 折叠」时这条红。设不上（没有这个功能或权限）就跳过。
+test('norm：Windows 上开了按目录区分大小写的目录里，大小写变体不折叠', { skip: !WIN }, (t) => {
+  const d = tempDir('agent-team-cs-')
+  try {
+    try {
+      execFileSync('fsutil.exe', ['file', 'setCaseSensitiveInfo', d, 'enable'], { stdio: 'ignore' })
+    } catch {
+      t.skip('这台机器上设不了按目录区分大小写')
+      return
+    }
+    mkdirSync(join(d, 'Ab'))
+    assert.notEqual(norm(join(d, 'Ab', 'x.md')), norm(join(d, 'ab', 'x.md')))
+  } finally {
+    rmSync(d, { recursive: true, force: true })
+  }
 })
