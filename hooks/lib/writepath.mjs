@@ -1,4 +1,4 @@
-// H3 写路径隔离（纯函数）。
+// H3 写路径隔离（判定函数：不读 stdin、不写输出、不退出进程；路径经 path-norm 的 norm() 解析到物理位置，会读文件系统——M3q）。
 //
 // ⚠️ 已知边界（规格 §6.2）：这道闸只管 Edit/Write/NotebookEdit。
 // 执行角色保留 Bash 以跑构建与测试，而 Bash 能写文件（echo >、sed -i），
@@ -108,8 +108,8 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 「没有角色能把 at-pm 当派发目标」这条花名册不变量，由
   // tests/roster-closure.test.mjs 钉住，完整论证在 contract-guard.mjs 头部。
   //
-  // agentTeamDir 缺省时这一段整体不触发，回落到既有行为——纯函数不该假设调用方
-  // 一定传全参数，而 gate.mjs 那条路径上它总是来自 ctx.agentTeamDir。
+  // agentTeamDir 缺省时这一段整体不触发，回落到既有行为——导出的判定函数不该假设
+  // 调用方一定传全参数，而 gate.mjs 那条路径上它总是来自 ctx.agentTeamDir。
   if (isControlFile(filePath, agentTeamDir)) {
     if (isContractWriter(role)) return { decision: 'allow' }
     return {

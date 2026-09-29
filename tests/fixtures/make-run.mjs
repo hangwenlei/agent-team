@@ -42,9 +42,10 @@ import { join, dirname } from 'node:path'
 export function makeRun({ runId = 'r1', stage = 'S2', artifacts = [], project = null, stages = null, roster = [], history = null, trimmed = null } = {}) {
   // 两个根分开造：projectDir 模拟用户仓库，pluginDir 模拟插件安装目录。
   // realpath（M3p，CI 第一次在 macOS 上跑）：macOS 的 tmpdir() 是 /var/folders/...，而 /var 是
-  // /private/var 的软链接。门禁按字面比较路径，子进程的 process.cwd() 给的是解析后的
-  // /private/var/...，夹具交给测试的却是 /var/...——两边对不上，「这是不是契约 / run 目录」
-  // 全判成「不是」，门禁子进程测试成片地红。夹具只发规范路径，不在夹具这一层制造别名。
+  // /private/var 的软链接。当时门禁按字面比较路径，子进程的 process.cwd() 给的是解析后的
+  // /private/var/...，夹具交给测试的却是 /var/...——两边对不上，门禁子进程测试成片地红。
+  // M3q 之后 norm() 会把两种写法解析成同一个物理位置（tests/path-alias.test.mjs 钉着），这一步
+  // 不再是必需的；留着，是为了夹具这一层不制造别名，测试失败时看到的路径就是真实路径。
   const projectDir = realpathSync(mkdtempSync(join(tmpdir(), 'agent-team-proj-')))
   const pluginDir = realpathSync(mkdtempSync(join(tmpdir(), 'agent-team-plug-')))
 

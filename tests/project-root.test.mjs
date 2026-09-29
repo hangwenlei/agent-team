@@ -27,7 +27,8 @@ import { projectRootFrom } from '../hooks/lib/runctx.mjs'
 import { norm } from '../hooks/lib/path-norm.mjs'
 import { TRACE_ENV } from '../hooks/lib/trace.mjs'
 
-// ---- 纯函数（「这个目录下有没有 .agent-team」由调用方注入，不碰磁盘）----
+// ---- projectRootFrom 本身（「这个目录下有没有 .agent-team」由调用方注入；比较经 norm()，
+// 假路径两侧同样按字面解析，M3q）----
 
 // dirs：有 .agent-team 的目录。比较一律过 norm()，免得 win32 上 '/proj' 被 resolve 成 'C:proj'
 // 之后字面对不上。
