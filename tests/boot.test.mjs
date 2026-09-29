@@ -198,10 +198,10 @@ test('拒绝理由带上错误的种类，stderr 带上完整的栈——排查�
 
 const FAKE = fileURLToPath(new URL('./helpers/fake-node-version.cjs', import.meta.url))
 
-function withFakeNode(version, body) {
+function withFakeNode(version, body, execPath) {
   const projectDir = mkdtempSync(join(tmpdir(), 'agent-team-boot-ver-'))
   try {
-    const env = { ...hermeticEnv(), AGENT_TEAM_FAKE_NODE: version }
+    const env = { ...hermeticEnv(), AGENT_TEAM_FAKE_NODE: version, ...(execPath ? { AGENT_TEAM_FAKE_EXECPATH: execPath } : {}) }
     body(
       (check, input) => run(check, input, GATE, projectDir, env, { nodeArgs: ['-r', FAKE] }),
       projectDir,
@@ -298,3 +298,23 @@ for (const [label, damage] of [
     })
   })
 }
+
+// 拼进「太旧」理由的版本号与路径只许占一行（docs/27）：路径可以带任何字符（目录名里的 U+2028 在 NTFS
+// 上合法）。版本号与路径分开弄脏——只弄脏版本号，打不红「只去掉路径那一处单行化」。
+test('Node 太旧时，版本号或路径里的换行字符都不会让理由另起一行', () => {
+  const breaks = [10, 13, 0x85, 0x2028, 0x2029].map((c) => String.fromCharCode(c))
+  const old = versionBefore(MIN_NODE)
+  for (const b of breaks) {
+    for (const [version, execPath] of [[`${old}${b}伪造的一行`, undefined], [old, `/opt/n${b}伪造的一行/node`]]) {
+      withFakeNode(version, (gate) => {
+        const { stdout, stderr } = gate('writepath', INPUTS.writepath)
+        const reason = decisionOf(stdout)?.permissionDecisionReason ?? ''
+        assert.ok(reason.includes(MIN_NODE) && reason.includes('伪造的一行'), reason)
+        assert.ok(!breaks.some((c) => reason.includes(c)), JSON.stringify(reason))
+        const head = stderr.split('\n')[0]
+        assert.ok(head.includes('需要 Node') && head.includes('伪造的一行'), JSON.stringify(stderr))
+        assert.ok(!breaks.filter((c) => c !== '\n').some((c) => head.includes(c)), JSON.stringify(head))
+      }, execPath)
+    }
+  }
+})

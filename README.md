@@ -38,7 +38,9 @@ claude plugin install agent-team@agent-team-marketplace --scope local
 - **Node 16.9 或更新**，而且要在 Claude Code 启动时的 PATH 上——门禁就是用它跑的。原生安装的 Claude Code 自己不需要 Node，所以要单独确认。桌面端和 IDE 起的会话用的是它们自己的环境，不一定和你终端里的一致；装完或换了 Node，要重开 Claude Code（桌面端要完全退出再打开）。
 - **Claude Code 2.1.276 或更新**。桌面端保持应用为最新即可。
 
-前提不满足时，平台不拦任何调用，门禁一道都不生效，也不会告诉你。所以项目经理在起跑、续跑与勘察这三条命令开头，以及续会话之后第一次动手之前，会做一次**门禁自检**：故意写一个门禁一定会拦下的文件。界面上会出现一条被拦下的写入（显示为一条错误），那就是自检，属预期。门禁没拦下它，项目经理会停下来，告诉你怎么查。`/agent-team:at-status` 只读，不做这项检查。
+Node 找不到、旧到门禁起不来，或者 hooks 被关掉时，平台不拦任何调用，门禁一道都不生效，界面上至多一行不起眼的灰字。所以项目经理在 `/agent-team:at`、`/agent-team:at-resume`、`/agent-team:at-init` 开头，以及之后你每发一条消息、它这一轮第一次派发或写 `.agent-team` 之前（续会话之后也一样），都会做一次**门禁自检**：故意写一个门禁一定会拦下的文件。每次自检都会在界面上留下一条被拦下的写入（显示为一条错误），内容以「门禁自检：在线」开头——那就是自检，属预期。门禁没拦下它，项目经理会停下来，告诉你怎么查。`/agent-team:at-status` 只读，不做这项检查。
+
+Node 起得来但太旧时，门禁会拒绝每一次派发与写入，并写明要装哪个版本。自检不核 Claude Code 的版本：版本不够时，门禁可能照常在跑、自检也通过，分层派发却走不通——所以要自己确认，终端里用 `claude --version`，桌面端保持应用为最新。
 
 **更新**——版本号变了才会拉到新版，已经开着的会话要重开才生效：
 
@@ -162,6 +164,7 @@ node --test
 - 从仓库根目录直接跑 `node --test`，不要带路径参数——带了会漏掉测试，并报一个假的失败。
 - **推 `main` 就是发布。** 每次推送都要挪 `.claude-plugin/plugin.json` 里的 `version`：`claude plugin update` 只比这个字符串。只改文档或测试挪最后一位，改到插件会加载的文件挪中间一位。
 - CI 在 Linux、macOS、Windows 上跑全部测试；推 `main` 或向 `main` 提 PR 时还会核版本号是否按上一条挪了。先推功能分支、等 CI 全绿，再合进 `main` 推送。
+- 跑测试要 Node 22 或更新——安装一节写的 Node 下限只管门禁。CI 另有一个作业把门禁换到那个最低版本上跑全部测试，所以 `hooks/` 下的代码不能用比它更新的 Node API。
 - 设计记录与实测记录在 `docs/` 下。
 
 ## 许可
@@ -210,7 +213,9 @@ Then start a new session in that directory — the main session is the project m
 - **Node 16.9 or later** on the PATH that Claude Code starts with — the gates run on it. A native install of Claude Code does not need Node itself, so check it separately. Sessions started from the desktop app or an IDE use that app's environment, which may differ from your terminal's; after installing or switching Node, restart Claude Code (quit the desktop app completely and reopen it).
 - **Claude Code 2.1.276 or later.** For the desktop app, keeping the app up to date is enough.
 
-When a requirement is not met, the platform blocks nothing: no gate takes effect, and nothing tells you so. That is why the project manager runs a **gate self-check** at the start of the run, resume and survey commands, and before its first action after a session is resumed: it deliberately writes a file the gates always block. You will see one blocked write (shown as an error) — that is the self-check, and it is expected. If the gates fail to block it, the project manager stops and tells you what to check. `/agent-team:at-status` is read-only and skips this check.
+If Node is missing or too old for the gates to start, or hooks are disabled, the platform blocks nothing: no gate takes effect, and at most one easy-to-miss grey line appears. That is why the project manager runs a **gate self-check** at the start of `/agent-team:at`, `/agent-team:at-resume` and `/agent-team:at-init`, and again after each message you send, before its first dispatch or first write under `.agent-team` in that turn (including after a session is resumed): it deliberately writes a file the gates always block. Each self-check shows up as a blocked write (shown as an error) whose text starts with the self-check's “online” message — that is expected. If the gates fail to block it, the project manager stops and tells you what to check. `/agent-team:at-status` is read-only and skips this check.
+
+If Node starts but is too old, the gates refuse every dispatch and write and say which version to install. The self-check does not check the Claude Code version: on an older Claude Code the gates may run and the self-check pass while layered dispatch still fails — so check it yourself with `claude --version` in a terminal, and keep the desktop app up to date.
 
 **Update** — a new release arrives only when its version number changes, and sessions already open need a restart:
 
@@ -334,6 +339,7 @@ node --test
 - Run bare `node --test` from the repository root, with no path argument — with one, tests are missed and a phantom failure is reported.
 - **Pushing to `main` is the release.** Every push must bump `version` in `.claude-plugin/plugin.json`, because that string is all `claude plugin update` compares. Docs- or tests-only changes bump the last digit; changes to anything the plugin loads bump the middle one.
 - CI runs the full test suite on Linux, macOS and Windows; pushes and pull requests to `main` also check that the version was bumped as described above. Push a feature branch and wait for CI to pass before merging into `main` and pushing.
+- The test suite needs Node 22 or later — the Node minimum under Installation applies to the gates only. A separate CI job runs the whole suite with the gates on that minimum version, so code under `hooks/` must not use Node APIs newer than it.
 - Design notes and measurement records live under `docs/`.
 
 ## License

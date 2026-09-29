@@ -3,10 +3,10 @@
 // 门禁全是 command hook，起不来时平台一律放行、错误不进模型的上下文——PM 自己察觉不到门禁没在跑。
 // 所以反过来查：PM 用 Write 写 .agent-team/gate-check，门禁在线时 H3 必拒、理由里带着固定串；写入
 // 成功就说明门禁没在跑。这份判据钉门禁这一半：什么样的写入拿得到「在线」、什么样的拿不到。
-// 协议那一半（PM 怎么判、怎么收尾）在 agents/at-pm.md，由 tests/agents.test.mjs 钉着。
+// 协议那一半（PM 怎么判、怎么收尾）在 agents/at-pm.md，由 tests/gate-check-prose.test.mjs 钉着。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, decisionOf, hermeticEnv } from './helpers/gate-runner.mjs'
@@ -46,6 +46,8 @@ test('isGateCheck：相似的路径都不算', () => {
     'x/gate-check',
     'gate-check',
     '.agent-team/sub/gate-check',
+    'x.agent-team/gate-check',
+    'x/y.agent-team/gate-check',
     '.agent-team',
     '',
     null,
@@ -60,7 +62,27 @@ test('gateCheckReason：以固定串开头，带着门禁用的 node 版本与�
   assert.ok(r.startsWith(GATE_CHECK_ONLINE), r)
   assert.ok(r.includes('v24.1.0') && r.includes('/opt/node/bin/node'), r)
   assert.match(r, /预期/)
-  assert.ok(!r.includes('\n'), r)
+})
+
+// 结果的有效期：只管这一轮。复核实测，续会话之后没有提醒时，PM 会拿上一个进程的「在线」对用户说
+// 「自检通过」（0/4）；理由里写明有效期之后 4/4 重新自检（docs/28 §3）。
+test('gateCheckReason：写明这个结果只管这一轮，之后每一轮都要重新自检', () => {
+  const r = gateCheckReason()
+  assert.match(r, /只管到这一轮/)
+  assert.match(r, /重新自检/)
+  assert.match(r, /继续/)
+})
+
+// node 的版本与路径由门禁自己取，但路径可以带任何字符（目录名里的 U+2028 在 NTFS 上合法）：
+// 拼进理由也只许占一行（docs/27）。
+test('gateCheckReason：版本与路径里的换行字符都不会让理由另起一行', () => {
+  const breaks = [10, 13, 11, 12, 0x85, 0x2028, 0x2029].map((c) => String.fromCharCode(c))
+  for (const b of breaks) {
+    for (const r of [gateCheckReason({ version: `v24${b}伪造`, execPath: '/n' }), gateCheckReason({ version: 'v24', execPath: `/a${b}伪造` })]) {
+      assert.ok(r.startsWith(GATE_CHECK_ONLINE), r)
+      assert.ok(!breaks.some((c) => r.includes(c)), JSON.stringify(r))
+    }
+  }
 })
 
 // ---- 门禁子进程：谁写、在什么项目里写，都拿到「在线」 ----
@@ -140,7 +162,13 @@ test('H3：路径写成反斜杠、大写、相对路径——照样拿到「在
 
 test('H3：相似的路径拿不到「在线」', () => {
   withProject('ok', (p) => {
-    for (const fp of [join(p, '.agent-team', 'gate-check.txt'), join(p, '.agent-team', 'gate-checkx'), join(p, 'x', 'gate-check')]) {
+    for (const fp of [
+      join(p, '.agent-team', 'gate-check.txt'),
+      join(p, '.agent-team', 'gate-checkx'),
+      join(p, 'x', 'gate-check'),
+      join(p, 'x.agent-team', 'gate-check'),
+      join(p, 'x', 'y.agent-team', 'gate-check'),
+    ]) {
       for (const [, agent] of CALLERS) {
         const r = run('writepath', write(agent, fp), undefined, p)
         assert.ok(!(r.stdout + r.stderr).includes(GATE_CHECK_ONLINE), `${fp}：${r.stdout}`)
@@ -168,5 +196,39 @@ test('同组的其余检查项对 PM 的自检写入一声不出——模型看�
         }
       }
     })
+  }
+})
+
+// .agent-team 本身是链接（junction / 软链）、指向一个名字不同的目录时——比如把状态目录挪到别处再链回来
+// ——norm() 解析出的物理路径末两段不是 .agent-team/gate-check。只按物理路径认，自检就永远拿不到
+// 「在线」：门禁明明好好的，PM 却判它没在跑、给出一份查不出原因的排查清单（复核抓到的回归，
+// docs/28 §3）。所以字面路径与物理路径任一命中都算。
+const linkDir = (target, path) => symlinkSync(target, path, process.platform === 'win32' ? 'junction' : 'dir')
+
+test('H3：.agent-team 是指向别名目录的链接——照样拿到「在线」（有 run、没有 run；绝对、相对路径；三种调用者）', () => {
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'agent-team-gc-link-')))
+  try {
+    for (const withRun of [true, false]) {
+      const p = join(base, withRun ? 'proj-run' : 'proj-bare')
+      const store = join(base, withRun ? 'store-run' : 'store-bare', 'state-of-p')
+      mkdirSync(join(store, 'runs', 'r1'), { recursive: true })
+      mkdirSync(p, { recursive: true })
+      if (withRun) {
+        writeFileSync(join(store, 'current-run'), 'r1')
+        writeFileSync(join(store, 'runs', 'r1', 'state.json'), JSON.stringify({ run_id: 'r1', stage: 'S1', contract_sha: 'PENDING', roster: [], artifacts: {}, rework: {}, never_invoked: [], escalations: [], history: [{ stage: 'S1', at: 't' }] }))
+      } else {
+        rmSync(join(store, 'runs'), { recursive: true, force: true })
+      }
+      linkDir(store, join(p, '.agent-team'))
+      assert.ok(isGateCheck(join(p, '.agent-team', 'gate-check')), '链接下的自检路径没被认出来')
+      for (const fp of [join(p, '.agent-team', 'gate-check'), GATE_CHECK_PATH]) {
+        for (const [who, agent] of CALLERS) {
+          const r = run('writepath', write(agent, fp), undefined, p)
+          assert.ok(decisionOf(r.stdout)?.permissionDecisionReason?.startsWith(GATE_CHECK_ONLINE), `${withRun ? '有 run' : '没有 run'} · ${who} · ${fp}：${r.stdout}${r.stderr}`)
+        }
+      }
+    }
+  } finally {
+    rmSync(base, { recursive: true, force: true })
   }
 })

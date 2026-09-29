@@ -10,13 +10,25 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { GATE_NODE, run, runAsync } from './helpers/gate-runner.mjs'
+import { GATE_NODE, run, runAsync, decisionOf } from './helpers/gate-runner.mjs'
+import { GATE_CHECK_PATH, GATE_CHECK_ONLINE } from '../hooks/lib/gate-check.mjs'
 import { MIN_NODE } from './helpers/min-node.mjs'
 
 const TESTS = new URL('./', import.meta.url)
 
-// tests/ 下（含 helpers/、fixtures/）每一处「拿 process.execPath 或字面量 node 起子进程」的地方。
-function nodeSpawnSites() {
+// tests/ 下（含 helpers/、fixtures/）每一处「拿 process.execPath 或字面量 node 起子进程」的地方。对整份
+// 文本匹配（调用可以折成好几行写），text 取那一处所在的整行（ALLOWED 按它认）。另外，process.execPath
+// 这串字只准出现在 ALLOWED 那几行与出口自己里——先放进变量再 spawn 的写法，这一条挡得住。
+//
+// 文字扫描打不全（docs/16 §3 的三样）：
+//   - 仍漏的写法：process.argv[0]、process.argv0、解构出来的 execPath、字面量 'node' 先进变量、execSync 的
+//     字符串命令。
+//   - 拒绝的判据长什么样：动态判据——最低版本作业里给门禁子进程装记录垫片，核对每个跑了 boot.mjs 的
+//     进程的版本。
+//   - 什么会让答案改变：出了一次「有门禁子进程没走出口」的事故，或者上面那种动态判据做得便宜了。
+const SPAWN_RE = /\b(spawn|spawnSync|execFile|execFileSync|fork)\s*\(\s*(process\.execPath|['"]node(\.exe)?['"])/g
+
+function sourcesUnderTests() {
   const out = []
   for (const dir of ['', 'helpers/', 'fixtures/']) {
     let names = []
@@ -26,15 +38,31 @@ function nodeSpawnSites() {
       continue
     }
     for (const name of names.filter((n) => /\.(mjs|cjs|js)$/.test(n))) {
-      const rel = dir + name
-      readFileSync(new URL(rel, TESTS), 'utf8').split(/\r?\n/).forEach((line, i) => {
-        if (/\b(spawn|spawnSync|execFile|execFileSync|fork)\s*\(\s*(process\.execPath|['"]node(\.exe)?['"])/.test(line)) {
-          out.push({ rel, line: i + 1, text: line.trim() })
-        }
-      })
+      out.push({ rel: dir + name, text: readFileSync(new URL(dir + name, TESTS), 'utf8') })
     }
   }
   return out
+}
+
+function sitesIn(rel, text, re) {
+  const lines = text.split(/\r?\n/)
+  return [...text.matchAll(re)].map((m) => {
+    const line = text.slice(0, m.index).split('\n').length
+    return { rel, line, text: lines[line - 1].trim() }
+  })
+}
+
+function nodeSpawnSites() {
+  return sourcesUnderTests().flatMap(({ rel, text }) => sitesIn(rel, text, SPAWN_RE))
+}
+
+// process.execPath 出现在哪。除外的：本文件、出口自己，以及伪造预加载——它在门禁子进程里面改这个值，
+// 不起任何子进程。
+const EXEC_PATH_OK = ['helpers/gate-runner.mjs', 'gate-runner.test.mjs', 'helpers/fake-node-version.cjs']
+function execPathSites() {
+  return sourcesUnderTests()
+    .filter(({ rel }) => !EXEC_PATH_OK.includes(rel))
+    .flatMap(({ rel, text }) => sitesIn(rel, text, /process\.execPath/g))
 }
 
 // 不是门禁子进程、所以不该走出口的，逐处列出理由。
@@ -58,6 +86,17 @@ test('锚：ALLOWED 的每一条都还对得上一处真实的调用——清单
   for (const a of ALLOWED) {
     assert.ok(sites.some((s) => s.rel === a.rel && s.text.includes(a.has)), `${a.rel}（${a.has}）已经不在了，把它从 ALLOWED 里删掉`)
   }
+})
+
+test('process.execPath 只出现在 ALLOWED 那几行——先放进变量再 spawn 的写法也挡得住', () => {
+  const stray = execPathSites().filter((s) => !ALLOWED.some((a) => a.rel === s.rel && s.text.includes(a.has)))
+  assert.deepEqual(stray.map((s) => `${s.rel}:${s.line}  ${s.text}`), [])
+})
+
+test('自检：扫描认得出折成两行的调用', () => {
+  const sample = 'const r = spawnSync(\n  process.execPath,\n  [x],\n)\n'
+  assert.equal(sitesIn('x.mjs', sample, SPAWN_RE).length, 1)
+  assert.equal(sitesIn('x.mjs', sample, SPAWN_RE)[0].line, 1)
 })
 
 test('自检：nodeSpawnSites() 认得出一处真实的写法，也不收变量——扫描不是在空转', () => {
@@ -97,10 +136,23 @@ test('node 本身起不来：run 抛出来', () => {
 // CI 的最低版本作业（.github/workflows/min-node.yml）设了 AGENT_TEAM_GATE_NODE 时，门禁子进程必须
 // 真的跑在 hooks/boot.mjs 的 MIN_NODE 那一版上——精确到补丁号。没设时（本地、主矩阵）跳过。
 
-test('最低版本作业：门禁子进程跑的正是 MIN_NODE 那一版', { skip: !process.env.AGENT_TEAM_GATE_NODE }, () => {
+// 经出口问：出口的默认 node 被改回 process.execPath 时，只核 GATE_NODE 常量的锚照样绿，而门禁子进程全都
+// 悄悄回到新版本上（M3t 复核）。门禁自检的拒绝理由里带着门禁用的 node 版本，拿它核。
+test('最低版本作业：门禁子进程跑的正是 MIN_NODE 那一版——经 run 与 runAsync 两个出口核', { skip: !process.env.AGENT_TEAM_GATE_NODE }, async () => {
   const r = spawnSync(GATE_NODE, ['-p', 'process.versions.node'], { encoding: 'utf8' })
   assert.equal(r.stdout.trim(), MIN_NODE, `AGENT_TEAM_GATE_NODE=${GATE_NODE}`)
   assert.notEqual(GATE_NODE, process.execPath, '测试框架与门禁子进程是同一个 node——最低版本作业没起作用')
+  const dir = mkdtempSync(join(tmpdir(), 'agent-team-runner-min-'))
+  try {
+    const input = { hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: join(dir, GATE_CHECK_PATH), content: 'x' } }
+    for (const out of [run('writepath', input, undefined, dir), await runAsync('writepath', input, { cwd: dir })]) {
+      const reason = decisionOf(out.stdout)?.permissionDecisionReason ?? ''
+      assert.ok(reason.startsWith(GATE_CHECK_ONLINE), reason)
+      assert.ok(reason.includes(`v${MIN_NODE}`), `出口起的不是 ${MIN_NODE}：${reason}`)
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 const WORKFLOW = new URL('../.github/workflows/min-node.yml', import.meta.url)

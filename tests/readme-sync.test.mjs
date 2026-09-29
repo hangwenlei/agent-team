@@ -25,7 +25,7 @@
 // 「`at-pm` 工具面」那条钉的就是它——前提一旦重新变假，论证会跟着红。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { MIN_MAJOR_MINOR } from './helpers/min-node.mjs'
 import { fileURLToPath } from 'node:url'
@@ -1566,4 +1566,21 @@ const RETIRED_RUNTIME_CLAIMS = ['零运行时依赖', 'Zero runtime dependencies
 test('README 不再说「零运行时依赖」——门禁要靠 PATH 上的 Node', () => {
   const text = read(README)
   assert.deepEqual(RETIRED_RUNTIME_CLAIMS.filter((c) => text.includes(c)), [])
+})
+
+test('两半的安装一节都说清是「Claude Code 启动时」的 PATH——桌面端、IDE 起的会话与终端可以不同', () => {
+  assert.ok((installSectionOf(read(README_EN), pairOf('## Installation')[0]) ?? '').includes('PATH that Claude Code starts with'))
+  assert.ok((installSectionOf(read(README_ZH), pairOf('## Installation')[1]) ?? '').includes('启动时的 PATH'))
+})
+
+// 自检那段话点名的命令，要与 commands/ 对得上：三条做自检的开头都做，只读的那条点名不做。
+test('两半的安装一节点名的 /agent-team:* 命令，恰好是 commands/ 下的全部命令；说的是每条消息、不是只一次', () => {
+  const all = readdirSync(new URL('../commands/', import.meta.url)).filter((f) => f.endsWith('.md')).map((f) => f.replace(/\.md$/, '')).sort()
+  for (const [half, heading, each] of [[README_EN, pairOf('## Installation')[0], /each message/], [README_ZH, pairOf('## Installation')[1], /每发一条消息/]]) {
+    const s = installSectionOf(read(half), heading) ?? ''
+    const named = [...new Set([...s.matchAll(/\/agent-team:(at[\w-]*)/g)].map((m) => m[1]))].sort()
+    assert.deepEqual(named, all, half)
+    assert.match(s, each, half)
+    assert.doesNotMatch(s, /one blocked write/, half)
+  }
 })

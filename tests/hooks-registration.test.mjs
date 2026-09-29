@@ -88,7 +88,7 @@ function allHookCommands() {
   )
 }
 
-test('hooks.json 里的每一个注册项都是零依赖 node 调用、参数完整、指向真实文件与已知检查名', () => {
+test('hooks.json 里每一道门禁的注册（自检提醒除外）都是 node 调用、参数完整、指向真实文件与已知检查名', () => {
   const commands = allHookCommands()
   assert.ok(commands.length > 0, 'hooks.json 里一个 hook 命令都没有')
   for (const hook of commands) {
@@ -97,7 +97,7 @@ test('hooks.json 里的每一个注册项都是零依赖 node 调用、参数完
     assert.equal(
       hook.command,
       'node',
-      `${label} 的 command 不是 "node"——本插件是零依赖插件，所有 hook 必须走 node`,
+      `${label} 的 command 不是 "node"——门禁一律走 node 起 boot.mjs；若这条是自检提醒，先核它与 gate-check.mjs 的 REMINDER_COMMAND 是否逐字一致`,
     )
     assert.ok(
       Array.isArray(hook.args) && hook.args.length > 0,
@@ -268,7 +268,7 @@ test('接线：每个检查项恰好注册一次', () => {
   }
 })
 
-test('接线：每一条 hook 都经 hooks/boot.mjs 进门，不直接跑 gate.mjs', () => {
+test('接线：每一道门禁都经 hooks/boot.mjs 进门，不直接跑 gate.mjs', () => {
   for (const r of registrations()) {
     assert.equal(
       r.entry,
@@ -292,6 +292,10 @@ function reminderEntries() {
 }
 
 test('自检提醒：UserPromptSubmit 上恰好这一条，逐字等于 gate-check.mjs 的 REMINDER_COMMAND', () => {
+  // 事件名钉成字面量，不经常量自证：提醒要每轮紧挨着用户消息出现。SessionStart 只在会话开头注入一次，
+  // 续会话时同样的文本不再注入——恰好丢掉要补的那条路（docs/28 §2.2）。
+  assert.equal(REMINDER_EVENT, 'UserPromptSubmit')
+  assert.ok(Array.isArray(hooksConfig.hooks.UserPromptSubmit), 'hooks.json 里没有 UserPromptSubmit')
   const entries = reminderEntries()
   assert.equal(entries.length, 1, JSON.stringify(entries))
   assert.equal(entries[0].hook.type, 'command')
@@ -302,6 +306,9 @@ test('自检提醒：UserPromptSubmit 上恰好这一条，逐字等于 gate-che
 test('自检提醒：shell 形式、不带 args、不调 node——它要在门禁起不来的时候照样出现', () => {
   const { hook } = reminderEntries()[0]
   assert.equal(hook.args, undefined, '带了 args 就成了 exec 形式：CLI 早于 2.1.139 时整条退化')
+  // 多一个键就改了平台怎么跑它：shell 换了解释器（找不到那个 shell 时起不来、静默消失），once 只跑第一轮，
+  // async 不进上下文。
+  assert.deepEqual(Object.keys(hook).sort(), ['command', 'timeout', 'type'])
   assert.doesNotMatch(hook.command, /\bnode\b/)
   assert.ok(hook.command.startsWith("echo '") && hook.command.endsWith("'"), hook.command)
 })
@@ -312,8 +319,19 @@ test('自检提醒：文字纯 ASCII、不含单引号——PowerShell 5.1 输�
   assert.ok(REMINDER_TEXT.startsWith('agent-team reminder:'), REMINDER_TEXT)
 })
 
+// 两半都承重：复核实测，续会话、门禁离线时原文 6/6 重做自检；只删「去做自检」那半句 4/6，整段删光 3/6。
+// 上限（docs/16 §3）：认不出「do not run the gate self-check」这类说反话的改写，关键词都还在；要答案改变，
+// 得能在 CI 里用真实会话核 PM 的行为。
+test('自检提醒：说了什么时候、做什么、更早的结果不算数', () => {
+  assert.match(REMINDER_TEXT, /before the first Agent dispatch or the first write under \.agent-team in this turn/)
+  assert.match(REMINDER_TEXT, /\bgate self-check\b/)
+  assert.match(REMINDER_TEXT, /\brole file\b/)
+  assert.match(REMINDER_TEXT, /Earlier results do not count/)
+})
+
 // 按平台的实际选择去跑：Windows 上找得到 Git Bash 用 bash，找不到退到 PowerShell（从不用 cmd.exe，
-// 单引号在 cmd.exe 里是字面字符）；两个都在就两个都跑。macOS / Linux 用 sh。
+// 单引号在 cmd.exe 里是字面字符）；两个都在就两个都跑。macOS / Linux 用 sh。这张表只对条目不写 shell
+// 键时成立（上面那条键集判据钉着）。
 const SHELLS = process.platform === 'win32'
   ? [['C:/Program Files/Git/bin/bash.exe', ['-c']], ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command']]]
   : [['sh', ['-c']]]

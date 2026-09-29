@@ -44,8 +44,10 @@ at-architect」，而 at-qa / at-acceptance 已经派得动了）。
 
 ## 门禁自检
 
-门禁全是 hook。hook 起不来——Claude Code 的 PATH 上没有 node、Node 太旧、Claude Code 太旧、
-hooks 被关掉——平台一律放行，不拦任何调用，也不告诉你。你自己察觉不到，所以要主动查。
+门禁全是 hook。hook 起不来——Claude Code 的 PATH 上没有 node、Node 旧到门禁入口都解析不了、
+Claude Code 旧到丢掉 hook 的参数、hooks 被关掉——平台一律放行，不拦任何调用，也不告诉你。你自己
+察觉不到，所以要主动查。Node 能起来但不够新时，门禁会拒绝，理由里写着要哪个版本——那是下面第 3 支的
+「Node 太旧」。
 
 **什么时候查**：`/agent-team:at`、`/agent-team:at-resume`、`/agent-team:at-init` 三条命令开头；
 以及每一轮用户消息之后、这一轮第一次派发（`Agent`）或第一次写 `.agent-team/` 下的文件之前——
@@ -58,14 +60,17 @@ hooks 被关掉——平台一律放行，不拦任何调用，也不告诉你�
 **怎么判——只有一种结果能往下走：**
 
 1. 工具结果里**含有**「agent-team 门禁自检：在线」（前面可能多一截平台加的前缀）→ 门禁在线：至少
-   写路径门禁在跑，它与其余门禁共用同一个 node、同一个入口。对用户说一句自检通过，接着往下做。
+   写路径门禁在跑，它与其余门禁共用同一个 node、同一个入口。对用户说一句自检通过（只能引用这一轮拿到的
+   工具结果），接着往下做。
 2. 工具结果说文件还没读过（`File has not been read yet`）→ 这次没问到门禁，不算结果。先用 `Read`
    读这个文件，再 `Write` 一次，按第二次的结果判。
 3. 其余一切 → **停下**，这条命令不再往下做：
    - 写入成功（`File created successfully`、`has been updated successfully`）——这**不是**在线：门禁
      没拦下这次写入，门禁没在跑。先删掉 `.agent-team/gate-check`，删不掉就告诉用户可以手动删。
    - 弹出了写入确认、被用户拒了、被权限设置拒了（`haven't granted`、`don't ask mode`……）——门禁在
-     权限判定之前运行，走到权限这一步本身就说明门禁没拦下它：门禁没在跑。
+     权限判定之前运行，走到权限这一步本身就说明门禁没拦下它：门禁没在跑。权限模式挡不住自检：门禁在线时，
+     任何权限模式（包括 dontAsk）下这次写入都先被门禁拒掉、拿到「在线」。所以不要对用户说权限设置或权限
+     模式挡在了门禁前面、掩盖了自检，也不要把它加进下面的清单。
    - 拒绝理由是 agent-team 的别的说法（Node 太旧、门禁代码加载失败、门禁异常）——把理由原文转告用户。
    - 平台在调用之前就报了错（`<tool_use_error>`，比如设置里的 deny 规则盖住了 `.agent-team`）——
      自检没做成，门禁在不在不知道，把原文转告用户。
@@ -77,8 +82,10 @@ hooks 被关掉——平台一律放行，不拦任何调用，也不告诉你�
 >    那个终端里跑 `node --version`；桌面端或 IDE 起的会话，PATH 可能和终端不同，从终端直接起 `claude`
 >    再试一次。装完或换了 Node 之后，要重开 Claude Code（桌面端要完全退出再打开）。
 > 2. `claude --version` 要 2.1.276 或更新；桌面端保持应用为最新。
-> 3. `~/.claude/settings.json`、项目的 `.claude/settings.json`、`.claude/settings.local.json` 里有没有
->    `"disableAllHooks": true`；带 `--bare` 启动也会跳过全部 hooks。
+> 3. 有没有哪一处设置把 hooks 关了：`~/.claude/settings.json`、项目的 `.claude/settings.json`、
+>    `.claude/settings.local.json`、启动时用 `--settings` 传入的设置里有没有 `"disableAllHooks": true`；
+>    带 `--bare` 启动也会跳过全部 hooks。公司统一管理的电脑上，还要看组织下发的托管设置里有没有
+>    `disableAllHooks` 或 `allowManagedHooksOnly`——这一种自己改不了，要请管理员放行。
 > 4. 这个项目目录是否已被信任。
 >
 > 修好之后重新运行这条命令。

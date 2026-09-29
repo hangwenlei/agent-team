@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// 门禁的进程入口——hooks/hooks.json 注册的每一条 hook 都跑这个文件。判定全在 ./gate.mjs；
+// 门禁的进程入口——hooks/hooks.json 里每一道门禁都跑这个文件（UserPromptSubmit 上那条自检提醒不是门禁，
+// 故意不走 node）。判定全在 ./gate.mjs；
 // 这里只做两件事，都是把「判定模块根本跑不起来」纳入 ./lib/checks.mjs 的失败策略表：
 //
 // 1. 加载失败（M3p，docs/24 §2.2）。gate.mjs 的静态 import 在 ESM 链接期解析：任何一个 lib
