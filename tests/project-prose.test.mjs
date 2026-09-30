@@ -94,7 +94,12 @@ test('at-init §3：先处理【project.json】——阻断与要改改到没有
   // 【插件】单成一段、排在最前：它不在「里面要是有【project.json】」的条件底下（只有花名册坏时没有【project.json】）。
   const plugin = s.indexOf('**里面要是有【插件】（roster.json 读不出来），先停下**')
   assert.ok(plugin >= 0 && plugin < s.indexOf('**里面要是有【project.json】，先处理它**'), s.slice(0, 300))
-  for (const k of ['**改它修不好**。不要写 `.agent-team/reach.json`', '告诉用户重装或更新 agent-team 插件，装好之后重跑这条命令']) {
+  for (const k of [
+    '**改它修不好**。不要写 `.agent-team/reach.json`',
+    // 插件更新只对新会话生效：同一会话里重跑，hook 多半还读旧目录下那份坏的 roster.json。
+    '告诉用户重装或更新 agent-team 插件，装好之后新开一个会话，再重跑这条命令',
+    '`.agent-team/reach.json` 这时还是上一份配置算的',
+  ]) {
     assert.ok(s.includes(k), k)
   }
   // 触达表说这次不发时照做；连这一段都没收到才判门禁没在跑。
@@ -132,7 +137,7 @@ test('/agent-team:at §1：写完 current-run 收到【project.json】就先改�
   assert.ok(!s.includes('那些问题会让执行角色'), s)
   assert.ok(s.includes('**先改好它再写契约**'), s)
   // at 流程第一次收到【插件】就在写 current-run 这里。
-  assert.ok(s.includes('要是收到【插件】（roster.json 读不出来）') && s.includes('修不好它——停下，告诉用户重装或更新 agent-team 插件'), s)
+  assert.ok(s.includes('要是收到【插件】（roster.json 读不出来）') && s.includes('修不好它——停下，告诉用户重装或更新 agent-team 插件') && s.includes('新开一个会话'), s)
 })
 
 test('/agent-team:at §2：没收到契约回传时，先排除 project.json 读不出来这一种，再判门禁没在跑', () => {

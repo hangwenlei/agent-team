@@ -77,7 +77,7 @@ description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json
 
 **里面要是有【插件】（roster.json 读不出来），先停下**：那不是 `project.json` 的问题，**改它修不好**。
 不要写 `.agent-team/reach.json`（这时的触达表算不出来，保持原样），告诉用户重装或更新 agent-team 插件，
-装好之后重跑这条命令。
+装好之后新开一个会话，再重跑这条命令；并告诉用户 `.agent-team/reach.json` 这时还是上一份配置算的，重跑之后才会更新。
 
 **里面要是有【project.json】，先处理它**，分三档：
 

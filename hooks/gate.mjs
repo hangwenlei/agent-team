@@ -163,7 +163,9 @@ function readProjectText(file) {
 // 读得到、却解析不出的 project.json 是不是 UTF-16 编码（Windows PowerShell 5.1 的 Out-File、> 的默认编码）。按 UTF-8
 // 读出来，UTF-16 的 BOM 是开头的 U+FFFD，先跳过；之后 ASCII 内容的每个字符旁边都跟着一个 NUL——奇数位（LE）或偶数位
 // （BE）绝大多数是 NUL、另一半几乎没有才算。尾部补 NUL（断电后常见）、整份清零、UTF-32、夹着一个裸 NUL 的 UTF-8 都
-// 不算，落回泛说的口径（「常见原因：……」），不把编码当成事实说错。
+// 不算，落回泛说的口径（「常见原因：……」），不把编码当成事实说错。去掉 BOM 后不足 4 个码元（含 0 字节的空文件）也
+// 不算：空串的奇偶计数全是 0，不设下限就会判成 UTF-16。开头有较多非 ASCII 字符的 UTF-16 文件判不出来（按 UTF-8 解
+// 码时字节会并成一个字符、奇偶错开），落回泛说的口径——方向安全，docs/29 §5 登记着。
 function looksUtf16(text) {
   if (typeof text !== 'string') return false
   const replacement = String.fromCharCode(0xfffd)

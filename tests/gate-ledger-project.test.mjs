@@ -118,6 +118,8 @@ test('写 project.json（没有 run，/agent-team:at-init 的正路）：有问�
     assert.ok(ctx.indexOf('【project.json】') < ctx.indexOf('【触达表】'), ctx)
     assert.ok(ctx.includes('"at-fronted"'), ctx)
     assert.ok(sectionOf(ctx, '要改（')?.includes('"at-fronted"'), ctx)
+    // 只有要改、没有阻断：照发触达表的 JSON，不扣下。
+    assert.ok(ctx.includes('原样写进 .agent-team/reach.json') && !ctx.includes('这次不发'), ctx)
   })
 })
 
@@ -173,6 +175,7 @@ for (const [label, text] of [
   ['尾逗号', '{ "paths": {}, }'],
   ['顶层是数组', '[]'],
   ['顶层是 null', 'null'],
+  ['空文件', ''],
 ]) {
   test(`写坏的 project.json（${label}）：没有 run、有 run 两种状态下都报一句固定的话，不回显文件内容、不发触达表`, () => {
     const check = (p) => {
@@ -202,15 +205,26 @@ test('brokenProjectNotice：写的正是它、run 里在别处被弄坏、没有
   // 没有 run 就没有契约哈希可拿；改好 project.json 本身就会收到报告与触达表。
   const nr = brokenProjectNotice({ runInProgress: false, justWritten: false })
   for (const k of ['哈希', '原样重写', 'run 进行中']) assert.ok(!nr.includes(k), `${k}：${nr}`)
-  assert.ok(nr.includes('改好就会收到报告与触达表') && nr.includes('回报上级'), nr)
+  assert.ok(nr.includes('改好就会收到报告与【触达表】那一段') && nr.includes('回报上级'), nr)
   // 原因：泛说时把编码也列上；认出 UTF-16 时直说，并叫它写两次也不奇怪（Write 第一次会沿用原编码）。
   assert.ok(jw.includes('注释') && jw.includes('尾逗号') && jw.includes('不是 UTF-8 编码'), jw)
   // UTF-16：说出可观测的现象（第一次写完仍是 UTF-16、只少了 FF FE）与兜底——实测 PM 自己核字节、看到第一次写完仍是
   // UTF-16 时，会不信「再写一次」有用，改去写探测文件或删文件重建。
   const u = brokenProjectNotice({ runInProgress: true, justWritten: false, utf16: true })
-  for (const k of ['UTF-16', '门禁只读 UTF-8', 'FF FE', '再 Write 一次', '先删掉它，再用 Write 新建', '不用另写别的文件试探']) {
+  for (const k of [
+    'UTF-16', '门禁只读 UTF-8', 'FF FE', '多半仍是 UTF-16', '再 Write 一次', '第二次写完仍收到这一句',
+    '先删掉它，再用 Write 新建', '不用另写别的文件试探',
+  ]) {
     assert.ok(u.includes(k), `${k}：${u}`)
   }
+  // 兜底的先后：先再写一次，第二次写完还收到才删掉重建。
+  assert.ok(u.indexOf('再 Write 一次') < u.indexOf('第二次写完仍收到这一句') && u.indexOf('第二次写完仍收到这一句') < u.indexOf('先删掉它'), u)
+  // 写的正是它、UTF-16、run 进行中：修 UTF-16 要连写两次，早先那条回传末尾的「原样重写刚才那个文件」隔着两段回传多半
+  // 被丢掉（实测 7 次里 1 次照做），把提醒挂在修好之前的最后一条回传上。
+  const ju = brokenProjectNotice({ runInProgress: true, utf16: true })
+  for (const k of ['刚写进去的', '收到触达表之后', 'state.json', '原样重写']) assert.ok(ju.includes(k), `${k}：${ju}`)
+  assert.ok(!ju.includes('刚才那个文件'), ju)
+  assert.ok(!brokenProjectNotice({ runInProgress: false, utf16: true }).includes('原样重写'))
   assert.ok(!u.includes('注释'), u)
   for (const s of [jw, el, nr]) assert.ok(!s.includes('FF FE') && !s.includes('再 Write 一次'), s)
 })
@@ -260,6 +274,13 @@ test('project.json 读的时候撞上占用、再读是合法的：照常发报�
       assert.ok(!ctx.includes('不是一个合法的 JSON 对象'), ctx)
     })
   }
+  // 别的短暂失败（EPERM：删除待决、杀毒软件）同样重读——只有文件不在（ENOENT）不重读。
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TYPO))
+    const ctx = ctxOf(runReads(posted(join(p, '.agent-team', 'project.json')), p, reads('eperm*3')))
+    assert.ok(ctx.includes('【触达表】') && ctx.includes('"at-fronted"'), ctx)
+    assert.ok(!ctx.includes('不是一个合法的 JSON 对象'), ctx)
+  })
   // 一直读不到：只留痕，不说「写坏了」。
   withoutRun((p) => {
     writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TYPO))
@@ -333,12 +354,26 @@ test('project.json 是 UTF-16 编码（Windows PowerShell 5.1 的默认）：回
       assert.ok(ctx.includes('UTF-16') && ctx.includes('门禁只读 UTF-8') && ctx.includes('再 Write 一次'), ctx)
     })
   }
+  // run 进行中、写的正是 project.json：修好之前的最后一条回传提醒把读不出期间写过的文件原样重写一次；没有 run 时不提。
+  const le = Buffer.concat([Buffer.from([0xff, 0xfe]), body])
+  withRun(TEMPLATE, (p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), le)
+    const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p))
+    for (const k of ['刚写进去的', 'UTF-16', '收到触达表之后', 'state.json', '原样重写']) assert.ok(ctx.includes(k), `${k}：${ctx}`)
+    assert.ok(!ctx.includes('刚才那个文件'), ctx)
+  })
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), le)
+    const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p))
+    assert.ok(ctx.includes('UTF-16') && !ctx.includes('原样重写'), ctx)
+  })
 })
 
-test('带 NUL 却不是 UTF-16 的坏文件（尾部补 NUL、整份清零、UTF-32）：不说成 UTF-16，落回泛说的口径', () => {
+test('带 NUL 却不是 UTF-16 的坏文件（尾部补 NUL、整份清零、UTF-32、夹着一个裸 NUL 的 UTF-8）：不说成 UTF-16，落回泛说的口径', () => {
   const json = JSON.stringify(TEMPLATE)
   const utf32 = Buffer.concat([Buffer.from([0xff, 0xfe, 0, 0]), Buffer.from([...json].flatMap((c) => [c.charCodeAt(0), 0, 0, 0]))])
-  for (const bytes of [Buffer.concat([Buffer.from(json), Buffer.alloc(512)]), Buffer.alloc(1024), utf32]) {
+  const bareNul = Buffer.from('{ "paths": {} /* x' + String.fromCharCode(0) + ' */, }')
+  for (const bytes of [Buffer.concat([Buffer.from(json), Buffer.alloc(512)]), Buffer.alloc(1024), utf32, bareNul]) {
     withoutRun((p) => {
       writeFileSync(join(p, '.agent-team', 'project.json'), bytes)
       const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p))
@@ -474,6 +509,7 @@ test('门禁子进程：插件副本的 roster.json 读坏时，写 project.json
       const ctx = ctxOf(run('ledger', posted(join(runDir, 'state.json')), gate, p))
       assert.ok(ctx.includes('【插件】'), ctx)
       for (const k of ['改到没有为止', '整份重写']) assert.ok(!ctx.includes(k), `${k}：${ctx}`)
+      assert.ok(!ctx.includes('【触达表】'), ctx)
     })
     // 触达表拿空花名册算，恒得出「没有角色的触达超出」——实测 PM 用这份 {} 覆盖了一份正确的 reach.json。不发 JSON。
     for (const bad of ['{', '{}', '[]']) {
@@ -482,11 +518,21 @@ test('门禁子进程：插件副本的 roster.json 读坏时，写 project.json
         writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE))
         const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), gate, p))
         assert.ok(ctx.includes('【插件】') && ctx.includes('不要写 .agent-team/reach.json'), `${bad}：${ctx}`)
+        assert.ok(ctx.includes('【触达表】这次算不出来') && !ctx.includes('上面有阻断') && ctx.includes('新开一个会话'), `${bad}：${ctx}`)
         for (const k of ['原样写进 .agent-team/reach.json', '没有角色的触达超出']) assert.ok(!ctx.includes(k), `${k}：${ctx}`)
       }
       withoutRun(check)
       withRun(TEMPLATE, check)
     }
+    // 花名册坏、同时有阻断：说花名册那句——「改完阻断、重写 project.json 之后才会收到」在花名册修好之前是假话。
+    writeFileSync(join(plugin, 'roster.json'), '{')
+    withoutRun((p) => {
+      const blocked = { ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-backend': ['src/server/', '../shared/'] } }
+      writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(blocked))
+      const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), gate, p))
+      assert.ok(ctx.includes('【project.json】') && ctx.includes('"../shared/"'), ctx)
+      assert.ok(ctx.includes('【触达表】这次算不出来') && !ctx.includes('上面有阻断'), ctx)
+    })
   } finally {
     rmSync(plugin, { recursive: true, force: true })
   }
@@ -503,6 +549,14 @@ test('写 project.json 有阻断时不发触达表 JSON：照整条作废的条�
   }
   withoutRun(check)
   withRun(TEMPLATE, check)
+  // paths 缺失这类整份级阻断：触达表其实与 H3 一致，所以话里不说「算得不对」，只说改完才会收到。
+  withoutRun((p) => {
+    const noPaths = { ...TEMPLATE }
+    delete noPaths.paths
+    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(noPaths))
+    const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p))
+    assert.ok(ctx.includes('【触达表】这次不发') && ctx.includes('之后才会收到') && !ctx.includes('不对'), ctx)
+  })
 })
 
 // ---- 每趟 run 开头 ----
@@ -541,6 +595,10 @@ test('写 state.json：只报阻断——只有要改或请确认的问题时不
     const ctx = ctxOf(run('ledger', posted(join(runDir, 'state.json')), undefined, p))
     assert.ok(ctx.includes('【project.json】') && ctx.includes('"../"'), ctx)
     assert.ok(!ctx.includes('请确认'), ctx)
+    // 【触达表】只在写 project.json 时出：记账与每趟 run 开头都不推它。
+    assert.ok(!ctx.includes('【触达表】'), ctx)
+    const ptr = ctxOf(run('ledger', posted(join(p, '.agent-team', 'current-run')), undefined, p))
+    assert.ok(ptr.includes('【project.json】') && !ptr.includes('【触达表】'), ptr)
   })
   for (const project of [TYPO, CONFIRM_ONLY, TEMPLATE]) {
     withRun(project, (p, runDir) => {
