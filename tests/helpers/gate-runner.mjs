@@ -11,6 +11,8 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { TRACE_ENV } from '../../hooks/lib/trace.mjs'
+import { CHECKS } from '../../hooks/lib/checks.mjs'
+import { SECOND_WRITE_NOTE } from '../../hooks/lib/fail-open.mjs'
 
 // GATE 是 hooks.json 真正注册的那个进程入口 boot.mjs，不是判定主体 gate.mjs（M3p）：子进程
 // 判据要走平台走的那条路，boot.mjs 再把判定交给 gate.mjs。
@@ -50,7 +52,7 @@ export function hermeticEnv(base = process.env) {
 // env 是可选的第五个参数，缺省是「当前环境去掉留痕开关与 CLAUDE_PROJECT_DIR」（见上面 hermeticEnv）。
 // 第六个参数：nodeArgs 放在入口之前，用来预加载（-r 一个 .cjs：--import 要 Node 18.18 起才有，
 // 最低版本作业上会让子进程在「bad option」上直接退出）；node 换一个 node 来跑（tests/boot-old-node.test.mjs 用）。
-export function run(check, input, gate = GATE, cwd = undefined, env = hermeticEnv(), { nodeArgs = [], node = GATE_NODE } = {}) {
+export function run(check, input, gate = GATE, cwd = undefined, env = hermeticEnv(), { nodeArgs = [], node = GATE_NODE, contract = true } = {}) {
   const result = spawnSync(node, [...nodeArgs, gate, check], {
     input: typeof input === 'string' ? input : JSON.stringify(input),
     encoding: 'utf8',
@@ -59,11 +61,12 @@ export function run(check, input, gate = GATE, cwd = undefined, env = hermeticEn
   })
   const out = { stdout: result.stdout ?? '', stderr: result.stderr ?? '', status: result.status }
   assertRan(out, gate, result.error, node)
+  if (contract) assertContract(check, out)
   return out
 }
 
 // 异步版：同一个出口，给要并发跑几十个子进程的判据用（tests/trusted-echo.test.mjs）。
-export function runAsync(check, input, { gate = GATE, cwd, env = hermeticEnv(), nodeArgs = [], node = GATE_NODE } = {}) {
+export function runAsync(check, input, { gate = GATE, cwd, env = hermeticEnv(), nodeArgs = [], node = GATE_NODE, contract = true } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(node, [...nodeArgs, gate, check], { cwd, env })
     let stdout = ''
@@ -75,6 +78,7 @@ export function runAsync(check, input, { gate = GATE, cwd, env = hermeticEnv(), 
       const out = { check, stdout, stderr, status }
       try {
         assertRan(out, gate, undefined, node)
+        if (contract) assertContract(check, out)
         resolve(out)
       } catch (e) {
         reject(e)
@@ -92,6 +96,63 @@ function assertRan({ stderr, status }, gate, error, node) {
   if (status === null) throw new Error(`门禁子进程被信号杀掉了（${gate}）：${stderr.slice(0, 300)}`)
   if (![0, 1, 2].includes(status)) throw new Error(`门禁子进程退出码 ${status} 不在 0/1/2 里：${stderr.slice(0, 300)}`)
   if (stderr.includes(`Cannot find module '${gate}'`)) throw new Error(`门禁入口本身找不到：${gate}`)
+}
+
+// M3v（docs/30，全量审查第 12 条）：每一次门禁子进程的输出都要守平台契约——钉在出口上，不只钉形状表列举的那几格，
+// 以后新增的出口不在任何表里也跑不掉。违反任何一条，平台上的后果都是静默的：
+//   - stdout 不是恰好一份 JSON 对象：两份 JSON 让拒绝失效、回传全丢；
+//   - 顶层 decision / continue、permissionDecision 不是 deny：allow 绕过权限确认，continue:false 停整轮；
+//   - hookEventName 与这次事件不符：整份输出作废；
+//   - SubagentStop 上 stdout 非空：additionalContext 在那里等于拦截（拒绝走 exit 2 + stderr，stdout 永远是空的）；
+//   - PreToolUse 上的 additionalContext：本插件在那里不发受信块（hooks/lib/fail-open.mjs 头部）；
+//   - 有 JSON 却不是 exit 0：exit 1 时平台照样处理它，与文档相反，别依赖；
+//   - stderr 里的 BUG 行与「已经写过一份」那句：兜底触发了——它们只该在注入用例里出现，那种用例传 contract: false。
+export function outputContractViolations(check, { stdout, stderr, status }) {
+  const out = []
+  const spec = Object.hasOwn(CHECKS, check) ? CHECKS[check] : null
+  const event = spec ? spec.event : 'PreToolUse'
+  const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+  if (stdout.trim() !== '') {
+    if (event === 'SubagentStop') out.push('SubagentStop 上 stdout 非空')
+    if (status !== 0) out.push(`stdout 上有输出，退出码却是 ${status}`)
+    let v
+    try {
+      v = JSON.parse(stdout)
+    } catch {
+      out.push('stdout 不是恰好一份 JSON')
+      return out
+    }
+    if (!isObj(v)) return [...out, 'stdout 不是一个 JSON 对象']
+    if ('decision' in v) out.push('顶层有 decision')
+    if ('continue' in v) out.push('顶层有 continue')
+    if ('systemMessage' in v && typeof v.systemMessage !== 'string') out.push('systemMessage 不是字符串')
+    const h = v.hookSpecificOutput
+    if (h !== undefined) {
+      if (!isObj(h)) {
+        out.push('hookSpecificOutput 不是对象')
+      } else {
+        if (h.hookEventName !== event) out.push(`hookEventName 是 ${JSON.stringify(h.hookEventName)}，这次事件是 ${event}`)
+        if ('permissionDecision' in h && h.permissionDecision !== 'deny') out.push(`permissionDecision 是 ${JSON.stringify(h.permissionDecision)}`)
+        if ('additionalContext' in h) {
+          if (typeof h.additionalContext !== 'string') out.push('additionalContext 不是字符串')
+          if (event !== 'PostToolUse') out.push(`${event} 上发了 additionalContext`)
+        }
+      }
+    }
+  }
+  if (stderr.includes('agent-team BUG:')) out.push('stderr 里有 BUG 行')
+  if (stderr.includes(SECOND_WRITE_NOTE)) out.push('stderr 里有「已经写过一份」那句')
+  return out
+}
+
+function assertContract(check, out) {
+  const bad = outputContractViolations(check, out)
+  if (bad.length) {
+    throw new Error(
+      `门禁输出违反平台契约（检查项 ${check}）：${bad.join('；')}。` +
+        `stdout：${out.stdout.slice(0, 300)}；stderr：${out.stderr.slice(0, 300)}`,
+    )
+  }
 }
 
 export function decisionOf(stdout) {

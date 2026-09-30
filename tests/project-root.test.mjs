@@ -58,6 +58,16 @@ test('projectRootFrom：离最近的那个赢——嵌套的子项目有自己�
   assert.equal(root({ CLAUDE_PROJECT_DIR: '/proj' }, '/proj/pkg/x', having('/proj', '/proj/pkg')), norm('/proj/pkg'))
 })
 
+// M3v 第三轮真实会话（docs/30 §3）：PM 用 Bash `cd .agent-team/runs/<id>` 之后 cwd 留在那里，相对路径的 Write 在 run 目录里
+// 造出一个嵌套的 .agent-team——「离最近的那个赢」于是把 run 目录认成了项目根，那一趟的门禁全看错了地方。项目根不会在
+// 某个 .agent-team 目录里面，那样的候选跳过。
+test('projectRootFrom：.agent-team 里面嵌套出来的 .agent-team 不算——项目根不会在 .agent-team 目录里', () => {
+  const nested = '/proj/.agent-team/runs/r1'
+  assert.equal(root({ CLAUDE_PROJECT_DIR: '/proj' }, nested, having('/proj', nested)), norm('/proj'))
+  assert.equal(root({}, `${nested}/sub`, having('/proj', nested)), norm('/proj'))
+  assert.equal(root({}, '/proj/.AGENT-TEAM/runs/r1', having('/proj', '/proj/.AGENT-TEAM/runs/r1')), norm('/proj'))
+})
+
 test('projectRootFrom：没有 CLAUDE_PROJECT_DIR 时照样往上找', () => {
   assert.equal(root({}, '/proj/web', having('/proj')), norm('/proj'))
 })

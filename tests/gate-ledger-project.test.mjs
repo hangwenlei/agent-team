@@ -447,12 +447,13 @@ test('project.json 坏着时，.agent-team 之外的写入照旧一声不吭—�
       const input = posted(f)
       if (who) input.agent_type = who
       else delete input.agent_type
-      assert.equal(ctxOf(run('ledger', input, undefined, p)), '', f)
+      // M3v：断言 stdout 整个为空，不只是没有回传——只给用户刷一行 systemMessage 的误报，只查回传是拦不住的。
+      assert.equal(run('ledger', input, undefined, p).stdout, '', f)
     }
   })
   withRun(TEMPLATE, (p) => {
     writeFileSync(join(p, '.agent-team', 'project.json'), '[]')
-    assert.equal(ctxOf(run('ledger', posted(join(p, 'README.md')), undefined, p)), '')
+    assert.equal(run('ledger', posted(join(p, 'README.md')), undefined, p).stdout, '')
   })
 })
 

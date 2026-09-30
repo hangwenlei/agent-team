@@ -313,8 +313,10 @@ test('命令正文里出现的每个 .agent-team 路径都是控制文件或 run
     CONTROL_FILES.some((c) => new RegExp(`^${c.replace('*', '[^/]+')}$`).test(rel)) ||
     /^runs\/[^/]+\/?$/.test(rel) ||
     [...produced].some((p) => rel.endsWith(p))
+  // 字符类里有 *（M3v）：正文会写 Glob 模式（`.agent-team/runs/*/state.json`，commands/at-resume.md 找丢了指针的 run），
+  // 没有它，匹配在 runs/ 就断了、被当成一个裸的 runs/ 报出来。runs/*/state.json 本身就是控制文件的模式，照认。
   for (const f of FILES) {
-    for (const m of new Set(textOf(f).match(/\.agent-team\/[A-Za-z0-9_./<>-]+/g) ?? [])) {
+    for (const m of new Set(textOf(f).match(/\.agent-team\/[A-Za-z0-9_./<>*-]+/g) ?? [])) {
       const rel = m.replace('.agent-team/', '').replace(/[.]$/, '')
       assert.ok(
         ok(rel.replace(/<run[_-]?id>/g, 'RID')),

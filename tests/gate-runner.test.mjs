@@ -10,7 +10,8 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { GATE_NODE, run, runAsync, decisionOf } from './helpers/gate-runner.mjs'
+import { GATE_NODE, run, runAsync, decisionOf, outputContractViolations } from './helpers/gate-runner.mjs'
+import { SECOND_WRITE_NOTE } from '../hooks/lib/fail-open.mjs'
 import { GATE_CHECK_PATH, GATE_CHECK_ONLINE } from '../hooks/lib/gate-check.mjs'
 import { MIN_NODE } from './helpers/min-node.mjs'
 
@@ -122,6 +123,58 @@ test('退出码不在 0/1/2 里：run 与 runAsync 都抛', async () => {
     writeFileSync(gate, 'process.exit(3)\n')
     assert.throws(() => run('writepath', {}, gate, dir), /退出码 3/)
     await assert.rejects(runAsync('writepath', {}, { gate, cwd: dir }), /退出码 3/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// ---- 出口上的平台契约（M3v，docs/30）----
+//
+// 契约本身写在 tests/helpers/gate-runner.mjs 的 outputContractViolations 上方。这几条是它的正向锚：每一种违规样本都要被
+// 认出来——函数哪天退化成恒返回空数组，全套照样绿，而这里当场红。
+
+const OK_SAMPLES = [
+  ['writepath', { stdout: '', stderr: '', status: 0 }],
+  ['writepath', { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'x' } }), stderr: '', status: 0 }],
+  ['readiness', { stdout: JSON.stringify({ systemMessage: 'agent-team x' }), stderr: '', status: 0 }],
+  ['ledger', { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: 'x' }, systemMessage: 'y' }), stderr: '', status: 0 }],
+  ['stop-gate', { stdout: '', stderr: '理由', status: 2 }],
+  ['ledger', { stdout: '', stderr: 'agent-team ledger 检查项没有运行', status: 1 }],
+]
+
+const BAD_SAMPLES = [
+  ['两份 JSON', 'ledger', { stdout: '{"systemMessage":"a"}{"systemMessage":"b"}', stderr: '', status: 0 }, /恰好一份/],
+  ['不是对象', 'ledger', { stdout: '[1]', stderr: '', status: 0 }, /不是一个 JSON 对象/],
+  ['顶层 decision', 'deliverable', { stdout: JSON.stringify({ decision: 'block' }), stderr: '', status: 0 }, /decision/],
+  ['顶层 continue', 'ledger', { stdout: JSON.stringify({ continue: false }), stderr: '', status: 0 }, /continue/],
+  ['allow', 'readiness', { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow' } }), stderr: '', status: 0 }, /permissionDecision/],
+  ['事件名不符', 'ledger', { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: 'x' } }), stderr: '', status: 0 }, /hookEventName/],
+  ['SubagentStop 上有 stdout', 'stop-gate', { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'SubagentStop', additionalContext: 'x' } }), stderr: '', status: 0 }, /SubagentStop/],
+  ['PreToolUse 上的 additionalContext', 'readiness', { stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: 'x' } }), stderr: '', status: 0 }, /PreToolUse 上发了 additionalContext/],
+  ['systemMessage 不是字符串', 'ledger', { stdout: JSON.stringify({ systemMessage: 1 }), stderr: '', status: 0 }, /systemMessage/],
+  ['有 JSON 却 exit 1', 'ledger', { stdout: JSON.stringify({ systemMessage: 'x' }), stderr: '', status: 1 }, /退出码/],
+  ['BUG 行', 'ledger', { stdout: '', stderr: 'agent-team BUG: x', status: 0 }, /BUG/],
+  ['已经写过一份', 'ledger', { stdout: '', stderr: SECOND_WRITE_NOTE, status: 0 }, /已经写过一份/],
+]
+
+test('出口契约：合规的样本一条都不报', () => {
+  for (const [check, out] of OK_SAMPLES) assert.deepEqual(outputContractViolations(check, out), [], `${check}：${out.stdout}`)
+})
+
+test('出口契约：每一种违规样本都被认出来', () => {
+  for (const [label, check, out, re] of BAD_SAMPLES) {
+    const bad = outputContractViolations(check, out)
+    assert.ok(bad.some((b) => re.test(b)), `${label}：${bad.join('；')}`)
+  }
+})
+
+test('出口契约：run 在违规时抛出来；contract: false 时不核（注入用例用）', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agent-team-runner-'))
+  try {
+    const gate = join(dir, 'two.mjs')
+    writeFileSync(gate, "process.stdout.write('{}{}')\n")
+    assert.throws(() => run('ledger', {}, gate, dir), /违反平台契约/)
+    assert.equal(run('ledger', {}, gate, dir, undefined, { contract: false }).stdout, '{}{}')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

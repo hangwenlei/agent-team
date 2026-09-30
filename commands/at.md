@@ -22,6 +22,10 @@ $ARGUMENTS
 
 ## 1. 建 run
 
+开头自检的理由末尾要是跟着一句「另外，」说原来那趟 run 坏了（指针丢了、`state.json` 读不出来、`state.stage` 不在阶段链里）：不要写原来那趟 run 目录下的任何文件，照本节另起一个 run id 建新 run。
+这一轮回复用户时（不论停在哪一步）把原来那趟的问题与它的 run id 告诉用户；要接回它，先把 `.agent-team/current-run` 改回那个 run id，再跑 `/agent-team:at-resume`（那样就离开了新建的这一趟）。
+说的是 `project.json` 读不出来的话，先照它修好再建 run。
+
 - run id：`YYYYMMDD-HHmm-<slug>`，`slug` 用小写字母、数字与连字符，取自需求本身
   （例：`20260917-1430-login-sso`）。
 - 建目录 `.agent-team/runs/<run_id>/`。
@@ -42,7 +46,7 @@ $ARGUMENTS
 
 ## 2. S1 录入 —— 冻结契约
 
-照 `${CLAUDE_PLUGIN_ROOT}/templates/00-contract.md` 写 `00-contract.md`。
+照 `${CLAUDE_PLUGIN_ROOT}/templates/00-contract.md` 写 `.agent-team/runs/<run_id>/00-contract.md`——写在这一趟的 run 目录里，写到别处门禁不回传 sha。
 
 **第 1 节「用户原话」必须逐字照抄上面 `$ARGUMENTS` 的内容。** 不要改写、不要顺一顺、
 不要补全你觉得他漏掉的东西。后面每个角色的产出都要对着这段话验收；转写时润色过一次，
@@ -51,7 +55,11 @@ $ARGUMENTS
 写完之后你会收到一段「agent-team 账本回传」，里面有契约的 sha256。**把那个值原样写进
 `state.json` 的 `contract_sha`**，不要自己拼一个。**没收到就停下**，先看这一轮有没有收到过说
 `project.json` 不是合法 JSON 对象的【project.json】：有的话这是配置问题，不是门禁掉线——改好
-`project.json`，再原样重写一次 `00-contract.md` 拿回传（第 1 节照旧逐字不动）。没有的话，那说明门禁没在跑
+`project.json`，再原样重写一次 `00-contract.md` 拿回传（第 1 节照旧逐字不动）。
+回传里没有契约的 sha、却有一段【门禁】（不论它说的是什么原因）：那不是门禁没在跑——照它说的修，再原样重写一次 `00-contract.md` 拿回传。
+两样都没有的话，先核契约写对地方没有：写到了别处（比如项目根），门禁不回传——照 `.agent-team/runs/<run_id>/00-contract.md` 原样重写一次。
+位置也对，再 `Read` 一下 `.agent-team/current-run`，核对它是不是正在写的这一趟的 run id：还指着上一趟，就是第 1 节写 `current-run` 那一步漏了——补上，再原样重写一次 `00-contract.md`。
+指针也对，那说明门禁没在跑
 （开头自检之后它也可能掉线，比如会话换了一个环境）——照你的角色正文「门禁自检」一节告诉用户，不要自己算一个 sha 补上。
 
 ## 3. 逐段推进

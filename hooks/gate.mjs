@@ -33,9 +33,20 @@ import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
 import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
 import { isPlainObject } from './lib/stages.mjs'
-import { TRUSTED_PREFIX, inline, quote, trustedBlock } from './lib/trusted.mjs'
+import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
-import { gateCheckReason, isGateCheck } from './lib/gate-check.mjs'
+import { GATE_CHECK_PATH, gateCheckReason, isGateCheck } from './lib/gate-check.mjs'
+import {
+  SECOND_WRITE_NOTE,
+  crashContext,
+  dispatchNoRunNotice,
+  dispatchUnreadableNotice,
+  hookOutput,
+  ledgerUnreadableNotice,
+  selfCheckAppendix,
+  systemMessage,
+  unknownStageNotice,
+} from './lib/fail-open.mjs'
 
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -123,9 +134,17 @@ function loadRoster() {
 // 不需要再写 exit。
 function denyAndExit(reason, event) {
   const { stream, text, exitCode } = denyOutput(reason, event)
+  DECIDED = exitCode
   process[stream].write(text)
   process.exit(exitCode)
 }
+
+// 这次进程已经写出的结果要以哪个退出码收尾（M3v）；没写出过是 null。只有最外层 catch 读它：写出结果之后再崩（只有注入走得
+// 到——每个出口写完都紧跟 process.exit），再写一份就是两份 JSON，拒绝失效、回传全丢；SubagentStop 的拒绝是 stderr + exit 2，
+// 不写 stdout，崩溃之后要照样以 2 退出，不能被改判成放行（docs/30 §3 的复核）。
+let DECIDED = null
+// 这次的 hook 输入。只有最外层 catch 读它：崩溃时按「收件人是不是 PM」选措辞。
+let INPUT = null
 
 // 「这次写的是不是 .agent-team/project.json」。抽成一个谓词是因为 ledger 分支现在
 // 要在两条路径上问同一个问题（ctx.ok 的正常路径，以及 ctx 读不出来时那条只为触达表
@@ -248,17 +267,39 @@ function isCoordinatorFor(ctx, role) {
   return (reach[role]?.reachableRoles ?? []).includes(stageRole)
 }
 
-// ledger 的输出契约：notices 非空才写 stdout。抽出来同样是因为有两个调用点。
-function emitLedger(event, notices) {
-  if (!notices.length) return
-  process.stdout.write(
-    JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: event,
-        additionalContext: trustedBlock(notices.join('\n\n')),
-      },
-    }),
-  )
+// 放行一侧写 stdout 的唯一出口（M3v，docs/30）：受信回传（contexts，并成一份受信块）与给用户的一行（systemMessage）。
+// 输出长什么样由纯函数 hookOutput（hooks/lib/fail-open.mjs）定：PreToolUse 上不发受信块，SubagentStop 上什么都不发，
+// 永不带 permissionDecision、decision、continue。这里只做 I/O，**写完就退出**：同一次进程只写一份，两份 JSON 会让
+// 回传全丢（上一版的 emitLedger 不退出，靠每个调用点自己紧跟 exit）。要一起发的话在调用点并进同一次调用。
+// 不变式：fail closed 的检查项只经 denyAndExit 写 stdout，不调用这里（tests/gate-fail-open.test.mjs 按源码钉着）。
+function emitHookJson(event, parts) {
+  const { stdout, bug } = hookOutput(event, parts)
+  if (bug) process.stderr.write(bug)
+  if (stdout) {
+    DECIDED = 0
+    process.stdout.write(stdout)
+  }
+  process.exit(0)
+}
+
+// 输入读不出来（stdin 不是一个 JSON 对象、缺 tool_name）时 fail open 的那一支（M3v）：往 stderr 留一行，Pre/Post 上再
+// 给用户一行。不进模型——模型做不了什么，这多半是 Claude Code 改了 hook 输入的形状，要更新的是插件或 Claude Code。
+function inputUnreadable(spec, what) {
+  process.stderr.write(`agent-team ${CHECK}：读不出这次的 hook 输入（${what}），没有做校验、放行。\n`)
+  emitHookJson(spec.event, spec.event === 'SubagentStop' ? {} : { systemMessage: systemMessage('input', { check: CHECK }) })
+}
+
+// 门禁自检理由末尾的追加句（M3v）：只在调用者是 PM、自检写在门禁认的项目根下时追加——丢指针时 PM 在 /agent-team:at-resume
+// 里只读不写、/agent-team:at 建新 run 只写控制文件，别处都开不了口（措辞与理由在 hooks/lib/fail-open.mjs 的
+// selfCheckAppendix）。多读一次运行上下文；出任何意外都只是不追加——自检本身的「在线」不能因为它丢掉。
+function selfCheckTail(input, checked) {
+  try {
+    if (!isContractWriter(input?.agent_type)) return ''
+    if (norm(checked) !== norm(join(ROOT_PROJECT, GATE_CHECK_PATH))) return ''
+    return selfCheckAppendix(readRunContext(ROOT_PROJECT, ROOT))
+  } catch {
+    return ''
+  }
 }
 
 // fail open 时往 stderr 留的那行痕迹（整理项 10）。四个检查项此前各写一份
@@ -273,6 +314,10 @@ function emitLedger(event, notices) {
 // 这个失效形状。文案只说一次"放行"，剩下的篇幅换成一句可执行的下一步：
 // ctx.reason 的大多数取值本身就是 current-run / run 目录的问题，那是最先该查
 // 的地方。
+//
+// ⚠️ M3v（docs/30，全量审查第 12 条）：这一行只进转录——模型看不到，用户在默认界面上也看不到。PM 自己发起的派发
+// （H5a）与写入（ledger）上，判不出来时另有一段受信回传与给用户的一行，措辞与理由在 hooks/lib/fail-open.mjs；这一行
+// 照旧写，两者并存。
 function failOpenNotice(label, ctx) {
   const what = ctx.kind === 'no-run' ? '当前没有进行中的 run' : '读不到运行上下文'
   return (
@@ -584,13 +629,15 @@ function main() {
 
   const spec = CHECKS[CHECK]
   const input = readStdin()
+  INPUT = input
 
   if (!isValidInput(input)) {
-    // 读不到可判定的输入。fail closed 的检查项拒绝；fail open 的不表态。
+    // 读不到可判定的输入。fail closed 的检查项拒绝；fail open 的放行，但不静默（M3v：此前这里零输出，与「判过了、
+    // 结论是放行」分不出来）。
     if (spec.failClosed) {
       denyAndExit('agent-team 门禁无法读取 hook 输入，按安全边界拒绝。', spec.event)
     }
-    process.exit(0)
+    inputUnreadable(spec, 'stdin 不是一个 JSON 对象')
   }
 
   if (spec.toolNames !== null) {
@@ -601,7 +648,7 @@ function main() {
           spec.event,
         )
       }
-      process.exit(0)
+      inputUnreadable(spec, 'tool_name 缺失或不是字符串')
     }
     if (!spec.toolNames.includes(input.tool_name)) {
       // 这次调用确实与本检查项无关，保持沉默、不表态。
@@ -618,10 +665,10 @@ function main() {
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
     // H2 是流程辅助：读不到运行上下文时 fail open，但规格 §6 写的是
     // allow + warning，不是静默放行——必须留痕，不能一声不吭就 exit(0)。
-    // stderr 是这个代码库已有的告警通道（未知检查项那条路径也走它），
-    // 跟着用；不改用 additionalContext，因为 PreToolUse 是否支持那个
-    // 字段本项目没有实测过，换一个同样没验过的通道不会让告警更可靠。
-    // 这条告警在会话里是否可见，本项目也没有实测过，留给 Task 7 核实。
+    // M3v（docs/30）：这里只往 stderr 留痕，告诉 PM 与用户的那一段在 H5a（PostToolUse:Agent）上说。理由两条，都实测过：
+    // PreToolUse 上几道 hook 的 additionalContext 被平台并成一段、不标来源，受信块放在这里会让别家插件的文字读起来像
+    // 它的续行（会话 ccf48d1e）；H1 拒掉的派发不跑 PostToolUse:Agent（会话 df24bc74），挪到 H5a 就不会对一次被拒的派发
+    // 说「这次派发没有做校验」。时机上两者等价：默认的后台派发下，两处的回传都紧跟在「Async agent launched」之后。
     if (!ctx.ok) {
       // 文案与措辞口径统一在 failOpenNotice 里，见那里的注释。H2 不按
       // ctx.kind 分派行为（两种 kind 都放行），但留痕的措辞要分——
@@ -654,8 +701,9 @@ function main() {
     // 门禁自检（M3t，docs/28，全量审查第 4 条）：写 .agent-team/gate-check 一律拒，理由带着
     // 「在线」固定串。排在一切之前——主线程豁免、读运行上下文都在它后面：自检要在没有
     // .agent-team 的项目里、坏掉的 run 里、由主线程发起时都拿得到回答。协议在 agents/at-pm.md。
+    // M3v：调用者是 PM 时，理由末尾可能追加一句运行状态的说明（selfCheckTail）。
     const checked = input.tool_name === 'NotebookEdit' ? input?.tool_input?.notebook_path : input?.tool_input?.file_path
-    if (isGateCheck(checked)) denyAndExit(gateCheckReason(), spec.event)
+    if (isGateCheck(checked)) denyAndExit(gateCheckReason() + selfCheckTail(input, checked), spec.event)
 
     // MAIN（无 agent_type）不受 per-role 隔离约束——H3 隔离的是
     // project.paths 里登记的各角色之间的边，主线程不是参与路径认领的
@@ -950,24 +998,23 @@ function main() {
           // 丢掉唯一一次「门禁判不出来」的信号。
           if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
           const roster = loadRoster()
-          emitLedger(
-            spec.event,
-            buildLedgerNotices({
+          emitHookJson(spec.event, {
+            contexts: buildLedgerNotices({
               kind: 'project',
               reach: computeReach({ roster, paths: project.value.paths }),
               // M3u（docs/29）：形状问题三档全报，排在【触达表】之前。
               projectReport: validateProject(project.value, { roster }),
             }),
-          )
-          process.exit(0)
+          })
         }
         // project.json 刚写进去却读不出来。M3u（docs/29）：文件在、只是解析不出或不是对象时，照 state.json
         // 那一支（M3r）回传一句固定的话——此前这里只往 stderr 留痕，模型看不到，/agent-team:at-init 会把它
         // 误当成「门禁没在跑」。不回显文件内容，不造空触达表。读不到（被删、被占用）时照旧只留痕（落到最后那行）。
         if (text !== null) {
           if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
-          emitLedger(spec.event, [brokenProjectNotice({ runInProgress: ctx.kind !== 'no-run', utf16: looksUtf16(text) })])
-          process.exit(0)
+          emitHookJson(spec.event, {
+            contexts: [brokenProjectNotice({ runInProgress: ctx.kind !== 'no-run', utf16: looksUtf16(text) })],
+          })
         }
       }
       // M3r（docs/26，全量审查第 5 条）：刚写的正是某个 run 的 state.json、而它读不出来——这趟
@@ -987,17 +1034,15 @@ function main() {
         } catch {}
         if (parseStateText(text) === null) {
           process.stderr.write(failOpenNotice('ledger 回传', ctx))
-          emitLedger(
-            spec.event,
-            buildLedgerNotices({
+          emitHookJson(spec.event, {
+            contexts: buildLedgerNotices({
               kind: 'state',
               stateProblems: [
                 '刚写进去的 state.json 不是一个合法的 JSON 对象，门禁读不出这趟 run——H2 到 H6 此刻都按' +
                   '「读不出运行上下文」处理。用 Write 写回一份合法的完整 state.json，再继续。',
               ],
             }),
-          )
-          process.exit(0)
+          })
         }
       }
       // M3u 复核轮（docs/29）：project.json 在别处被弄坏（用户在两趟 run 之间手改，加了注释或尾逗号）——run 在时
@@ -1017,14 +1062,39 @@ function main() {
         if (text !== null && value === null) {
           // no-run 不留痕，与上面那条缝同一个理由：不把人指向 current-run 去查一个不存在的问题。
           if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
-          emitLedger(spec.event, [
-            brokenProjectNotice({ runInProgress: ctx.kind !== 'no-run', justWritten: false, utf16: looksUtf16(text) }),
-          ])
-          process.exit(0)
+          emitHookJson(spec.event, {
+            contexts: [
+              brokenProjectNotice({ runInProgress: ctx.kind !== 'no-run', justWritten: false, utf16: looksUtf16(text) }),
+            ],
+          })
         }
       }
       // fail open + 留痕，与 H2/H5 同一先例。措辞按 ctx.kind 分派，共用 failOpenNotice。
       process.stderr.write(failOpenNotice('ledger 回传', ctx))
+      // M3v（docs/30，全量审查第 12 条）：run 在、却读不出来（丢指针、坏指针、state.json 或插件文件坏了……），PM 写 run
+      // 目录下的契约与产物，此前只有上面这行 stderr——契约哈希拿不到，commands/at.md 的「没收到就停下」把它误诊成「门禁
+      // 没在跑」。现在按原因回传一段【门禁】，给用户一行。只在这几格说：
+      //   - 调用者是 PM（isContractWriter）：unreadable 下非 PM 的写入在 PreToolUse 上就被 H3 拒了，走到这里的非 PM 只能是
+      //     「Pre 时好、Post 时坏」的竞态，它修不了，说给它听只是多一个转述环节；
+      //   - 写的在 .agent-team/runs/ 下、不是控制文件：契约与产物都在那下面；.agent-team/ 下别的文件本来就没有回传，
+      //     跟它说「重写一次拿回传」是假话。控制文件（state.json）是 PM 在建 run、修 run——第一趟建 run 时写
+      //     runs/<id>/state.json 的那一刻指针还没写，这里判丢指针，说一句就是在正路上刷屏；
+      //   - 不是 no-run：没有 run 就没有哈希可拿。偏离 /agent-team:at 第 1 节的顺序、直接写契约的那一格，落盘之后 runs/
+      //     非空、指针不在，这里判丢指针——契约的哈希确实丢了，该出声（tests/gate-fail-open.test.mjs 钉着）。
+      // 上面三条缝（project.json 本身、坏 state.json、在别处被弄坏的 project.json）先说完就退出了，不叠这一段。
+      if (
+        ctx.kind !== 'no-run' &&
+        isContractWriter(input.agent_type) &&
+        typeof filePath === 'string' &&
+        typeof ctx.agentTeamDir === 'string' &&
+        underDir(filePath, join(ctx.agentTeamDir, 'runs')) &&
+        !isControlFile(filePath, ctx.agentTeamDir)
+      ) {
+        emitHookJson(spec.event, {
+          contexts: [ledgerUnreadableNotice(ctx.cause)],
+          systemMessage: systemMessage('ledger-unreadable', { cause: ctx.cause }),
+        })
+      }
       process.exit(0)
     }
 
@@ -1185,7 +1255,7 @@ function main() {
       }
     }
 
-    emitLedger(spec.event, notices)
+    emitHookJson(spec.event, { contexts: notices })
   }
 
   if (CHECK === 'stop-gate' || CHECK === 'deliverable') {
@@ -1252,8 +1322,32 @@ function main() {
     // 一半，no-run 与 unreadable 在这里一视同仁放行。但不能静默：跟着
     // H2/H3/H4 的先例，读不到运行上下文时要往 stderr 留一行痕迹，否则
     // "放行"和"门禁坏了"长得一模一样。
+    //
+    // M3v（docs/30，全量审查第 12 条）：H5a 在 PM（含主线程）发起的派发上再回传一段【门禁】、给用户一行——这一次
+    // 前置就绪没做（H2 同一刻读的是同一份磁盘，只留了 stderr），交付物核验也不会做：
+    //   - unreadable：按原因给修法（hooks/lib/fail-open.mjs 的 runContextFix）。协调者发起的派发只留 stderr：它派的角色
+    //     写入时会被 H3 以同一个原因拒掉，拒绝理由会冒泡上去；再发一段只是多一个转述环节。
+    //   - no-run：只在目标是调用者派得动的团队角色时说（decideDelegation 放行，与 H1 同一个函数、同一份花名册）——
+    //     团队在干活而门禁看不见 run：要么是用户要的临时派发，要么门禁看的项目根不是 PM 以为的那个。
+    //     H1 拒掉的派发不跑 PostToolUse:Agent，这里不必另判；这一条只排除「派不动的目标」，挡不住别的插件或设置里的
+    //     deny 规则拒掉的派发——那种派发同样不跑 PostToolUse。
+    // H5b 照旧只 stderr：SubagentStop 上没有到父级或用户的通道（exit 0 带 additionalContext 等于拦截）。
     if (!ctx.ok) {
       process.stderr.write(failOpenNotice(label, ctx))
+      if (CHECK === 'deliverable' && isContractWriter(input.agent_type)) {
+        if (ctx.kind !== 'no-run') {
+          emitHookJson(spec.event, {
+            contexts: [dispatchUnreadableNotice(ctx.cause)],
+            systemMessage: systemMessage('dispatch-unreadable', { cause: ctx.cause }),
+          })
+        } else {
+          const roster = loadRoster()
+          // decideDelegation 排在前面：花名册读坏（null、数组）时它先判拒，不去对一个不是对象的值调 Object.hasOwn。
+          if (decideDelegation(input, roster).decision === 'allow' && Object.hasOwn(roster, role)) {
+            emitHookJson(spec.event, { contexts: [dispatchNoRunNotice()], systemMessage: systemMessage('dispatch-no-run') })
+          }
+        }
+      }
       process.exit(0)
     }
 
@@ -1269,10 +1363,10 @@ function main() {
     })
 
     // 账本比对（Task 4，规格 §6.2 的内容比对补偿）：排在 r.ok 分支判断之前算，因为不管
-    // r 落进下面哪一支，比对结果都要并进**同一条** additionalContext——两条 stdout.write
-    // 会让 PM 只看见后一条（下面统一交给 emitLedger 拼成一条）。只在 CHECK === 'deliverable'
-    // 时算：H5b（stop-gate）走 SubagentStop 的 stderr 契约，没有 additionalContext 这条
-    // 通道，算了也没地方发。
+    // r 落进下面哪一支，比对结果都要并进**同一条** additionalContext——两份 JSON 写进
+    // stdout，平台一份都不认（M3v 订正：上一版这里写的是「会让 PM 只看见后一条」，实测是两段都丢；下面统一交给
+    // emitHookJson 拼成一份）。只在 CHECK === 'deliverable' 时算：H5b（stop-gate）在 SubagentStop 上，exit 0 带
+    // additionalContext 等于拦截，这条通道不能用，算了也没地方发。
     // M3b：**这条回传的收件人不是 role**。role 是刚被派出去的那个目标
     // （tool_input.subagent_type）；additionalContext 发给**发起这次 Agent 调用的人**，
     // 也就是 agent_type——主线程发起时它缺失，callerOf 归成 MAIN。两个字段在这个事件上
@@ -1366,10 +1460,27 @@ function main() {
         artifactExists: ctx.artifactExists,
         roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
       })
-      // 'unknown-stage' 是 state.json 自己坏了，ledger 那条路径会给出细节。
-      // H5b（stop-gate）不发这条：SubagentStop 上没有 additionalContext 这条通道，
-      // 而且真拦截不该因为「无话可说」就往 stderr 刷字。
+      // 'unknown-stage'：state.stage 缺失、不是字符串，或不在阶段链里——交付物核验这一次没做，在它改对之前每一次都不做。
+      // M3v（docs/30）订正：上一版这里写的是「ledger 那条路径会给出细节」「SubagentStop 上没有 additionalContext 这条
+      // 通道」。前一句只有一半真——ledger 只在写 state.json 那一刻报，Bash 改坏 stage、插件升级改了阶段链时一次都不经过它；
+      // 后一句不准——通道在，只是在那里发等于拦截。现在：H5a 回传一段【门禁】（按 history 末条给两支修法，收件人改不了
+      // state.json 时冒泡），PM 收件时给用户一行；H5b 只往 stderr 留痕。痕迹不复用 misroutedNotice——那一句断言「判据没有
+      // 放行任何东西」，而这一格恰恰放行了。
       const notices = []
+      let message = null
+      if (r.skipped === 'unknown-stage') {
+        process.stderr.write(
+          `agent-team ${label}：state.stage 不在阶段链里，这次没有做交付物核验、放行。` +
+            (CHECK === 'deliverable' && !recipientCanWriteState
+              ? `回传落在 ${inline(recipient)} 手里——它改不了 state.json，要靠它原样冒泡到 PM。`
+              : '') +
+            '\n',
+        )
+        if (CHECK === 'deliverable') {
+          notices.push(unknownStageNotice({ state: ctx.state, stages: ctx.stages, recipientCanWriteState }))
+          if (recipientCanWriteState) message = systemMessage('unknown-stage')
+        }
+      }
       if (CHECK === 'deliverable' && r.skipped === 'role-not-in-stage' && (!coordinator || stageDone)) {
         const stageLabel = quote(ctx.state?.stage)
         // 两支措辞不能共用同一份文案："而且它也派不到那个执行者"在 coordinator 为真时
@@ -1389,12 +1500,11 @@ function main() {
         notices.push(notice)
       }
       // 账本比对：不管上面那条哑火告警发不发，只要三个清单有一个非空就并进同一条——
-      // 见上面 driftNotice 计算处的注释。emitLedger 空数组时天然不写 stdout，两条
+      // 见上面 driftNotice 计算处的注释。emitHookJson 什么都没有时不写 stdout，两条
       // 告警都不适用时这里保持原来的完全沉默。账本比对不受这条静默表约束（docs/11
       // §5.8）：它审的是产物内容对不对得上账，跟阶段有没有推进是两件独立的事。
       if (driftNotice) notices.push(driftNotice)
-      emitLedger(spec.event, notices)
-      process.exit(0)
+      emitHookJson(spec.event, { contexts: notices, systemMessage: message })
     }
 
     if (CHECK === 'stop-gate') {
@@ -1430,7 +1540,7 @@ function main() {
       // 交付物本身还缺产物时，账本比对一样并进同一条——它审计的是全部阶段的
       // produces，不只是刚被判定缺失的这一段（比如更早的阶段被 Bash 绕过写过）。
       if (driftNotice) notices.push(driftNotice)
-      emitLedger(spec.event, notices)
+      emitHookJson(spec.event, { contexts: notices })
     }
   }
 
@@ -1454,6 +1564,14 @@ try {
 } catch (err) {
   const spec = CHECKS[CHECK]
   const event = (spec && spec.event) || 'PreToolUse'
+  // M3v：这次进程已经写出结果（拒绝或回传）之后才崩——只有注入走得到：每个出口写完都紧跟 process.exit。再写一份就是
+  // 两份 JSON，拒绝失效、回传全丢；已经写出去的那一份照样有效，这里只留痕，照那个结果的退出码退出（SubagentStop 的拒绝是 2）。
+  if (DECIDED !== null) {
+    process.stderr.write(
+      `agent-team ${CHECK} 检查项在写出结果之后异常（${quote(err?.message ?? err, { max: 120 })}）。${SECOND_WRITE_NOTE}\n`,
+    )
+    process.exit(DECIDED)
+  }
   // CHECK 此刻按理已经通过 main() 顶部的 KNOWN_CHECKS 校验，spec 应该总是存在；
   // 万一不存在（防御性兜底），按最严格的 fail closed 处理，安全边界优先于精确。
   if (!spec || spec.failClosed) {
@@ -1476,6 +1594,22 @@ try {
   // ⚠️ M3s 订正（docs/27 §3）：上面「从外部没有任何输入能真正触发到」不成立。复核找到过三种：
   // state.stage 写成 {"toString":1} 这样的对象、project.json 的 paths 元素写成这样的对象（这两种
   // 已在 isStageDone 与 computeReach 挡掉），以及一份大到转不成字符串的产物（还开着，docs/27 §4）。
+  // ⚠️ M3v 订正（docs/30）：「不留成永久测试」也不再成立——注入现在是永久判据（tests/helpers/inject-throw.cjs 预加载，
+  // tests/gate-fail-open.test.mjs 的「崩溃」那几条）。
+  //
+  // M3v：stderr 那一行只进转录。PostToolUse 上（deliverable、ledger）再回传一段【门禁】：这一次哪样没做完、去核实
+  // 什么。不按调用者门控——ctx 正常时崩溃，只有这次调用的发起者看得见；非 PM 收到冒泡句。PM 收件时给用户一行。
+  // readiness 在 PreToolUse 上只给用户一行（那里不发受信块），stop-gate 在 SubagentStop 上什么都不发（hookOutput 定）。
+  // 这一段自己再抛就会掉进 boot.mjs 的「加载失败」退路、说错原因，所以整段兜住：兜不住就只剩上面那行 stderr。
   process.stderr.write(crashNotice(CHECK, err))
-  process.exit(0)
+  try {
+    const pm = isPlainObject(INPUT) && isContractWriter(INPUT.agent_type)
+    const context = crashContext(CHECK, err, pm)
+    emitHookJson(event, {
+      contexts: context ? [context] : [],
+      systemMessage: pm && event !== 'SubagentStop' ? systemMessage('crash', { check: CHECK }) : null,
+    })
+  } catch {
+    process.exit(0)
+  }
 }

@@ -451,7 +451,9 @@ test('deliverable：目标角色已经写出产物——stdout 为空，不记 w
   }
 })
 
-test('deliverable：没有 run 时 fail open 并在 stderr 留痕，不写 warning JSON', () => {
+// M3v（docs/30，全量审查第 12 条）：这一条原来断言 stdout 为空。主线程派一个它派得动的团队角色时，H5a 现在回传一段
+// 「这次派发没做校验、这是有意的放行」（形状表在 tests/gate-fail-open.test.mjs）——交付物告警照旧不写，stderr 照旧留痕。
+test('deliverable：没有 run 时 fail open 并在 stderr 留痕，不写交付物告警（主线程派团队角色只回传「有意的放行」）', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'agent-team-h5a-norun-cwd-'))
   try {
     const input = {
@@ -461,7 +463,11 @@ test('deliverable：没有 run 时 fail open 并在 stderr 留痕，不写 warni
     const { stdout, stderr, status } = run('deliverable', input, undefined, cwd)
 
     assert.equal(status, 0)
-    assert.equal(stdout, '', '没有 run 时不该往 stdout 写 warning JSON')
+    const ctx = decisionOf(stdout)?.additionalContext ?? ''
+    assert.doesNotMatch(ctx, /交付物校验：/, '没有 run 时不该写交付物告警')
+    assert.match(ctx, /有意的放行/)
+    const coordinator = run('deliverable', { ...input, agent_type: 'agent-team:at-architect', tool_input: { subagent_type: 'agent-team:at-backend' } }, undefined, cwd)
+    assert.equal(coordinator.stdout, '', '协调者发起的派发在没有 run 时不回传任何东西')
     assert.ok(stderr.trim().length > 0)
     assert.match(stderr, /agent-team/)
     assert.match(stderr, /(H5a|交付物)/)
@@ -748,7 +754,7 @@ test('H5a：协调者返回但当前阶段已经 done —— 报（这正是「�
     state.roster = f.roster
     // 账本记录与磁盘内容对齐（哈希对得上），让这条测试只钉「stageDone 分支的 h5a
     // 措辞」这一件事，不夹带账本比对（Task 4，独立信号）的 unrecorded 噪音——两者
-    // 谁报不报是分开的问题，见下面 emitLedger 调用点与 docs/11 §5.8。
+    // 谁报不报是分开的问题，见 hooks/gate.mjs 的 H5a 那几处 emitHookJson 调用点与 docs/11 §5.8。
     state.artifacts = { '05-impl/at-backend.md': sha256OfContract('fixture 05-impl/at-backend.md\n') }
     writeFileSync(statePath, JSON.stringify(state), 'utf8')
 
