@@ -201,7 +201,7 @@ export function projectRootFrom(env, cwd, hasAgentTeam = hasAgentTeamDir) {
     if (typeof cwd !== 'string' || cwd === '') return fallback
     const bound = home !== null && underDir(cwd, home) ? norm(home) : null
     for (let d = resolve(cwd); ; ) {
-      if (hasAgentTeam(d)) return d
+      if (!insideAgentTeam(d) && hasAgentTeam(d)) return d
       if (bound !== null && norm(d) === bound) return fallback
       const parent = dirname(d)
       if (parent === d) return fallback
@@ -210,6 +210,13 @@ export function projectRootFrom(env, cwd, hasAgentTeam = hasAgentTeamDir) {
   } catch {
     return fallback
   }
+}
+
+// 项目根不会在某个 .agent-team 目录里面（M3v，docs/30 §3）：PM 用 Bash `cd .agent-team/runs/<id>` 之后 cwd 留在那里，相对路径
+// 的 Write 会在 run 目录里造出一个嵌套的 .agent-team，「离最近的那个赢」就把 run 目录认成了项目根——那一趟的门禁全看错了
+// 地方，ledger 还因为写的是（那个根下的）控制文件一句不说。这样的候选跳过、接着往上找。按段比、不分大小写。
+function insideAgentTeam(dir) {
+  return String(dir).split(/[\\/]/).some((s) => s.toLowerCase() === '.agent-team')
 }
 
 function hasAgentTeamDir(dir) {

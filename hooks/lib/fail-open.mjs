@@ -49,7 +49,8 @@ const FIX = {
   state:
     '用 Write 写回一份合法的完整 `.agent-team/runs/<current-run 里的 run id>/state.json`（顶层键照 /agent-team:at 第 1 节）；' +
     '能从原文认出来的 history、rework、artifacts 照原样保留——返工计数只许增；认不出来的 contract_sha 写 PENDING，' +
-    '写回之后原样重写一次 00-contract.md、从回传里拿 sha。写回之后告诉用户 state.json 是重建的、哪些字段是照猜补的。',
+    '写回之后原样重写一次 00-contract.md、从回传里拿 sha，不要用 Bash 自己算（门禁先统一行尾再算，自己算的对不上）。' +
+    '写回之后告诉用户 state.json 是重建的、哪些字段是照猜补的。',
   project: '用 Write 写回一份合法的完整 `.agent-team/project.json`（照 /agent-team:at-init 第 2、3 节）。',
   plugin: '改 `.agent-team` 修不好它：停下，告诉用户重装或更新 agent-team 插件，不要去改插件目录下的文件。',
 }

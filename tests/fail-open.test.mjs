@@ -317,6 +317,9 @@ test('runContextFix(state)：认不出来的 contract_sha 写 PENDING，从回�
   assert.match(t, /认不出来的 contract_sha 写 PENDING/)
   assert.match(t, /原样重写一次 00-contract\.md/)
   assert.match(t, /告诉用户/)
+  // 第三轮真实会话：at-resume 里 3/3 仍用 Bash 自己算（「认不出来」读成了「算不出来」）；两次还 cd 进 run 目录、把 state.json
+  // 写进了嵌套的 .agent-team。
+  assert.match(t, /不要用 Bash 自己算/)
 })
 
 // 第二轮增量审查：这一轮新加的三处判定此前没有判据，删掉任何一处全套照绿。

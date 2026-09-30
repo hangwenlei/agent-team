@@ -275,6 +275,19 @@ test('ledger unreadable 反例：.agent-team 下 run 目录之外的文件、控
   })
 })
 
+// 第三轮真实会话（docs/30 §3）：PM 用 Bash cd 进了 run 目录，相对路径的 Write 把 state.json 写进了嵌套的
+// .agent-team/runs/<id>/。门禁此前把 run 目录认成项目根、判丢指针、又因为写的是（那个根下的）控制文件一句不说——PM 对用户说
+// 「已修好」，真的 state.json 仍是坏的。项目根不在 .agent-team 里面：照旧认外面那个项目，这次写入落在 runs/ 下、不是控制文件。
+test('ledger：cwd 在 run 目录里、写进嵌套的 .agent-team——项目根照旧是外面那个，【门禁】说 state.json 仍读不出来', () => {
+  using(UNREADABLE.state[1], (fx) => {
+    const nested = join(fx.runDir, '.agent-team', 'runs', 'r1', 'state.json')
+    mkdirSync(dirname(nested), { recursive: true })
+    writeFileSync(nested, JSON.stringify({ stage: 'S2' }), 'utf8')
+    const r = run('ledger', writing('PostToolUse', PM, nested), fx.gate, fx.runDir)
+    assert.equal(ctxOf(r), `${TRUSTED_PREFIX}：\n${ledgerUnreadableNotice('state')}`)
+  })
+})
+
 test('ledger：project.json 坏着时走原有那条缝（【project.json】），不叠一段【门禁】', () => {
   using(UNREADABLE.project[1], (fx) => {
     const file = join(fx.runDir, '00-contract.md')

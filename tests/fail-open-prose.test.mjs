@@ -33,6 +33,16 @@ test('commands/at.md §1：自检说原来那趟 run 坏了时，不碰它、另
   const at = read('commands/at.md')
   assert.ok(lineWith(at, '「另外，」', '不要写原来那趟 run 目录下的任何文件'), '§1 要承接自检的追加句')
   assert.ok(lineWith(at, '不论停在哪一步', 'run id'))
+  // 第三轮真实会话：「接回它是 at-resume 的事」不准——指针已经换成新 run，at-resume 接回的会是新的这一趟。
+  assert.ok(lineWith(at, '改回', '.agent-team/current-run', '/agent-team:at-resume'), '要说清怎么把指针切回原来那趟')
+})
+
+// 第三轮真实会话：§2 只写了裸文件名 00-contract.md，3/9 写到了项目根，拿不到 sha；排查链里又没有「契约写对地方没有」，
+// 有一次因此把「门禁没在跑」原样发给了用户。
+test('commands/at.md §2：契约写明在 run 目录下；「没收到」时先核它写对地方没有', () => {
+  const at = read('commands/at.md')
+  assert.ok(lineWith(at, '`.agent-team/runs/<run_id>/00-contract.md`', 'templates/00-contract.md'), '照模板写的那一句要带全路径')
+  assert.ok(lineWith(at, '写到了别处', '不回传'), '排查链要先核契约的位置')
 })
 
 test('commands/at-resume.md §1：读不到 current-run 时先 Glob runs/*/state.json，不直接说没有 run', () => {
