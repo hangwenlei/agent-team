@@ -49,6 +49,11 @@
 //                       绕过 H3/H4 per-role 隔离的办法——run 明明还在跑，
 //                       角色认领数据却因为文件损坏而不被承认。
 //
+// M3v（docs/30，全量审查第 12 条）：unreadable 的每个出口另带一个 cause——pointer（current-run 不在而 runs/ 下有 run、
+// 读不出、空、不是合法 id、指向的目录不存在）、runs、state、project、plugin（插件的 stages.json，以及最外层兜底）。
+// 门禁判不出来时要告诉 PM 怎么修，修法按它选（hooks/lib/fail-open.mjs 的 runContextFix）。它不改变 kind 的任何语义；
+// no-run 与 ok 不带它。tests/runctx.test.mjs 逐个出口钉着。
+//
 // 【M1b 终审 C1】失败返回里也带 agentTeamDir。理由：有一类判定只需要「.agent-team
 // 在哪」，压根不需要一个进行中的 run——触达表就是这样（它的判据只有插件侧的
 // roster.json 与刚写完的 .agent-team/project.json，两者都与 run 无关），而
@@ -253,6 +258,7 @@ export function readRunContext(projectDir, pluginDir) {
           return {
             ok: false,
             kind: 'unreadable',
+            cause: 'runs',
             agentTeamDir: base,
             reason: `找不到 ${inline(pointer)}，而 ${inline(runsDir)} 读不出来：${quote(err.message, { max: 120 })}`,
           }
@@ -261,6 +267,7 @@ export function readRunContext(projectDir, pluginDir) {
           return {
             ok: false,
             kind: 'unreadable',
+            cause: 'pointer',
             agentTeamDir: base,
             reason: `找不到 ${inline(pointer)}，但 ${inline(runsDir)} 下非空——有人建过 run 而指针不在，不是没有 run`,
           }
@@ -283,6 +290,7 @@ export function readRunContext(projectDir, pluginDir) {
       return {
         ok: false,
         kind: 'unreadable',
+        cause: 'pointer',
         agentTeamDir: base,
         reason: `读取 current-run 失败：${quote(err.message, { max: 120 })}`,
       }
@@ -290,7 +298,7 @@ export function readRunContext(projectDir, pluginDir) {
     // 空文件不算 no-run，见文件头部注释：pointer 存在但内容为空是异常
     // 状态，不是干净的缺席，归 unreadable 更安全。
     if (!runId) {
-      return { ok: false, kind: 'unreadable', agentTeamDir: base, reason: 'current-run 是空的' }
+      return { ok: false, kind: 'unreadable', cause: 'pointer', agentTeamDir: base, reason: 'current-run 是空的' }
     }
     // current-run 的内容会被原样拼进 runs/<runId>/... 路径。不校验的话，一个
     // 含 ../ 的 runId 会被 path.join 正规化到 .agent-team/runs 之外，让 H5
@@ -306,6 +314,7 @@ export function readRunContext(projectDir, pluginDir) {
       return {
         ok: false,
         kind: 'unreadable',
+        cause: 'pointer',
         agentTeamDir: base,
         reason:
           `current-run 内容不是合法的 run id（只允许字母、数字、点、下划线、连字符，且以字母或数字开头）：` +
@@ -322,6 +331,7 @@ export function readRunContext(projectDir, pluginDir) {
       return {
         ok: false,
         kind: 'unreadable',
+        cause: 'pointer',
         agentTeamDir: base,
         reason: `current-run 指向 ${inline(runId)}，但 ${inline(runDir)} 不存在`,
       }
@@ -330,14 +340,14 @@ export function readRunContext(projectDir, pluginDir) {
     // 走到这里，run 目录本身已确认存在——下面几步读到的任何失败都是
     // 「这个真实存在的 run 读不出来」，不再有 no-run 的可能，一律 unreadable。
     const state = readJson(join(runDir, 'state.json'))
-    if (!state.ok) return { ok: false, kind: 'unreadable', agentTeamDir: base, reason: state.reason }
+    if (!state.ok) return { ok: false, kind: 'unreadable', cause: 'state', agentTeamDir: base, reason: state.reason }
 
     const stages = readJson(join(pluginDir, 'stages.json'))
-    if (!stages.ok) return { ok: false, kind: 'unreadable', agentTeamDir: base, reason: stages.reason }
+    if (!stages.ok) return { ok: false, kind: 'unreadable', cause: 'plugin', agentTeamDir: base, reason: stages.reason }
 
     const projectPath = join(base, 'project.json')
     const project = existsSync(projectPath) ? readJson(projectPath) : { ok: true, value: null }
-    if (!project.ok) return { ok: false, kind: 'unreadable', agentTeamDir: base, reason: project.reason }
+    if (!project.ok) return { ok: false, kind: 'unreadable', cause: 'project', agentTeamDir: base, reason: project.reason }
 
     return {
       ok: true,
@@ -382,6 +392,6 @@ export function readRunContext(projectDir, pluginDir) {
     // base 从来没被算出来、此刻也不在作用域里。硬凑一个值出来就是在编一条路径。
     // 调用方按「取不到 agentTeamDir 就照原路 fail open」处理，见 hooks/gate.mjs 的
     // ledger 分支。
-    return { ok: false, kind: 'unreadable', reason: `读取运行上下文失败：${quote(err.message, { max: 120 })}` }
+    return { ok: false, kind: 'unreadable', cause: 'plugin', reason: `读取运行上下文失败：${quote(err.message, { max: 120 })}` }
   }
 }

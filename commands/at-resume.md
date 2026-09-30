@@ -14,8 +14,12 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 ## 1. 读回位置
 
-1. 读 `.agent-team/current-run` 拿到 run id。读不到就告诉用户还没有进行中的 run，
-   让他跑 `/agent-team:at <需求>`。
+1. 读 `.agent-team/current-run` 拿到 run id。读不到时先用 `Glob` 找 `.agent-team/runs/*/state.json`
+   （只 Glob `runs/*` 列不出目录）：
+   - 一趟都没有，才告诉用户还没有进行中的 run，让他跑 `/agent-team:at <需求>`；
+   - 有的话就是丢了指针，不是没有 run：只有一趟就把它的目录名写回 `.agent-team/current-run`；不止一趟时，
+     指针原本指向最后建的那一趟（run id 以日期时刻开头），读各自的 `state.json` 核实，拿不准就问用户——
+     不要把较早、没走完的那一趟当成当前 run。开头自检的「另外，」那一句说的往往就是这件事。
 2. 读 `.agent-team/runs/<run_id>/state.json`。
 3. 读 `.agent-team/project.json`（路径归属）。
 

@@ -91,6 +91,9 @@ for (const [label, damage] of [
         assert.equal(status, 1, `${check}：放行但要让平台记一条 hook error，不能装作判过了`)
         assert.match(stderr, /agent-team/, `${check} 的 stderr 要说明是谁`)
         assert.match(stderr, /加载失败/, `${check} 的 stderr 要说明是加载失败`)
+        // M3v（docs/30）：界面只显示 stderr 的第一个非空行（docs/28）——那一行就要说出放行了、为什么。
+        const head = stderr.split('\n').find((l) => l.trim()) ?? ''
+        assert.ok(head.includes('放行') && head.includes('加载失败'), `${check} 的首行：${head}`)
       }
     })
   })
@@ -249,6 +252,8 @@ for (const v of TOO_OLD) {
         assert.equal(stdout, '', check)
         assert.equal(status, 1, check)
         assert.ok(stderr.includes(MIN_NODE) && stderr.includes(`v${v}`), `${check}：${stderr}`)
+        const head = stderr.split('\n').find((l) => l.trim()) ?? ''
+        assert.ok(head.includes('放行') && head.includes('Node 太旧'), `${check} 的首行：${head}`)
       }
     })
   })

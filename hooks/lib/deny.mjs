@@ -82,6 +82,9 @@ export function denyOutput(reason, event) {
 // 等一个真实能崩溃的输入出现。hooks/gate.mjs 最外层 catch 调用它之后紧跟着
 // `process.exit(0)`，那条传导链（真的从 gate.mjs 走到这里、真的写了 stderr）
 // 由一次性注入 throw 验证过，不留成永久测试——理由与 denyOutput 那段一致。
+// ⚠️ M3v 订正（docs/30）：上面两句都过期了。最外层 catch 写完这一行之后，PostToolUse 上还回传一段【门禁】、给用户
+// 一行（hooks/lib/fail-open.mjs 的 crashContext），不再紧跟 exit；注入现在是永久判据（tests/helpers/inject-throw.cjs
+// 预加载，tests/gate-fail-open.test.mjs 的「崩溃」那几条）。这一行本身的收件人仍是转录。
 /**
  * @param {string} check 崩溃时的检查项名（CHECK，如 'deliverable'）
  * @param {Error} err main() 内部抛出的异常

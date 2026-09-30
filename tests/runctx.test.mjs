@@ -474,3 +474,57 @@ test('state.json 与 project.json 带 UTF-8 BOM：照样读得出来', () => {
     rmSync(dirs.pluginDir, { recursive: true, force: true })
   }
 })
+
+// M3v（docs/30，全量审查第 12 条）：每个 unreadable 出口带一个原因短码 cause。门禁判不出来时告诉 PM 怎么修，修法按它
+// 选——stages.json 坏了该重装插件，project.json 坏了该改 project.json，只说「修 current-run、state.json」会把 PM 派去修
+// 一个没坏的东西（hooks/lib/fail-open.mjs 的 runContextFix）。逐个出口列举，一格一个造法。
+const CAUSE_CASES = [
+  ['丢指针③：current-run 不在、runs/ 下有 run', 'pointer', (d) => rmSync(join(d.projectDir, '.agent-team', 'current-run'))],
+  ['current-run 读不出来（它是个目录）', 'pointer', (d) => {
+    const p = join(d.projectDir, '.agent-team', 'current-run')
+    rmSync(p)
+    mkdirSync(p)
+  }],
+  ['current-run 是空的', 'pointer', (d) => writeFileSync(join(d.projectDir, '.agent-team', 'current-run'), '', 'utf8')],
+  ['current-run 不是合法的 run id', 'pointer', (d) => writeFileSync(join(d.projectDir, '.agent-team', 'current-run'), '../x', 'utf8')],
+  ['current-run 指向的 run 目录不存在', 'pointer', (d) => writeFileSync(join(d.projectDir, '.agent-team', 'current-run'), 'r9', 'utf8')],
+  ['runs 读不出来（它是个文件）', 'runs', (d) => {
+    rmSync(join(d.projectDir, '.agent-team', 'current-run'))
+    rmSync(join(d.projectDir, '.agent-team', 'runs'), { recursive: true, force: true })
+    writeFileSync(join(d.projectDir, '.agent-team', 'runs'), '不是目录', 'utf8')
+  }],
+  ['state.json 是坏 JSON', 'state', (d) => writeFileSync(join(d.projectDir, '.agent-team', 'runs', 'r1', 'state.json'), '{ x', 'utf8')],
+  ['state.json 不在', 'state', (d) => rmSync(join(d.projectDir, '.agent-team', 'runs', 'r1', 'state.json'))],
+  ['插件的 stages.json 是坏 JSON', 'plugin', (d) => writeFileSync(join(d.pluginDir, 'stages.json'), '{ x', 'utf8')],
+  ['project.json 是坏 JSON', 'project', (d) => writeFileSync(join(d.projectDir, '.agent-team', 'project.json'), '{ x', 'utf8')],
+]
+
+for (const [label, cause, mutate] of CAUSE_CASES) {
+  test(`M3v：${label} → unreadable，cause 是 ${cause}`, () => {
+    const dirs = makeRun({ runId: 'r1', stages: STAGES, project: { paths: {} } })
+    try {
+      mutate(dirs)
+      const ctx = readRunContext(dirs.projectDir, dirs.pluginDir)
+      assert.equal(ctx.kind, 'unreadable', ctx.reason)
+      assert.equal(ctx.cause, cause, ctx.reason)
+    } finally {
+      cleanup(dirs)
+    }
+  })
+}
+
+test('M3v：最外层兜底 catch 的 cause 是 plugin——门禁自己读不动，改 .agent-team 修不好', () => {
+  const ctx = readRunContext(undefined, undefined)
+  assert.equal(ctx.kind, 'unreadable')
+  assert.equal(ctx.cause, 'plugin')
+})
+
+test('M3v：no-run 与 ok 不带 cause——它只描述「判不出来」的原因', () => {
+  assert.equal(readRunContext('/definitely/not/a/real/path', '/also/not/real').cause, undefined)
+  const dirs = makeRun({ runId: 'r1', stages: STAGES })
+  try {
+    assert.equal(readRunContext(dirs.projectDir, dirs.pluginDir).cause, undefined)
+  } finally {
+    cleanup(dirs)
+  }
+})

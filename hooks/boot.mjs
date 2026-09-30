@@ -75,15 +75,19 @@ async function refuse(msg) {
       : 'PreToolUse'
   const failClosed = spec ? spec.failClosed : event === 'PreToolUse'
 
-  process.stderr.write(msg.stderrHead + '\n')
   if (failClosed) {
     const out = await denyShape(msg.denyReason, event)
     if (out) {
+      process.stderr.write(msg.stderrHead + '\n')
       process[out.stream].write(out.text)
       process.exit(out.exitCode)
     }
   }
+  // 放行那一句排第一（M3v，docs/30）：界面只显示「<事件>:<工具> hook error」加 stderr 的第一个非空行（docs/28），
+  // 排在后面的话，用户看得见这行灰字，却看不出这次放行了——加载失败时它还排在整段栈之后。原因与补救都在这一句里，
+  // 细节（版本、栈）跟在后面。
   process.stderr.write('agent-team ' + CHECK + ' ' + msg.openNote + '\n')
+  process.stderr.write(msg.stderrHead + '\n')
   process.exit(1)
 }
 

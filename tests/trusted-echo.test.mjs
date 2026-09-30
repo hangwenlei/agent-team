@@ -13,6 +13,8 @@
 //   ④ 值来自磁盘（state.json、project.json、current-run）的入口：那句不带控制字符的祈使句只出现在
 //      一对引号里——磁盘上的值谁都写得进，不能不加引号地混进门禁的话。值来自这次调用自己的输入
 //      （file_path、subagent_type……）的入口不查这一条：读拒绝理由的，正是写那个参数的一方。
+//   ⑤ M3v（docs/30）：给用户看的那一行（顶层 systemMessage）只许固定文字——载荷的标签一次都不许出现，放在引号里也不行，
+//      而且它只有一行。它不进模型，受信前缀的规矩对它没有意义；要防的是用户看到的那一行被伪造（docs/27 §1 的第四条通道）。
 // 每个场景还要过一个正向锚点：载荷确实被门禁读到了——否则一个没走到消毒点的场景也是绿的（写这份
 // 判据时出过两次，复核又找出一批，docs/27 §3）。
 //
@@ -82,11 +84,14 @@ function channels(r) {
   const out = []
   if (r.stdout.trim()) {
     let h
+    let top = {}
     try {
-      h = JSON.parse(r.stdout).hookSpecificOutput ?? {}
+      top = JSON.parse(r.stdout)
+      h = top.hookSpecificOutput ?? {}
     } catch {
       h = { raw: r.stdout }
     }
+    if (typeof top.systemMessage === 'string') out.push({ name: 'systemMessage', text: top.systemMessage, fixed: true })
     if (h.additionalContext) out.push({ name: 'additionalContext', text: h.additionalContext, trusted: true })
     if (h.permissionDecisionReason) out.push({ name: 'permissionDecisionReason', text: h.permissionDecisionReason })
     if (h.raw) out.push({ name: 'stdout', text: h.raw })
@@ -106,8 +111,9 @@ const count = (s, sub) => s.split(sub).length - 1
 
 function violations(r, { disk = false } = {}) {
   const v = []
-  for (const { name, text, trusted } of channels(r)) {
+  for (const { name, text, trusted, fixed } of channels(r)) {
     if (ODD_BREAK_RE.test(text)) v.push(`${name} 里有 \\n 之外的换行字符`)
+    if (fixed && (/FORGED-|CLEAN-7f3a/.test(text) || text.includes('\n'))) v.push(`${name} 不是固定的一行文字：${text.slice(0, 80)}`)
     const n = count(text, TRUSTED_PREFIX)
     if (trusted ? n !== 1 || !text.startsWith(TRUSTED_PREFIX) : n !== 0) v.push(`${name} 里受信前缀出现了 ${n} 次`)
     text.split(BREAK_RE).forEach((line, i) => {
@@ -223,7 +229,25 @@ const SCENARIOS = [
     name: 'validateState：stage 本身是载荷、history 末条合法',
     disk: true,
     state: (s, P) => ({ ...s, stage: P }),
-    calls: ({ run }) => [['ledger', posted('at-pm', join(run, 'state.json'))]],
+    calls: ({ p, run }) => [
+      ['ledger', posted('at-pm', join(run, 'state.json'))],
+      // M3v：unknown-stage 的【门禁】（PM 收件、协调者收件）、H5b 的留痕、门禁自检的追加句。
+      ['deliverable', returned('agent-team:at-product')],
+      ['deliverable', returned('agent-team:at-backend', 'agent-team:at-architect')],
+      ['stop-gate', stopped('agent-team:at-product')],
+      ['writepath', write('at-pm', join(p, '.agent-team', 'gate-check'))],
+    ],
+  },
+  {
+    // M3v：history 末条也是载荷——【门禁】走「只许追加」那一支，不引末条。
+    name: 'unknown-stage：stage 与 history 末条都是载荷（【门禁】的另一支修法）',
+    disk: true,
+    state: (s, P) => ({ ...s, stage: P, history: [...s.history, { stage: P, at: 't' }], rework: {} }),
+    calls: ({ p }) => [
+      ['deliverable', returned('agent-team:at-product')],
+      ['deliverable', returned('agent-team:at-backend', 'agent-team:at-architect')],
+      ['writepath', write('at-pm', join(p, '.agent-team', 'gate-check'))],
+    ],
   },
   {
     // 新内容长度不变、伪造的那个阶段少出现一次——拒绝理由走「某阶段出现次数变少」那一条，真的带上阶段名。
@@ -301,6 +325,10 @@ const SCENARIOS = [
       ['readiness', dispatch('agent-team:at-architect')],
       ['stop-gate', stopped('agent-team:at-product')],
       ['ledger', posted('at-pm', join(run, 'state.json'))],
+      // M3v：读不到运行上下文时 PM 收到的【门禁】（派发、写产物）与自检的追加句——reason 不拼进去。
+      ['deliverable', returned('agent-team:at-product')],
+      ['ledger', posted('at-pm', join(run, '01-prd.md'))],
+      ['writepath', write('at-pm', join(p, '.agent-team', 'gate-check'))],
     ],
     anchor: UNREADABLE,
   },
@@ -308,14 +336,24 @@ const SCENARIOS = [
     name: 'project.json 写成坏 JSON 短文',
     disk: true,
     raw: { 'project.json': (P) => P.slice(0, 18) },
-    calls: ({ p }) => [['writepath', write('agent-team:at-backend', join(p, 'src', 'server', 'a.ts'))]],
+    calls: ({ p, run }) => [
+      ['writepath', write('agent-team:at-backend', join(p, 'src', 'server', 'a.ts'))],
+      ['deliverable', returned('agent-team:at-product')],
+      ['ledger', posted('at-pm', join(run, '01-prd.md'))],
+      ['writepath', write('at-pm', join(p, '.agent-team', 'gate-check'))],
+    ],
     anchor: UNREADABLE,
   },
   {
     name: 'current-run 的内容',
     disk: true,
     pointer: (P) => P,
-    calls: ({ p }) => [['writepath', write('agent-team:at-backend', join(p, 'src', 'server', 'a.ts'))]],
+    calls: ({ p, run }) => [
+      ['writepath', write('agent-team:at-backend', join(p, 'src', 'server', 'a.ts'))],
+      ['deliverable', returned('agent-team:at-product')],
+      ['ledger', posted('at-pm', join(run, '01-prd.md'))],
+      ['writepath', write('at-pm', join(p, '.agent-team', 'gate-check'))],
+    ],
   },
   {
     name: 'hook 输入的 subagent_type',
@@ -420,6 +458,10 @@ test('不回显外部值：项目根的目录名带行分隔符（由它拼出�
           ['contract', write('agent-team:at-backend', join(p, '.agent-team', 'runs', 'r1', '00-contract.md'))],
           ['readiness', dispatch('agent-team:at-architect')],
           ['ledger', posted('at-pm', join(p, 'src', 'server', 'a.ts'))],
+          // M3v：PM 收到的【门禁】与自检的追加句不带由项目根拼出的路径。
+          ['deliverable', returned('agent-team:at-product')],
+          ['ledger', posted('at-pm', join(p, '.agent-team', 'runs', 'r1', '00-contract.md'))],
+          ['writepath', write('at-pm', join(p, '.agent-team', 'gate-check'))],
         ]
         const results = await Promise.all(calls.map(([check, input]) => gate(check, input, p)))
         bad.push(...results.flatMap((r) => violations(r).map((v) => `${pname} · ${layout} · ${r.check}：${v}`)))
@@ -515,6 +557,13 @@ test('正向锚点：violations 认得出 \\n 之外的换行字符，以及用�
 test('正向锚点：violations 认得出行首藏在零宽字符后面的伪造行', () => {
   const fake = { check: 'x', stdout: '', stderr: `a\n${String.fromCharCode(0x200b)}【阶段】FORGED-x` }
   assert.ok(violations(fake).length >= 1)
+})
+
+test('正向锚点：violations 认得出带着载荷标签的 systemMessage，引号里的也算', () => {
+  const sm = (text) => ({ check: 'x', stdout: JSON.stringify({ systemMessage: text }), stderr: '' })
+  assert.ok(violations(sm(`agent-team 交付物核验：${JSON.stringify(PAYLOADS.clean)}`)).length >= 1)
+  assert.ok(violations(sm('agent-team 一行\n第二行')).length >= 1)
+  assert.deepEqual(violations(sm('agent-team 交付物核验：这次派发没有做。')), [])
 })
 
 test('正向锚点：violations 认得出不在引号里的磁盘值，放过引号里的', () => {

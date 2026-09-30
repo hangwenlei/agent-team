@@ -90,10 +90,19 @@
 // 哪些阶段属于这一类，去 stages.json 看，不要在这里抄一份清单。
 import { expandProduces, stageRoles } from './stages.mjs'
 
+// 「这个阶段 id 在不在阶段链里」。M3v（docs/30）起门禁自检的追加句与 unknown-stage 的修法（hooks/lib/fail-open.mjs）也要
+// 问同一个问题，抽成一份：它们说「不在阶段链里」的时候，必须正是这里判 skipped:'unknown-stage' 的时候。
+export function isKnownStage(stages, stageId) {
+  return (
+    !!stages && typeof stages === 'object' && typeof stageId === 'string' && Object.hasOwn(stages, stageId) &&
+    !!stages[stageId]
+  )
+}
+
 export function decideDeliverable({ role, stageId, stages, artifactExists }) {
   if (!stages || typeof stages !== 'object') return { ok: true, skipped: 'unknown-stage' }
 
-  const stage = typeof stageId === 'string' && Object.hasOwn(stages, stageId) ? stages[stageId] : null
+  const stage = isKnownStage(stages, stageId) ? stages[stageId] : null
   // stageId 来自 state.json 的 stage 字段。查不到只有两种成因：state.json 缺字段，
   // 或者它指向一个 stages.json 里不存在的阶段——两者都是「门禁认不出该查哪一段」，
   // 不是「这个角色没有交付义务」。H5 是 fail open，所以不表态；但要把原因带出去，
