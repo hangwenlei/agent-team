@@ -9,7 +9,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 
 ## 🚀 运行现状
 
-- 形态：Claude Code 插件，零运行时依赖，不部署任何服务、不监听任何端口。
+- 形态：Claude Code 插件，零 npm 依赖，不部署任何服务、不监听任何端口；门禁要靠 Claude Code 启动时 PATH 上的 Node（下限是 `hooks/boot.mjs` 的 `MIN_NODE`）。
 - 发布：**推 `main` 就是发布**。用户在自己的项目目录下经 `claude plugin marketplace add hangwenlei/agent-team --scope local`
   与 `claude plugin install agent-team@agent-team-marketplace --scope local` 安装。
 - 当前版本以 `.claude-plugin/plugin.json` 的 `version` 为准，判据总数以 `node --test` 的实时输出为准 —— 这里不抄数字，写下来的数字会漂。
@@ -24,18 +24,21 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 
 ## 📁 重要文件
 
-- `hooks/boot.mjs` — 门禁的进程入口（`hooks/hooks.json` 注册的是它），只动态 import `gate.mjs`，判定代码加载失败时照 `checks.mjs` 的失败策略表收尾。
-- `hooks/gate.mjs` — 门禁的判定主体，按 argv 分派检查项；`hooks/hooks.json` — 事件到检查项的注册。
+- `hooks/boot.mjs` — 门禁的进程入口（`hooks/hooks.json` 里每一道门禁注册的都是它）：先比 `process.versions.node` 与 `MIN_NODE`，太旧就不加载 `gate.mjs`；版本够就动态 import `gate.mjs`。两种失败都照 `checks.mjs` 的失败策略表收尾。
+- `hooks/gate.mjs` — 门禁的判定主体，按 argv 分派检查项；`hooks/hooks.json` — 事件到检查项的注册，外加一条不走 node 的每轮自检提醒（UserPromptSubmit）。`hooks/lib/gate-check.mjs` — 门禁自检（协议在 `agents/at-pm.md` 的「门禁自检」一节）。
 - `hooks/lib/` — 判定用的纯函数（`runctx.mjs` 读运行上下文、`trace.mjs` 门禁留痕、`retry-budget.mjs` 那份重试上限说明的单一真源等）。
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/27` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查逐条的现状（原文在它的附录），下一轮从那里挑。
-- `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`。
+- `docs/13`…`docs/28` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查逐条的现状（原文在它的附录），下一轮从那里挑。
+- `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
 ## 🧠 长期决策与理由
 
-- **零运行时依赖，不建 `package.json`。**
+- **零 npm 依赖，不建 `package.json`。** 运行时的前提只有 PATH 上的 Node。
+- **`hooks/` 下的代码不用晚于 `MIN_NODE` 的内建；boot.mjs 还要能在 Node 12.17 上解析**（不用顶层 await、`?.`、`??`、
+  `Object.hasOwn`，内建模块写 `'fs'` 不写 `'node:fs'`），好在旧 Node 上大声拒绝而不是静默放行。门禁子进程一律经
+  `tests/helpers/gate-runner.mjs` 起（`tests/gate-runner.test.mjs` 钉着），最低版本作业才换得动它们。理由在 `docs/28`。
 - **任何角色都不授予 `Skill` / `SendMessage` / `ListAgents`**（规格 §6.1）。frontmatter 的 `skills:` 键是另一回事，允许。插件自带的 skill 不得声明 `context: fork`。
 - **`at-outsider` 永远不进任何角色的 `Agent(...)` 宇宙，也不进任何 `can_delegate_to`。**
 - **发布纪律：每次推 `main` 都挪 `version`** —— 只碰散文 / `docs/` / `tests/` 挪最后一位，碰插件会加载的东西挪中间一位，任何一位不长到 `10`。
@@ -48,6 +51,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **找缺陷靠变异验证，不靠读代码**（`docs/16` §3）。
 - **README 对外只写结论，不写过程。** 不写「某版本上实测」这类叙述、CLI 版本号和 `docs/` 编号引用；用户要知道的用法与风险照写，
   被 `tests/readme-sync.test.mjs` 钉着的那几条事实换成不带过程的说法保留。过程与证据留在 `docs/`。
+  运行前提（Node 与 Claude Code 的最低版本）属于用法，照写，由判据钉着；不写的是「在某版本上实测过」这类过程。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。

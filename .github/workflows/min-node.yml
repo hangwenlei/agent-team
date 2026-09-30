@@ -1,0 +1,60 @@
+# 门禁在用户最旧可能用的 Node 上跑得对，而在更旧的 Node 上会大声拒绝（docs/28，全量审查第 4 条）。
+#
+# 门禁用的是 Claude Code 启动时 PATH 上的 node，版本由用户的环境决定。hooks/boot.mjs 的 MIN_NODE 是
+# 声明的下限，这个作业钉住它的两面：
+#   - 测试框架跑在新版本上（它自己要 Node 22 起的行为），门禁子进程换成 MIN_NODE 那一版
+#     （AGENT_TEAM_GATE_NODE，所有门禁子进程都经 tests/helpers/gate-runner.mjs 起）；
+#   - 仅 Linux：装两个真的旧 Node，交给 tests/boot-old-node.test.mjs，确认 boot.mjs 在它们上面能
+#     解析、跑到版本检查、按失败策略表拒绝——而不是解析失败、静默放行。
+# ⚠️ 最后一次 setup-node 决定 PATH 上的 node，也就是测试框架用的那个；顺序不能换。
+# 路径一律用 `node -p process.execPath` 取：Windows 的默认 shell 是 pwsh，`which node` 给的
+# /c/... 形式在那里会 ENOENT。tests/gate-runner.test.mjs 钉着本文件的几处关键写法。
+name: min-node
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  gates-on-min-node:
+    name: gates on min node (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 16.9.0
+      - name: 门禁子进程用最低版本
+        shell: bash
+        run: echo "AGENT_TEAM_GATE_NODE=$(node -p process.execPath)" >> "$GITHUB_ENV"
+
+      - if: runner.os == 'Linux'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 12.17.0
+      - if: runner.os == 'Linux'
+        shell: bash
+        run: echo "OLD_A=$(node -p process.execPath)" >> "$GITHUB_ENV"
+      - if: runner.os == 'Linux'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 12.22.12
+      - if: runner.os == 'Linux'
+        name: 交给旧 Node 判据
+        shell: bash
+        run: echo "AGENT_TEAM_OLD_NODES=[\"$OLD_A\",\"$(node -p process.execPath)\"]" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # 裸跑，不带路径参数（HANDOFF.md「注意事项」）。
+      - run: node --test

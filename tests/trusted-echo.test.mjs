@@ -20,11 +20,10 @@
 // 而没有过 quote / inline / shaOrNote / safeJson，只要它能被下面某个入口喂到，这里就红。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { GATE, hermeticEnv } from './helpers/gate-runner.mjs'
+import { runAsync } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { exoticPath } from '../hooks/lib/path-norm.mjs'
@@ -75,18 +74,8 @@ function baseState() {
   }
 }
 
-// 并发跑门禁子进程——几十个场景 × 九种载荷，串行要好几分钟。
-function gate(check, input, cwd) {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [GATE, check], { cwd, env: hermeticEnv() })
-    let stdout = ''
-    let stderr = ''
-    child.stdout.on('data', (d) => (stdout += d))
-    child.stderr.on('data', (d) => (stderr += d))
-    child.on('close', (status) => resolve({ check, stdout, stderr, status }))
-    child.stdin.end(JSON.stringify(input))
-  })
-}
+// 并发跑门禁子进程——几十个场景 × 九种载荷，串行要好几分钟。经 gate-runner 的异步出口起（M3t）。
+const gate = (check, input, cwd) => runAsync(check, input, { cwd })
 
 // 一次门禁调用的全部输出，按通道拆开。
 function channels(r) {

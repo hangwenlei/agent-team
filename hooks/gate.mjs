@@ -34,6 +34,7 @@ import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
 import { isPlainObject } from './lib/stages.mjs'
 import { TRUSTED_PREFIX, inline, quote, trustedBlock } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
+import { gateCheckReason, isGateCheck } from './lib/gate-check.mjs'
 
 const CHECK = process.argv[2]
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -597,6 +598,12 @@ function main() {
   }
 
   if (CHECK === 'writepath') {
+    // 门禁自检（M3t，docs/28，全量审查第 4 条）：写 .agent-team/gate-check 一律拒，理由带着
+    // 「在线」固定串。排在一切之前——主线程豁免、读运行上下文都在它后面：自检要在没有
+    // .agent-team 的项目里、坏掉的 run 里、由主线程发起时都拿得到回答。协议在 agents/at-pm.md。
+    const checked = input.tool_name === 'NotebookEdit' ? input?.tool_input?.notebook_path : input?.tool_input?.file_path
+    if (isGateCheck(checked)) denyAndExit(gateCheckReason(), spec.event)
+
     // MAIN（无 agent_type）不受 per-role 隔离约束——H3 隔离的是
     // project.paths 里登记的各角色之间的边，主线程不是参与路径认领的
     // 一方。callerOf 对 agent_type 缺失/为 null 统一归为 MAIN，跟 H1
