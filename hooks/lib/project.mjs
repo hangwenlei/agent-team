@@ -1,7 +1,7 @@
 // .agent-team/project.json 的形状（M3u，docs/29，全量审查第 10 条）。
 //
 // 此前 project.json 只要是个合法对象，H3 就照单全收：paths 缺失、键名拼错、带插件前缀、被删掉——调用者在
-// paths 里「没有键」——一律静默放行；前缀 '../' 认领到项目根之外，'' 与 '.' 认领整个项目根。这里把问题分三档：
+// paths 里「没有键」——一律静默放行；前缀 '../' 认领到项目根之外，'' 与 '.' 认领整个项目根。这里把问题分三档，另有一档 plugin：
 //   - block（阻断）：H3 据此拒持有这个条目的角色——只算 H3 会拿这个键去判的（建了键的 at-qa、at-acceptance 也算）；
 //     at-pm、__main__ 与认不出的键上的同类问题 H3 不拿来判人，降成要改。paths 本身缺失或不是对象时拒 at-qa、
 //     at-acceptance 以外的执行角色；
@@ -188,8 +188,8 @@ export function validateProject(project, { roster, platform = process.platform }
       // 任何调用者。它上面的阻断问题不让谁被拒，降成要改：阻断档的标题说「这些角色……会被拒」，写 state.json 时
       // 还只报这一档，挂在这种键上就是每次记账都重报一遍的假话。at-outsider 不在此列：H3 照常按它的键判它（挡住
       // 它的是工具面只有 Read，tests/tool-surface.test.mjs 钉着）。
-      // 花名册读坏时，除 at-pm、__main__ 外都不算 inert：H3 此时在第 3 步就拒所有执行角色、判不到键，但读坏是
-      // 暂时的，重装之后这些键照常被判，所以它们上面的阻断照报，不先降档。
+      // 花名册读坏时判不出哪些键是真角色（拼错的键也在内）：除 at-pm、__main__ 外一律不降档，阻断照报——那些前缀
+      // 重装前后都该改掉；嵌套提醒不出（见下），它对拼错的键是假话，重装后重跑 /agent-team:at-init 会补上。
       let inert = true
       if (rosterOk && !known(key)) {
         out.fix.push(`${label}：${quote(key)} 不是花名册里的角色名——拼错了？带了 agent-team: 前缀？门禁不会拿它判任何人`)
@@ -214,7 +214,7 @@ export function validateProject(project, { roster, platform = process.platform }
         if (!p.block.length) judged.add(key)
       }
     }
-    out.confirm.push(...nesting(Object.entries(paths).filter(([k]) => judged.has(k)), platform))
+    if (rosterOk) out.confirm.push(...nesting(Object.entries(paths).filter(([k]) => judged.has(k)), platform))
   }
 
   const roles = project.available_roles
@@ -240,8 +240,9 @@ export function validateProject(project, { roster, platform = process.platform }
 
 // 不同角色之间，一条前缀按段严格包含另一条：外层角色也能写进内层（认领按「列了谁、谁能写」，不按最具体的
 // 前缀归属）。相同前缀（共享目录）与同一角色内部的嵌套不提。段按 H3 解析后的落点切（'..' 先折叠），一律按不分
-// 大小写比（Windows / macOS 上门禁的 norm 折叠大小写；Linux 上多提一条无害）。只比调用方给的条目：H3 不判人的键、
-// 整条有阻断（已经作废）的条目不参与——对它们说「也能写进这一块」是假话。
+// 大小写比（Windows / macOS 上门禁的 norm 折叠大小写；Linux 上多提一条无害）。只比调用方给的条目：H3 不判人的键
+// 不参与（对它们说「也能写进这一块」是假话）；整条有阻断（已经作废）的条目两个方向都不参与——作外层时那句是
+// 假话，作内层时那句虽真，但这个条目要先改掉阻断、整份重写 project.json，重写之后会再报，先不加噪声。
 function nesting(pathEntries, platform) {
   const entries = pathEntries.map(([role, value]) => [
     role,

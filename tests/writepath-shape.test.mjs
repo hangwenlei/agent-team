@@ -219,6 +219,18 @@ test('「这条路径归谁」只认 H3 会拿来判人的键：at-pm、__main__
   for (const k of ['at-pm', '__main__', 'at-fronted']) assert.ok(!r.reason.includes(`归 "${k}"`), `${k}：${r.reason}`)
 })
 
+test('「这条路径归谁」照认 H3 会判的键：建了键的 at-qa、at-acceptance 认领的路径归它们；at-outsider 也照说，引 PM 去改那个错键', () => {
+  // 说成「没人认领」会把人引去扩 paths，而不是跨角色协调。
+  for (const key of NO_PATHS_ROLES) {
+    const r = decide('at-backend', '/proj/e2e/a.spec.ts', withPaths({ ...TEMPLATE.paths, [key]: ['e2e/'] }))
+    assert.ok(r.decision === 'deny' && r.reason.includes(`归 "${key}"`), r.reason)
+  }
+  const paths = { ...TEMPLATE.paths }
+  delete paths['at-ios']
+  const r = decide('at-backend', IOS, withPaths({ ...paths, 'at-outsider': ['src/ios/'] }))
+  assert.ok(r.reason.includes('"at-outsider"'), r.reason)
+})
+
 // ---- 拒绝理由里的外部值只占一行（docs/27）----
 
 test('键与前缀带换行字符：拒绝理由不另起一行', () => {

@@ -274,7 +274,9 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
 
   // 认领者查找只看别人条目里合法的前缀：别人条目里一个坏元素不该把拒绝理由变成「门禁异常」。也只看 H3 会拿来判
   // 人的键（花名册里、不是 PM 与主线程）：说「这条路径归 at-pm」「归拼错的键」，是在叫执行角色去找一个不存在的主人
-  // 协调。第 3 步已经保证走到这里时花名册有效。
+  // 协调。第 3 步已经保证走到这里时花名册有效。at-outsider 不排除：它是花名册里的真键、H3 照常判它；说「归
+  // at-outsider」会把 PM 引到 project.json 里那个错键上（账本的要改档已经点名「不要给 at-outsider 建键」），排除它
+  // 反倒会说成「没有被任何角色认领」，而配置里明明有人认领。
   const claimant = Object.entries(paths).find(
     ([other, value]) =>
       other !== role &&

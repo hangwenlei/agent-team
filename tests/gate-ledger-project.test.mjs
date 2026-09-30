@@ -24,6 +24,12 @@ const TEMPLATE = JSON.parse(readFileSync(new URL('../templates/project.json', im
 const posted = (file_path, agent_type = 'agent-team:at-pm') => ({ hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type, tool_input: { file_path } })
 const ctxOf = (r) => decisionOf(r.stdout)?.additionalContext ?? ''
 
+// 读 project.json 的方式由预加载脚本化（tests/helpers/project-reads.cjs）：占用、写了一半、按时间的占用窗口、数停顿。
+const PROJECT_READS = fileURLToPath(new URL('./helpers/project-reads.cjs', import.meta.url))
+const runReads = (input, cwd, vars) =>
+  run('ledger', input, undefined, cwd, { ...hermeticEnv(), ...vars }, { nodeArgs: ['-r', PROJECT_READS] })
+const reads = (script) => ({ AGENT_TEAM_TEST_PROJECT_READS: script })
+
 function withRun(project, body) {
   const dirs = makeRun({ runId: 'r1', stage: 'S1', project })
   try {
@@ -178,6 +184,8 @@ for (const [label, text] of [
       // 写的正是 project.json：说「刚写进去的」，不叫它去「原样重写刚才那个文件」（那就是它自己）。
       assert.ok(ctx.includes('刚写进去的') && !ctx.includes('原样重写'), ctx)
       assert.ok(ctx.includes('回报上级'), ctx)
+      // 普通的坏文件不按 UTF-16 说：说错原因会把 PM 从注释、尾逗号那里引开。
+      assert.ok(!ctx.includes('UTF-16') && !ctx.includes('再 Write 一次'), ctx)
     }
     withoutRun(check)
     withRun(TEMPLATE, check)
@@ -197,9 +205,14 @@ test('brokenProjectNotice：写的正是它、run 里在别处被弄坏、没有
   assert.ok(nr.includes('改好就会收到报告与触达表') && nr.includes('回报上级'), nr)
   // 原因：泛说时把编码也列上；认出 UTF-16 时直说，并叫它写两次也不奇怪（Write 第一次会沿用原编码）。
   assert.ok(jw.includes('注释') && jw.includes('尾逗号') && jw.includes('不是 UTF-8 编码'), jw)
+  // UTF-16：说出可观测的现象（第一次写完仍是 UTF-16、只少了 FF FE）与兜底——实测 PM 自己核字节、看到第一次写完仍是
+  // UTF-16 时，会不信「再写一次」有用，改去写探测文件或删文件重建。
   const u = brokenProjectNotice({ runInProgress: true, justWritten: false, utf16: true })
-  for (const k of ['UTF-16', '门禁只读 UTF-8', '内容看着没问题也要用 Write 整份重写', '再写一次']) assert.ok(u.includes(k), `${k}：${u}`)
+  for (const k of ['UTF-16', '门禁只读 UTF-8', 'FF FE', '再 Write 一次', '先删掉它，再用 Write 新建', '不用另写别的文件试探']) {
+    assert.ok(u.includes(k), `${k}：${u}`)
+  }
   assert.ok(!u.includes('注释'), u)
+  for (const s of [jw, el, nr]) assert.ok(!s.includes('FF FE') && !s.includes('再 Write 一次'), s)
 })
 
 test('写坏的 project.json：run 进行中补一句后果、往 stderr 留痕；没有 run 时两样都没有', () => {
@@ -228,14 +241,12 @@ test('project.json 不在（写完又被删、或者被占用读不到）：不�
 })
 
 test('project.json 读的时候撞上占用、再读是合法的：照常发报告与触达表，不谎报「写坏了」；连着占用超过重读的上限才只留痕', () => {
-  const ebusy = fileURLToPath(new URL('./helpers/ebusy-project.cjs', import.meta.url))
-  const env = (n) => ({ ...hermeticEnv(), AGENT_TEAM_TEST_EBUSY_READS: String(n) })
   const BOM = String.fromCharCode(0xfeff)
   // 没有 run：缝里 readProjectConfig 读一次，重读最多三次——前三次撞上占用，第四次读到。带 BOM 的合法文件同样认得。
   for (const [n, text] of [[1, JSON.stringify(TYPO)], [3, JSON.stringify(TYPO)], [1, BOM + JSON.stringify(TYPO)]]) {
     withoutRun((p) => {
       writeFileSync(join(p, '.agent-team', 'project.json'), text)
-      const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p, env(n), { nodeArgs: ['-r', ebusy] }))
+      const ctx = ctxOf(runReads(posted(join(p, '.agent-team', 'project.json')), p, reads(`busy*${n}`)))
       assert.ok(ctx.includes('【触达表】') && ctx.includes('"at-fronted"'), `${n}：${ctx}`)
       assert.ok(!ctx.includes('不是一个合法的 JSON 对象'), ctx)
     })
@@ -244,23 +255,73 @@ test('project.json 读的时候撞上占用、再读是合法的：照常发报�
   for (const n of [2, 4]) {
     withRun(TEMPLATE, (p) => {
       writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TYPO))
-      const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p, env(n), { nodeArgs: ['-r', ebusy] }))
+      const ctx = ctxOf(runReads(posted(join(p, '.agent-team', 'project.json')), p, reads(`busy*${n}`)))
       assert.ok(ctx.includes('【触达表】') && ctx.includes('"at-fronted"'), `${n}：${ctx}`)
       assert.ok(!ctx.includes('不是一个合法的 JSON 对象'), ctx)
     })
   }
-  // 一直读不到：只留痕，不说「写坏了」，也不落进「在别处被弄坏」那一支（写的正是 project.json）。
+  // 一直读不到：只留痕，不说「写坏了」。
   withoutRun((p) => {
     writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TYPO))
-    const r = run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p, env(10), { nodeArgs: ['-r', ebusy] })
+    const r = runReads(posted(join(p, '.agent-team', 'project.json')), p, reads('busy*10'))
     assert.equal(ctxOf(r), '')
     assert.match(r.stderr, /ledger 回传/)
   })
 })
 
+test('重读之间真的停一下：按时间的占用窗口（第一次读之后 40ms 内都占用）也等得过去——单向判据，慢机器上最多假绿', () => {
+  // 原版第三次读离第一次至少两次停顿（每次至少 25ms），一定落在 40ms 的窗口之外；三次读连着不停就全落在窗口里。
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TYPO))
+    const ctx = ctxOf(runReads(posted(join(p, '.agent-team', 'project.json')), p, { AGENT_TEAM_TEST_PROJECT_BUSY_MS: '40' }))
+    assert.ok(ctx.includes('【触达表】'), ctx)
+  })
+})
+
+test('重读记着读到过的原文：先读到坏内容、之后又撞上占用，照样报「写坏了」，不退成只留痕', () => {
+  // 杀毒软件在刚写完时扫描就是这一格：readProjectConfig 与第一次重读读到 []，后两次撞上占用。
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), '[]')
+    const ctx = ctxOf(runReads(posted(join(p, '.agent-team', 'project.json')), p, reads('ok,ok,busy*2')))
+    assert.ok(ctx.includes('不是一个合法的 JSON 对象') && ctx.includes('刚写进去的'), ctx)
+  })
+})
+
+test('重读也挡读到写了一半的内容：run 在、写 state.json 时 project.json 前两次读到一半，不谎报「写坏了」', () => {
+  // 读运行上下文读到一半 → run 判成读不出；在别处被弄坏那一支的第一次重读又读到一半，第二次才读全。
+  withRun(TEMPLATE, (p, runDir) => {
+    const ctx = ctxOf(runReads(posted(join(runDir, 'state.json')), p, reads('half*2')))
+    assert.ok(!ctx.includes('不是一个合法的 JSON 对象'), ctx)
+  })
+})
+
+test('写的正是 project.json 而缝里一直读不到、之后才读到坏内容：报不报都行，但不用「在别处被弄坏」的口径叫它原样重写它自己', () => {
+  // 读的次数：读运行上下文 1 次、readProjectConfig 1 次、缝里重读 3 次，共 5 次——以后增减读取次数要跟着改。
+  withRun(TEMPLATE, (p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), '[]')
+    const ctx = ctxOf(runReads(posted(join(p, '.agent-team', 'project.json')), p, reads('busy*5')))
+    assert.ok(!ctx.includes('原样重写') && !ctx.includes('哈希这时也回传不了'), ctx)
+  })
+})
+
+test('project.json 不在（ENOENT）时不重读、不停顿；坏文件照旧重读，两次停顿', () => {
+  const waits = (r) => Number((/agent-team-test waits=(\d+)/.exec(r.stderr) ?? [])[1])
+  const count = { AGENT_TEAM_TEST_COUNT_WAITS: '1' }
+  withoutRun((p) => {
+    const r = runReads(posted(join(p, '.agent-team', 'reach.json')), p, count)
+    assert.equal(waits(r), 0, r.stderr)
+  })
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), '[]')
+    const r = runReads(posted(join(p, '.agent-team', 'reach.json')), p, count)
+    assert.equal(waits(r), 2, r.stderr)
+  })
+})
+
 test('project.json 是 UTF-16 编码（Windows PowerShell 5.1 的默认）：回传直说编码，不只说注释和尾逗号', () => {
   const body = Buffer.from(JSON.stringify(TEMPLATE), 'utf16le')
-  for (const bytes of [Buffer.concat([Buffer.from([0xff, 0xfe]), body]), body]) {
+  const be = Buffer.from(body).swap16()
+  for (const bytes of [Buffer.concat([Buffer.from([0xff, 0xfe]), body]), body, Buffer.concat([Buffer.from([0xfe, 0xff]), be]), be]) {
     withoutRun((p) => {
       writeFileSync(join(p, '.agent-team', 'project.json'), bytes)
       const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p))
@@ -269,7 +330,19 @@ test('project.json 是 UTF-16 编码（Windows PowerShell 5.1 的默认）：回
     withRun(TEMPLATE, (p, runDir) => {
       writeFileSync(join(p, '.agent-team', 'project.json'), bytes)
       const ctx = ctxOf(run('ledger', posted(join(runDir, 'state.json')), undefined, p))
-      assert.ok(ctx.includes('UTF-16') && ctx.includes('门禁只读 UTF-8'), ctx)
+      assert.ok(ctx.includes('UTF-16') && ctx.includes('门禁只读 UTF-8') && ctx.includes('再 Write 一次'), ctx)
+    })
+  }
+})
+
+test('带 NUL 却不是 UTF-16 的坏文件（尾部补 NUL、整份清零、UTF-32）：不说成 UTF-16，落回泛说的口径', () => {
+  const json = JSON.stringify(TEMPLATE)
+  const utf32 = Buffer.concat([Buffer.from([0xff, 0xfe, 0, 0]), Buffer.from([...json].flatMap((c) => [c.charCodeAt(0), 0, 0, 0]))])
+  for (const bytes of [Buffer.concat([Buffer.from(json), Buffer.alloc(512)]), Buffer.alloc(1024), utf32]) {
+    withoutRun((p) => {
+      writeFileSync(join(p, '.agent-team', 'project.json'), bytes)
+      const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p))
+      assert.ok(ctx.includes('不是一个合法的 JSON 对象') && !ctx.includes('UTF-16') && ctx.includes('常见原因'), ctx)
     })
   }
 })
@@ -402,9 +475,34 @@ test('门禁子进程：插件副本的 roster.json 读坏时，写 project.json
       assert.ok(ctx.includes('【插件】'), ctx)
       for (const k of ['改到没有为止', '整份重写']) assert.ok(!ctx.includes(k), `${k}：${ctx}`)
     })
+    // 触达表拿空花名册算，恒得出「没有角色的触达超出」——实测 PM 用这份 {} 覆盖了一份正确的 reach.json。不发 JSON。
+    for (const bad of ['{', '{}', '[]']) {
+      writeFileSync(join(plugin, 'roster.json'), bad)
+      const check = (p) => {
+        writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE))
+        const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), gate, p))
+        assert.ok(ctx.includes('【插件】') && ctx.includes('不要写 .agent-team/reach.json'), `${bad}：${ctx}`)
+        for (const k of ['原样写进 .agent-team/reach.json', '没有角色的触达超出']) assert.ok(!ctx.includes(k), `${k}：${ctx}`)
+      }
+      withoutRun(check)
+      withRun(TEMPLATE, check)
+    }
   } finally {
     rmSync(plugin, { recursive: true, force: true })
   }
+})
+
+test('写 project.json 有阻断时不发触达表 JSON：照整条作废的条目算出来的「还能写到」与门禁自相矛盾', () => {
+  const project = { ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-backend': ['src/server/', '../shared/'] } }
+  const check = (p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(project))
+    const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p))
+    assert.ok(ctx.includes('【project.json】') && ctx.includes('"../shared/"'), ctx)
+    assert.ok(ctx.includes('【触达表】这次不发') && ctx.includes('不要写 .agent-team/reach.json'), ctx)
+    for (const k of ['还能写到 "../shared/"', '原样写进 .agent-team/reach.json']) assert.ok(!ctx.includes(k), `${k}：${ctx}`)
+  }
+  withoutRun(check)
+  withRun(TEMPLATE, check)
 })
 
 // ---- 每趟 run 开头 ----

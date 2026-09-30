@@ -55,14 +55,19 @@ test('at-init §2：重跑时缺键的角色逐个判，不一刀切地删角色
 
 // 上限（docs/16 §3）：钉得住正文，钉不住模型照不照做。实测：只写「在读模板之前先读旧文件」时，模型常把判断旧文件
 // 在不在的那一步和读模板并发（14 次里只有 2 次严格先读旧文件）；读序对了也挡不住把模板值说成旧文件（8 次里 1 次）；
-// 写成「第一步单独一条消息读旧文件、重跑不读模板」后 14 次里 11 次没读模板、0 次错描。拒绝的判据长什么样：CI 里起
+// 写成「第一步单独一条消息读旧文件、重跑不读模板」后累计 26 次里 20 次没读模板、0 次错描，读序 12 次里 12 次对（有的会话
+// 读了模板却在收尾自称没读，所以 §4 不要求 PM 汇报读没读模板）。拒绝的判据长什么样：CI 里起
 // 真会话，核自检之后第一个调用是单独一条 Read .agent-team/project.json、重跑全程不 Read 模板——CI 没有模型与密钥。
 // 什么会让答案改变：出现一次没读模板、却仍把模板值说成旧文件的重跑——那就改成门禁侧给旧文件留底、回传改了哪些键。
 test('at-init §1：第一步单独一条消息读旧 project.json；重跑不读模板、以旧文件为底，并说清两者不是一个文件', () => {
   const s = flat(sectionOf(INIT, '## 1.'))
   const first = s.indexOf('**第一步只做一件事**：用 `Read` 读用户项目里的 `.agent-team/project.json`')
   assert.ok(first >= 0, s.slice(0, 200))
-  assert.ok(s.includes('这一步单独一条消息，不和任何别的工具调用并发'), s.slice(0, 300))
+  // 「这一步」必须紧跟第一步——挪到别处，它指的就是勘察那一步了。
+  assert.ok(s.includes('读用户项目里的 `.agent-team/project.json`。这一步单独一条消息，不和任何别的工具调用并发。'), s.slice(0, 300))
+  for (const k of ['读不到（文件不存在）就是首跑', '要有哪些键第 2 节列全了，角色名在花名册里', '它不是合法的 JSON，就照实说']) {
+    assert.ok(s.includes(k), k)
+  }
   const noTpl = s.indexOf('**重跑不读 `${CLAUDE_PLUGIN_ROOT}/templates/project.json`**')
   assert.ok(noTpl > first, '「重跑不读模板」要写在第一步之后')
   assert.ok(s.includes('旧文件不是合法的 JSON 也一样'), '坏文件也不许借口去读模板')
@@ -85,7 +90,15 @@ test('at-init §4：重跑时逐条说和旧文件比改了哪些键；请确认
 
 test('at-init §3：先处理【project.json】——阻断与要改改到没有为止；请确认的确认、保留、告诉用户，不编前缀、不删 available_roles', () => {
   const s = flat(sectionOf(INIT, '## 3.'))
-  assert.ok(s.indexOf('【project.json】') < s.indexOf('reach.json'), '【project.json】要排在落盘触达表之前')
+  assert.ok(s.indexOf('【project.json】，先处理它') < s.indexOf('回传里还有一段【触达表】'), '【project.json】要排在落盘触达表之前')
+  // 【插件】单成一段、排在最前：它不在「里面要是有【project.json】」的条件底下（只有花名册坏时没有【project.json】）。
+  const plugin = s.indexOf('**里面要是有【插件】（roster.json 读不出来），先停下**')
+  assert.ok(plugin >= 0 && plugin < s.indexOf('**里面要是有【project.json】，先处理它**'), s.slice(0, 300))
+  for (const k of ['**改它修不好**。不要写 `.agent-team/reach.json`', '告诉用户重装或更新 agent-team 插件，装好之后重跑这条命令']) {
+    assert.ok(s.includes(k), k)
+  }
+  // 触达表说这次不发时照做；连这一段都没收到才判门禁没在跑。
+  for (const k of ['它说这次不发时，照它说的做，不要写', '**连【触达表】这一段都没收到就停下**']) assert.ok(s.includes(k), k)
   for (const k of [
     '**阻断**与**要改**：逐条改到没有为止',
     '**请确认**：逐条读一遍，是有意的就留着',
@@ -94,9 +107,7 @@ test('at-init §3：先处理【project.json】——阻断与要改改到没有
     '不要把角色从 `available_roles` 里删掉',
     // 阻断按角色生效：一条坏前缀让这个角色其余合法的前缀也写不了（实测：只说「这条前缀会被拒」时 PM 会留着它）。
     '阻断**按角色生效**',
-    // roster.json 读坏单列【插件】，改 project.json 修不好它。
-    '回传里要是有【插件】',
-    '**改它修不好**——停下，告诉用户',
+
   ]) {
     assert.ok(s.includes(k), k)
   }
@@ -104,7 +115,7 @@ test('at-init §3：先处理【project.json】——阻断与要改改到没有
 
 test('/agent-team:at-resume §3：【插件】是「先修它」的例外——改 project.json 修不好，停下让用户重装', () => {
   const s = flat(sectionOf(RESUME, '## 3.'))
-  assert.ok(s.includes('【插件】') && s.includes('修不好') && /重装|更新/.test(s), s)
+  assert.ok(s.includes('【插件】（roster.json 读不出来）是例外') && s.includes('修不好它——停下，告诉用户重装或更新 agent-team 插件'), s)
 })
 
 test('/agent-team:at §0：不再说「每个执行角色都会被拒」——按设计不认领路径的那几个不会', () => {
@@ -120,6 +131,8 @@ test('/agent-team:at §1：写完 current-run 收到【project.json】就先改�
   assert.ok(s.includes('阻断会让执行角色在 run 目录之外的写入被拒'), s)
   assert.ok(!s.includes('那些问题会让执行角色'), s)
   assert.ok(s.includes('**先改好它再写契约**'), s)
+  // at 流程第一次收到【插件】就在写 current-run 这里。
+  assert.ok(s.includes('要是收到【插件】（roster.json 读不出来）') && s.includes('修不好它——停下，告诉用户重装或更新 agent-team 插件'), s)
 })
 
 test('/agent-team:at §2：没收到契约回传时，先排除 project.json 读不出来这一种，再判门禁没在跑', () => {

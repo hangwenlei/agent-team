@@ -89,7 +89,8 @@ function isValidInput(input) {
 //   （I-1 修复，Object.keys(roster).length === 0 时 deny，理由讲清楚是
 //   roster.json 本身不合法，不是随便一条通用崩溃消息）；
 // - computeReach（isCoordinatorFor 用它）对空对象同样安全：Object.keys({})
-//   是空数组，算出的 reach 对任何角色都是「够不到任何人」，不会抛。
+//   是空数组，算出的 reach 对任何角色都是「够不到任何人」，不会抛。安全，但那份触达表是假的
+//   （「没有角色的触达超出」）——M3u 起 ledger 在花名册读坏时不发它（hooks/lib/ledger.mjs）。
 // 退回空花名册不是「假装没事」，是把「读不出来」换算成这两处已经设计好的
 // 「最保守」退化路径，而不是让整个检查项的判定半途而废。
 // ⚠️ M3u：H3（decideWritePath）与 validateProject 也消费它。对 H3 来说空花名册**不是**天然保守的——H3 对
@@ -140,7 +141,7 @@ function isProjectJson(filePath, agentTeamDir) {
 // 索引器的短暂占用，以及读到别人正写到一半的内容，停一下再读多半就好了——只读一次的话，一次占用就会让合法的文件
 // 被说成「写坏了」，两次连着占用就退成只留痕（/agent-team:at-init 会按「门禁没在跑」叫停）。读到能解析成对象的
 // 就返回它（剥 BOM、要普通对象，与 runctx 的 readJson 同一口径）；3 次都解析不出，返回最后读到的原文；都读不到，
-// text 为 null。
+// text 为 null。文件不在（ENOENT）不重读：没有收益，只会在 project.json 缺失时让每次写 .agent-team 多停约 50ms。
 function readProjectText(file) {
   let text = null
   for (let i = 0; i < 3; i++) {
@@ -148,7 +149,9 @@ function readProjectText(file) {
     let t = null
     try {
       t = readFileSync(file, 'utf8')
-    } catch {}
+    } catch (e) {
+      if (e && e.code === 'ENOENT') break
+    }
     if (t === null) continue
     text = t
     const value = parseStateText(t)
@@ -157,10 +160,26 @@ function readProjectText(file) {
   return { value: null, text }
 }
 
-// 读得到、却解析不出的 project.json 是不是 UTF-16 编码（Windows PowerShell 5.1 的 Out-File、> 的默认编码）：按
-// UTF-8 读出来，ASCII 内容的每个字符后面都跟着一个 NUL。
+// 读得到、却解析不出的 project.json 是不是 UTF-16 编码（Windows PowerShell 5.1 的 Out-File、> 的默认编码）。按 UTF-8
+// 读出来，UTF-16 的 BOM 是开头的 U+FFFD，先跳过；之后 ASCII 内容的每个字符旁边都跟着一个 NUL——奇数位（LE）或偶数位
+// （BE）绝大多数是 NUL、另一半几乎没有才算。尾部补 NUL（断电后常见）、整份清零、UTF-32、夹着一个裸 NUL 的 UTF-8 都
+// 不算，落回泛说的口径（「常见原因：……」），不把编码当成事实说错。
 function looksUtf16(text) {
-  return typeof text === 'string' && text.includes(String.fromCharCode(0))
+  if (typeof text !== 'string') return false
+  const replacement = String.fromCharCode(0xfffd)
+  let start = 0
+  while (text[start] === replacement) start += 1
+  const head = text.slice(start, start + 64)
+  if (head.length < 4) return false
+  const nul = [0, 0]
+  const total = [0, 0]
+  for (let i = 0; i < head.length; i += 1) {
+    total[i % 2] += 1
+    if (head.charCodeAt(i) === 0) nul[i % 2] += 1
+  }
+  const mostly = (p) => nul[p] >= total[p] * 0.8
+  const hardly = (p) => nul[p] <= total[p] * 0.2
+  return (mostly(1) && hardly(0)) || (mostly(0) && hardly(1))
 }
 
 // 刚返回的这个角色，是不是当前阶段执行角色的一个**合法协调者**？
@@ -1048,7 +1067,7 @@ function main() {
 
     // M3u（docs/29）：project.json 的形状问题只有 PM 改得了，在它写控制文件的几个时机说出来——写 project.json
     // 本身（三档全报）；每趟 run 开头写 current-run（三档全报，已装用户的旧配置在 S1 就露面，不等 S5 撞上拒绝）；
-    // 写 state.json（只报阻断：覆盖升级前开始、升级后续跑的 run，不报警告免得每次记账都刷一遍）。解析不出的
+    // 写 state.json（只报阻断与插件问题：覆盖升级前开始、升级后续跑的 run，不报要改与请确认免得每次记账都刷一遍）。解析不出的
     // project.json 走不到这里（ctx 判 unreadable），由上面 !ctx.ok 那一支回传。
     let projectReport = null
     const isPointer = target === norm(`${ctx.agentTeamDir}/current-run`)

@@ -98,8 +98,10 @@ export function pluginNotice(report) {
  *   注释或尾逗号），PM 写 .agent-team 下别的文件时撞上。run 进行中时，那一刻契约与产物的哈希也回传不了，改好之后
  *   要原样重写一次刚才那个文件才拿得到（契约这一格 commands/at.md §2 另有兜底，这句管的是其余产物与记账）；没有
  *   run 时没有哈希可拿，改好 project.json 本身就会收到报告与触达表。
- * - utf16：按 UTF-8 读出来带 NUL（Windows PowerShell 5.1 的 Out-File、> 的默认编码）。PM 用 Read 看到的是一份
- *   合法的 JSON，只说「注释和尾逗号」它会认为没问题；实测 Write 第一次还会沿用原编码，要再写一次。
+ * - utf16：门禁认出它是 UTF-16 编码（Windows PowerShell 5.1 的 Out-File、> 的默认编码；gate.mjs 的 looksUtf16）。只说
+ *   「注释和尾逗号」会把 PM 引开。实测（CLI 2.1.283）：Read 看到的是开头两个 U+FFFD、每个字后跟一个 NUL 的乱码；
+ *   Write 第一次去掉 BOM、仍写成 UTF-16LE，第二次才是 UTF-8。PM 自己核字节、看到第一次写完仍是 UTF-16 时，会不信
+ *   「再写一次」有用、改去写探测文件或删文件重建（6 次里 2 次）——所以把这个可观测的现象与兜底都说出来。
  */
 export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 = false }) {
   const why = utf16 ? '（文件是 UTF-16 编码，门禁只读 UTF-8）' : '（常见原因：注释、尾逗号、文件不是 UTF-8 编码）'
@@ -113,7 +115,10 @@ export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 =
   return (
     `【project.json】${justWritten ? '刚写进去的 ' : ''}.agent-team/project.json 不是一个合法的 JSON 对象${why}，门禁读不出它。` +
     (runInProgress ? 'run 进行中：执行角色写任何地方都会被拒，前置就绪与交付物校验按读不出运行上下文放行。' : '') +
-    (utf16 ? '内容看着没问题也要用 Write 整份重写；写完仍收到这一句就再写一次。' : '') +
+    (utf16
+      ? '用 Write 整份重写（Read 看到的可能是一字一隔的乱码）。第一次写完，文件多半仍是 UTF-16、只少了开头的 FF FE，' +
+        '这是预期的：照原样再 Write 一次。第二次写完仍收到这一句，就先删掉它，再用 Write 新建。不用另写别的文件试探。'
+      : '') +
     how
   )
 }
@@ -136,7 +141,19 @@ export function buildLedgerNotices({
     if (!cmp.ok) out.push(`【契约】${cmp.problem}`)
   }
 
-  if (kind === 'project' && reach && typeof reach === 'object') {
+  // M3u：花名册读坏、或者 project.json 有阻断时，照现在算出来的触达表是假的——花名册读坏时 computeReach 拿 {} 算，恒得
+  // 出「没有角色的触达超出」（实测 PM 用这份 {} 覆盖了一份正确的 reach.json）；有阻断时它照整条作废的条目算，把门禁不
+  // 放行的前缀也算成「还能写到」，与同一段回传里的【project.json】自相矛盾。不发 JSON，说清为什么、什么时候会收到。
+  const blocked = Array.isArray(projectReport?.block) && projectReport.block.length > 0
+  if (kind === 'project' && (pl || blocked)) {
+    out.push(
+      pl
+        ? '【触达表】这次算不出来：花名册读不出，照它算的触达表是空的、不对。不要写 .agent-team/reach.json，保持原样；' +
+            '插件重装或更新之后重跑 /agent-team:at-init 再落盘。'
+        : '【触达表】这次不发：上面有阻断，照现在的配置算出来的触达表不对。改完阻断、重写 project.json 就会收到；' +
+            '在那之前不要写 .agent-team/reach.json。',
+    )
+  } else if (kind === 'project' && reach && typeof reach === 'object') {
     const lines = []
     for (const [role, r] of Object.entries(reach)) {
       if (!r || !r.widened) continue

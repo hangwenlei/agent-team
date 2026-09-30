@@ -2,9 +2,9 @@
 //
 // 此前 project.json 只要是个合法对象，H3 就照单全收：paths 缺失、键名拼错、带插件前缀、被删掉，调用者
 // 在 paths 里「没有键」，一律静默放行；前缀 '../' 认领到项目根之外，'' 与 '.' 认领整个项目根。
-// validateProject 把问题分三档：阻断（H3 据此拒持有它的那个角色——只算 H3 会拿键去判的；roster.json 读坏也归
-// 这一档）、要改（/agent-team:at-init 明令禁止、或者按字面比较一定落空的写法）、请确认（可能是有意的，PM 读一遍）。
-// 外部值一律过 quote（docs/27）。
+// validateProject 把问题分三档：阻断（H3 据此拒持有它的那个角色——只算 H3 会拿键去判的）、要改（/agent-team:at-init
+// 明令禁止、或者按字面比较一定落空的写法）、请确认（可能是有意的，PM 读一遍）。roster.json 读坏不进三档，单列 plugin
+// （ledger 的【插件】）。外部值一律过 quote（docs/27）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -64,6 +64,12 @@ test('阻断的理由给得出改法：出根的删掉、别换成项目里的�
   assert.ok(!out.includes('写不到项目外') && out.includes('门禁不会按这条前缀放行任何写入'), out)
   const onPm = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-pm': ['../x/'] } })
   assert.ok(!all(onPm).includes('写不到项目外'), all(onPm))
+  // PM 那一路（validateProject → 【project.json】）拿的是带改法的说法——只直调 prefixProblems 的话，缺省读者一改就漏。
+  const viaPm = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-backend': ['../shared/'], 'at-ui': [''], 'at-ios': ['src/a:b/'] } })
+  const b = viaPm.block.join('\n')
+  for (const k of ['删掉这一条', '不要换成项目里的同名目录', '收尾时告诉用户删了哪一条', '逐个列出', '换一个不带冒号的名字']) {
+    assert.ok(b.includes(k), `${k}：${b}`)
+  }
   // 平铺在项目根的文件没有目录可写：前缀也可以是单个文件。
   for (const p of ['', '.', './']) {
     const root = prefixProblems(p).block.join('\n')
@@ -182,7 +188,7 @@ test('要改：前缀里有不可见的格式字符（零宽空格之类）—�
 
 test('要改：U+FEFF 在前缀首尾只报一条「不可见的格式字符」——它也算空白，但不能再让人去找一个并不存在的空格', () => {
   const BOM = String.fromCharCode(0xfeff)
-  for (const p of [`${BOM}src/`, `src/${BOM}`]) {
+  for (const p of [`${BOM}src/`, `src/${BOM}`, `${BOM}src/${BOM}`, `${BOM}${BOM}src/`]) {
     const r = prefixProblems(p)
     assert.equal(r.fix.length, 1, r.fix.join('；'))
     assert.ok(r.fix[0].includes('U+FEFF') && !r.fix[0].includes('首尾有空白'), r.fix[0])
@@ -253,6 +259,14 @@ test('请确认：嵌套只在 H3 会判、而且整条没作废的条目之间�
     const r = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, ...extra } })
     assert.ok(!r.confirm.some((s) => s.includes('也能写进这一块')), `${JSON.stringify(extra)}：${all(r)}`)
   }
+  // 整条作废的条目作内层也不报：要先改掉阻断、整份重写，重写之后会再报。
+  const inner = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-backend': ['src/'], 'at-frontend': ['src/web/', '../x/'] } })
+  assert.ok(!inner.confirm.some((s) => s.includes('paths["at-frontend"]')), all(inner))
+  // 该进的照进：只有要改级问题的条目没作废；建了键的 at-qa、at-acceptance H3 会判。
+  for (const [extra, who] of [[{ 'at-product': ['docs/', 'docs/*'] }, 'at-product'], [{ 'at-qa': ['docs/'] }, 'at-qa'], [{ 'at-acceptance': ['docs/'] }, 'at-acceptance']]) {
+    const r = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, ...extra } })
+    assert.ok(r.confirm.some((s) => s.includes(`"${who}" 也能写进这一块`)), `${who}：${r.confirm.join('\n')}`)
+  }
 })
 
 test('请确认：前缀落在 Claude Code 会自动加载或执行的地方（.claude/、.git/、根下的 CLAUDE.md 之类）', () => {
@@ -264,7 +278,10 @@ test('请确认：前缀落在 Claude Code 会自动加载或执行的地方（.
     assert.deepEqual(r.block, [], `${JSON.stringify(p)} 不阻断：可能是有意的`)
   }
   // 文件只认项目根下那几个：子目录里的同名文件、名叫 CLAUDE.md 的目录都不报（理由在 project.mjs 的 AUTOLOADED 注释）。
-  for (const p of ['.github/', '.gitignore', '.claude-plugin/', 'docs/.claude-notes/', 'src/CLAUDE.md.bak', 'packages/app/.mcp.json', 'CLAUDE.md/notes/']) {
+  for (const p of [
+    '.github/', '.gitignore', '.claude-plugin/', 'docs/.claude-notes/', 'src/CLAUDE.md.bak',
+    'packages/app/.mcp.json', 'CLAUDE.md/notes/', 'docs/CLAUDE.md', 'docs/.mcp.json', 'docs/CLAUDE.local.md',
+  ]) {
     assert.deepEqual(prefixProblems(p).confirm, [], JSON.stringify(p))
   }
   // POSIX 上 '.claude\x' 是项目根下一个名字带反斜杠的文件，不在 .claude/ 下。
@@ -294,7 +311,7 @@ test('花名册读坏时：单列一条插件问题——不是 project.json 的
     // 又修不好它，所以不进三档（【project.json】那一段的首句叫人整份重写、结尾叫人改到没有为止）。
     assert.equal(r.plugin.length, 1, JSON.stringify(r))
     const p = r.plugin[0]
-    for (const k of ['roster.json', '这不是 project.json 的问题', '改它修不好', '没有键的']) assert.ok(p.includes(k), `${k}：${p}`)
+    for (const k of ['roster.json', '这不是 project.json 的问题', '改它修不好', '没有键的', '派发一律被拒', '停下']) assert.ok(p.includes(k), `${k}：${p}`)
     assert.match(p, /重装|更新/)
     // H3 的第 2 步排在第 3 步之前：没有键的 at-qa、at-acceptance 在花名册读坏时照样放行。
     for (const role of NO_PATHS_ROLES) assert.ok(p.includes(role), `${role}：${p}`)
@@ -306,6 +323,11 @@ test('花名册读坏时：单列一条插件问题——不是 project.json 的
   for (const roster of [{}, null]) {
     const r = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-backend': ['../'] } }, roster)
     assert.ok(r.block.some((s) => s.includes('"../"')), all(r))
+  }
+  // 嵌套提醒不出：花名册读坏时判不出哪些键是真角色，「"at-fronted" 也能写进这一块」对拼错的键是假话。
+  for (const roster of [{}, null]) {
+    const r = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-fronted': ['src/'] } }, roster)
+    assert.ok(!r.confirm.some((s) => s.includes('也能写进这一块')), all(r))
   }
   assert.deepEqual(v(TEMPLATE).plugin, [])
 })
