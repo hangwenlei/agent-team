@@ -148,17 +148,16 @@ test('contract：NotebookEdit 用 notebook_path 也能正确判定为契约文�
 // 路径上 H3 放行、H4 拒绝"这种单输入 A/B 已经构造不出来了——H4 只在
 // runDir/00-contract.md 这一条路径上拒绝，而这条路径现在 H3 也拦。改成共用
 // 同一个"没有 project.json"的 run、分三步看：
-//   ① 前提核实：run 目录外的普通源码路径——这是 I1 收窄之后
-//      `!project.paths → allow` 唯一还管的范围，H3 在这里确实整体没有判据、
-//      放行（如果有人把这条早退删了，这里会因为 project.paths 取不到而落进
-//      gate.mjs 的兜底 fail closed，assert 会红，不是恒真断言）。
+//   ① 前提核实：run 目录外的普通源码路径。M3u（docs/29）起 project.json 缺席时
+//      H3 在这里拒，理由点名 project.json 不在；这一步只核 H3 走的是「没有判据」
+//      那一支（有人把 writepath.mjs 的第 5 步改回放行，assert 会红）。
 //   ② 独立性本身：同一个 run、同一个子代理写契约——H4 仍然拒，且理由点名
 //      契约文件，不是"读不到运行上下文"那种撞上别的 fail-closed 分支的措辞。
 //   ③ 顺带钉住 I1 在子进程级也成立：H3 在契约路径上现在也拒，但走的是它
 //      自己那条 run 目录归属判定（理由点名 S1 与 at-pm），跟 H4 的理由不是
 //      同一件事——两道闸同时触发、判据各自独立，这正是 Task 7 清单第 5 条
 //      记下的那个观察。
-test('contract：project.json 缺失时 H3 对普通路径整体放行、H4 仍然独立拦住契约——H4 不借 H3 的前提', () => {
+test('contract：project.json 缺失时 H4 仍然独立拦住契约——H4 不借 H3 的前提', () => {
   const dirs = makeRun({ runId: 'r1' }) // 不传 project，makeRun 就不会写 project.json
   try {
     const contractPath = join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md')
@@ -168,7 +167,8 @@ test('contract：project.json 缺失时 H3 对普通路径整体放行、H4 仍�
       tool_input: { file_path: contractPath },
     }
 
-    // ① 前提核实：run 目录外的普通路径，H3 没有判据可用 → 放行。
+    // ① 前提核实：run 目录外的普通路径，H3 没有判据可用。M3u（docs/29）起它在 run 进行中拒，理由点名
+    //    project.json 不在（此前是放行）——这一步只核 H3 在这种状态下走的是「没有判据」那一支。
     const plainWrite = run(
       'writepath',
       {
@@ -179,11 +179,10 @@ test('contract：project.json 缺失时 H3 对普通路径整体放行、H4 仍�
       undefined,
       dirs.projectDir,
     )
-    assert.equal(
-      plainWrite.stdout.trim(),
-      '',
-      '前提核实：project.json 缺失时 H3 的 per-role 隔离那一段确实没有判据、整体放行，' +
-        '不然下面 H4 的对比就立不住',
+    assert.match(
+      decisionOf(plainWrite.stdout)?.permissionDecisionReason ?? '',
+      /project.json 不在/,
+      '前提核实：project.json 缺失时 H3 的 per-role 隔离那一段没有判据，拒绝理由点名 project.json 不在',
     )
 
     // ③ I1 的子进程级证据：同样是 project.json 缺席，run 目录内就不放行了。

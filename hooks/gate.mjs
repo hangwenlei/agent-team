@@ -27,7 +27,8 @@ import { isControlFile, mayBeStateFile } from './lib/control-files.mjs'
 import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
 import { sha256OfContract, shaOrNote } from './lib/contract-hash.mjs'
-import { buildLedgerNotices } from './lib/ledger.mjs'
+import { buildLedgerNotices, brokenProjectNotice } from './lib/ledger.mjs'
+import { NO_PATHS_ROLES, validateProject } from './lib/project.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
 import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
@@ -88,9 +89,14 @@ function isValidInput(input) {
 //   （I-1 修复，Object.keys(roster).length === 0 时 deny，理由讲清楚是
 //   roster.json 本身不合法，不是随便一条通用崩溃消息）；
 // - computeReach（isCoordinatorFor 用它）对空对象同样安全：Object.keys({})
-//   是空数组，算出的 reach 对任何角色都是「够不到任何人」，不会抛。
+//   是空数组，算出的 reach 对任何角色都是「够不到任何人」，不会抛。安全，但那份触达表是假的
+//   （「没有角色的触达超出」）——M3u 起 ledger 在花名册读坏时不发它（hooks/lib/ledger.mjs）。
 // 退回空花名册不是「假装没事」，是把「读不出来」换算成这两处已经设计好的
 // 「最保守」退化路径，而不是让整个检查项的判定半途而废。
+// ⚠️ M3u：H3（decideWritePath）与 validateProject 也消费它。对 H3 来说空花名册**不是**天然保守的——H3 对
+// 「不在花名册里」的调用者放行，{} 会让所有人都「不在花名册里」。所以 decideWritePath 先用 decide.mjs 的
+// isValidRoster（与 H1 同一份）核花名册：读坏时，除 PM 与没有键的 at-qa、at-acceptance 之外一律拒，不走那条
+// 放行。validateProject 读坏时不核对角色名，单列一条【插件】（其余键上的问题照报）。
 function loadRoster() {
   try {
     return JSON.parse(readFileSync(join(ROOT, 'roster.json'), 'utf8'))
@@ -129,6 +135,53 @@ function isProjectJson(filePath, agentTeamDir) {
   if (typeof filePath !== 'string' || !filePath) return false
   if (typeof agentTeamDir !== 'string' || !agentTeamDir) return false
   return norm(filePath) === norm(`${agentTeamDir}/project.json`)
+}
+
+// ledger 那两处「project.json 是不是写坏了」要读它的原文（M3u）。最多读 3 次，两次之间停 25ms：Windows 上杀毒软件、
+// 索引器的短暂占用，以及读到别人正写到一半的内容，停一下再读多半就好了——只读一次的话，一次占用就会让合法的文件
+// 被说成「写坏了」，两次连着占用就退成只留痕（/agent-team:at-init 会按「门禁没在跑」叫停）。读到能解析成对象的
+// 就返回它（剥 BOM、要普通对象，与 runctx 的 readJson 同一口径）；3 次都解析不出，返回最后读到的原文；都读不到，
+// text 为 null。文件不在（ENOENT）不重读：没有收益，只会在 project.json 缺失时让每次写 .agent-team 多停约 50ms。
+function readProjectText(file) {
+  let text = null
+  for (let i = 0; i < 3; i++) {
+    if (i > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25)
+    let t = null
+    try {
+      t = readFileSync(file, 'utf8')
+    } catch (e) {
+      if (e && e.code === 'ENOENT') break
+    }
+    if (t === null) continue
+    text = t
+    const value = parseStateText(t)
+    if (value !== null) return { value, text }
+  }
+  return { value: null, text }
+}
+
+// 读得到、却解析不出的 project.json 是不是 UTF-16 编码（Windows PowerShell 5.1 的 Out-File、> 的默认编码）。按 UTF-8
+// 读出来，UTF-16 的 BOM 是开头的 U+FFFD，先跳过；之后 ASCII 内容的每个字符旁边都跟着一个 NUL——奇数位（LE）或偶数位
+// （BE）绝大多数是 NUL、另一半几乎没有才算。尾部补 NUL（断电后常见）、整份清零、UTF-32、夹着一个裸 NUL 的 UTF-8 都
+// 不算，落回泛说的口径（「常见原因：……」），不把编码当成事实说错。去掉 BOM 后不足 4 个码元（含 0 字节的空文件）也
+// 不算：空串的奇偶计数全是 0，不设下限就会判成 UTF-16。开头有较多非 ASCII 字符的 UTF-16 文件判不出来（按 UTF-8 解
+// 码时字节会并成一个字符、奇偶错开），落回泛说的口径——方向安全，docs/29 §5 登记着。
+function looksUtf16(text) {
+  if (typeof text !== 'string') return false
+  const replacement = String.fromCharCode(0xfffd)
+  let start = 0
+  while (text[start] === replacement) start += 1
+  const head = text.slice(start, start + 64)
+  if (head.length < 4) return false
+  const nul = [0, 0]
+  const total = [0, 0]
+  for (let i = 0; i < head.length; i += 1) {
+    total[i % 2] += 1
+    if (head.charCodeAt(i) === 0) nul[i % 2] += 1
+  }
+  const mostly = (p) => nul[p] >= total[p] * 0.8
+  const hardly = (p) => nul[p] <= total[p] * 0.2
+  return (mostly(1) && hardly(0)) || (mostly(0) && hardly(1))
 }
 
 // 刚返回的这个角色，是不是当前阶段执行角色的一个**合法协调者**？
@@ -648,8 +701,8 @@ function main() {
       // 钉住）写在 hooks/lib/contract-guard.mjs 里，只该有一处。
       //
       // 只免除 unreadable 这一支，不像 H4 那样提到读 ctx 之前：ctx 读得出来时
-      // at-pm 仍然是受完整 per-role 隔离约束的角色，只是**控制文件**那一类已经由
-      // decideWritePath 顶部单独放行了（docs/09 账一 / 规格 §6.2.1）。
+      // at-pm 在 run 目录内仍只能写自己阶段的产物，**控制文件**那一类由 decideWritePath
+      // 顶部单独放行（docs/09 账一 / 规格 §6.2.1），run 目录之外由它的按角色隔离第 1 步放行（M3u）。
       // ⚠️ 这两条路径不要混：PM 第一次建 run 时 state.json 还不存在，ctx 是
       // unreadable，放行它的是**这条 I2 豁免**；run 建好之后（ctx.ok）放行它的才是
       // 控制文件规则。tests/gate-writepath.test.mjs 两条都钉住了，别把其中一条的
@@ -685,6 +738,7 @@ function main() {
       runDir: ctx.runDir,
       stages: ctx.stages,
       agentTeamDir: ctx.agentTeamDir,
+      roster: loadRoster(),
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
   }
@@ -869,7 +923,15 @@ function main() {
       // ctx.agentTeamDir 取不到时（runctx 最外层兜底 catch 那一支，连 .agent-team
       // 在哪都不知道）也照原路 fail open —— 见 hooks/lib/runctx.mjs 那里的注释。
       if (isProjectJson(filePath, ctx.agentTeamDir)) {
-        const project = readProjectConfig(ROOT_PROJECT)
+        let project = readProjectConfig(ROOT_PROJECT)
+        // 读不出来时自己再读原文（M3u，readProjectText）：readProjectConfig 可能只是撞上了短暂的占用，再读就是合法
+        // 的——那就照正常路径发报告与触达表，不对一份合法的文件说「写坏了」。
+        let text = null
+        if (!project.ok) {
+          const again = readProjectText(filePath)
+          text = again.text
+          if (again.value !== null) project = { ok: true, value: again.value }
+        }
         if (project.ok) {
           // ⚠️ ctx.kind 的两支在这条缝上**不是**二选一（终审复评 a）：
           //   - 'no-run' 是 /at-init 的正常形态（那条命令按设计就不建 run），不留痕
@@ -887,17 +949,26 @@ function main() {
           // kind 取不到时也留痕（往安全的那一侧偏）：留一行多余的痕迹，代价远小于
           // 丢掉唯一一次「门禁判不出来」的信号。
           if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
+          const roster = loadRoster()
           emitLedger(
             spec.event,
             buildLedgerNotices({
               kind: 'project',
-              reach: computeReach({ roster: loadRoster(), paths: project.value.paths }),
+              reach: computeReach({ roster, paths: project.value.paths }),
+              // M3u（docs/29）：形状问题三档全报，排在【触达表】之前。
+              projectReport: validateProject(project.value, { roster }),
             }),
           )
           process.exit(0)
         }
-        // project.json 刚写进去却读不出来（写坏了、或者被并发占用）——没有判据，
-        // 继续往下走原来的 fail open 留痕，不要凭空造一张空触达表回传。
+        // project.json 刚写进去却读不出来。M3u（docs/29）：文件在、只是解析不出或不是对象时，照 state.json
+        // 那一支（M3r）回传一句固定的话——此前这里只往 stderr 留痕，模型看不到，/agent-team:at-init 会把它
+        // 误当成「门禁没在跑」。不回显文件内容，不造空触达表。读不到（被删、被占用）时照旧只留痕（落到最后那行）。
+        if (text !== null) {
+          if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
+          emitLedger(spec.event, [brokenProjectNotice({ runInProgress: ctx.kind !== 'no-run', utf16: looksUtf16(text) })])
+          process.exit(0)
+        }
       }
       // M3r（docs/26，全量审查第 5 条）：刚写的正是某个 run 的 state.json、而它读不出来——这趟
       // run 此刻在门禁眼里是坏的（readRunContext 判 unreadable），此前这里只往 stderr 写一句，
@@ -926,6 +997,29 @@ function main() {
               ],
             }),
           )
+          process.exit(0)
+        }
+      }
+      // M3u 复核轮（docs/29）：project.json 在别处被弄坏（用户在两趟 run 之间手改，加了注释或尾逗号）——run 在时
+      // readRunContext 判 unreadable，落到这里的每一次写入此前都只往 stderr 留痕：PM 写 state.json、current-run、
+      // 契约都收不到任何东西，契约哈希拿不到，commands/at.md 的「没收到就停下：门禁没在跑」把用户引去排查一个
+      // 不存在的问题。写 .agent-team 下任何文件时（PM 这一趟会写的都在那下面），自己读一遍 project.json：读得到、
+      // 解析不出或不是对象，就回传那句固定的话的变体；读不到（被删、被占用）照旧只留痕。不回显文件内容。写的正是
+      // project.json 时不走这里：上面那条缝已经读过它（读不到才落到这里），不再用「在别处被弄坏」的口径说它。
+      // .agent-team 之外的写入保持沉默，同下面 ctx.ok 那一支：project.json 坏着的项目里，主会话与执行角色每写一个
+      // 业务文件都刷一遍这段话，会把真正要看的东西淹掉。
+      if (
+        typeof filePath === 'string' &&
+        underDir(filePath, ctx.agentTeamDir) &&
+        !isProjectJson(filePath, ctx.agentTeamDir)
+      ) {
+        const { value, text } = readProjectText(join(ctx.agentTeamDir, 'project.json'))
+        if (text !== null && value === null) {
+          // no-run 不留痕，与上面那条缝同一个理由：不把人指向 current-run 去查一个不存在的问题。
+          if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
+          emitLedger(spec.event, [
+            brokenProjectNotice({ runInProgress: ctx.kind !== 'no-run', justWritten: false, utf16: looksUtf16(text) }),
+          ])
           process.exit(0)
         }
       }
@@ -973,6 +1067,26 @@ function main() {
     const stateProblems =
       kind === 'state' ? validateState(ctx.state, { stages: ctx.stages }).problems : []
 
+    // M3u（docs/29）：project.json 的形状问题只有 PM 改得了，在它写控制文件的几个时机说出来——写 project.json
+    // 本身（三档全报）；每趟 run 开头写 current-run（三档全报，已装用户的旧配置在 S1 就露面，不等 S5 撞上拒绝）；
+    // 写 state.json（只报阻断与插件问题：覆盖升级前开始、升级后续跑的 run，不报要改与请确认免得每次记账都刷一遍）。解析不出的
+    // project.json 走不到这里（ctx 判 unreadable），由上面 !ctx.ok 那一支回传。
+    let projectReport = null
+    const isPointer = target === norm(`${ctx.agentTeamDir}/current-run`)
+    if (kind === 'project' || isPointer || kind === 'state') {
+      if (!ctx.project) {
+        projectReport = {
+          block: [
+            `.agent-team/project.json 不在——run 已经建起来，除按设计不认领路径的 ${NO_PATHS_ROLES.join('、')} 外，` +
+              '执行角色写 run 目录之外的任何地方都会被拒；先跑 /agent-team:at-init 写好它',
+          ],
+        }
+      } else {
+        const full = validateProject(ctx.project, { roster: loadRoster() })
+        projectReport = kind === 'state' ? { block: full.block, plugin: full.plugin } : full
+      }
+    }
+
     // 【阶段】那条提示的判据。roster 传 ctx.state?.roster——不是数组时传 undefined 退回
     // 全部 producers，写法与本文件另外三处一致（deliverable 分支里那次 isStageDone、
     // 那次 compareArtifacts、readiness 分支里那次 decideReadiness）。
@@ -1009,6 +1123,7 @@ function main() {
       stateProblems,
       produceName,
       produceSha: produceBytes ? sha256OfContract(produceBytes) : null,
+      projectReport,
     })
 
     // M3a Task 2：产者交代判据的触发点是「state.stage 推进出去时」（设计 §3.2），

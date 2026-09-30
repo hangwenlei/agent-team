@@ -10,8 +10,8 @@
 // #2（PM 就能 echo > 01-prd.md 伪造 H2 的判据）。更根本的一条：hook 一定会触发，
 // 脚本要靠 PM 记得跑——这与 §4.2 ② 把就绪门禁写成 hook 而不是提示词是同一条理由。
 //
-// 本模块只做格式化，一切 I/O 在 gate.mjs 里；判据本身来自 contract-hash.mjs /
-// reach.mjs / state.mjs 三个纯函数模块。
+// 本模块只做格式化，一切 I/O 在 gate.mjs 里；判据本身来自这些纯函数模块：contract-hash.mjs、
+// reach.mjs、state.mjs、project.mjs。
 import { compareContractSha, shaOrNote } from './contract-hash.mjs'
 import { inline, quote, safeJson } from './trusted.mjs'
 import { nextStage } from './state.mjs'
@@ -52,18 +52,117 @@ function pmOnlyNotice(action, reportWhat) {
   )
 }
 
+/**
+ * 【project.json】（M3u，docs/29，全量审查第 10 条）。report 是 hooks/lib/project.mjs 的 validateProject 那样的
+ * { block, fix, confirm }，每条已经是单行、外部值过了 quote；三档都空时返回 null。
+ *
+ * 收件人不一定是 PM：project.json 是控制文件，run 进行中只有 PM 写得了；但 no-run 时 H3 对所有角色 fail open
+ * （见 pmOnlyNotice 上方的注释），而 ledger 在 no-run 下对 project.json 照样回传。所以首句照 pmOnlyNotice 的
+ * 写法说「只有 PM 该改它」，不对收件人说「你是唯一改得了它的人」。
+ *
+ * 阻断那一档的标题说清按角色生效：每条讲的都是某一条前缀，实测 PM 会读成「只有这条前缀失效」而留着它，
+ * 可 H3 的第 8 步让这个角色整条条目作废。
+ */
+export function projectNotice(report) {
+  const sections = [
+    ['阻断（按角色生效：一个角色的条目里只要有一条，它写 run 目录之外的任何地方都会被拒，连它其余合法的前缀也一样）', report?.block],
+    ['要改（/agent-team:at-init 明令不许这样写，或者按字面比较一定落空）', report?.fix],
+    ['请确认（可能是有意的：读一遍，是想要的就不动）', report?.confirm],
+  ].filter(([, items]) => Array.isArray(items) && items.length)
+  if (!sections.length) return null
+  return (
+    '【project.json】.agent-team/project.json 有问题，逐条如下——只有 PM 该改它：你是 PM 就用 Write 整份重写；' +
+    '不是的话把这些问题回报给上级，不要自己写 project.json：\n' +
+    sections.map(([title, items]) => `  ${title}：\n` + items.map((s) => `  - ${s}`).join('\n')).join('\n') +
+    '\n' +
+    [
+      (report.block?.length || report.fix?.length) && '阻断与要改的，改到没有为止再往下走',
+      report.confirm?.length && '请确认的，确认是有意的就留着',
+    ].filter(Boolean).join('；') +
+    '。'
+  )
+}
+
+/**
+ * 【插件】（M3u）：roster.json 读不出来。它不是 project.json 的问题，不混进【project.json】——那一段的首句叫 PM
+ * 整份重写 project.json、结尾叫它改到没有为止，这一条改 project.json 永远改不掉。report 同 projectNotice。
+ */
+export function pluginNotice(report) {
+  const items = Array.isArray(report?.plugin) ? report.plugin : []
+  return items.length ? items.map((s) => `【插件】${s}。`).join('\n') : null
+}
+
+/**
+ * project.json 解析不出、或者不是对象。不回显文件内容（docs/27）。
+ * - justWritten：这次写的正是它（写 project.json 那条缝）；否则是它在别处被弄坏（用户在两趟 run 之间手改，加了
+ *   注释或尾逗号），PM 写 .agent-team 下别的文件时撞上。run 进行中时，那一刻契约与产物的哈希也回传不了，改好之后
+ *   要原样重写一次刚才那个文件才拿得到（契约这一格 commands/at.md §2 另有兜底，这句管的是其余产物与记账）；没有
+ *   run 时没有哈希可拿，改好 project.json 本身就会收到报告与【触达表】那一段。
+ * - utf16：门禁认出它是 UTF-16 编码（Windows PowerShell 5.1 的 Out-File、> 的默认编码；gate.mjs 的 looksUtf16）。只说
+ *   「注释和尾逗号」会把 PM 引开。实测（CLI 2.1.283）：Read 看到的是开头两个 U+FFFD、每个字后跟一个 NUL 的乱码；
+ *   Write 第一次去掉 BOM、仍写成 UTF-16LE，第二次才是 UTF-8。PM 自己核字节、看到第一次写完仍是 UTF-16 时，会不信
+ *   「再写一次」有用、改去写探测文件或删文件重建（6 次里 2 次）——所以把这个可观测的现象与兜底都说出来。修 UTF-16
+ *   要连写两次 project.json，run 进行中时，早先那条「在别处被弄坏」回传末尾的「修好后原样重写刚才那个文件」隔着两段
+ *   回传，实测多半被丢掉（7 次里 1 次照做）；所以写的正是它、UTF-16、run 进行中这一格，把那个提醒挂在修好之前的最后
+ *   一条回传上。兜底（删掉重建）按 project.json 的写入次数计：run 进行中时 PM 写 state.json 已经收到过一次同样的句子，
+ *   只说「第二次写完仍收到」会被数成第二次，第一次写完就删文件（合并前复测 8 次里 1 次）。
+ */
+export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 = false }) {
+  const why = utf16 ? '（文件是 UTF-16 编码，门禁只读 UTF-8）' : '（常见原因：注释、尾逗号、文件不是 UTF-8 编码）'
+  const how = justWritten
+    ? utf16 && runInProgress
+      ? '只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json；收到触达表之后，这之前写过、没拿到回传的 ' +
+        'state.json、契约或产物各原样重写一次，再继续；不是的话回报上级，不要自己写。'
+      : '只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json，再继续；不是的话回报上级，不要自己写。'
+    : runInProgress
+      ? '契约与产物的哈希这时也回传不了。只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json，' +
+        '再原样重写一次刚才那个文件拿回传；不是的话回报上级，不要自己写。'
+      : '只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json——改好就会收到报告与【触达表】那一段，再继续；' +
+        '不是的话回报上级，不要自己写。'
+  return (
+    `【project.json】${justWritten ? '刚写进去的 ' : ''}.agent-team/project.json 不是一个合法的 JSON 对象${why}，门禁读不出它。` +
+    (runInProgress ? 'run 进行中：执行角色写任何地方都会被拒，前置就绪与交付物校验按读不出运行上下文放行。' : '') +
+    (utf16
+      ? '用 Write 整份重写 project.json（Read 看到的可能是一字一隔的乱码）。第一次写完 project.json，文件多半仍是 UTF-16、' +
+        '只少了开头的 FF FE，这是预期的：照原样再 Write 一次 project.json。连写两次 project.json 仍收到这一句，才先删掉它，' +
+        '再用 Write 新建（写别的文件时收到的这一句不算次数）。不用另写别的文件试探。'
+      : '') +
+    how
+  )
+}
+
 export function buildLedgerNotices({
-  kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha,
+  kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha, projectReport,
 } = {}) {
   const out = []
   const st = state && typeof state === 'object' ? state : {}
+
+  // 排在最前：写 project.json 时它要先于【触达表】——先把配置改对，再落盘由它算出来的触达表。【插件】又在它之前：
+  // 插件装坏了，改 project.json 之前先停下。
+  const pl = pluginNotice(projectReport)
+  if (pl) out.push(pl)
+  const pn = projectNotice(projectReport)
+  if (pn) out.push(pn)
 
   if (kind === 'contract') {
     const cmp = compareContractSha({ recorded: st.contract_sha, actual: contractSha ?? null })
     if (!cmp.ok) out.push(`【契约】${cmp.problem}`)
   }
 
-  if (kind === 'project' && reach && typeof reach === 'object') {
+  // M3u：花名册读坏、或者 project.json 有阻断时不发触达表的 JSON，说清为什么、什么时候会收到。花名册读坏时 computeReach
+  // 拿 {} 算，恒得出「没有角色的触达超出」（实测 PM 用这份 {} 覆盖了一份正确的 reach.json）。有阻断时一律等改完再发：
+  // 元素级、前缀级阻断下它照整条作废的条目算，把门禁不放行的前缀也算成「还能写到」，与同一段回传里的【project.json】
+  // 自相矛盾；整份级、整条级阻断下它算得与 H3 一致，但改完阻断就会变——所以话里不说「算得不对」，只说改完才会收到。
+  // 只在写 project.json 时出（kind === 'project'）：写 state.json、current-run 时不推它，免得每次记账都刷一遍。
+  const blocked = Array.isArray(projectReport?.block) && projectReport.block.length > 0
+  if (kind === 'project' && (pl || blocked)) {
+    out.push(
+      pl
+        ? '【触达表】这次算不出来：花名册读不出，照它算的触达表是空的、不对。不要写 .agent-team/reach.json，保持原样；' +
+            '插件重装（或有新版本时更新）之后，新开一个会话再跑 /agent-team:at-init 落盘。'
+        : '【触达表】这次不发：上面有阻断，改完阻断、重写 project.json 之后才会收到；在那之前不要写 .agent-team/reach.json。',
+    )
+  } else if (kind === 'project' && reach && typeof reach === 'object') {
     const lines = []
     for (const [role, r] of Object.entries(reach)) {
       if (!r || !r.widened) continue

@@ -697,8 +697,8 @@ test('描述触达表的命令正文必须两半都在：禁令**和**理由—�
 // 不能再加一条同样没人守的指示。
 //
 // 为什么这条规则本身重要（docs/11 §5.14）：hooks/lib/writepath.mjs 的 decideWritePath
-// 对**没有 paths 条目**的角色，在 run 目录之外整段早退放行——「没有登记 paths」被当成
-// 「没有可用判据、不表态」，而不表态就是放行。agents/at-qa.md 与 agents/at-acceptance.md
+// 对**按设计不认领路径**的这两个角色（hooks/lib/project.mjs 的 NO_PATHS_ROLES），在没有 paths
+// 条目时于 run 目录之外整段早退放行（M3u 起其余角色没有条目会被拒，docs/29）。agents/at-qa.md 与 agents/at-acceptance.md
 // 的红线据此如实写着「写路径隔离连拒都不会拒你，那里只剩你自己的克制」。某个项目一旦给
 // 它们建了 paths 键，那句话对那一趟当场变假——**而正文是插件自带的，改不了那一趟的
 // project.json**。「允许但要求同步改正文」在结构上不可能执行，所以裁定是硬禁止。

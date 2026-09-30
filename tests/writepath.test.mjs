@@ -3,6 +3,10 @@ import assert from 'node:assert/strict'
 import { decideWritePath, stageOwnerOfRunPath } from '../hooks/lib/writepath.mjs'
 import { norm } from '../hooks/lib/path-norm.mjs'
 import { resolve } from 'node:path'
+import { readFileSync } from 'node:fs'
+
+// 真实花名册：H3 从 M3u 起要它判调用者归不归本插件管（docs/29）。
+const ROSTER = JSON.parse(readFileSync(new URL('../roster.json', import.meta.url), 'utf8'))
 
 const PROJECT = {
   paths: {
@@ -28,7 +32,7 @@ const STAGES = {
 const AT = '/proj/.agent-team'
 
 const call = (role, filePath) =>
-  decideWritePath({ role, filePath, project: PROJECT, runDir: RUN, stages: STAGES, agentTeamDir: AT })
+  decideWritePath({ roster: ROSTER, role, filePath, project: PROJECT, runDir: RUN, stages: STAGES, agentTeamDir: AT })
 
 // Task 4：S5 多产者夹具，自建一份、不读真 stages.json——单测要能独立于真实配置。
 // 形状照抄上面 STAGES 的风格，只是 S5 换成 producers + <role> 模式。
@@ -43,7 +47,7 @@ const STAGES_M2A = {
 }
 
 const callM2a = (role, filePath) =>
-  decideWritePath({ role, filePath, project: PROJECT, runDir: RUN, stages: STAGES_M2A, agentTeamDir: AT })
+  decideWritePath({ roster: ROSTER, role, filePath, project: PROJECT, runDir: RUN, stages: STAGES_M2A, agentTeamDir: AT })
 
 // ——— docs/09 账一：控制文件 ———
 
@@ -85,7 +89,7 @@ test('账一 #2：PM 仍然不能伪造别人阶段的产物', () => {
 })
 
 test('不传 agentTeamDir 时控制文件分支不触发，保持既有行为', () => {
-  const r = decideWritePath({
+  const r = decideWritePath({ roster: ROSTER,
     role: 'at-pm', filePath: `${RUN}/state.json`,
     project: PROJECT, runDir: RUN, stages: STAGES,
   })
@@ -243,16 +247,20 @@ test('S5 多产者：产者之间互不认领——at-frontend 写 at-backend �
 // 照做并留了注释），Task 4 写这份文件时又写了回来。这条用例的语义是"一个真实
 // 存在、但不在 project.paths 里的角色"，roster.json 里的 at-outsider 才对得上
 // （它就是为"在花名册里但不参与阶段链"这件事准备的对照角色）。
-test('不在 project.paths 里的角色不归本门禁管，放行', () => {
-  assert.equal(call('at-outsider', '/proj/anything.ts').decision, 'allow')
+// M3u（docs/29）：此前这里用 at-outsider——它在花名册里、没有 paths 键，旧判据放行它。现在「在花名册里却
+// 没有键」会被拒（tests/writepath-shape.test.mjs 钉着），不归本门禁管的只剩真正不在花名册里的调用者。
+test('不在花名册里的调用者不归本门禁管，放行', () => {
+  assert.equal(call('some-other-plugin-agent', '/proj/anything.ts').decision, 'allow')
 })
 
-test('project 为 null 时，run 目录外的普通路径放行——尚未跑过勘察，per-role 隔离没有判据', () => {
-  const r = decideWritePath({ role: 'at-backend', filePath: '/proj/x.ts', project: null, runDir: RUN })
-  assert.equal(r.decision, 'allow')
+// M3u（docs/29）：此前 project 为 null 时放行——run 进行中把 project.json 删掉，按角色隔离就全开。
+test('project 为 null（run 进行中 project.json 不在）时，执行角色写 run 目录外的普通路径被拒', () => {
+  const r = decideWritePath({ roster: ROSTER, role: 'at-backend', filePath: '/proj/x.ts', project: null, runDir: RUN })
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /project.json/)
 })
 
-// 全分支评审 I1：上一条的"放行"只该覆盖 project.paths 那一段。run 目录保护
+// 全分支评审 I1：上一条（M3u 之前是放行，现在是拒）只管 run 目录外按角色隔离那一段。run 目录保护
 // 只依赖 runDir/stages，跟 project.json 在不在没有关系——而旧版本把
 // `!project.paths → allow` 写在整个函数最前面，于是 run 正在跑、
 // project.json 不在时（runctx.mjs 明确允许这种状态：project 为 null 且
@@ -261,7 +269,7 @@ test('project 为 null 时，run 目录外的普通路径放行——尚未跑�
 // 上面那五条"run 目录下…拒绝"的用例全都带着 project: PROJECT，一条也没有
 // 覆盖缺席路径，它们在证明一件自己没在守的事。这条钉住缺席路径。
 test('project 为 null 时，run 目录下写别人阶段的产物仍然拒绝——run 目录保护不挂在 project.json 上', () => {
-  const r = decideWritePath({
+  const r = decideWritePath({ roster: ROSTER,
     role: 'at-backend',
     filePath: `${RUN}/05-impl/at-frontend.md`,
     project: null,
@@ -274,7 +282,7 @@ test('project 为 null 时，run 目录下写别人阶段的产物仍然拒绝�
 })
 
 test('project 为 null 时，run 目录下写 state.json 仍然拒绝——它是 H4/H5 的状态来源', () => {
-  const r = decideWritePath({
+  const r = decideWritePath({ roster: ROSTER,
     role: 'at-backend',
     filePath: `${RUN}/state.json`,
     project: null,
@@ -285,7 +293,7 @@ test('project 为 null 时，run 目录下写 state.json 仍然拒绝——它�
 })
 
 test('project 为 null 时，run 目录下写自己阶段的产物仍然放行——收紧的是别人的地盘，不是自己的', () => {
-  const r = decideWritePath({
+  const r = decideWritePath({ roster: ROSTER,
     role: 'at-backend',
     filePath: `${RUN}/05-impl/at-backend.md`,
     project: null,
@@ -307,17 +315,17 @@ test('路径里的 .. 不能用来逃出自己的地盘', () => {
 // isValidInput/tool_name 校验里做了，不是这个纯函数的职责）。
 
 test('filePath 缺失（undefined）时放行——没有可判定的目标路径', () => {
-  const r = decideWritePath({ role: 'at-backend', filePath: undefined, project: PROJECT, runDir: RUN })
+  const r = decideWritePath({ roster: ROSTER, role: 'at-backend', filePath: undefined, project: PROJECT, runDir: RUN })
   assert.equal(r.decision, 'allow')
 })
 
 test('filePath 不是字符串（数字）时放行——没有可判定的目标路径', () => {
-  const r = decideWritePath({ role: 'at-backend', filePath: 42, project: PROJECT, runDir: RUN })
+  const r = decideWritePath({ roster: ROSTER, role: 'at-backend', filePath: 42, project: PROJECT, runDir: RUN })
   assert.equal(r.decision, 'allow')
 })
 
 test('filePath 是空字符串时放行——没有可判定的目标路径', () => {
-  const r = decideWritePath({ role: 'at-backend', filePath: '', project: PROJECT, runDir: RUN })
+  const r = decideWritePath({ roster: ROSTER, role: 'at-backend', filePath: '', project: PROJECT, runDir: RUN })
   assert.equal(r.decision, 'allow')
 })
 
@@ -406,7 +414,7 @@ test(
 // 消息。这条钉住：不抛异常，且理由要指向 project.json 本身。
 test('project.paths[role] 不是数组时拒绝，理由指向 project.json 配置错误——不抛异常', () => {
   const project = { paths: { 'at-backend': 'src/server/' } } // 手误写成字符串，不是数组
-  const r = decideWritePath({
+  const r = decideWritePath({ roster: ROSTER,
     role: 'at-backend',
     filePath: '/proj/src/server/api.ts',
     project,

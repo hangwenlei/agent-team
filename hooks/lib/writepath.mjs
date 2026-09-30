@@ -10,18 +10,21 @@ import { dirname, resolve } from 'node:path'
 import { exoticPath, norm, underDir } from './path-norm.mjs'
 import { isControlFile } from './control-files.mjs'
 import { isContractWriter } from './contract-guard.mjs'
-import { stageRoles, expandProduces } from './stages.mjs'
+import { stageRoles, expandProduces, isPlainObject } from './stages.mjs'
 // 拒绝理由会被模型读到；角色名（hook 输入的 agent_type）、路径（tool_input）、project.json 的键与值
 // 一律过 inline / quote（M3s，docs/27）。
 import { inline, quote } from './trusted.mjs'
+import { NO_PATHS_ROLES, entryProblems, usablePrefixes } from './project.mjs'
+import { isValidRoster } from './decide.mjs'
 
 function underAny(target, prefixes, base) {
   // 评审三轮 Minor 3：prefixes 理论上总是数组（project.paths 的值），但
   // project.json 是用户手写的配置文件，形状不该指望它总是对的——不是数组
   // 时 .some 会抛 TypeError，外层 try/catch 兜得住（fail closed）但用户
   // 看到的是一句不知所云的"prefixes.some is not a function"，而不是指向
-  // 真正问题（project.json 配置形状不对）的消息。这里防一层，调用方
-  // （decideWritePath 自己的 owners[role] 那次查找）另外给出更具体的理由。
+  // 真正问题（project.json 配置形状不对）的消息。这里防一层。M3u（docs/29）起
+  // decideWritePath 这边已经走不到它：第 8 步的 entryProblems 先拒掉值不是数组的
+  // 条目并给出具体的理由，认领者查找先过 usablePrefixes（总是数组）。
   if (!Array.isArray(prefixes)) return false
   return prefixes.some((prefix) => {
     const full = norm(`${base}/${prefix}`)
@@ -78,7 +81,7 @@ export function stageOwnerOfRunPath(stages, rd, target) {
   return null
 }
 
-export function decideWritePath({ role, filePath, project, runDir, stages, agentTeamDir }) {
+export function decideWritePath({ role, filePath, project, runDir, stages, agentTeamDir, roster }) {
   if (typeof filePath !== 'string' || !filePath) return { decision: 'allow' }
   const who = inline(role)
   const fp = inline(filePath)
@@ -102,9 +105,9 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 之前——两头的既有判据对控制文件都是错的，而且错的方向相反：
   //   - runs/<id>/state.json 在 runDir 里，落到下面那块会被「不是你这个阶段的
   //     produces」**无条件**拒掉，连 PM 也拒（M1a 记的 I3 死锁）；
-  //   - .agent-team/project.json 与 current-run 不在 runDir 里，落到 project.paths
-  //     那段会因为 Object.hasOwn(owners, role) 早退而被**静默放行**——任何不在 paths
-  //     里登记的角色都能重写项目配置。
+  //   - .agent-team/project.json 与 current-run 不在 runDir 里，落到下面按角色隔离那段时，
+  //     没有键的 at-qa、at-acceptance 与花名册外的调用者会被**静默放行**——它们都能重写
+  //     项目配置（M3u 之前是任何不在 paths 里登记的角色，docs/29）。
   // 一个太紧、一个太松，所以这不是「在某一段里加个 if」能解决的，必须自成一段。
   //
   // 「谁算 PM」复用 isContractWriter，不另写一遍 role === 'at-pm'：M1a 评审在 H4
@@ -127,8 +130,8 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     }
   }
 
-  // 全分支评审 I1：下面这整块 run 目录保护必须排在 project.paths 的整体放行
-  // 之前。它只依赖 runDir 与 stages，跟 project.paths 没有任何关系——而旧版本
+  // 全分支评审 I1：下面这整块 run 目录保护必须排在按角色隔离那段之前。它只依赖
+  // runDir 与 stages，跟 project.paths 没有任何关系——而旧版本
   // 把 `!project.paths → allow` 写在函数第一行，等于把整块保护挂在
   // "project.json 存在"之上。hooks/lib/runctx.mjs 明确允许 project.json 不
   // 存在（返回 project: null 且 ctx.ok 为 true，见那里第 126 行），于是
@@ -139,6 +142,9 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 证明一件自己没在守的事。缺席路径的覆盖见 tests/writepath.test.mjs 里
   // "project 为 null 时，run 目录下…"那三条，以及 tests/gate-contract.test.mjs
   // 的子进程级对照。
+  // M3u（docs/29）起排序照样要紧，理由换了：按角色隔离那段对 PM、没有键的 at-qa/at-acceptance、
+  // 花名册外的调用者放行，对 project.json 不在的情形拒——排到这块前面，run 里别人的产物就能被
+  // PM、at-qa 写到，执行角色自己的产物反而在 project.json 不在时被拒。
   if (runDir) {
     const rd = norm(runDir)
     // 评审 I-2：这条判定与 hooks/gate.mjs 的 ledger 分支曾经各写一份逐字符相同的
@@ -186,37 +192,98 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     }
   }
 
-  // 以下是 project.paths 的 per-role 隔离。判据只有一个来源：
-  // .agent-team/project.json 的 paths。它不存在、或者存在但没有 paths 字段
-  // 时，这一段没有任何可用的判据，不表态——但这条早退只跳过这一段，跳不过
-  // 上面的 run 目录保护（全分支评审 I1：它曾经排在函数第一行，把两件事绑成
-  // 了一件）。
-  if (!project || typeof project !== 'object' || !project.paths) return { decision: 'allow' }
+  // 以下是 run 目录之外的按角色隔离，判据是 .agent-team/project.json 的 paths（M3u，docs/29，全量审查第 10 条）。
+  // 此前只要 project.json 是个合法对象，调用者在 paths 里「没有键」就放行——paths 缺失、键名拼错、带插件前缀、
+  // 被删掉、run 进行中整份文件不在，效果都是按角色隔离静默全开。现在逐步判；形状问题只让本检查项看，不把整趟
+  // run 判成读不出来（那样 H2、H5 会跟着一起降级，一个键名拼错就让交付物校验停摆）。
+  //
+  // 1. PM 不参与路径认领：放行（给 at-pm 错建了键时这个键不起作用，ledger 会报）。
+  if (isContractWriter(role)) return { decision: 'allow' }
 
-  const owners = project.paths
-  if (!Object.hasOwn(owners, role)) return { decision: 'allow' }
+  // 2. 按设计不认领路径的角色（at-qa、at-acceptance）没有键时放行，不看 project.json 其余部分——它们的权限
+  //    本来就不看它，它们的正文也照此写（审查第 34 条另论）。
+  const paths = project && typeof project === 'object' ? project.paths : undefined
+  const pathsOk = isPlainObject(paths)
+  if (NO_PATHS_ROLES.includes(role) && !(pathsOk && Object.hasOwn(paths, role))) return { decision: 'allow' }
 
-  // 评审三轮 Minor 3：owners[role] 不是数组（比如手误写成字符串或 null）
-  // 时提前给出指向 project.json 本身的理由，不要落到 underAny 的防御性
-  // false 上——那样会落到"没人认领"的通用理由，掩盖了真正的配置错误。
-  const myPaths = owners[role]
-  if (!Array.isArray(myPaths)) {
+  // 3. 花名册读坏：判不出谁归不归本插件管。不能落成下一步的「不在花名册里就放行」——loadRoster 读坏时
+  //    退回 {}，那样对所有人全开。H1 此时也拒一切派发。
+  if (!isValidRoster(roster)) {
     return {
       decision: 'deny',
       reason:
-        `${who} 不得写 ${fp}——.agent-team/project.json 里 paths.${who} 不是数组` +
-        `（是 ${quote(myPaths)}），这是配置错误，不是这次调用的问题。`,
+        `${who} 不得写 ${fp}——roster.json 读不出来，门禁判不出你是不是本插件的角色，按安全边界拒绝。` +
+        '插件安装可能不完整：冒泡给派你的上级，由 PM 告诉用户重装或更新 agent-team 插件。',
+    }
+  }
+
+  // 4. 不在花名册里的调用者不归本插件管（H1 保证团队角色派不出花名册外的 agent）。
+  if (!Object.hasOwn(roster, role)) return { decision: 'allow' }
+
+  // 括注指向规则，不指向命令：PM 就地改 project.json 就行，不必让用户重跑 /agent-team:at-init。
+  const fixIt = '这是配置问题，不是这次调用的问题：冒泡给派你的上级，由 PM 改 .agent-team/project.json（规则见 /agent-team:at-init 第 2 节）。'
+
+  // 5. run 进行中而 project.json 不在：没有判据。
+  if (!project) {
+    return {
+      decision: 'deny',
+      reason: `${who} 不得写 ${fp}——run 进行中，但 .agent-team/project.json 不在，写路径隔离没有判据。${fixIt}`,
+    }
+  }
+
+  // 6. paths 缺失或不是对象：同上。
+  if (!pathsOk) {
+    const what = paths === undefined ? '缺失' : `不是对象（是 ${quote(paths)}）`
+    return {
+      decision: 'deny',
+      reason: `${who} 不得写 ${fp}——.agent-team/project.json 的 paths ${what}，写路径隔离没有判据。${fixIt}`,
+    }
+  }
+
+  // 7. 调用者没有键：被删、从没写、键名拼错、带插件前缀，一律拒。认不出的键一并列出——多半是拼错的那一个。
+  if (!Object.hasOwn(paths, role)) {
+    const strays = Object.keys(paths).filter((k) => !Object.hasOwn(roster, k))
+    const hint = strays.length ? `paths 里有这些认不出的键：${strays.map((k) => quote(k)).join('、')}——是不是拼错了？` : ''
+    return {
+      decision: 'deny',
+      reason:
+        `${who} 不得写 ${fp}——.agent-team/project.json 的 paths 里没有 ${who} 的键，run 目录之外它哪都写不了。` +
+        `${hint}${fixIt}`,
+    }
+  }
+
+  // 8. 调用者自己的条目有阻断问题（不是数组、元素不是字符串、前缀出根、认领整个根、带冒号）：只拒它——整条条目
+  //    作废，连它其余合法的前缀也写不了。理由里说出来：实测只点一条前缀时，PM 会读成「只有这条前缀失效」而留着它。
+  //    问题按 audience: 'role' 取：只说问题本身，不带「删掉这一条……收尾时告诉用户」这类说给 PM 的改法——执行角色
+  //    改不了 project.json、也见不到用户，它的出路是 fixIt 那句冒泡。
+  const own = entryProblems(role, paths[role], { audience: 'role' })
+  if (own.block.length) {
+    return {
+      decision: 'deny',
+      reason:
+        `${who} 不得写 ${fp}——.agent-team/project.json 里 ${own.block.slice(0, 3).join('；')}。` +
+        `这让 ${who} 的整条 paths 条目作废，写它其余合法的前缀也被拒。${fixIt}`,
     }
   }
 
   // project.paths 的值是相对项目根的前缀；项目根由 runDir 往上推三级得到
   // （.agent-team/runs/<id> → 项目根），没有 runDir 时退回用 filePath 的根。
   const base = runDir ? norm(`${runDir}/../../..`) : '/'
-
+  const myPaths = paths[role]
   if (underAny(target, myPaths, base)) return { decision: 'allow' }
 
-  const claimant = Object.entries(owners).find(
-    ([other, prefixes]) => other !== role && underAny(target, prefixes, base),
+  // 认领者查找只看别人条目里合法的前缀：别人条目里一个坏元素不该把拒绝理由变成「门禁异常」。也只看 H3 会拿来判
+  // 人的键（花名册里、不是 PM 与主线程）：说「这条路径归 at-pm」「归拼错的键」，是在叫执行角色去找一个不存在的主人
+  // 协调。第 3 步已经保证走到这里时花名册有效。at-outsider 不排除：它是花名册里的真键、H3 照常判它；说「归
+  // at-outsider」会把 PM 引到 project.json 里那个错键上（账本的要改档已经点名「不要给 at-outsider 建键」），排除它
+  // 反倒会说成「没有被任何角色认领」，而配置里明明有人认领。
+  const claimant = Object.entries(paths).find(
+    ([other, value]) =>
+      other !== role &&
+      Object.hasOwn(roster, other) &&
+      other !== 'at-pm' &&
+      other !== '__main__' &&
+      underAny(target, usablePrefixes(value), base),
   )
 
   if (claimant) {
@@ -231,7 +298,11 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   return {
     decision: 'deny',
     reason:
-      `${who} 不得写 ${fp}——这条路径在 .agent-team/project.json 里没有被任何角色认领。` +
-      `先在 project.json 的 paths 里把它划给某个角色，再动它。`,
+      `${who} 不得写 ${fp}——这条路径在 .agent-team/project.json 里没有被任何角色认领` +
+      `（${who} 认领的是 ${quote(myPaths)}；前缀按字面比较，不是通配符）。` +
+      // 落到这里的只可能是有键的执行角色，它写不了 project.json（控制文件）。不拼 fixIt：没人认领也可能是这次
+      // 调用越界了，不一定是配置问题。
+      '确实要写这里，冒泡给派你的上级，由 PM 决定要不要在 .agent-team/project.json 的 paths 里把它划给某个角色' +
+      '（你写不了 project.json）。',
   }
 }

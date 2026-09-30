@@ -567,9 +567,10 @@ for (const f of [README_EN, README_ZH]) {
 // 五、「不认领路径的那些角色」—— 真源是 templates/project.json
 // ---------------------------------------------------------------------------
 //
-// 已知边界第一段现在写着「写路径隔离是硬约束，但只对认领了路径的角色；一个都不
-// 认领的那两个整段跳过这道检查」。这半句是 M2b 才写下来的事实（`docs/11` §5.14：
-// `decideWritePath` 在 `!Object.hasOwn(owners, role)` 时早退放行，而 `at-qa` 还
+// 已知边界第一段写着 at-qa、at-acceptance 按设计不认领目录，这道检查对它们在 run 目录之外
+// 整段放行。这半句是 M2b 才写下来的事实（`docs/11` §5.14：
+// `decideWritePath` 对这两个按设计不认领路径的角色在没有条目时早退放行——M3u 起只对它们，
+// 其余角色没有条目会被拒（docs/29）——而 `at-qa` 还
 // 持有 `Bash`），M0 的 README 里没有它——**旧那句「写路径隔离对 Edit/Write 是硬
 // 约束」对这两个角色是假的，而且假在把风险说小了那一侧。**
 //
@@ -591,7 +592,7 @@ for (const f of [README_EN, README_ZH]) {
       assert.ok(
         block.includes(role),
         `${f} 的已知边界没提 ${role}，而它在 templates/project.json 里一个 project.paths 都不认领` +
-          '——写路径隔离对它在 run 目录之外整段早退放行（docs/11 §5.14）。' +
+          '——写路径隔离对它（按设计不认领路径的角色）在 run 目录之外整段早退放行（docs/11 §5.14）。' +
           '这是陌生人判断「装上它安不安全」要用的事实，不能只留在 docs 里',
       )
     }

@@ -49,8 +49,9 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 ## 3. 状态文件有问题时
 
 写 `state.json` 之后你会收到账本回传。如果它报了问题（返工计数与 `history` 对不上、
-`history` 最后一条与 `stage` 分叉、`contract_sha` 漂移之类），**先修它再往下跑**。
-带着一份不自洽的状态继续，后面每一步的判断都建立在它上面。
+`history` 最后一条与 `stage` 分叉、`contract_sha` 漂移、【project.json】里的阻断之类），**先修它再往下跑**。
+带着一份不自洽的状态继续，后面每一步的判断都建立在它上面。收到【插件】（roster.json 读不出来）是例外：改
+`project.json` 修不好它——停下，告诉用户重装或更新 agent-team 插件。
 
 ## 4. 接着跑
 

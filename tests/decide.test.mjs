@@ -151,6 +151,16 @@ test('roster 为空数组 [] 时门禁 fail closed 并指名 roster.json', () =>
   assert.match(r.reason, /roster\.json/)
 })
 
+// 非空数组：Object.keys 给出 '0'、'1'……，只查「非空」会把它当成有效花名册，调用者查不到条目就按「未登记」放行。
+// isValidRoster 的「不是数组」那一条只有这一格钉得住（空数组在「非空」那一条就被拦下了）。
+test('roster 为非空数组时门禁 fail closed 并指名 roster.json', () => {
+  for (const roster of [['at-product'], [{ 'at-pm': { can_delegate_to: ['at-product'] } }]]) {
+    const r = decideDelegation({ tool_input: { subagent_type: 'at-product' } }, roster)
+    assert.equal(r.decision, 'deny', JSON.stringify(roster))
+    assert.match(r.reason, /roster\.json/)
+  }
+})
+
 test('roster 为 null 时门禁 fail closed 并指名 roster.json', () => {
   const r = decideDelegation({ tool_input: { subagent_type: 'at-product' } }, null)
   assert.equal(r.decision, 'deny')

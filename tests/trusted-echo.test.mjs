@@ -267,6 +267,31 @@ const SCENARIOS = [
     calls: ({ p }) => [['writepath', write('agent-team:at-backend', join(p, 'src', 'server', 'a.ts'))]],
   },
   {
+    // M3u（docs/29）：paths 本身不是对象时，H3 第 6 步的拒绝理由与【project.json】都带着它。
+    name: 'project.paths 本身是载荷（H3 的配置错误、【project.json】）',
+    disk: true,
+    project: (P) => ({ ...PROJECT, paths: P }),
+    calls: ({ p }) => [
+      ['writepath', write('agent-team:at-backend', join(p, 'src', 'server', 'a.ts'))],
+      ['ledger', posted('at-pm', join(p, '.agent-team', 'project.json'))],
+    ],
+  },
+  {
+    name: 'project.available_roles 本身是载荷（【project.json】）',
+    disk: true,
+    project: (P) => ({ ...PROJECT, available_roles: P }),
+    calls: ({ p }) => [['ledger', posted('at-pm', join(p, '.agent-team', 'project.json'))]],
+  },
+  {
+    // 嵌套提醒里两条前缀各过一次 quote。嵌套只在 H3 会判的键之间比（M3u），键是花名册里的角色名，载荷只能放在前缀里。
+    // 前提锚：真的出了嵌套提醒——带冒号的载荷（以 sha 打头那一种）让前缀被阻断、不参与嵌套，它由阻断那一条读到。
+    name: 'project.paths 的嵌套提醒（【project.json】）',
+    disk: true,
+    project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, 'at-product': [P + '/'], 'at-architect': [P + '/y/'] } }),
+    calls: ({ p }) => [['ledger', posted('at-pm', join(p, '.agent-team', 'project.json'))]],
+    anchor: (all, P) => reached(all, P) && (P.includes(':') || all.includes('包含')),
+  },
+  {
     name: 'state.json 写成坏 JSON 短文（异常消息引用原文）',
     disk: true,
     raw: { 'state.json': (P) => P.slice(0, 18) },
@@ -307,7 +332,7 @@ const SCENARIOS = [
     name: 'hook 输入的 agent_type',
     calls: ({ p }, P) => [
       ['writepath', write(P, join(p, 'src', 'server', 'a.ts'))],
-      // 写控制文件一定被拒，拒绝理由里带着调用者的角色名（写普通路径时它没有 paths 条目，直接放行）。
+      // 写控制文件一定被拒，拒绝理由里带着调用者的角色名（写普通路径时它不在花名册里，不归 H3 管，直接放行）。
       ['writepath', write(P, join(p, '.agent-team', 'current-run'))],
       ['deliverable', returned('agent-team:at-product', P)],
     ],
@@ -347,7 +372,7 @@ async function runScenario(sc, pname, P) {
     const results = await Promise.all(sc.calls({ p, run }, P).map(([check, input]) => gate(check, input, p)))
     const bad = results.flatMap((r) => violations(r, sc).map((v) => `${pname} · ${r.check}：${v}`))
     const all = results.flatMap((r) => channels(r).map((c) => c.text)).join('\n')
-    const anchored = sc.anchor ? sc.anchor(all) : reached(all, P)
+    const anchored = sc.anchor ? sc.anchor(all, P) : reached(all, P)
     if (!anchored) bad.push(`${pname}：正向锚点没命中——载荷没有被门禁读到，这个场景什么都没测`)
     return bad
   } finally {

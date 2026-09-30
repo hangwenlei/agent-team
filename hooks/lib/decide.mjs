@@ -44,6 +44,12 @@ function fmt(list) {
   return list.length ? list.join('、') : '（无，这是叶子角色）'
 }
 
+// 花名册有没有用：null、不是对象、数组、空对象都算坏。H1 与 H3（M3u）共用这一份——H3 拿到一个坏花名册
+// 时若照「不在花名册里就不归我管」放行，就对所有人全开（loadRoster 读坏时退回的正是 {}）。
+export function isValidRoster(roster) {
+  return roster !== null && typeof roster === 'object' && !Array.isArray(roster) && Object.keys(roster).length > 0
+}
+
 /**
  * 派发白名单（门禁 H1）。这是**派发路径**的唯一强制手段——但派发不是获得 agent
  * 的唯一路径：`context: fork` 的 skill 不经 Agent 工具就能起一个 subagent，这里看不见
@@ -56,12 +62,7 @@ export function decideDelegation(input, roster) {
   // 花名册本身的形状校验。门禁坏掉的方式不止「抛异常」一种——
   // 一个语法合法但语义空的花名册（{}、[]、null）同样是坏掉，而且更难发现：
   // 它会让每一条「查不到条目」的判断都走「未登记调用者放行」，整个门禁静默失效。
-  if (
-    roster === null ||
-    typeof roster !== 'object' ||
-    Array.isArray(roster) ||
-    Object.keys(roster).length === 0
-  ) {
+  if (!isValidRoster(roster)) {
     return deny(
       'agent-team 的 roster.json 不是有效的花名册对象' +
         '（应为至少含一个条目的 JSON 对象），无法判定派发权限，按安全边界拒绝。',
