@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { decideReadiness } from '../hooks/lib/readiness.mjs'
+import { candidateStages, decideReadiness } from '../hooks/lib/readiness.mjs'
 import { computeReach } from '../hooks/lib/reach.mjs'
 
 const STAGES = {
@@ -328,7 +328,8 @@ test('H2 回归（修复 1）正向自检锚：targetRole 不属于任何阶段�
 // at-ui 是 S2 与 S5 的产者。H2 此前按书写顺序取它「第一个产物没齐的段」当它此刻要做的那一段，不看是谁派的：
 //   - S2 已齐之后 at-product 让它返修：按 S5 的前置判，缺 03-arch.md、04-dispatch.md，拒，没有出路；
 //   - S2 被裁或只交了一半，架构师为 S5 派它：按 S2 判、放行，S5 的前置从不查（同格 at-backend 被拒）。
-// 花名册的边本身就区分了这两段：at-product 派的是 S2 的活，at-architect 派的是 S5 的活（agents/at-ui.md「冒泡给谁」）。
+// 派发边本身不带段；但「派发者是某段的 role、或传递派得到它」这个组合，在今天的拓扑下恰好把 at-ui 的两段分开：at-product
+// 派的是 S2 的活，at-architect 派的是 S5 的活（agents/at-ui.md「冒泡给谁」）——与 docs/11 §5.12 口径甲是同一件事。
 // 候选段只留派发者就是那一段的 role、或能传递派到它的那些段（与 H5a 的 isCoordinatorFor 同一口径）；剪空时不剪。
 // 下面按真实 stages.json 与 roster.json 的拓扑写，callerReach 由 computeReach 算。
 const REAL_STAGES = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
@@ -337,12 +338,23 @@ const REACH = computeReach({ roster: REAL_ROSTER, paths: {} })
 const by = (caller) => ({ caller, callerReach: REACH[caller].reachableRoles })
 const S2_DONE = ['00-contract.md', '01-prd.md', '02-ui-spec.md', '02-wireframe.html']
 
-test('M3w 前提：真实花名册下，at-product 只派得到 S2 那一段的 at-ui，at-architect 只派得到 S5 那一段', () => {
-  // 这条变红说明花名册变了：某个派发者能派到 at-ui 的两段，按派发者选段就又得在两段之间猜（docs/31 §4）。
-  assert.equal(REAL_STAGES.S2.role, 'at-product')
-  assert.ok(!REACH['at-product'].reachableRoles.includes(REAL_STAGES.S5.role))
-  assert.ok(REACH['at-architect'].reachableRoles.includes(REAL_STAGES.S5.role))
-  assert.ok(!REACH['at-architect'].reachableRoles.includes(REAL_STAGES.S2.role))
+// 失效条件（docs/31 §4）：某个角色 R 的 can_delegate_to 里直接有一个多段角色 X，而 X 的各段中「role 是 R、或 R 传递派得到它」的
+// 段不恰好一段——多于一段时候选段里仍按「第一个没齐」猜，零段时剪空、退回老规则（H1 这时并不拒）。遍历真实花名册的每一条
+// 直接边，用门禁自己那一份候选段判别式（candidateStages）算，不在测试里另抄一份。
+test('M3w 前提：真实花名册的每一条直接派发边，派到多段角色时候选段恰好一段', () => {
+  const multi = Object.keys(REAL_ROSTER).filter((x) => candidateStages(REAL_STAGES, x).length >= 2)
+  assert.ok(multi.includes('at-ui'), '前提锚：at-ui 是多段角色——这条要是变了，下面的遍历就没在测任何东西')
+  const bad = []
+  for (const [caller, entry] of Object.entries(REAL_ROSTER)) {
+    for (const target of entry.can_delegate_to ?? []) {
+      if (!multi.includes(target)) continue
+      const got = candidateStages(REAL_STAGES, target, caller, REACH[caller].reachableRoles).map(([id]) => id)
+      if (got.length !== 1) bad.push(`${caller} → ${target}：${got.join('、') || '（剪空）'}`)
+    }
+  }
+  assert.deepEqual(bad, [], '花名册的边变了，按派发者选段的前提不再成立（docs/31 §4）')
+  assert.deepEqual(candidateStages(REAL_STAGES, 'at-ui', 'at-product', REACH['at-product'].reachableRoles).map(([id]) => id), ['S2'])
+  assert.deepEqual(candidateStages(REAL_STAGES, 'at-ui', 'at-architect', REACH['at-architect'].reachableRoles).map(([id]) => id), ['S5'])
 })
 
 test('M3w：S2 已齐之后 at-product 让 at-ui 返修——按 S2 判，放行（此前按 S5 判、缺 03/04 被拒）', () => {
@@ -380,12 +392,29 @@ test('M3w：S5 正路——架构师派 at-ui、03/04 在，放行', () => {
 })
 
 // 变异 R3（审查 id 83）：「前置齐了就放行」改成「接着看下一段」时，S2 正路 at-product→at-ui 会按 S5 的前置被拒死。按派发者
-// 剪枝之后，at-ui 对每个派发者只有一个候选段，门禁层走不到这里；派发者认不出（不剪）时仍走得到，这一格钉在纯函数层。
-test('M3w：派发者认不出时不剪——照旧按书写顺序取第一个没齐的段，前置齐了就放行（R3）', () => {
+// 剪枝之后，花名册里直接派 at-ui 的两个派发者各只有一个候选段；派发者认不出（不在花名册里——别的插件的代理、用户自己的
+// subagent，H1 对它们放行）时不剪，门禁层照样走得到——tests/gate-readiness.test.mjs 的「派发者不在花名册里」那一格钉着。
+test('M3w：派发者认不出时不剪——照旧按书写顺序取第一个没齐的段，前置齐了就放行（R3 那一行）', () => {
   const r = decideReadiness({ targetRole: 'at-ui', stages: REAL_STAGES, roster: [], artifactExists: have('00-contract.md') })
   assert.equal(r.decision, 'allow')
   const unknown = decideReadiness({ targetRole: 'at-ui', stages: REAL_STAGES, roster: [], artifactExists: have('00-contract.md'), caller: 'x', callerReach: null })
   assert.equal(unknown.decision, 'allow')
+})
+
+// 派发者不在花名册里（callerReach 是 null）：不剪、也不因此放行——这类调用者只有 H2 在查前置（H1 对它们放行）。
+test('M3w：派发者不在花名册里——不剪，前置缺照样拒', () => {
+  const r = decideReadiness({ targetRole: 'at-backend', stages: REAL_STAGES, roster: [], artifactExists: have('03-arch.md'), caller: 'other-plugin:x', callerReach: null })
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /04-dispatch\.md/)
+})
+
+// caller 与 callerReach 缺一不剪：caller 缺失、是空串或不是字符串时，哪怕给了一份触达也不剪。
+test('M3w：caller 缺失、空串或不是字符串时不剪——哪怕给了触达', () => {
+  const half = have('00-contract.md', '01-prd.md', '02-ui-spec.md')
+  for (const caller of [undefined, '', 42]) {
+    const r = decideReadiness({ targetRole: 'at-ui', stages: REAL_STAGES, roster: [], artifactExists: half, caller, callerReach: REACH['at-architect'].reachableRoles })
+    assert.equal(r.decision, 'allow', String(caller))
+  }
 })
 
 test('M3w：剪空时不剪——派发者派不到目标任何一段的 role（H1 本来就拒）时退回老规则，不因为剪枝放行', () => {

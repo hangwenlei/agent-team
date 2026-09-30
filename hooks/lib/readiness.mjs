@@ -24,8 +24,38 @@ function producerOf(stages, artifact) {
   return null
 }
 
+/**
+ * 这次派发要按哪几段判（M3w，docs/31，全量审查第 13 条）：目标是产者的那些段（按书写顺序），再按派发者收窄。
+ *
+ * 派发边本身不带段；但「派发者是某段的 role、或者能（传递地）派到它」这个组合，在今天的拓扑下恰好把多段角色的每一段分开：
+ * at-product 派 at-ui 是 S2 的活，at-architect 派它是 S5 的活（agents/at-ui.md「冒泡给谁」一节）。这与 gate.mjs 的
+ * isCoordinatorFor（H5a 认协调者）是同一个口径，读的也是 stages[X].role 单数——docs/11 §5.12 的口径甲，改一处要连另一处。
+ * 不按 producers 剪：S5 的 producers 里有 at-ui，而 at-product 派得到 at-ui，按 producers 剪会把 S5 留给 at-product。
+ *
+ * caller 是派发者（hook 输入的 agent_type，经 callerOf），callerReach 是它沿花名册派发边传递派得到的角色（computeReach 的
+ * reachableRoles，不含它自己）。两者缺一不剪：caller 缺失、空串或不是字符串，派发者不在花名册里（callerReach 为 null——别的插件
+ * 的代理、用户自己的 subagent，H1 对它们放行，前置只有 H2 在查），花名册读坏。剪空时也不剪（派发者派不到目标任何一段的 role：
+ * 今天只有 H1 会拒的派发；花名册加一条这样的边之后就不止了），退回全部候选段，不因为剪枝放行。
+ * 不看 state.stage：那会让 H2 也依赖 stage 准不准（stage 没推进时，架构师为 S5 派 at-ui 会按 S2 放行，docs/31 §2 有两种方案的
+ * 对照）。派发者由平台随调用给出；CLI 自己起的分叉带的是主线程的身份或空串（docs/22），那时候选段或者是主线程的、或者剪空，
+ * 都退回老规则，是安全的一侧。
+ *
+ * 失效条件（docs/31 §4）：某个角色 R 的 can_delegate_to 里直接有一个多段角色 X，而 X 的各段中「role 是 R、或 R 传递派得到它」
+ * 的段不恰好一段——多于一段时仍按「第一个没齐」猜，零段时剪空、退回老规则。tests/readiness.test.mjs 的「M3w 前提」遍历真实
+ * 花名册的每一条直接边钉着它。
+ */
+export function candidateStages(stages, targetRole, caller, callerReach) {
+  if (!stages || typeof stages !== 'object') return []
+  const mine = Object.entries(stages).filter(([, s]) => stageRoles(s).includes(targetRole))
+  const reachable = typeof caller === 'string' && caller && Array.isArray(callerReach) ? callerReach : null
+  const byCaller = reachable
+    ? mine.filter(([, s]) => typeof s.role === 'string' && (s.role === caller || reachable.includes(s.role)))
+    : []
+  return byCaller.length ? byCaller : mine
+}
+
 // caller 是这次的派发者（hook 输入的 agent_type，经 callerOf），callerReach 是它沿花名册的派发边（传递地）派得到的角色
-// （hooks/lib/reach.mjs 的 computeReach 算的 reachableRoles）。两者缺一时不按派发者剪枝，见下面 M3w 那一段。
+// （hooks/lib/reach.mjs 的 computeReach 算的 reachableRoles）。两者缺一时不按派发者剪枝，见 candidateStages。
 export function decideReadiness({ targetRole, stages, artifactExists, roster, caller, callerReach }) {
   if (!stages || typeof stages !== 'object') return { decision: 'allow' }
 
@@ -45,11 +75,12 @@ export function decideReadiness({ targetRole, stages, artifactExists, roster, ca
   // 而 stages.json 的链早已是 S1–S8，那个「当前」是假的。改成不报范围：范围可以
   // 读 stages.json 核，写下来的数字不能。）
   //
-  // 已知边界（Task 3 评审 Minor 3，与下面 produces 那条同类）：某个阶段条目
-  // 手误漏写 role（s.role 是 undefined）时，这个 filter 会让它匹配不上任何
+  // 已知边界（Task 3 评审 Minor 3，与下面 produces 那条同类）：某个没有 producers 的阶段条目
+  // 手误漏写 role（s.role 是 undefined）时，candidateStages 里那个 filter 会让它匹配不上任何
   // 真实 targetRole，整段既不属于任何角色、也就没人会替它跑这条门禁——
-  // 是配置错误，不是这个函数的职责，当前 stages.json 八个阶段 role 都是
-  // 非空字符串，未做改动。
+  // 是配置错误，不是这个函数的职责；今天 stages.json 里每个阶段的 role 都是非空字符串（范围
+  // 读 stages.json 核，这里不写段数），未做改动。有 producers 的段不看 role 认产者，漏写 role
+  // 只会让它进不了按派发者剪出的候选段，剪空时退回老规则（M3w）。
   //
   // M2a 整分支终审发现：这里原本写的是 `s.role === targetRole`（单数），是 `<role>`
   // 消费方里的**第十处**，也是两轮穷举都没照到的那一处——前两轮 grep 的是 `.produces`，
@@ -61,24 +92,9 @@ export function decideReadiness({ targetRole, stages, artifactExists, roster, ca
   // 行为不对称，排查时极易误判成「H2 好着呢」。
   //
   // 与 Task 9 修掉的第九处（deliverable.mjs 的归属判据）是同一族、同一修法。
-  const mine = Object.entries(stages).filter(([, s]) => stageRoles(s).includes(targetRole))
+  const candidates = candidateStages(stages, targetRole, caller, callerReach)
 
-  if (mine.length === 0) return { decision: 'allow' }
-
-  // M3w：按派发者选段。花名册的边本身就区分了多段角色的每一段：at-product 派 at-ui 是 S2 的活，at-architect 派它是 S5 的活
-  // （agents/at-ui.md「冒泡给谁」一节）。候选段只留「派发者就是那一段的 role、或者能传递派到它」的那些——与 gate.mjs 的
-  // isCoordinatorFor（H5a 认协调者）同一个口径，读的也是 stages[X].role 单数（docs/11 §5.12 的裁定）。不按 producers 剪：S5 的
-  // producers 里有 at-ui，而 at-product 派得到 at-ui，按 producers 剪会把 S5 留给 at-product。
-  // 剪空时不剪：派发者认不出（空串、别的插件的代理、没传进来）、或者它本来派不动目标（H1 已经拒）时，退回下面的老规则，
-  // 不因为剪枝放行。不看 state.stage：那会让 H2 也依赖 stage 准不准（stage 没推进时，架构师为 S5 派 at-ui 会按 S2 放行），
-  // 而派发者在这次调用里总是准的（docs/31 §2 有两种方案的对照）。
-  // 失效条件：花名册里出现一个派发者能派到同一个角色的两段——那时候选段里仍按「第一个没齐」猜；tests/readiness.test.mjs 的
-  // 「M3w 前提」那一条钉着今天的拓扑。
-  const reachable = typeof caller === 'string' && caller && Array.isArray(callerReach) ? callerReach : null
-  const byCaller = reachable
-    ? mine.filter(([, s]) => typeof s.role === 'string' && (s.role === caller || reachable.includes(s.role)))
-    : []
-  const candidates = byCaller.length ? byCaller : mine
+  if (candidates.length === 0) return { decision: 'allow' }
 
   // 修复 1（Task 2 修复轮 1，F1 承重发现）：mine 的构造条件就是
   // `targetRole ∈ stageRoles(stage)`，所以进入下面这个循环的每一个 stage，

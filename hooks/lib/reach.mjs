@@ -51,6 +51,9 @@ export function computeReach({ roster, paths }) {
         ? entry.can_delegate_to
         : []
       for (const next of edges) {
+        // 不是字符串的元素不算一个角色（M3w，docs/31 §3）：{"toString":1} 这样的元素拿去当属性键会抛——此前 H5a、ledger 在这个
+        // 形状上崩，M3w 起 H2 每次派发都算触达，同一个崩溃会让它对所有派发 fail open。与上面 ownOf 过滤 paths 元素同一种防御。
+        if (typeof next !== 'string') continue
         if (visited.has(next)) continue
         visited.add(next)
         const nextPath = [...path, next]
