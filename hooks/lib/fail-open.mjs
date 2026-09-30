@@ -45,38 +45,45 @@ const FIX = {
   pointer: POINTER_FIND + '一趟都没有 state.json，就照 /agent-team:at 第 1 节先写 state.json，再写 current-run。',
   runs: '`.agent-team/runs` 读不出来（比如它是一个文件，不是目录）：把这件事告诉用户，由用户处理，不要自己删改它。',
   // 写明它在哪：真实会话里只说「当前 run 的 state.json」时，模型把它写到了项目根（docs/30 §3）。
+  // 认不出来的 contract_sha：真实会话里 PM 用 Bash 自己算，LF 的契约上碰巧对得上，CRLF 签出的就对不上（门禁先统一行尾）。
   state:
     '用 Write 写回一份合法的完整 `.agent-team/runs/<current-run 里的 run id>/state.json`（顶层键照 /agent-team:at 第 1 节）；' +
-    '能从原文认出来的 history、rework、artifacts 照原样保留——返工计数只许增。',
+    '能从原文认出来的 history、rework、artifacts 照原样保留——返工计数只许增；认不出来的 contract_sha 写 PENDING，' +
+    '写回之后原样重写一次 00-contract.md、从回传里拿 sha。写回之后告诉用户 state.json 是重建的、哪些字段是照猜补的。',
   project: '用 Write 写回一份合法的完整 `.agent-team/project.json`（照 /agent-team:at-init 第 2、3 节）。',
   plugin: '改 `.agent-team` 修不好它：停下，告诉用户重装或更新 agent-team 插件，不要去改插件目录下的文件。',
 }
+const FALLBACK = '把这件事告诉用户：门禁读不出这个项目的运行状态，原因不明。'
 
-// 命令开头（门禁自检的追加句）才说的几句。/agent-team:at 要建新 run 时，不该先去修一趟即将被替下的旧 run；
-// /agent-team:at-resume 里没有用户的需求，照第 1 节补建 run 连契约的「用户原话」都填不了（docs/30 §3 的复核）。
-const AT_START = {
-  pointer:
-    POINTER_FIND +
-    '一趟都没有 state.json 的话：/agent-team:at-resume 里照它第 1 节告诉用户没有可续的 run，并照实说 runs/ 下那几个目录里' +
-    '有什么（空目录、只有契约……），不要自己补 state.json，也不要删目录。',
-  plugin: '改 `.agent-team` 修不好它：告诉用户重装或更新 agent-team 插件，不要去改插件目录下的文件；要建或续 run 的命令在这里停下。',
-}
-const NEW_RUN = '这条命令是 /agent-team:at 的话照建新 run，旧 run 的问题收尾时告诉用户'
+// 命令开头（门禁自检的追加句）按命令分（docs/30 §3 的两轮复核）：
+//   - /agent-team:at 要建新 run，不该碰原来那趟：第二轮真实会话里，通用修法排在前、「照建」排在后时，8 次里 3 次先改了旧 run，
+//     两次还用新需求覆盖了旧契约（旧 state 读不出来时 H6 没有基线，H3、H4 对 PM 放行，门禁挡不住）。所以这一支排第一、明写不写
+//     原来那趟 run 目录；告诉用户不挂在「收尾」上——那个词撞上 commands/at.md 第 6 节的标题，停在 S1 时到不了，0/4 生效。
+//   - /agent-team:at-resume 才修；那里没有用户的需求，「一趟都没有 state.json」时补建 run 连契约的「用户原话」都填不了。
+//   - /agent-team:at-init 不在那里修 run（project.json 坏了例外：at-init 就是修它的）。
+const AT_BRANCH =
+  '这条命令是 /agent-team:at 的话：不要写原来那趟 run 目录下的任何文件，照第 1 节另起一个 run id 建新 run；' +
+  '这一轮回复用户时（不论停在哪一步）把原来那趟 run 的问题与它的 run id 告诉用户。'
+const atResume = (fix) => `这条命令是 /agent-team:at-resume 的话：${fix}`
+const POINTER_NONE_AT_RESUME =
+  '一趟都没有 state.json 的话，照 /agent-team:at-resume 第 1 节告诉用户没有可续的 run，并照实说 runs/ 下那几个目录里有什么' +
+  '（空目录、只有契约……），不要自己补 state.json，也不要删目录。'
+const AT_START_PLUGIN =
+  '改 `.agent-team` 修不好它：告诉用户重装或更新 agent-team 插件，不要去改插件目录下的文件；要建或续 run 的命令在这里停下。'
 const AT_INIT = '这条命令是 /agent-team:at-init 的话，不在这里修，收尾时告诉用户。'
 
 /**
- * 按原因给的修法。H5a、ledger、门禁自检三处共用这一份。atStart：门禁自检的追加句用，那时 PM 在一条命令的开头，按命令分：
- * 要建新 run 的 /agent-team:at 照建（丢指针、state.json 坏了——旧 run 的事收尾时说；project.json 坏了照样要先修，写路径
- * 隔离靠它；runs 读不出来、插件坏了本来就建不了）；/agent-team:at-init 不在那里修 run（project.json 坏了例外：at-init
- * 就是修它的）。
+ * 按原因给的修法。H5a、ledger 与门禁自检共用这一份。atStart：门禁自检的追加句用，那时 PM 在一条命令的开头，按命令分（见上）；
+ * 丢指针、state.json 坏了时返回的整段自带命令的分支，不以「修法：」开头。project.json 坏了照样要先修（写路径隔离靠它），
+ * runs 读不出来、插件坏了本来就建不了 run。
  */
 export function runContextFix(cause, { atStart = false } = {}) {
-  if (!atStart) return FIX[cause] ?? '把这件事告诉用户：门禁读不出这个项目的运行状态，原因不明。'
-  let text = AT_START[cause] ?? FIX[cause] ?? '把这件事告诉用户：门禁读不出这个项目的运行状态，原因不明。'
-  if (cause === 'pointer') text += `${NEW_RUN}（runs/ 下原有的目录还在）。`
-  if (cause === 'state') text += `${NEW_RUN}。`
-  if (cause !== 'project') text += AT_INIT
-  return text
+  if (!atStart) return FIX[cause] ?? FALLBACK
+  if (cause === 'pointer') return AT_BRANCH + atResume(POINTER_FIND + POINTER_NONE_AT_RESUME) + AT_INIT
+  if (cause === 'state') return AT_BRANCH + atResume(FIX.state) + AT_INIT
+  if (cause === 'project') return FIX.project
+  if (cause === 'plugin') return AT_START_PLUGIN + AT_INIT
+  return (FIX[cause] ?? FALLBACK) + AT_INIT
 }
 
 const BUBBLE = '⚠️ 这一条你处理不了：把它原样冒泡给派你的人，让它一路带到 PM；不要自己把它咽掉——咽掉之后没有任何人会再看见它。'
@@ -111,7 +118,7 @@ export function ledgerUnreadableNotice(cause) {
     `修法：${runContextFix(cause)}` +
     '若这是契约或你自己阶段的产物：修好之后用 Write 把它原样再写一次，哈希只从那次回传里拿，不要自己算（门禁先统一行尾' +
     '再算，自己算的对不上）；是契约的话第 1 节照旧逐字不动。写的是别的角色的产物的话，修好之后写路径门禁不让你再写它：' +
-    '派它的产者重交一次。别的文件本来就没有回传。'
+    '派它的产者重交一次；它不在你的派发名单上的话，经派得到它的那一层转派。别的文件本来就没有回传。'
   )
 }
 
@@ -199,12 +206,14 @@ export function selfCheckAppendix(ctx) {
   if (!ctx || typeof ctx !== 'object') return ''
   if (!ctx.ok) {
     if (ctx.kind !== 'unreadable') return ''
-    return `另外，门禁读不到这个项目的运行状态（${causePhrase(ctx.cause)}）。修法：${runContextFix(ctx.cause, { atStart: true })}`
+    const guide = runContextFix(ctx.cause, { atStart: true })
+    // 丢指针、state.json 坏了那两支自带命令的分支（以「这条命令是」开头），不再冠「修法：」。
+    return `另外，门禁读不到这个项目的运行状态（${causePhrase(ctx.cause)}）。${guide.startsWith('这条命令是') ? '' : '修法：'}${guide}`
   }
   if (isKnownStage(ctx.stages, ctx.state?.stage)) return ''
   return (
     `另外，交付物核验在 state.stage 改对之前不做——${unknownStageDesc(ctx.state?.stage)}。` +
-    `修法：${unknownStageFix({ state: ctx.state, stages: ctx.stages })}${NEW_RUN}。${AT_INIT}`
+    `${AT_BRANCH}${atResume(unknownStageFix({ state: ctx.state, stages: ctx.stages }))}${AT_INIT}`
   )
 }
 

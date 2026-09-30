@@ -499,6 +499,7 @@ const CAUSE_CASES = [
   // 复核（docs/30 §3，noise 第 1 条）：解析得出、形状不对的插件文件此前算读出来了，每一次派发都被说成 state.stage 不在阶段链里。
   ['插件的 stages.json 是 {}', 'plugin', (d) => writeFileSync(join(d.pluginDir, 'stages.json'), '{}', 'utf8')],
   ['插件的 stages.json 里某一段的值不是对象', 'plugin', (d) => writeFileSync(join(d.pluginDir, 'stages.json'), JSON.stringify({ ...STAGES, S3: 1 }), 'utf8')],
+  ['插件的 stages.json 里某一段的值是数组', 'plugin', (d) => writeFileSync(join(d.pluginDir, 'stages.json'), JSON.stringify({ ...STAGES, S3: [] }), 'utf8')],
   ['project.json 是坏 JSON', 'project', (d) => writeFileSync(join(d.projectDir, '.agent-team', 'project.json'), '{ x', 'utf8')],
 ]
 

@@ -28,6 +28,13 @@ test('commands/at.md §2：收到【门禁】（不论原因）是门禁在跑�
   assert.ok(lineWith(at, '【门禁】', '00-contract.md') || lineWith(at, '【门禁】', '原样重写'))
 })
 
+// 第二轮真实会话（docs/30 §3）：自检说旧 run 坏了时，/agent-team:at 里有 PM 先改旧 run、用新需求覆盖旧契约。
+test('commands/at.md §1：自检说原来那趟 run 坏了时，不碰它、另起 run id，这一轮就告诉用户', () => {
+  const at = read('commands/at.md')
+  assert.ok(lineWith(at, '「另外，」', '不要写原来那趟 run 目录下的任何文件'), '§1 要承接自检的追加句')
+  assert.ok(lineWith(at, '不论停在哪一步', 'run id'))
+})
+
 test('commands/at-resume.md §1：读不到 current-run 时先 Glob runs/*/state.json，不直接说没有 run', () => {
   const r = read('commands/at-resume.md')
   assert.ok(lineWith(r, 'runs/*/state.json'), '要写明 Glob 的模式')

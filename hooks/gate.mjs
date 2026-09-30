@@ -1343,7 +1343,7 @@ function main() {
         } else {
           const roster = loadRoster()
           // decideDelegation 排在前面：花名册读坏（null、数组）时它先判拒，不去对一个不是对象的值调 Object.hasOwn。
-        if (decideDelegation(input, roster).decision === 'allow' && Object.hasOwn(roster, role)) {
+          if (decideDelegation(input, roster).decision === 'allow' && Object.hasOwn(roster, role)) {
             emitHookJson(spec.event, { contexts: [dispatchNoRunNotice()], systemMessage: systemMessage('dispatch-no-run') })
           }
         }

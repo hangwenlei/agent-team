@@ -120,9 +120,9 @@ test('runContextFix：project、plugin、runs 三种原因不把 PM 指去修 cu
   assert.doesNotMatch(runContextFix('plugin'), /写回一份合法的/)
 })
 
-test('runContextFix：atStart 时补命令开头才有的两句；project 本来就是 at-init 修的，不说「不在这里修」', () => {
-  assert.match(runContextFix('pointer', { atStart: true }), /这条命令是 \/agent-team:at 的话照建新 run/)
-  assert.doesNotMatch(runContextFix('pointer'), /照建新 run|原有的目录还在/)
+test('runContextFix：atStart 时按命令分；project 本来就是 at-init 修的，不说「不在这里修」', () => {
+  assert.match(runContextFix('pointer', { atStart: true }), /这条命令是 \/agent-team:at 的话：/)
+  assert.doesNotMatch(runContextFix('pointer'), /这条命令是/)
   for (const c of ['pointer', 'state', 'plugin', 'runs']) {
     assert.match(runContextFix(c, { atStart: true }), /\/agent-team:at-init 的话，不在这里修，收尾时告诉用户/)
     assert.doesNotMatch(runContextFix(c), /at-init 的话/)
@@ -261,6 +261,8 @@ test('ledgerUnreadableNotice：原样重写只说给契约与 PM 自己阶段的
   const t = ledgerUnreadableNotice('pointer')
   assert.match(t, /若这是契约或你自己阶段的产物/)
   assert.match(t, /写的是别的角色的产物的话，修好之后写路径门禁不让你再写它：派它的产者重交一次/)
+  // 第二轮增量审查：S5 的执行角色、at-ui 不在 PM 的派发名单上，照字面派会被派发白名单拒。
+  assert.match(t, /它不在你的派发名单上的话，经派得到它的那一层转派/)
 })
 
 // 复核（wording 第 1 条）：末条是真阶段、更早的条目里有坏阶段时走支 1，照做之后写 state.json 的回传仍报那条坏阶段，
@@ -275,7 +277,7 @@ test('unknownStageFix 支 1：history 里还有别的坏阶段时，补一句那
 
 // 复核（wording 第 2 条）：history 不是由 {stage, at} 对象组成的数组时，H6 的计数不认它——「会拒」「出现过就记返工」都不成立。
 test('unknownStageFix：history 的形状不对时不引 H6 的说法，叫 PM 照写 state.json 时的回传改', () => {
-  for (const history of [['S1', 'S2', 'S3'], { S1: 't' }, undefined, [{ stage: 'S1' }, 'S2'], [null]]) {
+  for (const history of [['S1', 'S2', 'S3'], { S1: 't' }, undefined, [{ stage: 'S1' }, 'S2'], [null], [{ stage: 'S1' }, ['S2'], { stage: 'S3' }]]) {
     const t = unknownStageFix({ state: { stage: 'S9', history }, stages: STAGES })
     assert.match(t, /history 的形状也不对/, JSON.stringify(history))
     assert.doesNotMatch(t, /返工预算门禁会拒|记一次返工|改回/, JSON.stringify(history))
@@ -286,16 +288,40 @@ test('unknownStageFix：history 的形状不对时不引 H6 的说法，叫 PM �
 
 // 复核（wording 第 3 条）：命令开头的追加句要分命令——/agent-team:at 要建新 run 时不该先去修一趟即将被替下的旧 run；
 // at-resume 里「一趟都没有 state.json」时不该自己补建。
-test('runContextFix / selfCheckAppendix：命令开头时 state 与 unknown-stage 也允许照建新 run；丢指针那一句分命令说', () => {
-  for (const c of ['state']) assert.match(runContextFix(c, { atStart: true }), /这条命令是 \/agent-team:at 的话照建新 run，旧 run 的问题收尾时告诉用户/)
-  for (const c of ['project', 'runs', 'plugin']) assert.doesNotMatch(runContextFix(c, { atStart: true }), /照建新 run/)
-  const a = selfCheckAppendix({ ok: true, state: { stage: 'S9', history: [{ stage: 'S2' }] }, stages: STAGES })
-  assert.match(a, /这条命令是 \/agent-team:at 的话照建新 run，旧 run 的问题收尾时告诉用户/)
-  const p = runContextFix('pointer', { atStart: true })
-  assert.match(p, /runs\/ 下原有的目录还在/)
-  assert.match(p, /\/agent-team:at-resume 里/)
+// 第二轮真实会话（docs/30 §3）：通用修法排在前、「/agent-team:at 照建」排在后时，8 次里 3 次先改了旧 run，两次还用新需求
+// 覆盖了旧契约；「收尾时告诉用户」0/4 生效。所以 /agent-team:at 那一支排第一、明写不碰旧 run 目录，告诉用户不挂在「收尾」上。
+const AT_BRANCH = '这条命令是 /agent-team:at 的话：不要写原来那趟 run 目录下的任何文件，照第 1 节另起一个 run id 建新 run'
+const TELL_NOW = '这一轮回复用户时（不论停在哪一步）'
+test('命令开头：丢指针、state.json 坏、stage 不在链里——/agent-team:at 那一支排第一，不碰旧 run，这一轮就告诉用户', () => {
+  const texts = {
+    pointer: runContextFix('pointer', { atStart: true }),
+    state: runContextFix('state', { atStart: true }),
+    'unknown-stage': selfCheckAppendix({ ok: true, state: { stage: 'S9', history: [{ stage: 'S2' }] }, stages: STAGES }),
+  }
+  for (const [k, t] of Object.entries(texts)) {
+    assert.ok(t.includes(AT_BRANCH), `${k}：${t}`)
+    assert.ok(t.includes(TELL_NOW), `${k}：${t}`)
+    assert.match(t, /这条命令是 \/agent-team:at-resume 的话：/, k)
+    assert.ok(t.indexOf(AT_BRANCH) < t.indexOf('这条命令是 /agent-team:at-resume 的话'), `${k}：/agent-team:at 那一支要排在修法之前`)
+    assert.doesNotMatch(t, /收尾时告诉用户旧|旧 run 的问题收尾时/, k)
+  }
+  for (const c of ['project', 'runs', 'plugin']) assert.ok(!runContextFix(c, { atStart: true }).includes(AT_BRANCH), c)
+  const p = texts.pointer
   assert.match(p, /不要自己补 state\.json，也不要删目录/)
-  assert.doesNotMatch(p, /旧 run 还在/)
+  assert.ok(p.indexOf('/agent-team:at-resume 的话') < p.indexOf('用 Glob'), '丢指针的找法属于 at-resume 那一支')
+})
+
+// 第二轮真实会话：state.json 从零重建时，PM 用 Bash 自己算 contract_sha（LF 的夹具上碰巧对得上，CRLF 签出的契约上就不对）。
+test('runContextFix(state)：认不出来的 contract_sha 写 PENDING，从回传里拿；告诉用户是重建的', () => {
+  const t = runContextFix('state')
+  assert.match(t, /认不出来的 contract_sha 写 PENDING/)
+  assert.match(t, /原样重写一次 00-contract\.md/)
+  assert.match(t, /告诉用户/)
+})
+
+// 第二轮增量审查：这一轮新加的三处判定此前没有判据，删掉任何一处全套照绿。
+test('runContextFix(plugin, atStart)：要建或续 run 的命令在这里停下（at-init 不停）', () => {
+  assert.match(runContextFix('plugin', { atStart: true }), /要建或续 run 的命令在这里停下/)
 })
 
 // 真实会话（docs/30 §3）：修法只说「当前 run 的 state.json」时，haiku 把它写到了项目根。

@@ -22,6 +22,10 @@ $ARGUMENTS
 
 ## 1. 建 run
 
+开头自检的理由末尾要是跟着一句「另外，」说原来那趟 run 坏了（指针丢了、`state.json` 读不出来、`state.stage` 不在阶段链里）：不要写原来那趟 run 目录下的任何文件，照本节另起一个 run id 建新 run。
+这一轮回复用户时（不论停在哪一步）把原来那趟的问题与它的 run id 告诉用户，接回它是 `/agent-team:at-resume` 的事。
+说的是 `project.json` 读不出来的话，先照它修好再建 run。
+
 - run id：`YYYYMMDD-HHmm-<slug>`，`slug` 用小写字母、数字与连字符，取自需求本身
   （例：`20260917-1430-login-sso`）。
 - 建目录 `.agent-team/runs/<run_id>/`。
