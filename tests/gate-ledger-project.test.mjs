@@ -212,13 +212,13 @@ test('brokenProjectNotice：写的正是它、run 里在别处被弄坏、没有
   // UTF-16 时，会不信「再写一次」有用，改去写探测文件或删文件重建。
   const u = brokenProjectNotice({ runInProgress: true, justWritten: false, utf16: true })
   for (const k of [
-    'UTF-16', '门禁只读 UTF-8', 'FF FE', '多半仍是 UTF-16', '再 Write 一次', '第二次写完仍收到这一句',
-    '先删掉它，再用 Write 新建', '不用另写别的文件试探',
+    'UTF-16', '门禁只读 UTF-8', 'FF FE', '多半仍是 UTF-16', '再 Write 一次', '连写两次 project.json 仍收到这一句',
+    '先删掉它，再用 Write 新建', '写别的文件时收到的这一句不算次数', '不用另写别的文件试探',
   ]) {
     assert.ok(u.includes(k), `${k}：${u}`)
   }
-  // 兜底的先后：先再写一次，第二次写完还收到才删掉重建。
-  assert.ok(u.indexOf('再 Write 一次') < u.indexOf('第二次写完仍收到这一句') && u.indexOf('第二次写完仍收到这一句') < u.indexOf('先删掉它'), u)
+  // 兜底的先后：先再写一次，连写两次 project.json 还收到才删掉重建——按 project.json 的写入次数计，写别的文件收到的不算。
+  assert.ok(u.indexOf('再 Write 一次') < u.indexOf('连写两次 project.json') && u.indexOf('连写两次 project.json') < u.indexOf('先删掉它'), u)
   // 写的正是它、UTF-16、run 进行中：修 UTF-16 要连写两次，早先那条回传末尾的「原样重写刚才那个文件」隔着两段回传多半
   // 被丢掉（实测 7 次里 1 次照做），把提醒挂在修好之前的最后一条回传上。
   const ju = brokenProjectNotice({ runInProgress: true, utf16: true })

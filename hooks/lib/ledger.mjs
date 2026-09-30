@@ -104,7 +104,8 @@ export function pluginNotice(report) {
  *   「再写一次」有用、改去写探测文件或删文件重建（6 次里 2 次）——所以把这个可观测的现象与兜底都说出来。修 UTF-16
  *   要连写两次 project.json，run 进行中时，早先那条「在别处被弄坏」回传末尾的「修好后原样重写刚才那个文件」隔着两段
  *   回传，实测多半被丢掉（7 次里 1 次照做）；所以写的正是它、UTF-16、run 进行中这一格，把那个提醒挂在修好之前的最后
- *   一条回传上。
+ *   一条回传上。兜底（删掉重建）按 project.json 的写入次数计：run 进行中时 PM 写 state.json 已经收到过一次同样的句子，
+ *   只说「第二次写完仍收到」会被数成第二次，第一次写完就删文件（合并前复测 8 次里 1 次）。
  */
 export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 = false }) {
   const why = utf16 ? '（文件是 UTF-16 编码，门禁只读 UTF-8）' : '（常见原因：注释、尾逗号、文件不是 UTF-8 编码）'
@@ -122,8 +123,9 @@ export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 =
     `【project.json】${justWritten ? '刚写进去的 ' : ''}.agent-team/project.json 不是一个合法的 JSON 对象${why}，门禁读不出它。` +
     (runInProgress ? 'run 进行中：执行角色写任何地方都会被拒，前置就绪与交付物校验按读不出运行上下文放行。' : '') +
     (utf16
-      ? '用 Write 整份重写（Read 看到的可能是一字一隔的乱码）。第一次写完，文件多半仍是 UTF-16、只少了开头的 FF FE，' +
-        '这是预期的：照原样再 Write 一次。第二次写完仍收到这一句，就先删掉它，再用 Write 新建。不用另写别的文件试探。'
+      ? '用 Write 整份重写 project.json（Read 看到的可能是一字一隔的乱码）。第一次写完 project.json，文件多半仍是 UTF-16、' +
+        '只少了开头的 FF FE，这是预期的：照原样再 Write 一次 project.json。连写两次 project.json 仍收到这一句，才先删掉它，' +
+        '再用 Write 新建（写别的文件时收到的这一句不算次数）。不用另写别的文件试探。'
       : '') +
     how
   )
