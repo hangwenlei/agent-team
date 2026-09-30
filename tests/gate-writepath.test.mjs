@@ -30,13 +30,10 @@ const PROJECT = {
   paths: {
     'at-backend': ['src/server/', 'src/shared/'],
     'at-frontend': ['src/web/', 'src/shared/'],
-    // 故意给 __main__（callerOf 对主线程的判定值）也认领一段窄路径。
-    // 如果没有这条，"主线程不受隔离约束" 那条测试即使 gate.mjs 里的
-    // MAIN 豁免分支被删掉也会碰巧通过——decideWritePath 对不在
-    // project.paths 里的角色本来就会直接放行（见 tests/writepath.test.mjs
-    // 「不在 project.paths 里的角色不归本门禁管」），那条测试会在错误的
-    // 理由下变绿。加了这条，__main__ 变成一个「已登记但没认领这条目标
-    // 路径」的角色，唯一能让它仍然放行的就是 gate.mjs 里显式的 MAIN 豁免。
+    // 故意给 __main__（callerOf 对主线程的判定值）也认领一段窄路径——M3u 之前，没有这条的话
+    // 「主线程不受隔离约束」那条测试即使 gate.mjs 的 MAIN 豁免被删掉也会碰巧通过。M3u（docs/29）起
+    // decideWritePath 在 run 目录之外对 PM（含主线程）一律放行，这个键不再起区分作用（只是一条
+    // 「门禁不会读到」的请确认），真正能区分 MAIN 豁免的是下面「主线程写 run 目录里别人的产物」那条。
     __main__: ['docs/'],
   },
 }
@@ -1002,5 +999,24 @@ test('自举边界：runs/ 存在但是空目录——有名有姓的非 PM 角�
     assert.match(stderr, /H3 写路径门禁：当前没有进行中的 run（/)
   } finally {
     rmSync(cwd, { recursive: true, force: true })
+  }
+})
+
+// M3u（docs/29）：decideWritePath 在 run 目录之外对 PM（含主线程）一律放行，上面那条「主线程写别人的地盘」
+// 因此不再能区分 gate.mjs 里的 MAIN 豁免在不在。run 目录里别人的阶段产物才是只有那条豁免放得行的地方：
+// decideWritePath 的 run 目录保护对 __main__ 照样按产物归属拒。
+test('writepath：主线程写 run 目录里别人的阶段产物也放行——只有 gate.mjs 的 MAIN 豁免放得行', () => {
+  const dirs = makeRun({ runId: 'r1', project: PROJECT })
+  try {
+    const input = {
+      tool_name: 'Write',
+      tool_input: { file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', '01-prd.md'), content: 'x' },
+    }
+    const { stdout, status } = run('writepath', input, undefined, dirs.projectDir)
+    assert.equal(status, 0)
+    assert.equal(stdout.trim(), '', '主线程写 run 目录里别人的产物不该被拦')
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
   }
 })

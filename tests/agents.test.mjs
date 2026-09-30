@@ -1139,8 +1139,9 @@ test('故意不认领 project.paths 的角色，正文里必须写明写路径�
     assert.ok(
       statesPathsEscape(bodyOf(`${role}.md`)),
       `agents/${role}.md 是 templates/project.json 里故意不认领 paths 的角色（available_roles ` +
-        '减去 paths 的键），而 hooks/lib/writepath.mjs 的 decideWritePath 对没有 paths 条目的' +
-        '角色在 run 目录之外整段早退放行——它的正文必须如实写出这件事（前提「paths 里没有你' +
+        '减去 paths 的键），而 hooks/lib/writepath.mjs 的 decideWritePath 对这几个按设计不认领路径' +
+        '的角色（hooks/lib/project.mjs 的 NO_PATHS_ROLES，且只对它们）在没有 paths 条目时于 run 目录' +
+        '之外整段早退放行——它的正文必须如实写出这件事（前提「paths 里没有你' +
         '的条目」+ 结论「早退放行」两半都要）。commands/at-init.md 那条禁令的理由正是这句话，' +
         '两边由同一个派生数组驱动，不能只剩禁令而依据消失（docs/11 §5.14）。',
     )

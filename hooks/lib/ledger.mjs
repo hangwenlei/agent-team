@@ -52,11 +52,48 @@ function pmOnlyNotice(action, reportWhat) {
   )
 }
 
+/**
+ * 【project.json】（M3u，docs/29，全量审查第 10 条）。report 是 hooks/lib/project.mjs 的 validateProject 那样的
+ * { block, fix, confirm }，每条已经是单行、外部值过了 quote；三档都空时返回 null。只有 PM 写得了 project.json，
+ * 而这条回传只在 PM 写控制文件之后发。
+ */
+export function projectNotice(report) {
+  const sections = [
+    ['阻断（这些角色写 run 目录之外会被拒）', report?.block],
+    ['要改（/agent-team:at-init 明令不许这样写，或者按字面比较一定落空）', report?.fix],
+    ['请确认（可能是有意的：读一遍，是想要的就不动）', report?.confirm],
+  ].filter(([, items]) => Array.isArray(items) && items.length)
+  if (!sections.length) return null
+  return (
+    '【project.json】.agent-team/project.json 有问题，逐条如下——你是唯一改得了它的人（用 Write 整份重写）：\n' +
+    sections.map(([title, items]) => `  ${title}：\n` + items.map((s) => `  - ${s}`).join('\n')).join('\n') +
+    '\n' +
+    [
+      (report.block?.length || report.fix?.length) && '阻断与要改的，改到没有为止再往下走',
+      report.confirm?.length && '请确认的，确认是有意的就留着',
+    ].filter(Boolean).join('；') +
+    '。'
+  )
+}
+
+/** 刚写进去的 project.json 解析不出、或者不是对象。不回显文件内容（docs/27）。 */
+export function brokenProjectNotice({ runInProgress }) {
+  return (
+    '【project.json】刚写进去的 .agent-team/project.json 不是一个合法的 JSON 对象（JSON 不允许注释和尾逗号），门禁读不出它。' +
+    (runInProgress ? 'run 进行中：执行角色写任何地方都会被拒，前置就绪与交付物校验按读不出运行上下文放行。' : '') +
+    '用 Write 写回一份合法的完整 project.json，再继续。'
+  )
+}
+
 export function buildLedgerNotices({
-  kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha,
+  kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha, projectReport,
 } = {}) {
   const out = []
   const st = state && typeof state === 'object' ? state : {}
+
+  // 排在最前：写 project.json 时它要先于【触达表】——先把配置改对，再落盘由它算出来的触达表。
+  const pn = projectNotice(projectReport)
+  if (pn) out.push(pn)
 
   if (kind === 'contract') {
     const cmp = compareContractSha({ recorded: st.contract_sha, actual: contractSha ?? null })

@@ -13,7 +13,8 @@ $ARGUMENTS
 照那一节告诉用户。
 
 若 `.agent-team/project.json` 不存在，**停下**，让用户先跑 `/agent-team:at-init`——没有它，
-写路径隔离没有判据，每个执行角色都会被拒。
+写路径隔离没有判据：run 进行中时，除了按设计不认领路径的 `at-qa` 与 `at-acceptance`，
+执行角色写 run 目录之外的任何地方都会被拒。
 
 本文里带 `${CLAUDE_PLUGIN_ROOT}` 前缀的路径都在**插件目录**里，用 `Read` 连着这个
 前缀一起读；以 `.agent-team/` 开头的路径才在用户项目里。两者不是同一个目录树——
@@ -33,7 +34,8 @@ $ARGUMENTS
   `PENDING`，`roster` 与 `never_invoked` 先留空数组，`artifacts`、`rework` 与 `trimmed`
   先留空对象——`artifacts` 会在每段产物写完之后按回传逐条补上，`escalations` 先留空数组。
 - 写 `.agent-team/current-run`，内容就是 run id 本身，**不带换行以外的任何东西，
-  不含路径分隔符**。
+  不含路径分隔符**。写完之后要是收到【project.json】，里面的阻断与要改先照 `/agent-team:at-init`
+  第 2、3 节改完，再进 S2——那些问题会让执行角色在 run 目录之外的写入被拒，而只有你改得了它。
 
 ## 2. S1 录入 —— 冻结契约
 

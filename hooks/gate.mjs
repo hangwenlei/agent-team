@@ -27,7 +27,8 @@ import { isControlFile, mayBeStateFile } from './lib/control-files.mjs'
 import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
 import { sha256OfContract, shaOrNote } from './lib/contract-hash.mjs'
-import { buildLedgerNotices } from './lib/ledger.mjs'
+import { buildLedgerNotices, brokenProjectNotice } from './lib/ledger.mjs'
+import { validateProject } from './lib/project.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
 import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
@@ -91,6 +92,9 @@ function isValidInput(input) {
 //   是空数组，算出的 reach 对任何角色都是「够不到任何人」，不会抛。
 // 退回空花名册不是「假装没事」，是把「读不出来」换算成这两处已经设计好的
 // 「最保守」退化路径，而不是让整个检查项的判定半途而废。
+// ⚠️ M3u：H3 是第三个消费方，而对它来说空花名册**不是**天然保守的——H3 对「不在花名册里」的调用者
+// 放行，{} 会让所有人都「不在花名册里」。所以 decideWritePath 先用 decide.mjs 的 isValidRoster（与 H1
+// 同一份）核花名册，读坏就拒非 PM，不走那条放行。
 function loadRoster() {
   try {
     return JSON.parse(readFileSync(join(ROOT, 'roster.json'), 'utf8'))
@@ -685,6 +689,7 @@ function main() {
       runDir: ctx.runDir,
       stages: ctx.stages,
       agentTeamDir: ctx.agentTeamDir,
+      roster: loadRoster(),
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
   }
@@ -887,17 +892,30 @@ function main() {
           // kind 取不到时也留痕（往安全的那一侧偏）：留一行多余的痕迹，代价远小于
           // 丢掉唯一一次「门禁判不出来」的信号。
           if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
+          const roster = loadRoster()
           emitLedger(
             spec.event,
             buildLedgerNotices({
               kind: 'project',
-              reach: computeReach({ roster: loadRoster(), paths: project.value.paths }),
+              reach: computeReach({ roster, paths: project.value.paths }),
+              // M3u（docs/29）：形状问题三档全报，排在【触达表】之前。
+              projectReport: validateProject(project.value, { roster }),
             }),
           )
           process.exit(0)
         }
-        // project.json 刚写进去却读不出来（写坏了、或者被并发占用）——没有判据，
-        // 继续往下走原来的 fail open 留痕，不要凭空造一张空触达表回传。
+        // project.json 刚写进去却读不出来。M3u（docs/29）：文件在、只是解析不出或不是对象时，照 state.json
+        // 那一支（M3r）回传一句固定的话——此前这里只往 stderr 留痕，模型看不到，/agent-team:at-init 会把它
+        // 误当成「门禁没在跑」。不回显文件内容，不造空触达表。读不到（被删、被占用）时照旧只留痕。
+        let text = null
+        try {
+          text = readFileSync(filePath, 'utf8')
+        } catch {}
+        if (text !== null) {
+          if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
+          emitLedger(spec.event, [brokenProjectNotice({ runInProgress: ctx.kind !== 'no-run' })])
+          process.exit(0)
+        }
       }
       // M3r（docs/26，全量审查第 5 条）：刚写的正是某个 run 的 state.json、而它读不出来——这趟
       // run 此刻在门禁眼里是坏的（readRunContext 判 unreadable），此前这里只往 stderr 写一句，
@@ -973,6 +991,24 @@ function main() {
     const stateProblems =
       kind === 'state' ? validateState(ctx.state, { stages: ctx.stages }).problems : []
 
+    // M3u（docs/29）：project.json 的形状问题只有 PM 改得了，在它写控制文件的几个时机说出来——写 project.json
+    // 本身（三档全报）；每趟 run 开头写 current-run（三档全报，已装用户的旧配置在 S1 就露面，不等 S5 撞上拒绝）；
+    // 写 state.json（只报阻断：覆盖升级前开始、升级后续跑的 run，不报警告免得每次记账都刷一遍）。
+    let projectReport = null
+    const isPointer = target === norm(`${ctx.agentTeamDir}/current-run`)
+    if (kind === 'project' || isPointer || kind === 'state') {
+      if (!ctx.project) {
+        projectReport = {
+          block: [
+            '.agent-team/project.json 不在——run 已经建起来，执行角色写 run 目录之外的任何地方都会被拒；先跑 /agent-team:at-init 写好它',
+          ],
+        }
+      } else {
+        const full = validateProject(ctx.project, { roster: loadRoster() })
+        projectReport = kind === 'state' ? { block: full.block } : full
+      }
+    }
+
     // 【阶段】那条提示的判据。roster 传 ctx.state?.roster——不是数组时传 undefined 退回
     // 全部 producers，写法与本文件另外三处一致（deliverable 分支里那次 isStageDone、
     // 那次 compareArtifacts、readiness 分支里那次 decideReadiness）。
@@ -1009,6 +1045,7 @@ function main() {
       stateProblems,
       produceName,
       produceSha: produceBytes ? sha256OfContract(produceBytes) : null,
+      projectReport,
     })
 
     // M3a Task 2：产者交代判据的触发点是「state.stage 推进出去时」（设计 §3.2），

@@ -138,7 +138,7 @@ flowchart TB
 ## 已知边界
 
 > [!WARNING]
-> **这不是沙箱。** 写路径隔离只约束在 `project.json` 里认领了目录的角色；`at-qa` 与 `at-acceptance` 不认领任何目录，这道检查对它们在 run 目录之外整段放行。`Bash` 没有任何门禁看着，而执行角色保留它来构建和测试。
+> **这不是沙箱。** 写路径隔离按 `project.json` 的 `paths` 管团队里的执行角色，没有条目的角色在 run 目录之外哪都写不了；`at-qa` 与 `at-acceptance` 按设计不认领目录，这道检查对它们在 run 目录之外整段放行。`Bash` 没有任何门禁看着，而执行角色保留它来构建和测试。
 
 > [!WARNING]
 > **主会话会被接管成 `at-pm`。** 它的工具面是 `Agent(...)`（受派发白名单约束）、`AskUserQuestion`、`Bash`、`Read`、`Glob`、`Write`、`Edit`——普通会话能做的它都能做，把它限制在目标项目里的是角色说明，不是工具权限。按上面的方式安装，影响范围只在安装它的那个项目目录；也不要用 `--agent` 把主会话换成别的角色，门禁按主会话的身份判定。
@@ -313,7 +313,7 @@ You can watch a role but not talk to it: roles report their questions to the pro
 ## Known Limitations
 
 > [!WARNING]
-> **This is not a sandbox.** Write-path isolation only constrains roles that claim directories in `project.json`; `at-qa` and `at-acceptance` claim none, so outside the run directory the check lets them through entirely. `Bash` is not watched by any gate, and implementation roles keep it to build and test.
+> **This is not a sandbox.** Write-path isolation governs the team's implementation roles by the `paths` in `project.json`, and a role with no entry can write nothing outside the run directory; `at-qa` and `at-acceptance` claim no directories by design, so outside the run directory the check lets them through entirely. `Bash` is not watched by any gate, and implementation roles keep it to build and test.
 
 > [!WARNING]
 > **The main session is taken over as `at-pm`.** Its tool surface is `Agent(...)` (bound by the dispatch whitelist), `AskUserQuestion`, `Bash`, `Read`, `Glob`, `Write` and `Edit` — it can do anything an ordinary session can, and what keeps it inside the target project is its role definition, not its permissions. Installed as above, its reach is limited to the one project directory that declares it. Don't swap the main session for another role with `--agent` either: the gates judge by the main session's identity.
