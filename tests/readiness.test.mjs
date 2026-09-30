@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { decideReadiness } from '../hooks/lib/readiness.mjs'
+import { computeReach } from '../hooks/lib/reach.mjs'
 
 const STAGES = {
   S1: { role: 'at-pm', requires: [], produces: ['00-contract.md'] },
@@ -51,7 +52,7 @@ test('不在阶段链里的角色不归本门禁管，放行', () => {
   assert.equal(r.decision, 'allow')
 })
 
-test('一个角色出现在多个阶段时，取尚未完成的最早那个', () => {
+test('一个角色出现在多个阶段、派发者没有收窄候选段时，取尚未完成的最早那个', () => {
   // at-pm 同时是 S1 与 S4 的执行角色。S1 的产物已在、S4 的前置未齐时，
   // 应当按 S4 判定而不是按 S1 放行。
   const stages = {
@@ -68,7 +69,7 @@ test('一个角色出现在多个阶段时，取尚未完成的最早那个', ()
 // 顺序，不该重新按字典序排。这条钉住"按书写顺序判定"这个真实的实现选择：
 // 旧的 localeCompare 实现会先查到 requires 为空的 S10、判它已完成，
 // 于是漏过 S2 真正缺失的前置，整条错判成 allow。
-test('多阶段同角色按 stages 的书写顺序判定，不按阶段 id 的字典序', () => {
+test('多阶段同角色（派发者没有收窄候选段时）按 stages 的书写顺序判定，不按阶段 id 的字典序', () => {
   const stages = {
     S2: { role: 'at-pm', requires: ['x'], produces: ['02.md'] },
     S10: { role: 'at-pm', requires: [], produces: ['10.md'] },
@@ -319,5 +320,82 @@ test('H2 回归（修复 1）正向自检锚：S5 前置产物齐备时，roster
 test('H2 回归（修复 1）正向自检锚：targetRole 不属于任何阶段（at-outsider）时放行，roster 为空不改变这一点', () => {
   const stages = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
   const r = decideReadiness({ targetRole: 'at-outsider', stages, roster: [], artifactExists: have() })
+  assert.equal(r.decision, 'allow')
+})
+
+// ---- M3w（docs/31，全量审查第 13 条）：多段角色按派发者选段 ----
+//
+// at-ui 是 S2 与 S5 的产者。H2 此前按书写顺序取它「第一个产物没齐的段」当它此刻要做的那一段，不看是谁派的：
+//   - S2 已齐之后 at-product 让它返修：按 S5 的前置判，缺 03-arch.md、04-dispatch.md，拒，没有出路；
+//   - S2 被裁或只交了一半，架构师为 S5 派它：按 S2 判、放行，S5 的前置从不查（同格 at-backend 被拒）。
+// 花名册的边本身就区分了这两段：at-product 派的是 S2 的活，at-architect 派的是 S5 的活（agents/at-ui.md「冒泡给谁」）。
+// 候选段只留派发者就是那一段的 role、或能传递派到它的那些段（与 H5a 的 isCoordinatorFor 同一口径）；剪空时不剪。
+// 下面按真实 stages.json 与 roster.json 的拓扑写，callerReach 由 computeReach 算。
+const REAL_STAGES = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
+const REAL_ROSTER = JSON.parse(readFileSync(new URL('../roster.json', import.meta.url), 'utf8'))
+const REACH = computeReach({ roster: REAL_ROSTER, paths: {} })
+const by = (caller) => ({ caller, callerReach: REACH[caller].reachableRoles })
+const S2_DONE = ['00-contract.md', '01-prd.md', '02-ui-spec.md', '02-wireframe.html']
+
+test('M3w 前提：真实花名册下，at-product 只派得到 S2 那一段的 at-ui，at-architect 只派得到 S5 那一段', () => {
+  // 这条变红说明花名册变了：某个派发者能派到 at-ui 的两段，按派发者选段就又得在两段之间猜（docs/31 §4）。
+  assert.equal(REAL_STAGES.S2.role, 'at-product')
+  assert.ok(!REACH['at-product'].reachableRoles.includes(REAL_STAGES.S5.role))
+  assert.ok(REACH['at-architect'].reachableRoles.includes(REAL_STAGES.S5.role))
+  assert.ok(!REACH['at-architect'].reachableRoles.includes(REAL_STAGES.S2.role))
+})
+
+test('M3w：S2 已齐之后 at-product 让 at-ui 返修——按 S2 判，放行（此前按 S5 判、缺 03/04 被拒）', () => {
+  const r = decideReadiness({ targetRole: 'at-ui', stages: REAL_STAGES, roster: ['at-product', 'at-ui'], artifactExists: have(...S2_DONE), ...by('at-product') })
+  assert.equal(r.decision, 'allow')
+})
+
+test('M3w：S2 被裁（没有 02 那两份）、架构师为 S5 派 at-ui、04 缺——按 S5 判，拒，理由点名 04-dispatch.md', () => {
+  const r = decideReadiness({ targetRole: 'at-ui', stages: REAL_STAGES, roster: ['at-product', 'at-architect'], artifactExists: have('00-contract.md', '01-prd.md', '03-arch.md'), ...by('at-architect') })
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /S5/)
+  assert.match(r.reason, /04-dispatch\.md/)
+  assert.doesNotMatch(r.reason, /03-arch/)
+})
+
+test('M3w：S2 只交了一半、架构师派 at-ui、03/04 缺——按 S5 判，拒；同一份磁盘上 at-product 派它补 S2——放行', () => {
+  const half = have('00-contract.md', '01-prd.md', '02-ui-spec.md')
+  const arch = decideReadiness({ targetRole: 'at-ui', stages: REAL_STAGES, roster: [], artifactExists: half, ...by('at-architect') })
+  assert.equal(arch.decision, 'deny')
+  assert.match(arch.reason, /S5/)
+  const prod = decideReadiness({ targetRole: 'at-ui', stages: REAL_STAGES, roster: [], artifactExists: half, ...by('at-product') })
+  assert.equal(prod.decision, 'allow')
+})
+
+test('M3w：S2 已齐、03/04 缺，架构师派 at-ui——拒（与 at-backend、at-frontend 同一格一致）', () => {
+  for (const target of ['at-ui', 'at-backend', 'at-frontend']) {
+    const r = decideReadiness({ targetRole: target, stages: REAL_STAGES, roster: [], artifactExists: have(...S2_DONE), ...by('at-architect') })
+    assert.equal(r.decision, 'deny', target)
+  }
+})
+
+test('M3w：S5 正路——架构师派 at-ui、03/04 在，放行', () => {
+  const r = decideReadiness({ targetRole: 'at-ui', stages: REAL_STAGES, roster: [], artifactExists: have(...S2_DONE, '03-arch.md', '04-dispatch.md'), ...by('at-architect') })
+  assert.equal(r.decision, 'allow')
+})
+
+// 变异 R3（审查 id 83）：「前置齐了就放行」改成「接着看下一段」时，S2 正路 at-product→at-ui 会按 S5 的前置被拒死。按派发者
+// 剪枝之后，at-ui 对每个派发者只有一个候选段，门禁层走不到这里；派发者认不出（不剪）时仍走得到，这一格钉在纯函数层。
+test('M3w：派发者认不出时不剪——照旧按书写顺序取第一个没齐的段，前置齐了就放行（R3）', () => {
+  const r = decideReadiness({ targetRole: 'at-ui', stages: REAL_STAGES, roster: [], artifactExists: have('00-contract.md') })
+  assert.equal(r.decision, 'allow')
+  const unknown = decideReadiness({ targetRole: 'at-ui', stages: REAL_STAGES, roster: [], artifactExists: have('00-contract.md'), caller: 'x', callerReach: null })
+  assert.equal(unknown.decision, 'allow')
+})
+
+test('M3w：剪空时不剪——派发者派不到目标任何一段的 role（H1 本来就拒）时退回老规则，不因为剪枝放行', () => {
+  const r = decideReadiness({ targetRole: 'at-backend', stages: REAL_STAGES, roster: [], artifactExists: have('03-arch.md'), ...by('at-product') })
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /04-dispatch\.md/)
+})
+
+test('M3w：剪枝看的是那一段的 role（单数），不是 producers——at-product 派 at-ui 不把 S5 算进来', () => {
+  // S5 的 producers 里有 at-ui、at-product 也派得到 at-ui；按 producers 剪会把 S5 留下，返修那一格又被按 S5 拒。
+  const r = decideReadiness({ targetRole: 'at-ui', stages: REAL_STAGES, roster: [], artifactExists: have(...S2_DONE), ...by('at-product') })
   assert.equal(r.decision, 'allow')
 })

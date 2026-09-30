@@ -686,6 +686,11 @@ function main() {
       )
       process.exit(0)
     }
+    // M3w（docs/31，全量审查第 13 条）：多段角色（at-ui 在 S2 与 S5）此刻做哪一段由派发者决定——at-product 派的是 S2 的活，
+    // at-architect 派的是 S5 的活。把派发者与它沿花名册派得到的角色传进去，判定在 decideReadiness 里（口径与理由在那里）。
+    // 派发者不在花名册里时 reach 里没有它，传 null，decideReadiness 退回不剪。
+    const caller = callerOf(input)
+    const reach = computeReach({ roster: loadRoster(), paths: {} })
     const r = decideReadiness({
       targetRole: target,
       stages: ctx.stages,
@@ -693,6 +698,8 @@ function main() {
       // M2a：与 deliverable 分支同一个口径——undefined 而不是 []，state.json 坏掉时
       // 退回「全部 producers」这个更宽的集合，宁可多判一次未完成，不要漏。
       roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
+      caller,
+      callerReach: Object.hasOwn(reach, caller) ? reach[caller].reachableRoles : null,
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
   }

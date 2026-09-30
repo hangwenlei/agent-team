@@ -188,3 +188,54 @@ test('readiness：坏指针时仍然 fail open，但措辞说「读不到运行�
     rmSync(dirs.pluginDir, { recursive: true, force: true })
   }
 })
+
+// ——— M3w（docs/31，全量审查第 13 条）：at-ui 按派发者选段 ———
+//
+// 纯函数那一层在 tests/readiness.test.mjs。这里钉的是门禁把派发者（hook 输入的 agent_type）与花名册的触达接进去了：
+// 忘了传派发者或触达时，第一格会退回老规则、按 S5 拒。
+const dispatchUi = (caller) => ({
+  hook_event_name: 'PreToolUse', tool_name: 'Agent', agent_type: caller, tool_input: { subagent_type: 'agent-team:at-ui', prompt: 'x' },
+})
+const S2_DONE = ['00-contract.md', '01-prd.md', '02-ui-spec.md', '02-wireframe.html']
+const withRun = (opts, body) => {
+  const dirs = makeRun({ runId: 'r1', ...opts })
+  try {
+    return body(dirs)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+}
+
+test('readiness（M3w）：S2 已齐之后 at-product 让 at-ui 返修——放行（此前按 S5 的前置拒）', () => {
+  withRun({ stage: 'S2', roster: ['at-product', 'at-ui'], artifacts: S2_DONE }, (dirs) => {
+    const { stdout } = run('readiness', dispatchUi('agent-team:at-product'), undefined, dirs.projectDir)
+    assert.equal(stdout, '', stdout)
+  })
+})
+
+test('readiness（M3w）：S2 被裁、stage 是 S5、04-dispatch.md 缺，架构师派 at-ui——拒，理由点名 04-dispatch.md（此前放行）', () => {
+  withRun({ stage: 'S5', roster: ['at-product', 'at-architect'], trimmed: { 'at-ui': 'S2' }, artifacts: ['00-contract.md', '01-prd.md', '03-arch.md', '03-alignment.md'] }, (dirs) => {
+    const out = decisionOf(run('readiness', dispatchUi('agent-team:at-architect'), undefined, dirs.projectDir).stdout)
+    assert.equal(out?.permissionDecision, 'deny')
+    assert.match(out.permissionDecisionReason, /04-dispatch\.md/)
+  })
+})
+
+test('readiness（M3w）：S2 只交了一半、stage 是 S3——架构师派 at-ui 拒（S5 的前置），at-product 派它补 S2 放行', () => {
+  withRun({ stage: 'S3', roster: ['at-product'], artifacts: ['00-contract.md', '01-prd.md', '02-ui-spec.md'] }, (dirs) => {
+    const arch = decisionOf(run('readiness', dispatchUi('agent-team:at-architect'), undefined, dirs.projectDir).stdout)
+    assert.equal(arch?.permissionDecision, 'deny')
+    assert.match(arch.permissionDecisionReason, /S5/)
+    assert.equal(run('readiness', dispatchUi('agent-team:at-product'), undefined, dirs.projectDir).stdout, '')
+  })
+})
+
+test('readiness（M3w）：stage 没推进（停在 S2）、S2 已齐、03/04 缺——架构师派 at-ui 拒，与 at-backend 一致', () => {
+  withRun({ stage: 'S2', roster: ['at-product', 'at-ui'], artifacts: S2_DONE }, (dirs) => {
+    for (const target of ['agent-team:at-ui', 'agent-team:at-backend']) {
+      const input = { ...dispatchUi('agent-team:at-architect'), tool_input: { subagent_type: target, prompt: 'x' } }
+      assert.equal(decisionOf(run('readiness', input, undefined, dirs.projectDir).stdout)?.permissionDecision, 'deny', target)
+    }
+  })
+})

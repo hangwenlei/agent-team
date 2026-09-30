@@ -24,11 +24,16 @@ function producerOf(stages, artifact) {
   return null
 }
 
-export function decideReadiness({ targetRole, stages, artifactExists, roster }) {
+// caller 是这次的派发者（hook 输入的 agent_type，经 callerOf），callerReach 是它沿花名册的派发边（传递地）派得到的角色
+// （hooks/lib/reach.mjs 的 computeReach 算的 reachableRoles）。两者缺一时不按派发者剪枝，见下面 M3w 那一段。
+export function decideReadiness({ targetRole, stages, artifactExists, roster, caller, callerReach }) {
   if (!stages || typeof stages !== 'object') return { decision: 'allow' }
 
-  // 一个角色可能是多个阶段的执行者（如 at-pm 既是 S1 又是 S4）。
-  // 找第一个「产物尚未齐全」的阶段来判定——那就是它此刻要做的那一段。
+  // 一个角色可能是多个阶段的执行者（如 at-pm 既是 S1 又是 S4，at-ui 既是 S2 又是 S5）。先按派发者把候选段收窄（M3w，
+  // 见下），再在候选段里找第一个「产物尚未齐全」的阶段来判定。
+  // ⚠️ M3w 订正（docs/31，全量审查第 13 条）：这里原来写的是「找第一个产物尚未齐全的阶段——那就是它此刻要做的那一段」。
+  // 对 at-ui 这不成立：S2 已齐之后 at-product 让它返修，这条规则按 S5 的前置拒它；S2 被裁或只交了一半时架构师为 S5 派它，
+  // 这条规则按 S2 放行、S5 的前置从不查。「此刻要做的那一段」由派发者决定，不由哪一段没齐决定。
   //
   // Task 3 评审 Minor 2：这里不能按阶段 id 字符串排序（原先用过
   // localeCompare）——"S10".localeCompare("S2") < 0，字典序会把 S10 排到
@@ -60,6 +65,21 @@ export function decideReadiness({ targetRole, stages, artifactExists, roster }) 
 
   if (mine.length === 0) return { decision: 'allow' }
 
+  // M3w：按派发者选段。花名册的边本身就区分了多段角色的每一段：at-product 派 at-ui 是 S2 的活，at-architect 派它是 S5 的活
+  // （agents/at-ui.md「冒泡给谁」一节）。候选段只留「派发者就是那一段的 role、或者能传递派到它」的那些——与 gate.mjs 的
+  // isCoordinatorFor（H5a 认协调者）同一个口径，读的也是 stages[X].role 单数（docs/11 §5.12 的裁定）。不按 producers 剪：S5 的
+  // producers 里有 at-ui，而 at-product 派得到 at-ui，按 producers 剪会把 S5 留给 at-product。
+  // 剪空时不剪：派发者认不出（空串、别的插件的代理、没传进来）、或者它本来派不动目标（H1 已经拒）时，退回下面的老规则，
+  // 不因为剪枝放行。不看 state.stage：那会让 H2 也依赖 stage 准不准（stage 没推进时，架构师为 S5 派 at-ui 会按 S2 放行），
+  // 而派发者在这次调用里总是准的（docs/31 §2 有两种方案的对照）。
+  // 失效条件：花名册里出现一个派发者能派到同一个角色的两段——那时候选段里仍按「第一个没齐」猜；tests/readiness.test.mjs 的
+  // 「M3w 前提」那一条钉着今天的拓扑。
+  const reachable = typeof caller === 'string' && caller && Array.isArray(callerReach) ? callerReach : null
+  const byCaller = reachable
+    ? mine.filter(([, s]) => typeof s.role === 'string' && (s.role === caller || reachable.includes(s.role)))
+    : []
+  const candidates = byCaller.length ? byCaller : mine
+
   // 修复 1（Task 2 修复轮 1，F1 承重发现）：mine 的构造条件就是
   // `targetRole ∈ stageRoles(stage)`，所以进入下面这个循环的每一个 stage，
   // targetRole 本身必然是它的合法产者之一——即便 roster 里还没有它。
@@ -78,12 +98,13 @@ export function decideReadiness({ targetRole, stages, artifactExists, roster }) 
   // 时「还没人被叫到、所以还没有产物该在」是诚实的。
   const inRun = Array.isArray(roster) ? [...roster, targetRole] : roster
 
-  for (const [stageId, stage] of mine) {
+  for (const [stageId, stage] of candidates) {
     // 已知边界（Task 3 评审 Minor 3）：produces 为空/缺失的阶段，这里会被
     // 判定为"已完成"，它的 requires 永远不会被检查——纯评审类、不产出
-    // 文件的阶段会因此完全不设防。当前 stages.json 五个阶段 produces 都
-    // 非空，暂不触发；一旦出现这类阶段，这里需要重新设计"已完成"的判定
-    // 方式，不能简单沿用"produces 都存在"这条标准。
+    // 文件的阶段会因此完全不设防。今天 stages.json 里每个阶段的 produces 都
+    // 非空（范围读 stages.json 核，这里不写段数——写下来的数字会漂：原文的「五个阶段」
+    // 在链扩到 S8 之后就假了，M3w 顺手改），暂不触发；一旦出现这类阶段，这里需要重新设计
+    // "已完成"的判定方式，不能简单沿用"produces 都存在"这条标准。
     // 修复 1 更正：M2a 曾在这里写过「按 roster ∩ producers 展开（与 isStageDone
     // 同一个口径，共用 stageRolesInRun）……展开后为空数组时 `.every` 仍然返回
     // true、判为『已完成』——对 <role> 阶段那恰好是对的（这一趟没有任何人是它的
