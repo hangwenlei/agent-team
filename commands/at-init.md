@@ -13,17 +13,20 @@ description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json
 
 ## 1. 勘察
 
-先看 `.agent-team/project.json` 在不在。在的话，这是**重跑**：在读 `${CLAUDE_PLUGIN_ROOT}/templates/project.json`
-之前，先用 `Read` 读用户项目里的 `.agent-team/project.json`。两个文件同名，模板是插件自带的骨架（TypeScript、
-`src/server/` 那些是占位），**不是用户的旧文件**。描述旧文件只能照这次 `Read` 的结果说；没读到、或者它不是
-合法的 JSON，就照实说。和磁盘相符的设置保留（包括有意的前缀嵌套与共享目录）。
+**第一步只做一件事**：用 `Read` 读用户项目里的 `.agent-team/project.json`。这一步单独一条消息，不和任何别的工具
+调用并发。读不到（文件不存在）就是首跑，往下勘察。
+
+读到了就是**重跑**：**重跑不读 `${CLAUDE_PLUGIN_ROOT}/templates/project.json`**，旧文件不是合法的 JSON 也一样——
+以这次读到的旧文件为底改，要有哪些键第 2 节列全了，角色名在花名册里。模板里是插件自带的占位（TypeScript、
+`src/server/` 那些），**不是用户的旧文件**。描述旧文件只能照这次 `Read` 的结果说；它不是合法的 JSON，就照实说。
+和磁盘相符的设置保留（包括有意的前缀嵌套与共享目录）。
 
 然后用 `Glob` 与 `Read` 看清楚这个项目：技术栈与包管理器、目录布局、构建命令、测试命令。
 **看磁盘，不要靠猜，也不要靠 README 的自述**——README 会过时，目录不会。
 
 ## 2. 划分路径归属
 
-照 `${CLAUDE_PLUGIN_ROOT}/templates/project.json` 的骨架写 `.agent-team/project.json`。
+首跑照 `${CLAUDE_PLUGIN_ROOT}/templates/project.json` 的骨架写 `.agent-team/project.json`；重跑以第 1 节读到的旧文件为底改，不读模板。
 **四件事**（规格 §7.1：路径归属、可用班底、技术栈、构建与测试命令）：
 
 - `stack`：语言、框架、包管理器。
@@ -47,7 +50,7 @@ description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json
   - 前缀相对项目根、用 `/` 分隔，要留在项目里（不许 `..` 出根、不许认领整个根、不许带冒号（含盘符））；
     按字面比较，不是通配符。前缀可以是目录，也可以是**单个文件**（按字面精确匹配）：项目根下平铺的文件
     逐个列，以后在项目根新建的文件要先在 `paths` 里加上才写得进去。
-  - 指向项目外的前缀（比如 `../shared/`）**删掉**，不要换成项目里的同名目录——那是另一个地方；
+  - 指向项目外的前缀（比如 `../shared/`）**删掉**，不要换成项目里的同名目录——多半是另一个地方；
     收尾时告诉用户删了哪一条。
   - 共享目录（例如 `src/shared/`）可以同时出现在多个角色下，那是有意的。前缀嵌套时（`docs/`
     包含 `docs/ui/`）外层角色也能写内层——认领按「列了谁、谁能写」，不按最具体的前缀独占；
@@ -77,7 +80,7 @@ description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json
 - **阻断**与**要改**：逐条改到没有为止（用 `Write` 整份重写 `project.json`），再往下落盘触达表。
   文件写坏了（不是合法的 JSON）也会收到一条【project.json】，同样先改。阻断**按角色生效**：一条坏前缀
   会让这个角色在 run 目录之外哪都写不了，连它其余合法的前缀也一样，不能先留着。
-- 阻断里要是有「roster.json 读不出来」那一条：那不是 `project.json` 的问题，**不要改 `project.json`**，停下告诉用户
+- 回传里要是有【插件】（roster.json 读不出来）：那不是 `project.json` 的问题，**改它修不好**——停下，告诉用户
   重装或更新 agent-team 插件。
 - **请确认**：逐条读一遍，是有意的就留着，收尾时告诉用户留下了哪几条、为什么。**不要为了消一条
   提醒去给角色编前缀，也不要把角色从 `available_roles` 里删掉**——后者会让产者交代那条判据漏掉它。

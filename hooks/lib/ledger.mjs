@@ -84,19 +84,37 @@ export function projectNotice(report) {
 }
 
 /**
- * project.json 解析不出、或者不是对象。不回显文件内容（docs/27）。justWritten：这次写的正是它（写 project.json
- * 那条缝）；否则是它在别处被弄坏（用户在两趟 run 之间手改，加了注释或尾逗号），PM 写 .agent-team 下别的文件时
- * 撞上——那时契约与产物的哈希也回传不了，改好之后要原样重写一次刚才那个文件才拿得到。
+ * 【插件】（M3u）：roster.json 读不出来。它不是 project.json 的问题，不混进【project.json】——那一段的首句叫 PM
+ * 整份重写 project.json、结尾叫它改到没有为止，这一条改 project.json 永远改不掉。report 同 projectNotice。
  */
-export function brokenProjectNotice({ runInProgress, justWritten = true }) {
+export function pluginNotice(report) {
+  const items = Array.isArray(report?.plugin) ? report.plugin : []
+  return items.length ? items.map((s) => `【插件】${s}。`).join('\n') : null
+}
+
+/**
+ * project.json 解析不出、或者不是对象。不回显文件内容（docs/27）。
+ * - justWritten：这次写的正是它（写 project.json 那条缝）；否则是它在别处被弄坏（用户在两趟 run 之间手改，加了
+ *   注释或尾逗号），PM 写 .agent-team 下别的文件时撞上。run 进行中时，那一刻契约与产物的哈希也回传不了，改好之后
+ *   要原样重写一次刚才那个文件才拿得到（契约这一格 commands/at.md §2 另有兜底，这句管的是其余产物与记账）；没有
+ *   run 时没有哈希可拿，改好 project.json 本身就会收到报告与触达表。
+ * - utf16：按 UTF-8 读出来带 NUL（Windows PowerShell 5.1 的 Out-File、> 的默认编码）。PM 用 Read 看到的是一份
+ *   合法的 JSON，只说「注释和尾逗号」它会认为没问题；实测 Write 第一次还会沿用原编码，要再写一次。
+ */
+export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 = false }) {
+  const why = utf16 ? '（文件是 UTF-16 编码，门禁只读 UTF-8）' : '（常见原因：注释、尾逗号、文件不是 UTF-8 编码）'
+  const how = justWritten
+    ? '只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json，再继续；不是的话回报上级，不要自己写。'
+    : runInProgress
+      ? '契约与产物的哈希这时也回传不了。只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json，' +
+        '再原样重写一次刚才那个文件拿回传；不是的话回报上级，不要自己写。'
+      : '只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json——改好就会收到报告与触达表，再继续；' +
+        '不是的话回报上级，不要自己写。'
   return (
-    `【project.json】${justWritten ? '刚写进去的 ' : ''}.agent-team/project.json 不是一个合法的 JSON 对象` +
-    '（JSON 不允许注释和尾逗号），门禁读不出它。' +
+    `【project.json】${justWritten ? '刚写进去的 ' : ''}.agent-team/project.json 不是一个合法的 JSON 对象${why}，门禁读不出它。` +
     (runInProgress ? 'run 进行中：执行角色写任何地方都会被拒，前置就绪与交付物校验按读不出运行上下文放行。' : '') +
-    (justWritten
-      ? '只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json，再继续；不是的话回报上级，不要自己写。'
-      : '契约与产物的哈希这时也回传不了。只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json，' +
-        '再原样重写一次刚才那个文件拿回传；不是的话回报上级，不要自己写。')
+    (utf16 ? '内容看着没问题也要用 Write 整份重写；写完仍收到这一句就再写一次。' : '') +
+    how
   )
 }
 
@@ -106,7 +124,10 @@ export function buildLedgerNotices({
   const out = []
   const st = state && typeof state === 'object' ? state : {}
 
-  // 排在最前：写 project.json 时它要先于【触达表】——先把配置改对，再落盘由它算出来的触达表。
+  // 排在最前：写 project.json 时它要先于【触达表】——先把配置改对，再落盘由它算出来的触达表。【插件】又在它之前：
+  // 插件装坏了，改 project.json 之前先停下。
+  const pl = pluginNotice(projectReport)
+  if (pl) out.push(pl)
   const pn = projectNotice(projectReport)
   if (pn) out.push(pn)
 

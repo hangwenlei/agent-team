@@ -283,11 +283,13 @@ const SCENARIOS = [
     calls: ({ p }) => [['ledger', posted('at-pm', join(p, '.agent-team', 'project.json'))]],
   },
   {
-    // 嵌套提醒里两个键、两条前缀各过一次 quote——只让前缀带载荷，照不到键那两处。
+    // 嵌套提醒里两条前缀各过一次 quote。嵌套只在 H3 会判的键之间比（M3u），键是花名册里的角色名，载荷只能放在前缀里。
+    // 前提锚：真的出了嵌套提醒——带冒号的载荷（以 sha 打头那一种）让前缀被阻断、不参与嵌套，它由阻断那一条读到。
     name: 'project.paths 的嵌套提醒（【project.json】）',
     disk: true,
-    project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, [P]: [P + '/'], ['j' + P]: [P + '/y/'] } }),
+    project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, 'at-product': [P + '/'], 'at-architect': [P + '/y/'] } }),
     calls: ({ p }) => [['ledger', posted('at-pm', join(p, '.agent-team', 'project.json'))]],
+    anchor: (all, P) => reached(all, P) && (P.includes(':') || all.includes('包含')),
   },
   {
     name: 'state.json 写成坏 JSON 短文（异常消息引用原文）',
@@ -370,7 +372,7 @@ async function runScenario(sc, pname, P) {
     const results = await Promise.all(sc.calls({ p, run }, P).map(([check, input]) => gate(check, input, p)))
     const bad = results.flatMap((r) => violations(r, sc).map((v) => `${pname} · ${r.check}：${v}`))
     const all = results.flatMap((r) => channels(r).map((c) => c.text)).join('\n')
-    const anchored = sc.anchor ? sc.anchor(all) : reached(all, P)
+    const anchored = sc.anchor ? sc.anchor(all, P) : reached(all, P)
     if (!anchored) bad.push(`${pname}：正向锚点没命中——载荷没有被门禁读到，这个场景什么都没测`)
     return bad
   } finally {

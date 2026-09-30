@@ -95,7 +95,7 @@ function isValidInput(input) {
 // ⚠️ M3u：H3（decideWritePath）与 validateProject 也消费它。对 H3 来说空花名册**不是**天然保守的——H3 对
 // 「不在花名册里」的调用者放行，{} 会让所有人都「不在花名册里」。所以 decideWritePath 先用 decide.mjs 的
 // isValidRoster（与 H1 同一份）核花名册：读坏时，除 PM 与没有键的 at-qa、at-acceptance 之外一律拒，不走那条
-// 放行。validateProject 读坏时不核对角色名，只报一条阻断。
+// 放行。validateProject 读坏时不核对角色名，单列一条【插件】（其余键上的问题照报）。
 function loadRoster() {
   try {
     return JSON.parse(readFileSync(join(ROOT, 'roster.json'), 'utf8'))
@@ -134,6 +134,33 @@ function isProjectJson(filePath, agentTeamDir) {
   if (typeof filePath !== 'string' || !filePath) return false
   if (typeof agentTeamDir !== 'string' || !agentTeamDir) return false
   return norm(filePath) === norm(`${agentTeamDir}/project.json`)
+}
+
+// ledger 那两处「project.json 是不是写坏了」要读它的原文（M3u）。最多读 3 次，两次之间停 25ms：Windows 上杀毒软件、
+// 索引器的短暂占用，以及读到别人正写到一半的内容，停一下再读多半就好了——只读一次的话，一次占用就会让合法的文件
+// 被说成「写坏了」，两次连着占用就退成只留痕（/agent-team:at-init 会按「门禁没在跑」叫停）。读到能解析成对象的
+// 就返回它（剥 BOM、要普通对象，与 runctx 的 readJson 同一口径）；3 次都解析不出，返回最后读到的原文；都读不到，
+// text 为 null。
+function readProjectText(file) {
+  let text = null
+  for (let i = 0; i < 3; i++) {
+    if (i > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25)
+    let t = null
+    try {
+      t = readFileSync(file, 'utf8')
+    } catch {}
+    if (t === null) continue
+    text = t
+    const value = parseStateText(t)
+    if (value !== null) return { value, text }
+  }
+  return { value: null, text }
+}
+
+// 读得到、却解析不出的 project.json 是不是 UTF-16 编码（Windows PowerShell 5.1 的 Out-File、> 的默认编码）：按
+// UTF-8 读出来，ASCII 内容的每个字符后面都跟着一个 NUL。
+function looksUtf16(text) {
+  return typeof text === 'string' && text.includes(String.fromCharCode(0))
 }
 
 // 刚返回的这个角色，是不是当前阶段执行角色的一个**合法协调者**？
@@ -876,17 +903,13 @@ function main() {
       // 在哪都不知道）也照原路 fail open —— 见 hooks/lib/runctx.mjs 那里的注释。
       if (isProjectJson(filePath, ctx.agentTeamDir)) {
         let project = readProjectConfig(ROOT_PROJECT)
-        // 读不出来时自己再读一遍原文（M3u 复核轮）：readProjectConfig 可能只是撞上了短暂的占用（Windows 上杀毒
-        // 软件、索引器常见的 EBUSY），紧接着重读就是合法的——那就照正常路径发报告与触达表，不对一份合法的文件说
-        // 「写坏了」。也不能退成只留痕：stdout 空着，/agent-team:at-init 会按「门禁没在跑」叫停整趟勘察。剥 BOM、
-        // 要普通对象，与 runctx 的 readJson 同一口径（parseStateText）。
+        // 读不出来时自己再读原文（M3u，readProjectText）：readProjectConfig 可能只是撞上了短暂的占用，再读就是合法
+        // 的——那就照正常路径发报告与触达表，不对一份合法的文件说「写坏了」。
         let text = null
         if (!project.ok) {
-          try {
-            text = readFileSync(filePath, 'utf8')
-          } catch {}
-          const reparsed = parseStateText(text)
-          if (reparsed !== null) project = { ok: true, value: reparsed }
+          const again = readProjectText(filePath)
+          text = again.text
+          if (again.value !== null) project = { ok: true, value: again.value }
         }
         if (project.ok) {
           // ⚠️ ctx.kind 的两支在这条缝上**不是**二选一（终审复评 a）：
@@ -922,7 +945,7 @@ function main() {
         // 误当成「门禁没在跑」。不回显文件内容，不造空触达表。读不到（被删、被占用）时照旧只留痕（落到最后那行）。
         if (text !== null) {
           if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
-          emitLedger(spec.event, [brokenProjectNotice({ runInProgress: ctx.kind !== 'no-run' })])
+          emitLedger(spec.event, [brokenProjectNotice({ runInProgress: ctx.kind !== 'no-run', utf16: looksUtf16(text) })])
           process.exit(0)
         }
       }
@@ -960,15 +983,22 @@ function main() {
       // readRunContext 判 unreadable，落到这里的每一次写入此前都只往 stderr 留痕：PM 写 state.json、current-run、
       // 契约都收不到任何东西，契约哈希拿不到，commands/at.md 的「没收到就停下：门禁没在跑」把用户引去排查一个
       // 不存在的问题。写 .agent-team 下任何文件时（PM 这一趟会写的都在那下面），自己读一遍 project.json：读得到、
-      // 解析不出或不是对象，就回传那句固定的话的变体；读不到（被删、被占用）照旧只留痕。不回显文件内容。
-      if (typeof filePath === 'string' && underDir(filePath, ctx.agentTeamDir)) {
-        let text = null
-        try {
-          text = readFileSync(join(ctx.agentTeamDir, 'project.json'), 'utf8')
-        } catch {}
-        if (text !== null && parseStateText(text) === null) {
+      // 解析不出或不是对象，就回传那句固定的话的变体；读不到（被删、被占用）照旧只留痕。不回显文件内容。写的正是
+      // project.json 时不走这里：上面那条缝已经读过它（读不到才落到这里），不再用「在别处被弄坏」的口径说它。
+      // .agent-team 之外的写入保持沉默，同下面 ctx.ok 那一支：project.json 坏着的项目里，主会话与执行角色每写一个
+      // 业务文件都刷一遍这段话，会把真正要看的东西淹掉。
+      if (
+        typeof filePath === 'string' &&
+        underDir(filePath, ctx.agentTeamDir) &&
+        !isProjectJson(filePath, ctx.agentTeamDir)
+      ) {
+        const { value, text } = readProjectText(join(ctx.agentTeamDir, 'project.json'))
+        if (text !== null && value === null) {
+          // no-run 不留痕，与上面那条缝同一个理由：不把人指向 current-run 去查一个不存在的问题。
           if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
-          emitLedger(spec.event, [brokenProjectNotice({ runInProgress: ctx.kind !== 'no-run', justWritten: false })])
+          emitLedger(spec.event, [
+            brokenProjectNotice({ runInProgress: ctx.kind !== 'no-run', justWritten: false, utf16: looksUtf16(text) }),
+          ])
           process.exit(0)
         }
       }
@@ -1032,7 +1062,7 @@ function main() {
         }
       } else {
         const full = validateProject(ctx.project, { roster: loadRoster() })
-        projectReport = kind === 'state' ? { block: full.block } : full
+        projectReport = kind === 'state' ? { block: full.block, plugin: full.plugin } : full
       }
     }
 

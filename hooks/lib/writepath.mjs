@@ -254,7 +254,9 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
 
   // 8. 调用者自己的条目有阻断问题（不是数组、元素不是字符串、前缀出根、认领整个根、带冒号）：只拒它——整条条目
   //    作废，连它其余合法的前缀也写不了。理由里说出来：实测只点一条前缀时，PM 会读成「只有这条前缀失效」而留着它。
-  const own = entryProblems(role, paths[role])
+  //    问题按 audience: 'role' 取：只说问题本身，不带「删掉这一条……收尾时告诉用户」这类说给 PM 的改法——执行角色
+  //    改不了 project.json、也见不到用户，它的出路是 fixIt 那句冒泡。
+  const own = entryProblems(role, paths[role], { audience: 'role' })
   if (own.block.length) {
     return {
       decision: 'deny',
@@ -270,9 +272,16 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   const myPaths = paths[role]
   if (underAny(target, myPaths, base)) return { decision: 'allow' }
 
-  // 认领者查找只看别人条目里合法的前缀：别人条目里一个坏元素不该把拒绝理由变成「门禁异常」。
+  // 认领者查找只看别人条目里合法的前缀：别人条目里一个坏元素不该把拒绝理由变成「门禁异常」。也只看 H3 会拿来判
+  // 人的键（花名册里、不是 PM 与主线程）：说「这条路径归 at-pm」「归拼错的键」，是在叫执行角色去找一个不存在的主人
+  // 协调。第 3 步已经保证走到这里时花名册有效。
   const claimant = Object.entries(paths).find(
-    ([other, value]) => other !== role && underAny(target, usablePrefixes(value), base),
+    ([other, value]) =>
+      other !== role &&
+      Object.hasOwn(roster, other) &&
+      other !== 'at-pm' &&
+      other !== '__main__' &&
+      underAny(target, usablePrefixes(value), base),
   )
 
   if (claimant) {

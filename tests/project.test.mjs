@@ -59,17 +59,32 @@ test('阻断：前缀出了项目根、认领整个项目根、带冒号', () =>
 test('阻断的理由给得出改法：出根的删掉、别换成项目里的同名目录；认领根的逐个列文件；冒号的理由不假装 POSIX 上也是盘符', () => {
   // 实测：只说「前缀要留在项目里」时，PM 会把 '../shared/' 换成项目里并不存在的 'shared/'——那是另一个地方。
   const out = prefixProblems('../shared/').block.join('\n')
-  assert.ok(out.includes('删掉') && out.includes('不要换成项目里'), out)
+  assert.ok(out.includes('删掉') && out.includes('不要换成项目里') && out.includes('收尾时告诉用户删了哪一条'), out)
+  // 理由不说「这个角色写不到项目外」：PM、没有键的 at-qa、at-acceptance 写得到，这句还会随降档出现在 at-pm 的键上。
+  assert.ok(!out.includes('写不到项目外') && out.includes('门禁不会按这条前缀放行任何写入'), out)
+  const onPm = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-pm': ['../x/'] } })
+  assert.ok(!all(onPm).includes('写不到项目外'), all(onPm))
   // 平铺在项目根的文件没有目录可写：前缀也可以是单个文件。
   for (const p of ['', '.', './']) {
     const root = prefixProblems(p).block.join('\n')
-    assert.ok(root.includes('单个文件'), root)
+    assert.ok(root.includes('单个文件') && root.includes('逐个列出'), root)
   }
   // 冒号在 POSIX 上是普通文件名字符。阻断照旧不分平台（同一份 project.json 各平台意思一样），理由说清是 Windows 的事。
   for (const platform of ['linux', 'darwin', 'win32']) {
     const colon = prefixProblems('src/a:b/', { platform }).block.join('\n')
-    assert.ok(colon.includes('Windows'), `${platform}：${colon}`)
+    assert.ok(colon.includes('Windows') && colon.includes('所有平台上都不接受') && colon.includes('换一个不带冒号的名字'), `${platform}：${colon}`)
   }
+})
+
+test('给执行角色看的措辞（audience: role）：阻断只说问题本身，不带说给 PM 的改法——执行角色改不了 project.json、见不到用户', () => {
+  for (const p of ['../shared/', '', 'src/a:b/']) {
+    const pm = prefixProblems(p).block.join('\n')
+    const role = prefixProblems(p, { audience: 'role' }).block.join('\n')
+    assert.ok(role.length > 0 && role.length < pm.length, `${JSON.stringify(p)}：${role}`)
+    for (const k of ['删掉这一条', '收尾时告诉用户', '逐个列出', '换一个不带冒号的名字']) assert.ok(!role.includes(k), `${k}：${role}`)
+  }
+  const e = entryProblems('at-backend', ['src/', '../x/'], { audience: 'role' }).block.join('\n')
+  assert.ok(e.includes('出了项目根') && !e.includes('删掉这一条'), e)
 })
 
 test('不阻断、也不报要改：./ 开头、中间走回来的 ..、以 .. 开头的名字——H3 解析后都落在项目根里', () => {
@@ -101,10 +116,25 @@ test('要改：键不是花名册角色（拼错、带插件前缀、别的插�
 
 test('H3 不拿来判人的键（at-pm、__main__、认不出的键）上的坏前缀不进阻断——阻断档只放真会让某个角色被拒的', () => {
   // 阻断档的标题说「这些角色写 run 目录之外会被拒」，写 state.json 时还只报这一档：挂在不判人的键上就是假话。
-  for (const [key, value] of [['at-pm', ['../']], ['__main__', ['']], ['at-fronted', ['../']], ['agent-team:at-backend', 'src/']]) {
+  for (const [key, value, what] of [
+    ['at-pm', ['../'], '出了项目根'],
+    ['__main__', [''], '整个项目根'],
+    ['at-fronted', ['../'], '出了项目根'],
+    ['agent-team:at-backend', 'src/', '不是数组'],
+  ]) {
     const r = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, [key]: value } })
     assert.deepEqual(r.block, [], `${key}：${all(r)}`)
-    assert.ok([...r.fix, ...r.confirm].some((s) => s.includes(JSON.stringify(key))), `${key} 的问题要换一档说：${all(r)}`)
+    // 断言那条前缀级的问题本身降进了要改——只断言含键名的话，键级那一句（「不要给 at-pm 建键」）就满足了。
+    assert.ok(r.fix.some((s) => s.includes(JSON.stringify(key)) && s.includes(what)), `${key} 的问题要降成要改：${all(r)}`)
+  }
+  // 三档各自的去向：阻断与要改进要改，请确认留在请确认，不升不丢。
+  for (const key of ['at-pm', '__main__', 'at-fronted']) {
+    const r = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, [key]: ['../', 'lib/*', '/lib2/'] } })
+    assert.deepEqual(r.block, [], `${key}：${all(r)}`)
+    assert.ok(r.fix.some((s) => s.includes('"../"') && s.includes('出了项目根')), `${key}：${all(r)}`)
+    assert.ok(r.fix.some((s) => s.includes('"lib/*"')), `${key}：${all(r)}`)
+    assert.ok(r.confirm.some((s) => s.includes('"/lib2/"')), `${key}：${all(r)}`)
+    assert.ok(!r.fix.some((s) => s.includes('"/lib2/"')), `${key}：${all(r)}`)
   }
   // H3 会拿键去判的，照旧阻断——包括建了键的 at-qa、at-acceptance（建了键就不再早退放行）与 at-outsider。
   for (const key of [...NO_PATHS_ROLES, 'at-outsider', 'at-backend']) {
@@ -142,6 +172,22 @@ test('要改：前缀里有不可见的格式字符（零宽空格之类）—�
     const r = prefixProblems(p)
     assert.ok(r.fix.some((s) => s.includes(cp)), `${JSON.stringify(p)}：${r.fix.join('；')}`)
   }
+  // 码点写全四位、去重、全部列出、按码点（不是 UTF-16 代理项）。
+  const SHY = String.fromCharCode(0xad)
+  const s = prefixProblems(`src/${ZW}a${ZW}b${SHY}${WJ}/`).fix.find((x) => x.includes('不可见'))
+  assert.ok(s && s.includes('（U+200B、U+00AD、U+2060）'), s)
+  const t = prefixProblems(`src/a${String.fromCodePoint(0xe0001)}/`).fix.find((x) => x.includes('不可见'))
+  assert.ok(t && t.includes('（U+E0001）'), t)
+})
+
+test('要改：U+FEFF 在前缀首尾只报一条「不可见的格式字符」——它也算空白，但不能再让人去找一个并不存在的空格', () => {
+  const BOM = String.fromCharCode(0xfeff)
+  for (const p of [`${BOM}src/`, `src/${BOM}`]) {
+    const r = prefixProblems(p)
+    assert.equal(r.fix.length, 1, r.fix.join('；'))
+    assert.ok(r.fix[0].includes('U+FEFF') && !r.fix[0].includes('首尾有空白'), r.fix[0])
+  }
+  assert.ok(prefixProblems(' src/').fix.some((x) => x.includes('首尾有空白')))
 })
 
 test('要改：available_roles 缺失、不是数组、有非花名册名字', () => {
@@ -202,6 +248,13 @@ test('请确认：阻断的前缀不参与嵌套——认领整个根的 at-ios 
   assert.ok(!r.confirm.some((s) => s.includes('包含')), all(r))
 })
 
+test('请确认：嵌套只在 H3 会判、而且整条没作废的条目之间比——at-pm、__main__、拼错的键、整条作废的角色不说「也能写进这一块」', () => {
+  for (const extra of [{ 'at-pm': ['docs/'] }, { __main__: ['src/'] }, { 'at-fronted': ['src/'] }, { 'at-frontend': ['src/', '../'] }]) {
+    const r = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, ...extra } })
+    assert.ok(!r.confirm.some((s) => s.includes('也能写进这一块')), `${JSON.stringify(extra)}：${all(r)}`)
+  }
+})
+
 test('请确认：前缀落在 Claude Code 会自动加载或执行的地方（.claude/、.git/、根下的 CLAUDE.md 之类）', () => {
   const hit = ['.claude/', '.claude/commands/', '.git/', '.git', 'CLAUDE.md', 'CLAUDE.local.md', '.mcp.json', 'x/../.claude/']
   if (WIN || process.platform === 'darwin') hit.push('.CLAUDE/', 'claude.md')
@@ -210,9 +263,12 @@ test('请确认：前缀落在 Claude Code 会自动加载或执行的地方（.
     assert.ok(r.confirm.length > 0, JSON.stringify(p))
     assert.deepEqual(r.block, [], `${JSON.stringify(p)} 不阻断：可能是有意的`)
   }
-  for (const p of ['.github/', '.gitignore', '.claude-plugin/', 'docs/.claude-notes/', 'src/CLAUDE.md.bak']) {
+  // 文件只认项目根下那几个：子目录里的同名文件、名叫 CLAUDE.md 的目录都不报（理由在 project.mjs 的 AUTOLOADED 注释）。
+  for (const p of ['.github/', '.gitignore', '.claude-plugin/', 'docs/.claude-notes/', 'src/CLAUDE.md.bak', 'packages/app/.mcp.json', 'CLAUDE.md/notes/']) {
     assert.deepEqual(prefixProblems(p).confirm, [], JSON.stringify(p))
   }
+  // POSIX 上 '.claude\x' 是项目根下一个名字带反斜杠的文件，不在 .claude/ 下。
+  for (const platform of ['linux', 'darwin']) assert.deepEqual(prefixProblems(`.claude${BS}x`, { platform }).confirm, [], platform)
 })
 
 test('请确认：前缀以 / 开头——门禁把它当相对项目根，写成相对的更清楚', () => {
@@ -230,17 +286,28 @@ test('__main__ 的键：请确认，门禁在进 H3 之前豁免主线程；at-o
 
 // ---- 花名册读坏时 ----
 
-test('花名册读坏时：报一条阻断——不是 project.json 的问题，停下让用户重装；不核对角色名，模板原样不多报一条要改', () => {
+test('花名册读坏时：单列一条插件问题——不是 project.json 的问题、改它修不好，停下让用户重装；不核对角色名，不混进三档', () => {
   for (const roster of [{}, [], null, ['at-backend']]) {
     const r = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-fronted': ['x/'] } }, roster)
     assert.ok(!all(r).includes('at-fronted'), JSON.stringify(roster))
-    // H1 拒一切派发、H3 拒 PM 与 at-qa、at-acceptance 以外的角色：这不可能是「有意的」，不放进请确认。
-    assert.equal(r.block.length, 1, all(r))
-    assert.ok(r.block[0].includes('roster.json') && r.block[0].includes('不要改 project.json') && /重装|更新/.test(r.block[0]), all(r))
+    // H1 拒一切派发、H3 拒 PM 与没有键的 at-qa、at-acceptance 以外的角色：不可能是「有意的」；改 project.json
+    // 又修不好它，所以不进三档（【project.json】那一段的首句叫人整份重写、结尾叫人改到没有为止）。
+    assert.equal(r.plugin.length, 1, JSON.stringify(r))
+    const p = r.plugin[0]
+    for (const k of ['roster.json', '这不是 project.json 的问题', '改它修不好', '没有键的']) assert.ok(p.includes(k), `${k}：${p}`)
+    assert.match(p, /重装|更新/)
+    // H3 的第 2 步排在第 3 步之前：没有键的 at-qa、at-acceptance 在花名册读坏时照样放行。
+    for (const role of NO_PATHS_ROLES) assert.ok(p.includes(role), `${role}：${p}`)
+    assert.ok(!all(r).includes('roster.json'), all(r))
     // 花名册读坏时 available_roles 里的名字没法核对，也不该被报成「不是花名册里的角色名」。
-    assert.deepEqual(r.fix, [], all(r))
-    assert.ok(!r.confirm.some((s) => s.includes('roster.json')), all(r))
+    assert.deepEqual([r.block, r.fix, r.confirm], [[], [], []], all(r))
   }
+  // 执行角色键上的阻断照报：读坏是暂时的，重装之后这些键照常被判，不先降成要改。
+  for (const roster of [{}, null]) {
+    const r = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-backend': ['../'] } }, roster)
+    assert.ok(r.block.some((s) => s.includes('"../"')), all(r))
+  }
+  assert.deepEqual(v(TEMPLATE).plugin, [])
 })
 
 // ---- 外部值不另起一行（docs/27）----
@@ -256,20 +323,20 @@ test('键、前缀、available_roles 里的值带换行字符，也不会让任�
       }, ROSTER],
       // paths、available_roles 本身是带换行的字符串。
       [{ ...TEMPLATE, paths: `p${b}伪造`, available_roles: `a${b}伪造` }, ROSTER],
-      // 嵌套提醒：两个键、两条前缀都带载荷（只让前缀带，照不到键那两处 quote）。
-      [{ ...TEMPLATE, paths: { [`k${b}伪造`]: [`n${b}伪造/`], [`j${b}伪造`]: [`n${b}伪造/y/`] } }, ROSTER],
+      // 嵌套提醒：两条前缀带载荷。嵌套只在 H3 会判的键之间比，键是花名册里的角色名，没有载荷可带。
+      [{ ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-product': [`n${b}伪造/`], 'at-architect': [`n${b}伪造/y/`] } }, ROSTER],
       // 花名册读坏时 available_roles 的名字只进「paths 里却没有它的键」那一句。
       [{ ...TEMPLATE, available_roles: [...TEMPLATE.available_roles, `x${b}伪造`] }, {}],
     ]
     for (const [project, roster] of cases) {
       const r = v(project, roster)
-      for (const s of [...r.block, ...r.fix, ...r.confirm]) {
+      for (const s of [...r.block, ...r.fix, ...r.confirm, ...r.plugin]) {
         assert.ok(!breaks.some((c) => s.includes(c)), JSON.stringify(s))
       }
       assert.ok(all(r).includes('伪造'), `载荷没进任何一条——这条判据什么都没测：${JSON.stringify(project).slice(0, 80)}`)
     }
   }
   // 嵌套那一格要真的出了嵌套提醒，不然它没测到嵌套那几处 quote。
-  const n = v({ ...TEMPLATE, paths: { k伪造: ['n伪造/'], j伪造: ['n伪造/y/'] } })
+  const n = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-product': ['n伪造/'], 'at-architect': ['n伪造/y/'] } })
   assert.ok(n.confirm.some((s) => s.includes('包含')), all(n))
 })

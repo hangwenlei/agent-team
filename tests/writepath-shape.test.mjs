@@ -101,6 +101,17 @@ test('调用者自己的条目有阻断问题（不是数组、元素不是字�
 test('一条坏前缀让整个条目作废：自己其余合法的前缀也写不了——理由把这一点说出来，不让人读成「只有这条前缀失效」', () => {
   const r = decide('at-backend', OWN, withPaths({ ...TEMPLATE.paths, 'at-backend': ['src/server/', '../shared/'] }))
   assertConfigDeny(r, '"../shared/"', '其余合法的前缀')
+  // 给执行角色的理由只说问题本身：「删掉这一条……收尾时告诉用户」是说给 PM 的，执行角色改不了 project.json、
+  // 也见不到用户；它的出路是冒泡（assertConfigDeny 已经核了）。
+  for (const k of ['删掉这一条', '收尾时告诉用户']) assert.ok(!r.reason.includes(k), `${k}：${r.reason}`)
+})
+
+test('配置问题的出路指向规则那一节，不叫用户重跑命令：括注里的节号与 /agent-team:at-init 里「划分路径归属」那一节对得上', () => {
+  const md = readFileSync(new URL('../commands/at-init.md', import.meta.url), 'utf8')
+  const n = (md.match(/^## (\d+)\. 划分路径归属/m) ?? [])[1]
+  assert.ok(n, 'at-init.md 里找不到「划分路径归属」那一节')
+  const r = decide('at-backend', OWN, withPaths({ ...TEMPLATE.paths, 'at-backend': ['../'] }))
+  assert.ok(r.reason.includes(`规则见 /agent-team:at-init 第 ${n} 节`), r.reason)
 })
 
 test('别的角色的条目坏了、paths 里多了认不出的键：不影响其余角色写自己的地盘', () => {
@@ -194,6 +205,18 @@ test('没人认领：理由里带着调用者自己的前缀，并说明前缀�
   assert.match(r.reason, /冒泡/)
   assert.match(r.reason, /PM/)
   assert.ok(!r.reason.includes('再动它'), r.reason)
+  // 没人认领也可能是这次调用越界了，不能把它说成「配置问题、不是这次调用的问题」（不拼 fixIt）。
+  assert.ok(!r.reason.includes('这是配置问题'), r.reason)
+  assert.ok(r.reason.includes('你写不了 project.json'), r.reason)
+})
+
+test('「这条路径归谁」只认 H3 会拿来判人的键：at-pm、__main__、拼错的键认领了也不说成「归它」', () => {
+  const paths = { ...TEMPLATE.paths }
+  delete paths['at-ios']
+  const r = decide('at-backend', IOS, withPaths({ ...paths, 'at-pm': ['src/'], __main__: ['src/'], 'at-fronted': ['src/'] }))
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /没有被任何角色认领/)
+  for (const k of ['at-pm', '__main__', 'at-fronted']) assert.ok(!r.reason.includes(`归 "${k}"`), `${k}：${r.reason}`)
 })
 
 // ---- 拒绝理由里的外部值只占一行（docs/27）----

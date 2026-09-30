@@ -23,6 +23,7 @@ function sectionOf(md, heading) {
 
 const INIT = read('commands/at-init.md')
 const AT = read('commands/at.md')
+const RESUME = read('commands/at-resume.md')
 
 test('at-init §2：早退放行在执行角色里只对按设计不认领路径的那几个，并逐个点名；at-pm 另行放行，不被说成「没键就拒」', () => {
   const s = flat(sectionOf(INIT, '## 2.'))
@@ -52,13 +53,28 @@ test('at-init §2：重跑时缺键的角色逐个判，不一刀切地删角色
   for (const k of ['键名拼错就改名', '只写 run 目录就补 `[]`', '重新勘察后确实用不上，才从 `available_roles` 删']) assert.ok(s.includes(k), k)
 })
 
-test('at-init §1：重跑先读用户项目里的旧 project.json，排在读模板之前，并说清两者不是一个文件', () => {
+// 上限（docs/16 §3）：钉得住正文，钉不住模型照不照做。实测：只写「在读模板之前先读旧文件」时，模型常把判断旧文件
+// 在不在的那一步和读模板并发（14 次里只有 2 次严格先读旧文件）；读序对了也挡不住把模板值说成旧文件（8 次里 1 次）；
+// 写成「第一步单独一条消息读旧文件、重跑不读模板」后 14 次里 11 次没读模板、0 次错描。拒绝的判据长什么样：CI 里起
+// 真会话，核自检之后第一个调用是单独一条 Read .agent-team/project.json、重跑全程不 Read 模板——CI 没有模型与密钥。
+// 什么会让答案改变：出现一次没读模板、却仍把模板值说成旧文件的重跑——那就改成门禁侧给旧文件留底、回传改了哪些键。
+test('at-init §1：第一步单独一条消息读旧 project.json；重跑不读模板、以旧文件为底，并说清两者不是一个文件', () => {
   const s = flat(sectionOf(INIT, '## 1.'))
-  const old = s.indexOf('先用 `Read` 读用户项目里的 `.agent-team/project.json`')
-  const tpl = s.indexOf('templates/project.json')
-  assert.ok(old >= 0, s.slice(0, 200))
-  assert.ok(tpl >= 0 && s.indexOf('templates/project.json', tpl + 1) < 0, '§1 只在「之前」那一句提模板')
+  const first = s.indexOf('**第一步只做一件事**：用 `Read` 读用户项目里的 `.agent-team/project.json`')
+  assert.ok(first >= 0, s.slice(0, 200))
+  assert.ok(s.includes('这一步单独一条消息，不和任何别的工具调用并发'), s.slice(0, 300))
+  const noTpl = s.indexOf('**重跑不读 `${CLAUDE_PLUGIN_ROOT}/templates/project.json`**')
+  assert.ok(noTpl > first, '「重跑不读模板」要写在第一步之后')
+  assert.ok(s.includes('旧文件不是合法的 JSON 也一样'), '坏文件也不许借口去读模板')
+  assert.ok(s.includes('以这次读到的旧文件为底改'), s.slice(0, 400))
   assert.ok(s.includes('**不是用户的旧文件**') && s.includes('只能照这次 `Read` 的结果说'), s.slice(0, 400))
+  assert.ok(s.includes('和磁盘相符的设置保留'), s.slice(0, 600))
+})
+
+test('at-init §2：模板骨架只管首跑；重跑以旧文件为底改、不读模板', () => {
+  const s = flat(sectionOf(INIT, '## 2.'))
+  assert.ok(s.includes('首跑照 `${CLAUDE_PLUGIN_ROOT}/templates/project.json` 的骨架写'), s.slice(0, 200))
+  assert.ok(s.includes('重跑以第 1 节读到的旧文件为底改，不读模板'), s.slice(0, 200))
 })
 
 test('at-init §4：重跑时逐条说和旧文件比改了哪些键；请确认的留下了哪几条', () => {
@@ -78,11 +94,17 @@ test('at-init §3：先处理【project.json】——阻断与要改改到没有
     '不要把角色从 `available_roles` 里删掉',
     // 阻断按角色生效：一条坏前缀让这个角色其余合法的前缀也写不了（实测：只说「这条前缀会被拒」时 PM 会留着它）。
     '阻断**按角色生效**',
-    // roster.json 读坏归阻断档，但改 project.json 修不好它。
-    '**不要改 `project.json`**，停下告诉用户',
+    // roster.json 读坏单列【插件】，改 project.json 修不好它。
+    '回传里要是有【插件】',
+    '**改它修不好**——停下，告诉用户',
   ]) {
     assert.ok(s.includes(k), k)
   }
+})
+
+test('/agent-team:at-resume §3：【插件】是「先修它」的例外——改 project.json 修不好，停下让用户重装', () => {
+  const s = flat(sectionOf(RESUME, '## 3.'))
+  assert.ok(s.includes('【插件】') && s.includes('修不好') && /重装|更新/.test(s), s)
 })
 
 test('/agent-team:at §0：不再说「每个执行角色都会被拒」——按设计不认领路径的那几个不会', () => {
@@ -106,6 +128,8 @@ test('/agent-team:at §2：没收到契约回传时，先排除 project.json 读
   const down = s.indexOf('那说明门禁没在跑')
   assert.ok(cfg >= 0 && down > cfg, s)
   assert.ok(s.includes('再原样重写一次 `00-contract.md`'), s)
+  // 实测：为了重新触发回传，PM 改过冻结的「用户原话」。
+  assert.ok(s.includes('逐字不动'), s)
 })
 
 test('README 两半的已知边界：项目经理以外的角色在 run 目录之外只能写自己的前缀、没有条目哪都写不了，at-qa 与 at-acceptance 是例外', () => {

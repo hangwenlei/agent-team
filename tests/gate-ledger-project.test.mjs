@@ -6,16 +6,17 @@
 //   - project.json 在别处被弄坏（用户手改加了注释、尾逗号）而 run 在：写 .agent-team 下任何文件都回传那句固定的话
 //     的变体——此前这一格整趟 run 一声不吭，PM 拿不到契约哈希，只能按「门禁没在跑」停下；
 //   - 每趟 run 开头 PM 写 current-run 时：整份报一次（已装用户的旧配置在 S1 就露面，不等到 S5 撞上拒绝）；
-//   - PM 写 state.json 时：只报阻断（覆盖升级前开始、升级后续跑的 run；不报警告，免得每次记账都刷一遍）。
+//   - PM 写 state.json 时：只报阻断（覆盖升级前开始、升级后续跑的 run；不报警告，免得每次记账都刷一遍）；
+//   - roster.json 读不出来：单列【插件】，排在【project.json】之前——它不是 project.json 的问题，改它修不好。
 // 没有问题时一个字都不发。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { run, decisionOf, hermeticEnv } from './helpers/gate-runner.mjs'
-import { projectNotice } from '../hooks/lib/ledger.mjs'
+import { brokenProjectNotice, buildLedgerNotices, pluginNotice, projectNotice } from '../hooks/lib/ledger.mjs'
 import { NO_PATHS_ROLES } from '../hooks/lib/project.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 
@@ -174,11 +175,32 @@ for (const [label, text] of [
       assert.ok(ctx.includes('【project.json】') && ctx.includes('不是一个合法的 JSON 对象'), ctx)
       assert.ok(!ctx.includes('【触达表】'), ctx)
       assert.ok(!ctx.includes(text.trim()) || text.trim().length < 3, `回显了文件内容：${ctx}`)
+      // 写的正是 project.json：说「刚写进去的」，不叫它去「原样重写刚才那个文件」（那就是它自己）。
+      assert.ok(ctx.includes('刚写进去的') && !ctx.includes('原样重写'), ctx)
+      assert.ok(ctx.includes('回报上级'), ctx)
     }
     withoutRun(check)
     withRun(TEMPLATE, check)
   })
 }
+
+test('brokenProjectNotice：写的正是它、run 里在别处被弄坏、没有 run 时在别处被弄坏，三种口径各给各的出路', () => {
+  const jw = brokenProjectNotice({ runInProgress: true })
+  assert.ok(jw.includes('刚写进去的') && jw.includes('回报上级'), jw)
+  assert.ok(!jw.includes('原样重写') && !jw.includes('哈希'), jw)
+  const el = brokenProjectNotice({ runInProgress: true, justWritten: false })
+  assert.ok(!el.includes('刚写进去的'), el)
+  for (const k of ['哈希这时也回传不了', '原样重写一次刚才那个文件', '回报上级']) assert.ok(el.includes(k), `${k}：${el}`)
+  // 没有 run 就没有契约哈希可拿；改好 project.json 本身就会收到报告与触达表。
+  const nr = brokenProjectNotice({ runInProgress: false, justWritten: false })
+  for (const k of ['哈希', '原样重写', 'run 进行中']) assert.ok(!nr.includes(k), `${k}：${nr}`)
+  assert.ok(nr.includes('改好就会收到报告与触达表') && nr.includes('回报上级'), nr)
+  // 原因：泛说时把编码也列上；认出 UTF-16 时直说，并叫它写两次也不奇怪（Write 第一次会沿用原编码）。
+  assert.ok(jw.includes('注释') && jw.includes('尾逗号') && jw.includes('不是 UTF-8 编码'), jw)
+  const u = brokenProjectNotice({ runInProgress: true, justWritten: false, utf16: true })
+  for (const k of ['UTF-16', '门禁只读 UTF-8', '内容看着没问题也要用 Write 整份重写', '再写一次']) assert.ok(u.includes(k), `${k}：${u}`)
+  assert.ok(!u.includes('注释'), u)
+})
 
 test('写坏的 project.json：run 进行中补一句后果、往 stderr 留痕；没有 run 时两样都没有', () => {
   const bad = '{ "paths": { '
@@ -205,23 +227,51 @@ test('project.json 不在（写完又被删、或者被占用读不到）：不�
   })
 })
 
-test('project.json 读第一次撞上占用、再读一次是合法的：照常发报告与触达表，不谎报「写坏了」', () => {
+test('project.json 读的时候撞上占用、再读是合法的：照常发报告与触达表，不谎报「写坏了」；连着占用超过重读的上限才只留痕', () => {
   const ebusy = fileURLToPath(new URL('./helpers/ebusy-project.cjs', import.meta.url))
   const env = (n) => ({ ...hermeticEnv(), AGENT_TEAM_TEST_EBUSY_READS: String(n) })
-  // 没有 run：门禁的缝里第一次读撞上占用。
+  const BOM = String.fromCharCode(0xfeff)
+  // 没有 run：缝里 readProjectConfig 读一次，重读最多三次——前三次撞上占用，第四次读到。带 BOM 的合法文件同样认得。
+  for (const [n, text] of [[1, JSON.stringify(TYPO)], [3, JSON.stringify(TYPO)], [1, BOM + JSON.stringify(TYPO)]]) {
+    withoutRun((p) => {
+      writeFileSync(join(p, '.agent-team', 'project.json'), text)
+      const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p, env(n), { nodeArgs: ['-r', ebusy] }))
+      assert.ok(ctx.includes('【触达表】') && ctx.includes('"at-fronted"'), `${n}：${ctx}`)
+      assert.ok(!ctx.includes('不是一个合法的 JSON 对象'), ctx)
+    })
+  }
+  // run 在：读运行上下文还要多读一次。
+  for (const n of [2, 4]) {
+    withRun(TEMPLATE, (p) => {
+      writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TYPO))
+      const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p, env(n), { nodeArgs: ['-r', ebusy] }))
+      assert.ok(ctx.includes('【触达表】') && ctx.includes('"at-fronted"'), `${n}：${ctx}`)
+      assert.ok(!ctx.includes('不是一个合法的 JSON 对象'), ctx)
+    })
+  }
+  // 一直读不到：只留痕，不说「写坏了」，也不落进「在别处被弄坏」那一支（写的正是 project.json）。
   withoutRun((p) => {
     writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TYPO))
-    const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p, env(1), { nodeArgs: ['-r', ebusy] }))
-    assert.ok(ctx.includes('【触达表】') && ctx.includes('"at-fronted"'), ctx)
-    assert.ok(!ctx.includes('不是一个合法的 JSON 对象'), ctx)
+    const r = run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p, env(10), { nodeArgs: ['-r', ebusy] })
+    assert.equal(ctxOf(r), '')
+    assert.match(r.stderr, /ledger 回传/)
   })
-  // run 在：读运行上下文、缝里第一次读，两次都撞上占用。
-  withRun(TEMPLATE, (p) => {
-    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TYPO))
-    const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p, env(2), { nodeArgs: ['-r', ebusy] }))
-    assert.ok(ctx.includes('【触达表】') && ctx.includes('"at-fronted"'), ctx)
-    assert.ok(!ctx.includes('不是一个合法的 JSON 对象'), ctx)
-  })
+})
+
+test('project.json 是 UTF-16 编码（Windows PowerShell 5.1 的默认）：回传直说编码，不只说注释和尾逗号', () => {
+  const body = Buffer.from(JSON.stringify(TEMPLATE), 'utf16le')
+  for (const bytes of [Buffer.concat([Buffer.from([0xff, 0xfe]), body]), body]) {
+    withoutRun((p) => {
+      writeFileSync(join(p, '.agent-team', 'project.json'), bytes)
+      const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p))
+      assert.ok(ctx.includes('UTF-16') && ctx.includes('门禁只读 UTF-8'), ctx)
+    })
+    withRun(TEMPLATE, (p, runDir) => {
+      writeFileSync(join(p, '.agent-team', 'project.json'), bytes)
+      const ctx = ctxOf(run('ledger', posted(join(runDir, 'state.json')), undefined, p))
+      assert.ok(ctx.includes('UTF-16') && ctx.includes('门禁只读 UTF-8'), ctx)
+    })
+  }
 })
 
 // ---- project.json 在别处被弄坏、run 在 ----
@@ -240,10 +290,15 @@ for (const [label, text] of [
       writeFileSync(join(p, '.agent-team', 'project.json'), text)
       writeFileSync(join(runDir, '00-contract.md'), '# 契约\n')
       for (const f of [join(runDir, 'state.json'), join(p, '.agent-team', 'current-run'), join(runDir, '00-contract.md')]) {
-        const ctx = ctxOf(run('ledger', posted(f), undefined, p))
+        const r = run('ledger', posted(f), undefined, p)
+        const ctx = ctxOf(r)
         assert.ok(ctx.includes('【project.json】') && ctx.includes('不是一个合法的 JSON 对象'), `${f}：${ctx}`)
         assert.ok(!ctx.includes('刚写进去的'), ctx)
         assert.ok(ctx.includes('run 进行中'), ctx)
+        // 出路：改好之后原样重写一次刚才那个文件拿回传；不是 PM 的回报上级。
+        for (const k of ['哈希这时也回传不了', '原样重写一次刚才那个文件', '回报上级']) assert.ok(ctx.includes(k), `${k}：${ctx}`)
+        // run 读不出来时放行必须留痕，而且只留一行。
+        assert.equal((r.stderr.match(/ledger 回传：读不到运行上下文/g) ?? []).length, 1, r.stderr)
         assert.ok(!ctx.includes('手改') && !ctx.includes('docs/product/'), `回显了文件内容：${ctx}`)
       }
     })
@@ -261,6 +316,49 @@ test('从零建 run、指针还没写：写第一份 state.json 时 project.json
   })
 })
 
+test('没有 run、project.json 坏着：写 .agent-team 下别的文件（at-init 的 reach.json）也回传，不说 run 进行中、不提哈希，不留痕', () => {
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), '{ "paths": {}, }')
+    const r = run('ledger', posted(join(p, '.agent-team', 'reach.json')), undefined, p)
+    const ctx = ctxOf(r)
+    assert.ok(ctx.includes('【project.json】') && ctx.includes('不是一个合法的 JSON 对象'), ctx)
+    for (const k of ['run 进行中', '哈希']) assert.ok(!ctx.includes(k), `${k}：${ctx}`)
+    // 与写 project.json 那条缝同一个理由：no-run 下不把人指向 current-run 去查一个不存在的问题。
+    assert.equal(r.stderr.trim(), '')
+  })
+})
+
+test('project.json 坏着时，.agent-team 之外的写入照旧一声不吭——执行角色与主会话写业务文件不被刷屏', () => {
+  const outside = (p) => [
+    [join(p, 'src', 'x.ts'), 'agent-team:at-backend'],
+    [join(p, 'README.md'), undefined],
+  ]
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), '[]')
+    for (const [f, who] of outside(p)) {
+      const input = posted(f)
+      if (who) input.agent_type = who
+      else delete input.agent_type
+      assert.equal(ctxOf(run('ledger', input, undefined, p)), '', f)
+    }
+  })
+  withRun(TEMPLATE, (p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), '[]')
+    assert.equal(ctxOf(run('ledger', posted(join(p, 'README.md')), undefined, p)), '')
+  })
+})
+
+test('带 BOM 的合法 project.json 不被当成写坏：run 读不出来（指针还没写）的那一格里写 state.json 不报', () => {
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), String.fromCharCode(0xfeff) + JSON.stringify(TEMPLATE))
+    const runDir = join(p, '.agent-team', 'runs', 'r1')
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, 'state.json'), JSON.stringify({ run_id: 'r1', stage: 'S1', contract_sha: 'PENDING', roster: [], artifacts: {}, rework: {}, never_invoked: [], escalations: [], history: [{ stage: 'S1', at: 't' }] }))
+    const ctx = ctxOf(run('ledger', posted(join(runDir, 'state.json')), undefined, p))
+    assert.ok(!ctx.includes('不是一个合法的 JSON 对象'), ctx)
+  })
+})
+
 test('反例：project.json 合法、或者根本不在时，写契约不发「不是一个合法的 JSON 对象」', () => {
   for (const project of [TEMPLATE, null]) {
     withRun(project, (p, runDir) => {
@@ -269,6 +367,43 @@ test('反例：project.json 合法、或者根本不在时，写契约不发「�
       assert.ok(!ctx.includes('不是一个合法的 JSON 对象'), ctx)
       assert.ok(ctx.includes('【契约】') || ctx.includes('sha256'), ctx)
     })
+  }
+})
+
+// ---- 【插件】：roster.json 读不出来 ----
+
+test('pluginNotice：没有插件问题时不发；有就单成一段【插件】，排在【project.json】与【触达表】之前', () => {
+  assert.equal(pluginNotice({ block: [], fix: [], confirm: [], plugin: [] }), null)
+  assert.equal(pluginNotice(null), null)
+  const notices = buildLedgerNotices({ kind: 'project', reach: {}, projectReport: { block: ['BLOCK-1'], fix: [], confirm: [], plugin: ['PLUGIN-1'] } })
+  const text = notices.join('\n')
+  const at = (s) => text.indexOf(s)
+  assert.ok(at('【插件】PLUGIN-1') >= 0 && at('【插件】') < at('【project.json】') && at('【project.json】') < at('【触达表】'), text)
+  // 它不在【project.json】那一段里：那一段的首句叫人整份重写 project.json、结尾叫人改到没有为止。
+  assert.ok(!projectNotice({ block: [], fix: [], confirm: [], plugin: ['PLUGIN-1'] }), '只有插件问题时不该出【project.json】')
+})
+
+test('门禁子进程：插件副本的 roster.json 读坏时，写 project.json、写 state.json 都收到【插件】，不叫 PM 改 project.json', () => {
+  const REPO = new URL('..', import.meta.url)
+  const plugin = realpathSync(mkdtempSync(join(tmpdir(), 'agent-team-lp-plug-')))
+  try {
+    cpSync(new URL('hooks', REPO), join(plugin, 'hooks'), { recursive: true })
+    cpSync(new URL('stages.json', REPO), join(plugin, 'stages.json'))
+    writeFileSync(join(plugin, 'roster.json'), '{')
+    const gate = join(plugin, 'hooks', 'boot.mjs')
+    withoutRun((p) => {
+      writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE))
+      const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), gate, p))
+      assert.ok(ctx.includes('【插件】') && ctx.includes('roster.json'), ctx)
+      assert.ok(!ctx.includes('【project.json】'), ctx)
+    })
+    withRun(TEMPLATE, (p, runDir) => {
+      const ctx = ctxOf(run('ledger', posted(join(runDir, 'state.json')), gate, p))
+      assert.ok(ctx.includes('【插件】'), ctx)
+      for (const k of ['改到没有为止', '整份重写']) assert.ok(!ctx.includes(k), `${k}：${ctx}`)
+    })
+  } finally {
+    rmSync(plugin, { recursive: true, force: true })
   }
 })
 
