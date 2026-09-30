@@ -267,6 +267,29 @@ const SCENARIOS = [
     calls: ({ p }) => [['writepath', write('agent-team:at-backend', join(p, 'src', 'server', 'a.ts'))]],
   },
   {
+    // M3u（docs/29）：paths 本身不是对象时，H3 第 6 步的拒绝理由与【project.json】都带着它。
+    name: 'project.paths 本身是载荷（H3 的配置错误、【project.json】）',
+    disk: true,
+    project: (P) => ({ ...PROJECT, paths: P }),
+    calls: ({ p }) => [
+      ['writepath', write('agent-team:at-backend', join(p, 'src', 'server', 'a.ts'))],
+      ['ledger', posted('at-pm', join(p, '.agent-team', 'project.json'))],
+    ],
+  },
+  {
+    name: 'project.available_roles 本身是载荷（【project.json】）',
+    disk: true,
+    project: (P) => ({ ...PROJECT, available_roles: P }),
+    calls: ({ p }) => [['ledger', posted('at-pm', join(p, '.agent-team', 'project.json'))]],
+  },
+  {
+    // 嵌套提醒里两个键、两条前缀各过一次 quote——只让前缀带载荷，照不到键那两处。
+    name: 'project.paths 的嵌套提醒（【project.json】）',
+    disk: true,
+    project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, [P]: [P + '/'], ['j' + P]: [P + '/y/'] } }),
+    calls: ({ p }) => [['ledger', posted('at-pm', join(p, '.agent-team', 'project.json'))]],
+  },
+  {
     name: 'state.json 写成坏 JSON 短文（异常消息引用原文）',
     disk: true,
     raw: { 'state.json': (P) => P.slice(0, 18) },
@@ -307,7 +330,7 @@ const SCENARIOS = [
     name: 'hook 输入的 agent_type',
     calls: ({ p }, P) => [
       ['writepath', write(P, join(p, 'src', 'server', 'a.ts'))],
-      // 写控制文件一定被拒，拒绝理由里带着调用者的角色名（写普通路径时它没有 paths 条目，直接放行）。
+      // 写控制文件一定被拒，拒绝理由里带着调用者的角色名（写普通路径时它不在花名册里，不归 H3 管，直接放行）。
       ['writepath', write(P, join(p, '.agent-team', 'current-run'))],
       ['deliverable', returned('agent-team:at-product', P)],
     ],

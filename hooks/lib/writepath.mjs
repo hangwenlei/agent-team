@@ -22,8 +22,9 @@ function underAny(target, prefixes, base) {
   // project.json 是用户手写的配置文件，形状不该指望它总是对的——不是数组
   // 时 .some 会抛 TypeError，外层 try/catch 兜得住（fail closed）但用户
   // 看到的是一句不知所云的"prefixes.some is not a function"，而不是指向
-  // 真正问题（project.json 配置形状不对）的消息。这里防一层，调用方
-  // （decideWritePath 自己的 owners[role] 那次查找）另外给出更具体的理由。
+  // 真正问题（project.json 配置形状不对）的消息。这里防一层。M3u（docs/29）起
+  // decideWritePath 这边已经走不到它：第 8 步的 entryProblems 先拒掉值不是数组的
+  // 条目并给出具体的理由，认领者查找先过 usablePrefixes（总是数组）。
   if (!Array.isArray(prefixes)) return false
   return prefixes.some((prefix) => {
     const full = norm(`${base}/${prefix}`)
@@ -104,9 +105,9 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 之前——两头的既有判据对控制文件都是错的，而且错的方向相反：
   //   - runs/<id>/state.json 在 runDir 里，落到下面那块会被「不是你这个阶段的
   //     produces」**无条件**拒掉，连 PM 也拒（M1a 记的 I3 死锁）；
-  //   - .agent-team/project.json 与 current-run 不在 runDir 里，落到 project.paths
-  //     那段会因为 Object.hasOwn(owners, role) 早退而被**静默放行**——任何不在 paths
-  //     里登记的角色都能重写项目配置。
+  //   - .agent-team/project.json 与 current-run 不在 runDir 里，落到下面按角色隔离那段时，
+  //     没有键的 at-qa、at-acceptance 与花名册外的调用者会被**静默放行**——它们都能重写
+  //     项目配置（M3u 之前是任何不在 paths 里登记的角色，docs/29）。
   // 一个太紧、一个太松，所以这不是「在某一段里加个 if」能解决的，必须自成一段。
   //
   // 「谁算 PM」复用 isContractWriter，不另写一遍 role === 'at-pm'：M1a 评审在 H4
@@ -129,8 +130,8 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     }
   }
 
-  // 全分支评审 I1：下面这整块 run 目录保护必须排在 project.paths 的整体放行
-  // 之前。它只依赖 runDir 与 stages，跟 project.paths 没有任何关系——而旧版本
+  // 全分支评审 I1：下面这整块 run 目录保护必须排在按角色隔离那段之前。它只依赖
+  // runDir 与 stages，跟 project.paths 没有任何关系——而旧版本
   // 把 `!project.paths → allow` 写在函数第一行，等于把整块保护挂在
   // "project.json 存在"之上。hooks/lib/runctx.mjs 明确允许 project.json 不
   // 存在（返回 project: null 且 ctx.ok 为 true，见那里第 126 行），于是
@@ -141,6 +142,9 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 证明一件自己没在守的事。缺席路径的覆盖见 tests/writepath.test.mjs 里
   // "project 为 null 时，run 目录下…"那三条，以及 tests/gate-contract.test.mjs
   // 的子进程级对照。
+  // M3u（docs/29）起排序照样要紧，理由换了：按角色隔离那段对 PM、没有键的 at-qa/at-acceptance、
+  // 花名册外的调用者放行，对 project.json 不在的情形拒——排到这块前面，run 里别人的产物就能被
+  // PM、at-qa 写到，执行角色自己的产物反而在 project.json 不在时被拒。
   if (runDir) {
     const rd = norm(runDir)
     // 评审 I-2：这条判定与 hooks/gate.mjs 的 ledger 分支曾经各写一份逐字符相同的
@@ -216,7 +220,8 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 4. 不在花名册里的调用者不归本插件管（H1 保证团队角色派不出花名册外的 agent）。
   if (!Object.hasOwn(roster, role)) return { decision: 'allow' }
 
-  const fixIt = '这是配置问题，不是这次调用的问题：冒泡给派你的上级，由 PM 改 .agent-team/project.json（/agent-team:at-init）。'
+  // 括注指向规则，不指向命令：PM 就地改 project.json 就行，不必让用户重跑 /agent-team:at-init。
+  const fixIt = '这是配置问题，不是这次调用的问题：冒泡给派你的上级，由 PM 改 .agent-team/project.json（规则见 /agent-team:at-init 第 2 节）。'
 
   // 5. run 进行中而 project.json 不在：没有判据。
   if (!project) {
@@ -247,12 +252,15 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     }
   }
 
-  // 8. 调用者自己的条目有阻断问题（不是数组、元素不是字符串、前缀出根、认领整个根、带冒号）：只拒它。
+  // 8. 调用者自己的条目有阻断问题（不是数组、元素不是字符串、前缀出根、认领整个根、带冒号）：只拒它——整条条目
+  //    作废，连它其余合法的前缀也写不了。理由里说出来：实测只点一条前缀时，PM 会读成「只有这条前缀失效」而留着它。
   const own = entryProblems(role, paths[role])
   if (own.block.length) {
     return {
       decision: 'deny',
-      reason: `${who} 不得写 ${fp}——.agent-team/project.json 里${own.block.slice(0, 3).join('；')}。${fixIt}`,
+      reason:
+        `${who} 不得写 ${fp}——.agent-team/project.json 里 ${own.block.slice(0, 3).join('；')}。` +
+        `这让 ${who} 的整条 paths 条目作废，写它其余合法的前缀也被拒。${fixIt}`,
     }
   }
 
@@ -281,6 +289,9 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     reason:
       `${who} 不得写 ${fp}——这条路径在 .agent-team/project.json 里没有被任何角色认领` +
       `（${who} 认领的是 ${quote(myPaths)}；前缀按字面比较，不是通配符）。` +
-      `先在 project.json 的 paths 里把它划给某个角色，再动它。`,
+      // 落到这里的只可能是有键的执行角色，它写不了 project.json（控制文件）。不拼 fixIt：没人认领也可能是这次
+      // 调用越界了，不一定是配置问题。
+      '确实要写这里，冒泡给派你的上级，由 PM 决定要不要在 .agent-team/project.json 的 paths 里把它划给某个角色' +
+      '（你写不了 project.json）。',
   }
 }

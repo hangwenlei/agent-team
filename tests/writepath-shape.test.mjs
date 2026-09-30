@@ -7,7 +7,7 @@
 //   3. 花名册读坏 → 拒；4. 不在花名册里的调用者 → 放行（不归本插件管）；5. run 进行中 project.json 不在 → 拒；
 //   6. paths 缺失或不是对象 → 拒；7. 调用者没有键 → 拒；8. 调用者自己的条目有阻断问题 → 拒，只拒它；
 //   9. 其余照旧（认领了放行、别人的拒、没人认领拒），认领者查找只看合法的前缀。
-// 每条拒绝理由都要指向具体的配置问题，并给执行角色一条够得着的出路（冒泡，由 PM 改 project.json）。
+// 每条拒绝理由都要说清拒在哪，并给执行角色一条够得着的出路（冒泡，由 PM 改 project.json 或重装插件）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { decideWritePath } from '../hooks/lib/writepath.mjs'
 import { NO_PATHS_ROLES } from '../hooks/lib/project.mjs'
+import { quote } from '../hooks/lib/trusted.mjs'
 import { run, decisionOf } from './helpers/gate-runner.mjs'
 
 const ROSTER = JSON.parse(readFileSync(new URL('../roster.json', import.meta.url), 'utf8'))
@@ -42,17 +43,19 @@ test('基线：模板配置下，执行角色写自己的地盘放行、写别�
   assert.equal(decide('at-backend', IOS, TEMPLATE).decision, 'deny')
 })
 
-// ---- 5、6：没有整份判据时拒所有执行角色 ----
+// ---- 5、6：没有整份判据时拒 NO_PATHS_ROLES 以外的执行角色（它们在第 2 步已经放行）----
 
 test('run 进行中 project.json 不在：执行角色写 run 目录外被拒，理由说「不在」、给出 /agent-team:at-init', () => {
   assertConfigDeny(decide('at-backend', OWN, null), '不在', '/agent-team:at-init')
 })
 
-test('paths 缺失、为空串、为数组、为字符串：执行角色写 run 目录外被拒', () => {
-  for (const paths of [undefined, '', [], 'src/', 0]) {
+test('paths 缺失、为空串、为数组、为字符串：执行角色写 run 目录外被拒，理由说的是 paths 本身，不是「没有你的键」', () => {
+  for (const paths of [undefined, '', [], ['src/server/'], 'src/', 0]) {
     const project = { ...TEMPLATE, paths }
     if (paths === undefined) delete project.paths
-    assertConfigDeny(decide('at-backend', OWN, project))
+    const r = decide('at-backend', OWN, project)
+    assertConfigDeny(r, paths === undefined ? 'paths 缺失' : `paths 不是对象（是 ${quote(paths)}）`)
+    assert.ok(!r.reason.includes('的键'), r.reason)
   }
 })
 
@@ -72,18 +75,32 @@ test('调用者在 paths 里没有键（被删、键名拼错、带插件前缀�
   }
 })
 
-test('调用者的键是 []：写 run 目录外被拒——[] 表示有意只写 run 目录', () => {
+test('调用者的键是 []：写 run 目录外被拒——[] 表示有意只写 run 目录；理由给出冒泡的出路', () => {
   const r = decide('at-product', '/proj/docs/product/x.md', withPaths({ ...TEMPLATE.paths, 'at-product': [] }))
   assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /冒泡/)
+  assert.match(r.reason, /PM/)
 })
 
 // ---- 8：只拒持有问题条目的那个角色 ----
 
 test('调用者自己的条目有阻断问题（不是数组、元素不是字符串、出根、认领整个根、带冒号）：拒，理由点名那条', () => {
-  for (const value of ['src/server/', ['src/server/', 5], ['../'], [''], ['./'], ['src/a:b']]) {
+  for (const [value, bad] of [
+    ['src/server/', '"src/server/"'],
+    [['src/server/', 5], '5'],
+    [['../'], '"../"'],
+    [[''], '""'],
+    [['./'], '"./"'],
+    [['src/a:b'], '"src/a:b"'],
+  ]) {
     const r = decide('at-backend', OWN, withPaths({ ...TEMPLATE.paths, 'at-backend': value }))
-    assertConfigDeny(r, 'at-backend')
+    assertConfigDeny(r, 'paths["at-backend"]', bad)
   }
+})
+
+test('一条坏前缀让整个条目作废：自己其余合法的前缀也写不了——理由把这一点说出来，不让人读成「只有这条前缀失效」', () => {
+  const r = decide('at-backend', OWN, withPaths({ ...TEMPLATE.paths, 'at-backend': ['src/server/', '../shared/'] }))
+  assertConfigDeny(r, '"../shared/"', '其余合法的前缀')
 })
 
 test('别的角色的条目坏了、paths 里多了认不出的键：不影响其余角色写自己的地盘', () => {
@@ -102,6 +119,18 @@ test('别的角色的条目坏了、paths 里多了认不出的键：不影响�
   }
 })
 
+test('认领者查找只看合法的前缀：别人条目里阻断的前缀（出根、认领整个根）不把「没人认领」说成「归它」', () => {
+  for (const bad of [['../'], ['']]) {
+    const r = decide('at-backend', '/proj/elsewhere/x.ts', withPaths({ ...TEMPLATE.paths, 'at-ios': bad }))
+    assert.equal(r.decision, 'deny')
+    assert.match(r.reason, /没有被任何角色认领/)
+    assert.ok(!r.reason.includes('归 "at-ios"'), r.reason)
+  }
+  // 坏条目排在真主人前面时，归属也不被它抢走。
+  const r = decide('at-backend', IOS, withPaths({ 'at-outsider': ['../'], ...TEMPLATE.paths }))
+  assert.ok(r.reason.includes('归 "at-ios"'), r.reason)
+})
+
 // ---- 2：按设计不认领路径的角色 ----
 
 test('at-qa、at-acceptance 没有键：不管 project.json 在不在、形状对不对，run 目录外都放行——它们的正文照此写', () => {
@@ -114,14 +143,25 @@ test('at-qa、at-acceptance 没有键：不管 project.json 在不在、形状�
   }
 })
 
+test('at-qa、at-acceptance 建了键：就只能写这些前缀——validateProject「建了键它就只能写这些前缀」那句的判据', () => {
+  for (const role of NO_PATHS_ROLES) {
+    const project = withPaths({ ...TEMPLATE.paths, [role]: ['tests/'] })
+    assert.equal(decide(role, '/proj/src/x.ts', project).decision, 'deny', role)
+    assert.equal(decide(role, '/proj/tests/x.ts', project).decision, 'allow', role)
+  }
+})
+
 // ---- 3、4：花名册 ----
 
-test('花名册读坏（{}、[]、null）：执行角色写 run 目录外被拒，理由指向 roster.json——不能落成「不在花名册里就放行」', () => {
-  for (const roster of [{}, [], null]) {
+test('花名册读坏（{}、[]、null、非空数组）：执行角色写 run 目录外被拒，理由指向 roster.json、给出重装的出路——不能落成「不在花名册里就放行」', () => {
+  // 非空数组：Object.keys(['at-backend']) 是 ['0']，只查「非空」会把它当成有效花名册，第 4 步对全员放行。
+  for (const roster of [{}, [], null, ['at-backend']]) {
     for (const path of [OWN, IOS, '/proj/CLAUDE.md']) {
       const r = decide('at-backend', path, TEMPLATE, roster)
       assert.equal(r.decision, 'deny', JSON.stringify(roster))
       assert.match(r.reason, /roster\.json/)
+      assert.match(r.reason, /冒泡/)
+      assert.match(r.reason, /重装|更新/)
     }
   }
 })
@@ -145,12 +185,15 @@ test('PM 写 run 目录外：放行，不看 project.json——包括给 at-pm �
 
 // ---- 9：没人认领时，理由说清调用者自己认领了什么 ----
 
-test('没人认领：理由里带着调用者自己的前缀，并说明前缀按字面比较、不是通配符', () => {
+test('没人认领：理由里带着调用者自己的前缀，并说明前缀按字面比较、不是通配符；出路是冒泡给上级，不是叫它自己改 project.json', () => {
   const r = decide('at-backend', '/proj/src/server/a.ts', withPaths({ ...TEMPLATE.paths, 'at-backend': ['src/**'] }))
   assert.equal(r.decision, 'deny')
   assert.match(r.reason, /没有被任何角色认领/)
   assert.ok(r.reason.includes('src/**'), r.reason)
   assert.match(r.reason, /通配符/)
+  assert.match(r.reason, /冒泡/)
+  assert.match(r.reason, /PM/)
+  assert.ok(!r.reason.includes('再动它'), r.reason)
 })
 
 // ---- 拒绝理由里的外部值只占一行（docs/27）----
@@ -180,7 +223,7 @@ test('门禁子进程：roster.json 读坏时，执行角色写 run 目录外被
   try {
     cpSync(new URL('hooks', REPO), join(plugin, 'hooks'), { recursive: true })
     cpSync(new URL('stages.json', REPO), join(plugin, 'stages.json'))
-    for (const bad of ['{', '{}', '[]']) {
+    for (const bad of ['{', '{}', '[]', '["at-backend"]']) {
       writeFileSync(join(plugin, 'roster.json'), bad)
       mkdirSync(join(proj, '.agent-team', 'runs', 'r1'), { recursive: true })
       writeFileSync(join(proj, '.agent-team', 'current-run'), 'r1')
@@ -192,6 +235,7 @@ test('门禁子进程：roster.json 读坏时，执行角色写 run 目录外被
         const d = decisionOf(run('writepath', write('agent-team:at-backend', fp), gate, proj).stdout)
         assert.equal(d?.permissionDecision, 'deny', `${bad} · ${fp}`)
         assert.match(d.permissionDecisionReason, /roster\.json/)
+        assert.match(d.permissionDecisionReason, /重装|更新/)
       }
       assert.equal(run('writepath', write('agent-team:at-pm', join(proj, 'dist', 'x.js')), gate, proj).stdout.trim(), '', bad)
     }

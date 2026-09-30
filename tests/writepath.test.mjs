@@ -260,7 +260,7 @@ test('project 为 null（run 进行中 project.json 不在）时，执行角色�
   assert.match(r.reason, /project.json/)
 })
 
-// 全分支评审 I1：上一条的"放行"只该覆盖 project.paths 那一段。run 目录保护
+// 全分支评审 I1：上一条（M3u 之前是放行，现在是拒）只管 run 目录外按角色隔离那一段。run 目录保护
 // 只依赖 runDir/stages，跟 project.json 在不在没有关系——而旧版本把
 // `!project.paths → allow` 写在整个函数最前面，于是 run 正在跑、
 // project.json 不在时（runctx.mjs 明确允许这种状态：project 为 null 且

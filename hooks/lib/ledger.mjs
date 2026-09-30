@@ -10,8 +10,8 @@
 // #2（PM 就能 echo > 01-prd.md 伪造 H2 的判据）。更根本的一条：hook 一定会触发，
 // 脚本要靠 PM 记得跑——这与 §4.2 ② 把就绪门禁写成 hook 而不是提示词是同一条理由。
 //
-// 本模块只做格式化，一切 I/O 在 gate.mjs 里；判据本身来自 contract-hash.mjs /
-// reach.mjs / state.mjs 三个纯函数模块。
+// 本模块只做格式化，一切 I/O 在 gate.mjs 里；判据本身来自这些纯函数模块：contract-hash.mjs、
+// reach.mjs、state.mjs、project.mjs。
 import { compareContractSha, shaOrNote } from './contract-hash.mjs'
 import { inline, quote, safeJson } from './trusted.mjs'
 import { nextStage } from './state.mjs'
@@ -54,18 +54,25 @@ function pmOnlyNotice(action, reportWhat) {
 
 /**
  * 【project.json】（M3u，docs/29，全量审查第 10 条）。report 是 hooks/lib/project.mjs 的 validateProject 那样的
- * { block, fix, confirm }，每条已经是单行、外部值过了 quote；三档都空时返回 null。只有 PM 写得了 project.json，
- * 而这条回传只在 PM 写控制文件之后发。
+ * { block, fix, confirm }，每条已经是单行、外部值过了 quote；三档都空时返回 null。
+ *
+ * 收件人不一定是 PM：project.json 是控制文件，run 进行中只有 PM 写得了；但 no-run 时 H3 对所有角色 fail open
+ * （见 pmOnlyNotice 上方的注释），而 ledger 在 no-run 下对 project.json 照样回传。所以首句照 pmOnlyNotice 的
+ * 写法说「只有 PM 该改它」，不对收件人说「你是唯一改得了它的人」。
+ *
+ * 阻断那一档的标题说清按角色生效：每条讲的都是某一条前缀，实测 PM 会读成「只有这条前缀失效」而留着它，
+ * 可 H3 的第 8 步让这个角色整条条目作废。
  */
 export function projectNotice(report) {
   const sections = [
-    ['阻断（这些角色写 run 目录之外会被拒）', report?.block],
+    ['阻断（按角色生效：一个角色的条目里只要有一条，它写 run 目录之外的任何地方都会被拒，连它其余合法的前缀也一样）', report?.block],
     ['要改（/agent-team:at-init 明令不许这样写，或者按字面比较一定落空）', report?.fix],
     ['请确认（可能是有意的：读一遍，是想要的就不动）', report?.confirm],
   ].filter(([, items]) => Array.isArray(items) && items.length)
   if (!sections.length) return null
   return (
-    '【project.json】.agent-team/project.json 有问题，逐条如下——你是唯一改得了它的人（用 Write 整份重写）：\n' +
+    '【project.json】.agent-team/project.json 有问题，逐条如下——只有 PM 该改它：你是 PM 就用 Write 整份重写；' +
+    '不是的话把这些问题回报给上级，不要自己写 project.json：\n' +
     sections.map(([title, items]) => `  ${title}：\n` + items.map((s) => `  - ${s}`).join('\n')).join('\n') +
     '\n' +
     [
@@ -76,12 +83,20 @@ export function projectNotice(report) {
   )
 }
 
-/** 刚写进去的 project.json 解析不出、或者不是对象。不回显文件内容（docs/27）。 */
-export function brokenProjectNotice({ runInProgress }) {
+/**
+ * project.json 解析不出、或者不是对象。不回显文件内容（docs/27）。justWritten：这次写的正是它（写 project.json
+ * 那条缝）；否则是它在别处被弄坏（用户在两趟 run 之间手改，加了注释或尾逗号），PM 写 .agent-team 下别的文件时
+ * 撞上——那时契约与产物的哈希也回传不了，改好之后要原样重写一次刚才那个文件才拿得到。
+ */
+export function brokenProjectNotice({ runInProgress, justWritten = true }) {
   return (
-    '【project.json】刚写进去的 .agent-team/project.json 不是一个合法的 JSON 对象（JSON 不允许注释和尾逗号），门禁读不出它。' +
+    `【project.json】${justWritten ? '刚写进去的 ' : ''}.agent-team/project.json 不是一个合法的 JSON 对象` +
+    '（JSON 不允许注释和尾逗号），门禁读不出它。' +
     (runInProgress ? 'run 进行中：执行角色写任何地方都会被拒，前置就绪与交付物校验按读不出运行上下文放行。' : '') +
-    '用 Write 写回一份合法的完整 project.json，再继续。'
+    (justWritten
+      ? '只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json，再继续；不是的话回报上级，不要自己写。'
+      : '契约与产物的哈希这时也回传不了。只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json，' +
+        '再原样重写一次刚才那个文件拿回传；不是的话回报上级，不要自己写。')
   )
 }
 

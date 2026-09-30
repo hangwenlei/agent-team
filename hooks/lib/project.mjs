@@ -2,7 +2,9 @@
 //
 // 此前 project.json 只要是个合法对象，H3 就照单全收：paths 缺失、键名拼错、带插件前缀、被删掉——调用者在
 // paths 里「没有键」——一律静默放行；前缀 '../' 认领到项目根之外，'' 与 '.' 认领整个项目根。这里把问题分三档：
-//   - block（阻断）：H3 据此拒持有这个条目的角色（paths 本身缺失或不是对象时拒所有执行角色）；
+//   - block（阻断）：H3 据此拒持有这个条目的角色——只算 H3 会拿这个键去判的（建了键的 at-qa、at-acceptance 也算）；
+//     at-pm、__main__ 与认不出的键上的同类问题 H3 不拿来判人，降成要改。paths 本身缺失或不是对象时拒 at-qa、
+//     at-acceptance 以外的执行角色；roster.json 读坏也归这一档（它不是 project.json 的问题，那一条自己说清出路）；
 //   - fix（要改）：/agent-team:at-init 明令禁止、或者按字面比较一定落空的写法；
 //   - confirm（请确认）：可能是有意的，PM 读一遍，是想要的就不动。
 // 纯函数，不碰文件系统。外部值（键、前缀、available_roles 的元素）一律过 quote（docs/27）。
@@ -16,23 +18,32 @@ import { isValidRoster } from './decide.mjs'
 // 它们的正文也照此写着「写路径隔离连拒都不会拒你」。
 export const NO_PATHS_ROLES = ['at-qa', 'at-acceptance']
 
-// /agent-team:at-init 明令不许建键的：at-pm（不参与路径认领）加上按设计不认领路径的那几个。
-export const FORBIDDEN_KEYS = ['at-pm', ...NO_PATHS_ROLES]
+// 花名册里、但不是执行角色的：驱动者 PM、主线程（callerOf 对它的判定值）、测试替身。available_roles 里不该有它们。
+const NOT_EXECUTION = ['at-pm', '__main__', 'at-outsider']
 
-// 花名册里、但门禁永远不会拿 paths 去判的：主线程（gate.mjs 在进 H3 之前就豁免了它）与测试替身。
-const UNREAD_KEYS = ['__main__', 'at-outsider']
+// 落在这些地方，Claude Code 会自动加载或执行里面的东西（设置、hook、指令、MCP 配置）：认领它们等于把这些交给
+// 这个角色。门禁层面对所有角色拒写它们归审查第 34 条（docs/24），这里只提醒。按不分大小写比，多提一条无害。
+const AUTOLOADED_DIRS = ['.claude', '.git']
+const AUTOLOADED_FILES = ['claude.md', 'claude.local.md', '.mcp.json']
 
-// 前缀按本平台的分隔符切段，丢掉空段与 '.' 段。
-function segmentsOf(prefix, platform) {
-  return prefix.split(platform === 'win32' ? /[\\/]/ : /\//).filter((s) => s !== '' && s !== '.')
-}
-
-// 照 H3 的拼法（项目根 + '/' + 前缀，见 writepath.mjs 的 underAny）在一个虚拟根上纯字面地解析，看它落在哪：
-// 出了根、就是根本身、还是根里面。不碰文件系统。
-function landing(prefix, platform) {
+// 照 H3 的拼法（项目根 + '/' + 前缀，见 writepath.mjs 的 underAny）在一个虚拟根上纯字面地解析，给出相对根的
+// 落点：'..' 折叠掉，'.' 与空段丢掉。不碰文件系统。落点、嵌套、「落在哪个目录下」都按它判——H3 放行的范围按
+// 解析后的位置算，按字面拼写比会让 'src/server/..' 这类字面上窄、实际宽的前缀漏报，嵌套的方向还会说反。
+function resolvedRel(prefix, platform) {
   const p = platform === 'win32' ? path.win32 : path.posix
   const root = platform === 'win32' ? path.win32.resolve('C:/v/r') : '/v/r'
-  const rel = p.relative(root, p.resolve(`${root}/${prefix}`))
+  return { p, rel: p.relative(root, p.resolve(`${root}/${prefix}`)) }
+}
+
+// 解析后的落点按本平台的分隔符切段。
+function segmentsOf(prefix, platform) {
+  const { rel } = resolvedRel(prefix, platform)
+  return rel.split(platform === 'win32' ? /[\\/]/ : /\//).filter((s) => s !== '' && s !== '.')
+}
+
+// 落在哪：出了根、就是根本身、还是根里面。
+function landing(prefix, platform) {
+  const { p, rel } = resolvedRel(prefix, platform)
   if (rel === '') return 'root'
   if (rel === '..' || rel.startsWith(`..${p.sep}`) || p.isAbsolute(rel)) return 'outside'
   return 'inside'
@@ -43,21 +54,47 @@ export function prefixProblems(prefix, { platform = process.platform, label = '�
   const out = { block: [], fix: [], confirm: [] }
   const at = `${label} 的前缀 ${quote(prefix)}`
   if (prefix.includes(':')) {
-    out.block.push(`${at} 带冒号——冒号只可能是盘符或流后缀，门禁认不出它指向哪`)
+    // 不分平台一律阻断：同一份 project.json 在各平台上意思要一样。理由只说 Windows——POSIX 上冒号是普通文件名字符。
+    out.block.push(
+      `${at} 带冒号——Windows 上冒号只能是盘符或流后缀，门禁认不出它指向哪；为了同一份 project.json 在各平台上` +
+        '意思一样，所有平台上都不接受带冒号的前缀，换一个不带冒号的名字',
+    )
   } else {
     const where = landing(prefix, platform)
-    if (where === 'outside') out.block.push(`${at} 出了项目根——前缀要留在项目里`)
+    // 改法要说全：只说「前缀要留在项目里」时，实测 PM 会把 '../shared/' 换成项目里并不存在的 'shared/'——那是
+    // 另一个地方，这个角色凭空多认领了一个目录。
+    if (where === 'outside') {
+      out.block.push(
+        `${at} 出了项目根——删掉这一条：这个角色用 Edit/Write 写不到项目外，不要换成项目里的同名目录（那是另一个` +
+          '地方），收尾时告诉用户删了哪一条',
+      )
+    }
     if (where === 'root') {
-      out.block.push(`${at} 认领了整个项目根——.claude/、CLAUDE.md、.git 都会对这个角色敞开；写成具体的目录`)
+      out.block.push(
+        `${at} 认领了整个项目根——.claude/、CLAUDE.md、.git 都会对这个角色敞开；改成具体的目录或文件：前缀也可以是` +
+          '单个文件（比如 main.py），平铺在项目根的文件逐个列出',
+      )
     }
   }
-  const segs = segmentsOf(prefix, platform)
-  if (segs.length > 0 && segs[0].toLowerCase() === '.agent-team') {
+  const segs = segmentsOf(prefix, platform).map((s) => s.toLowerCase())
+  if (segs[0] === '.agent-team') {
     out.fix.push(`${at} 落在 .agent-team 下——那里的控制文件不走角色认领`)
+  }
+  if (AUTOLOADED_DIRS.includes(segs[0]) || (segs.length === 1 && AUTOLOADED_FILES.includes(segs[0]))) {
+    out.confirm.push(
+      `${at} 落在 Claude Code 会自动加载或执行的地方（.claude/、.git/、项目根下的 CLAUDE.md、CLAUDE.local.md、` +
+        '.mcp.json）——认领它等于把设置、hook、指令交给这个角色；确实要这样再留着',
+    )
   }
   if (prefix.includes('\\')) out.fix.push(`${at} 含反斜杠——前缀一律用 /（macOS / Linux 上反斜杠是文件名的一部分）`)
   if (/[*?]/.test(prefix)) out.fix.push(`${at} 含 * 或 ?——前缀按字面比较，不是通配符`)
   if (prefix !== prefix.trim()) out.fix.push(`${at} 首尾有空白——按字面比较，认领的是另一个名字`)
+  // 零宽空格之类的格式字符 trim 剥不掉，肉眼也看不出来；quote 照原样回显它们，所以把码点写出来。
+  const invisible = [...new Set(prefix.match(/\p{Cf}/gu) ?? [])]
+  if (invisible.length) {
+    const cps = invisible.map((c) => `U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join('、')
+    out.fix.push(`${at} 含不可见的格式字符（${cps}）——按字面比较，认领的是另一个名字`)
+  }
   if (prefix.split(/[\\/]/).some((s) => s !== '.' && s !== '..' && /[. ]$/.test(s))) {
     out.fix.push(`${at} 有以点或空格结尾的段——Windows 上门禁一律拒写这种写法`)
   }
@@ -99,27 +136,51 @@ export function validateProject(project, { roster, platform = process.platform }
   }
   const rosterOk = isValidRoster(roster)
   if (!rosterOk) {
-    out.confirm.push('roster.json 读不出来（插件安装可能不完整），project.json 里的角色名没法核对——这不是 project.json 的问题')
+    // H1 拒一切派发、H3 拒 PM 与 at-qa、at-acceptance 以外的角色写 run 目录之外：不可能是有意的，归阻断。改
+    // project.json 修不好它，所以这一条自己说清出路（/agent-team:at-init 第 3 节照此写）。
+    out.block.push(
+      'roster.json 读不出来（插件安装不完整）——这不是 project.json 的问题，不要改 project.json：派发一律被拒，' +
+        `除 PM 与 ${NO_PATHS_ROLES.join('、')} 外写 run 目录之外也一律被拒。停下，告诉用户重装或更新 agent-team 插件`,
+    )
   }
   const known = (name) => rosterOk && Object.hasOwn(roster, name)
 
   const paths = project.paths
   if (!isPlainObject(paths)) {
     const what = paths === undefined ? '缺失' : `不是对象（是 ${quote(paths)}）`
-    out.block.push(`paths ${what}——写路径隔离没有判据，执行角色写 run 目录外会被拒`)
+    // H3 的第 2 步排在这之前：没有键的 at-qa、at-acceptance 照样放行（commands/at.md §0 同一口径）。
+    out.block.push(
+      `paths ${what}——写路径隔离没有判据，除按设计不认领路径的 ${NO_PATHS_ROLES.join('、')} 外，执行角色写 run 目录外会被拒`,
+    )
   } else {
     for (const [key, value] of Object.entries(paths)) {
       const label = `paths[${quote(key)}]`
+      // inert：H3 不拿这个键判任何人——PM 在第 1 步放行、主线程在进 H3 之前就被 gate.mjs 豁免、认不出的键对不上
+      // 任何调用者。它上面的阻断问题不让谁被拒，降成要改：阻断档的标题说「这些角色……会被拒」，写 state.json 时
+      // 还只报这一档，挂在这种键上就是每次记账都重报一遍的假话。at-outsider 不在此列：H3 照常按它的键判它（挡住
+      // 它的是工具面只有 Read，tests/tool-surface.test.mjs 钉着）。
+      let inert = true
       if (rosterOk && !known(key)) {
         out.fix.push(`${label}：${quote(key)} 不是花名册里的角色名——拼错了？带了 agent-team: 前缀？门禁不会拿它判任何人`)
       } else if (key === 'at-pm') {
         out.fix.push(`${label}：不要给 at-pm 建键——PM 不参与路径认领，这个键不起作用`)
-      } else if (NO_PATHS_ROLES.includes(key)) {
-        out.fix.push(`${label}：不要给 ${key} 建键——它按设计不认领路径；建了键它就只能写这些前缀，与它的正文不符`)
-      } else if (UNREAD_KEYS.includes(key)) {
-        out.confirm.push(`${label}：门禁不会拿这个键去判 ${key}`)
+      } else if (key === '__main__') {
+        out.confirm.push(`${label}：门禁在进 H3 之前就豁免了主线程，不会拿这个键去判它`)
+      } else {
+        inert = false
+        if (NO_PATHS_ROLES.includes(key)) {
+          out.fix.push(`${label}：不要给 ${key} 建键——它按设计不认领路径；建了键它就只能写这些前缀，与它的正文不符`)
+        } else if (key === 'at-outsider') {
+          out.fix.push(`${label}：不要给 at-outsider 建键——它是测试替身，不是执行角色`)
+        }
       }
-      merge(out, entryProblems(key, value, { platform, label }))
+      const p = entryProblems(key, value, { platform, label })
+      if (inert) {
+        out.fix.push(...p.block, ...p.fix)
+        out.confirm.push(...p.confirm)
+      } else {
+        merge(out, p)
+      }
     }
     out.confirm.push(...nesting(paths, platform))
   }
@@ -132,7 +193,7 @@ export function validateProject(project, { roster, platform = process.platform }
     for (const r of roles) {
       if (typeof r !== 'string' || (rosterOk && !known(r))) {
         out.fix.push(`available_roles 里的 ${quote(r)} 不是花名册里的角色名`)
-      } else if (r === 'at-pm' || UNREAD_KEYS.includes(r)) {
+      } else if (NOT_EXECUTION.includes(r)) {
         out.fix.push(`available_roles 里不要写 ${quote(r)}——它不是执行角色`)
       } else if (isPlainObject(paths) && !NO_PATHS_ROLES.includes(r) && !Object.hasOwn(paths, r)) {
         out.confirm.push(
@@ -146,7 +207,9 @@ export function validateProject(project, { roster, platform = process.platform }
 }
 
 // 不同角色之间，一条前缀按段严格包含另一条：外层角色也能写进内层（认领按「列了谁、谁能写」，不按最具体的
-// 前缀归属）。相同前缀（共享目录）与同一角色内部的嵌套不提。段一律按不分大小写比，多提一条无害。
+// 前缀归属）。相同前缀（共享目录）与同一角色内部的嵌套不提。段按 H3 解析后的落点切（'..' 先折叠），一律按不分
+// 大小写比（Windows / macOS 上门禁的 norm 折叠大小写；Linux 上多提一条无害）。阻断的前缀不参与：它们已经让持有
+// 者整条作废，再报「包含」只是噪声。
 function nesting(paths, platform) {
   const entries = Object.entries(paths).map(([role, value]) => [
     role,
