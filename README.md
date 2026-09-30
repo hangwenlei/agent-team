@@ -153,7 +153,7 @@ flowchart TB
 > 在用着这支团队的项目里，门禁会拒绝它认不出指向哪个文件的写法：网络路径（项目不在同一个共享上时）、带流后缀或以点、空格结尾的 Windows 路径、不带盘符的设备路径；项目放在网络共享上时，写本地盘路径同样被拒。需要写这些位置时由你自己来写。
 
 > [!NOTE]
-> 项目经理自己发起的调用上，门禁判不出这次该怎么判时（比如运行状态读不出来、阶段记录不在阶段链里），会告诉项目经理怎么修，并在界面上给你一行提示。
+> 项目经理自己发起的调用上，门禁判不出这次该怎么判时（比如运行状态读不出来、阶段记录不在阶段链里），会告诉项目经理怎么修，并在界面上给你一行提示。没有进行中的 run 时，项目经理派团队角色，界面上也会有一行提示，说明这次派发不受门禁约束。
 >
 > 正常放行默认不留记录。要让每次门禁调用都在会话转录里留一行，起会话时加 `--settings '{"env":{"AGENT_TEAM_GATE_TRACE":"1"}}'`。
 
@@ -330,7 +330,7 @@ You can watch a role but not talk to it: roles report their questions to the pro
 > In a project that uses the team, the gates refuse writes whose target they cannot pin down: network paths (unless the project sits on that same share), Windows paths with a stream suffix or a segment ending in a dot or space, and device paths without a drive letter; with the project on a network share, local-drive paths are refused too. Write to such locations yourself.
 
 > [!NOTE]
-> On the project manager's own calls, when a gate cannot tell how to rule (for example, the run state cannot be read, or the recorded stage is not in the stage chain), it tells the project manager how to fix it and shows you a one-line notice.
+> On the project manager's own calls, when a gate cannot tell how to rule (for example, the run state cannot be read, or the recorded stage is not in the stage chain), it tells the project manager how to fix it and shows you a one-line notice. When no run is in progress, each time the project manager dispatches a team role you also see a one-line notice that the dispatch is not gated.
 >
 > An ordinary pass leaves no record by default. To log one line per gate invocation in the session transcript, start the session with `--settings '{"env":{"AGENT_TEAM_GATE_TRACE":"1"}}'`.
 

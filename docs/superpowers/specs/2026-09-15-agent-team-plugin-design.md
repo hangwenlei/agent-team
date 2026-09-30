@@ -406,10 +406,19 @@ S5 重做，所以 S5 在 `history` 里出现两次、`rework.S5` 是 1，而 S6
 | H6 | PreToolUse / Edit\|Write | 返工预算写时强制：只对 `runs/*/state.json` 生效，只拦**减少**（`history` 变短、某阶段出现次数变少、`rework` 低于派生值、`rework` 超 `REWORK_LIMIT`），不碰增加——PM 每推进一个阶段都要正常重写这个文件 | deny | deny（fail closed）；新旧任一 parse 不出 JSON 时放行，见 §4.2 ③ |
 
 **表里的 warning 发给谁**（M3v 补，`docs/30`，全量审查第 12 条）：fail open 那几格的 warning 一律先往 stderr 写一行，
-那只进转录，模型与用户都看不到。PM 自己发起的派发（H5a，`PostToolUse` / Agent）与 PM 写 run 目录下的文件（ledger）上，
-门禁判不出来时（运行状态读不出来、`state.stage` 不在阶段链里、检查项中途出错）另回传一段【门禁】（受信回传，§6.5），
-并给用户一行 `systemMessage`。H2 的 warning 不在 `PreToolUse` 上发受信回传（那里几道 hook 的回传被并成一段、不标来源），
-由同一次派发的 H5a 说；`SubagentStop` 上什么都不发（exit 0 带回传等于拦截）。
+那只进转录，模型与用户都看不到。另外按检查项：
+
+- H5a（`PostToolUse` / Agent）：PM（含主线程）发起的派发、运行状态读不出来——回传一段【门禁】（受信回传，§6.5），给用户一行
+  `systemMessage`；没有进行中的 run、目标是它派得动的团队角色——【门禁】说明这是有意的放行，给用户一行；`state.stage` 不在
+  阶段链里——任何发起者都收到【门禁】（改不了 `state.json` 的带冒泡句），PM 收件时给用户一行。
+- ledger（`PostToolUse` / Edit、Write）：只在 PM 写 `.agent-team/runs/` 下的非控制文件、运行状态读不出来时发【门禁】并给一行；
+  写 `state.json` 不发（第一趟建 run 的正路上那一刻指针还没写）。`state.stage` 不在阶段链里时照常回传，由【state.json】报。
+- 检查项中途出错：deliverable 与 ledger 对任何发起者回传【门禁】（非 PM 带冒泡句），PM 收件时给一行；readiness 只给一行；
+  stop-gate 只留 stderr。
+- H2 的 warning 不在 `PreToolUse` 上发受信回传（那里几道 hook 的回传被并成一段、不标来源），由同一次派发的 H5a 说；
+  `SubagentStop` 上什么都不发（exit 0 带回传等于拦截）。
+
+每一格的输出形状由 `tests/gate-fail-open.test.mjs` 的形状表钉着，那份是真源，这里不另抄。
 
 **H5 为什么要两道**（M1 · U5 实测补，见 `docs/07-U5-U6-U8-实测结论.md`）：`SubagentStop`
 返回 exit 2 确实能阻止 subagent 停止、逼它补交付物，但平台的重试有上限——实测约 9 次，

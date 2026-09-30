@@ -16,9 +16,9 @@
 import { isKnownStage } from './deliverable.mjs'
 import { quote, trustedBlock } from './trusted.mjs'
 
-// 最外层 catch 发现这次进程已经往 stdout 写过一份（拒绝或回传）时，往 stderr 补的那一句：再写一份，两份 JSON 会让
-// 拒绝失效、回传全丢。只有注入（process.exit 被换成抛异常）走得到，tests/helpers/gate-runner.mjs 的出口契约见到它就红。
-export const SECOND_WRITE_NOTE = 'agent-team：这次进程已经往 stdout 写过一份输出，崩溃之后不再写第二份。'
+// 最外层 catch 发现这次进程已经写出结果（拒绝或回传）时，往 stderr 补的那一句：再写一份，两份 JSON 会让拒绝失效、回传
+// 全丢；照那个结果的退出码退出。只有注入（process.exit 被换成抛异常）走得到，tests/helpers/gate-runner.mjs 的出口契约见到它就红。
+export const SECOND_WRITE_NOTE = 'agent-team：这次进程已经写出过结果，崩溃之后照那个结果退出，不再写第二份。'
 
 // hooks/lib/runctx.mjs 的 unreadable 出口带的 cause。
 export const CAUSES = ['pointer', 'runs', 'state', 'project', 'plugin']
@@ -35,28 +35,47 @@ const CAUSE_PHRASE = {
 }
 const causePhrase = (cause) => CAUSE_PHRASE[cause] ?? '运行状态读不出来'
 
+const POINTER_FIND =
+  '用 Glob 找 `.agent-team/runs/*/state.json`（只 Glob `runs/*` 列不出目录）。只有一趟，就把它的目录名写回 ' +
+  '`.agent-team/current-run`；不止一趟时，指针原本指向最后建的那一趟（run id 以日期时刻开头）：读各自的 state.json ' +
+  '核实，拿不准就问用户，不要把较早、没走完的那一趟当成当前 run；'
+
 const FIX = {
-  pointer:
-    '用 Glob 找 `.agent-team/runs/*/state.json`（只 Glob `runs/*` 列不出目录）。只有一趟，就把它的目录名写回 ' +
-    '`.agent-team/current-run`；不止一趟时，指针原本指向最后建的那一趟（run id 以日期时刻开头）：读各自的 state.json ' +
-    '核实，拿不准就问用户，不要把较早、没走完的那一趟当成当前 run；一趟都没有 state.json，就照 /agent-team:at 第 1 节' +
-    '先写 state.json，再写 current-run。',
+  // 「一趟都没有」那半句在派发与写入时这么说：PM 正在干活，多半是偏离了 /agent-team:at 第 1 节的顺序（先写了契约）。
+  pointer: POINTER_FIND + '一趟都没有 state.json，就照 /agent-team:at 第 1 节先写 state.json，再写 current-run。',
   runs: '`.agent-team/runs` 读不出来（比如它是一个文件，不是目录）：把这件事告诉用户，由用户处理，不要自己删改它。',
+  // 写明它在哪：真实会话里只说「当前 run 的 state.json」时，模型把它写到了项目根（docs/30 §3）。
   state:
-    '用 Write 写回一份合法的完整 state.json（顶层键照 /agent-team:at 第 1 节）；能从原文认出来的 history、rework、' +
-    'artifacts 照原样保留——返工计数只许增。',
+    '用 Write 写回一份合法的完整 `.agent-team/runs/<current-run 里的 run id>/state.json`（顶层键照 /agent-team:at 第 1 节）；' +
+    '能从原文认出来的 history、rework、artifacts 照原样保留——返工计数只许增。',
   project: '用 Write 写回一份合法的完整 `.agent-team/project.json`（照 /agent-team:at-init 第 2、3 节）。',
   plugin: '改 `.agent-team` 修不好它：停下，告诉用户重装或更新 agent-team 插件，不要去改插件目录下的文件。',
 }
 
+// 命令开头（门禁自检的追加句）才说的几句。/agent-team:at 要建新 run 时，不该先去修一趟即将被替下的旧 run；
+// /agent-team:at-resume 里没有用户的需求，照第 1 节补建 run 连契约的「用户原话」都填不了（docs/30 §3 的复核）。
+const AT_START = {
+  pointer:
+    POINTER_FIND +
+    '一趟都没有 state.json 的话：/agent-team:at-resume 里照它第 1 节告诉用户没有可续的 run，并照实说 runs/ 下那几个目录里' +
+    '有什么（空目录、只有契约……），不要自己补 state.json，也不要删目录。',
+  plugin: '改 `.agent-team` 修不好它：告诉用户重装或更新 agent-team 插件，不要去改插件目录下的文件；要建或续 run 的命令在这里停下。',
+}
+const NEW_RUN = '这条命令是 /agent-team:at 的话照建新 run，旧 run 的问题收尾时告诉用户'
+const AT_INIT = '这条命令是 /agent-team:at-init 的话，不在这里修，收尾时告诉用户。'
+
 /**
- * 按原因给的修法。H5a、ledger、门禁自检三处共用这一份。atStart：门禁自检的追加句用，那时 PM 在一条命令的开头——
- * 要建新 run 的 /agent-team:at 照建；/agent-team:at-init 不在那里修 run（project.json 坏了例外：at-init 就是修它的）。
+ * 按原因给的修法。H5a、ledger、门禁自检三处共用这一份。atStart：门禁自检的追加句用，那时 PM 在一条命令的开头，按命令分：
+ * 要建新 run 的 /agent-team:at 照建（丢指针、state.json 坏了——旧 run 的事收尾时说；project.json 坏了照样要先修，写路径
+ * 隔离靠它；runs 读不出来、插件坏了本来就建不了）；/agent-team:at-init 不在那里修 run（project.json 坏了例外：at-init
+ * 就是修它的）。
  */
 export function runContextFix(cause, { atStart = false } = {}) {
-  let text = FIX[cause] ?? '把这件事告诉用户：门禁读不出这个项目的运行状态，原因不明。'
-  if (atStart && cause === 'pointer') text += '这次要建新 run 的话照建，并告诉用户旧 run 还在。'
-  if (atStart && cause !== 'project') text += '这条命令是 /agent-team:at-init 的话，不在这里修，收尾时告诉用户。'
+  if (!atStart) return FIX[cause] ?? '把这件事告诉用户：门禁读不出这个项目的运行状态，原因不明。'
+  let text = AT_START[cause] ?? FIX[cause] ?? '把这件事告诉用户：门禁读不出这个项目的运行状态，原因不明。'
+  if (cause === 'pointer') text += `${NEW_RUN}（runs/ 下原有的目录还在）。`
+  if (cause === 'state') text += `${NEW_RUN}。`
+  if (cause !== 'project') text += AT_INIT
   return text
 }
 
@@ -90,8 +109,9 @@ export function ledgerUnreadableNotice(cause) {
   return (
     `【门禁】这次写入没有回传（契约与产物的哈希、账本校验）——门禁读不到这个项目的运行状态（${causePhrase(cause)}）。` +
     `修法：${runContextFix(cause)}` +
-    '若这是契约或阶段产物：修好之后用 Write 把它原样再写一次，哈希只从那次回传里拿，不要自己算（门禁先统一行尾再算，' +
-    '自己算的对不上）；是契约的话第 1 节照旧逐字不动。别的文件本来就没有回传。'
+    '若这是契约或你自己阶段的产物：修好之后用 Write 把它原样再写一次，哈希只从那次回传里拿，不要自己算（门禁先统一行尾' +
+    '再算，自己算的对不上）；是契约的话第 1 节照旧逐字不动。写的是别的角色的产物的话，修好之后写路径门禁不让你再写它：' +
+    '派它的产者重交一次。别的文件本来就没有回传。'
   )
 }
 
@@ -103,14 +123,30 @@ export function unknownStageDesc(stage) {
 /**
  * unknown-stage 的修法，按 history 末条分两支。H6 不许删 history、不许让任何阶段的出现次数变少，所以末条也坏着时
  * 「把末条改成真实阶段」会被拒；追加一个出现过的阶段又要记一次返工（critique semantics 3、testability 2 的实测）。
+ * history 本身不是由对象组成的数组时，H6 的计数不认它（非对象的条目不计次数），「会拒」「出现过就记返工」都不成立——
+ * 那一格不给具体改法，叫 PM 照写 state.json 时的回传改（docs/30 §3 的复核：照「写一个只含当前阶段的数组」做，会撞上
+ * rework 与 history 对不上）。
  */
 export function unknownStageFix({ state, stages }) {
-  const history = state && typeof state === 'object' && Array.isArray(state.history) ? state.history : []
-  const last = history.length ? history[history.length - 1] : null
-  const lastStage = last && typeof last === 'object' ? last.stage : undefined
+  const raw = state && typeof state === 'object' ? state.history : undefined
+  const isEntry = (e) => e !== null && typeof e === 'object' && !Array.isArray(e)
+  if (!Array.isArray(raw) || !raw.every(isEntry)) {
+    return (
+      'history 的形状也不对（写 state.json 时的回传会逐条列出）：先照那份回传改；返工计数只许增、不许改小；' +
+      '拿不准就停下，把 state.json 的情况告诉用户。'
+    )
+  }
+  const lastStage = raw.length ? raw[raw.length - 1].stage : undefined
   if (isKnownStage(stages, lastStage)) {
-    // lastStage 等于 stages.json 的一个键——插件自己的名字，原样。
-    return `把 state.stage 改回 history 末条的 ${lastStage}，history 不动（用 Write 整份重写 state.json）。`
+    // lastStage 等于 stages.json 的一个键——插件自己的名字，原样。更早的条目里还有坏阶段时（支 2 修完留下的正是这种形状），
+    // 照做之后写 state.json 的回传仍会报它，而 H6 不许改：说在前面，免得 PM 去改、撞上拒绝。
+    const residue = raw.some((e) => !isKnownStage(stages, e.stage))
+    return (
+      `把 state.stage 改回 history 末条的 ${lastStage}，history 不动（用 Write 整份重写 state.json）。` +
+      (residue
+        ? 'history 里更早还有不在阶段链里的条目：写 state.json 时的回传仍会报它，是已知残留，不要改也不要删（返工预算门禁会拒）。'
+        : '')
+    )
   }
   return (
     'history 末条也不在阶段链里（或者 history 是空的）。不要改、也不要删 history 里已有的条目——返工预算门禁会拒；' +
@@ -168,8 +204,7 @@ export function selfCheckAppendix(ctx) {
   if (isKnownStage(ctx.stages, ctx.state?.stage)) return ''
   return (
     `另外，交付物核验在 state.stage 改对之前不做——${unknownStageDesc(ctx.state?.stage)}。` +
-    `修法：${unknownStageFix({ state: ctx.state, stages: ctx.stages })}` +
-    '这条命令是 /agent-team:at-init 的话，不在这里修，收尾时告诉用户。'
+    `修法：${unknownStageFix({ state: ctx.state, stages: ctx.stages })}${NEW_RUN}。${AT_INIT}`
   )
 }
 

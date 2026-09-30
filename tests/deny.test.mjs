@@ -52,6 +52,8 @@ test('其它事件：stderr 打一行 agent-team BUG 提示，exitCode 0，不�
 // （真的从最外层 catch 走到这里、真的写了 stderr、真的 exit 0）由一次性
 // 注入 throw 验证过，不留成永久测试——跟 denyOutput 的验证方式是同一个
 // 理由，见本文件顶部与 hooks/lib/deny.mjs 里 crashNotice 上方的说明。
+// M3v 订正（docs/30）：那条传导链现在是永久判据——tests/helpers/inject-throw.cjs 预加载注入，
+// tests/gate-fail-open.test.mjs 的「崩溃」那几条；那几条也钉着崩溃之后 PostToolUse 上的【门禁】与给用户的一行。
 //
 // 四段断言检验的是文案的四个不同侧面（点名检查项、带上错误消息、非空、
 // 说明是 fail open 且没拦截），各自占一个 test()——同一个 test() 里排在

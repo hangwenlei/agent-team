@@ -367,6 +367,16 @@ const SCENARIOS = [
     calls: (_, P) => [['delegation', dispatch('agent-team:at-product', undefined, { isolation: P })]],
   },
   {
+    // M3v 复核（docs/30 §3）：unknown-stage 那一行 stderr 痕迹带着收件人（hook 输入的 agent_type）。上面那个场景的 stage 合法，
+    // 走不到它；把这一处的 inline 去掉，全套此前照样全绿。
+    name: 'unknown-stage：收件人是载荷（hook 输入的 agent_type）',
+    state: (s) => ({ ...s, stage: 'SX' }),
+    calls: (_, P) => [
+      ['deliverable', returned('agent-team:at-product', P)],
+      ['deliverable', returned('agent-team:at-product', 'agent-team:' + P)],
+    ],
+  },
+  {
     name: 'hook 输入的 agent_type',
     calls: ({ p }, P) => [
       ['writepath', write(P, join(p, 'src', 'server', 'a.ts'))],

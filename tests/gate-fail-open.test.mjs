@@ -62,11 +62,14 @@ function noRun() {
 }
 
 // 插件副本，stages.json 写坏：cause 是 plugin。
-function withBrokenPlugin(fx) {
+// stagesText / rosterText 缺省时 stages.json 写坏、roster.json 照抄本仓库的。
+function withBrokenPlugin(fx, { stagesText = '{ x', rosterText = null } = {}) {
   const plugin = realpathSync(mkdtempSync(join(tmpdir(), 'agent-team-fo-plug-')))
   cpSync(new URL('hooks', REPO), join(plugin, 'hooks'), { recursive: true })
-  cpSync(new URL('roster.json', REPO), join(plugin, 'roster.json'))
-  writeFileSync(join(plugin, 'stages.json'), '{ x', 'utf8')
+  if (rosterText === null) cpSync(new URL('roster.json', REPO), join(plugin, 'roster.json'))
+  else writeFileSync(join(plugin, 'roster.json'), rosterText, 'utf8')
+  if (stagesText === null) cpSync(new URL('stages.json', REPO), join(plugin, 'stages.json'))
+  else writeFileSync(join(plugin, 'stages.json'), stagesText, 'utf8')
   const cleanup = fx.cleanup
   return { ...fx, gate: join(plugin, 'hooks', 'boot.mjs'), cleanup: () => { cleanup(); rmSync(plugin, { recursive: true, force: true }) } }
 }
@@ -85,6 +88,8 @@ const UNREADABLE = {
     return fx
   }],
   plugin: ['plugin', () => withBrokenPlugin(healthy())],
+  // 复核（docs/30 §3）：解析得出、形状不对的 stages.json 此前被说成 state.stage 不在阶段链里。
+  'plugin（stages.json 是 {}）': ['plugin', () => withBrokenPlugin(healthy(), { stagesText: '{}' })],
 }
 
 function using(make, body) {
@@ -541,5 +546,22 @@ test('崩溃：已经往 stdout 写过一份之后再崩（process.exit 被注�
     const w = crash(fx, 'writepath', writing('PreToolUse', PM, join(fx.p, GATE_CHECK_PATH)), 'exit')
     assert.ok(reasonOf(w).startsWith(GATE_CHECK_ONLINE))
     assert.ok(w.stderr.includes(SECOND_WRITE_NOTE))
+  })
+  // 复核（docs/30 §3）：SubagentStop 的拒绝是 stderr + exit 2，不写 stdout——崩溃之后照样按 exit 2 退出，不被改判成放行。
+  using(() => healthy({ stage: 'S2', roster: ['at-product'] }), (fx) => {
+    const s = crash(fx, 'stop-gate', { hook_event_name: 'SubagentStop', agent_type: 'agent-team:at-product' }, 'exit')
+    assert.equal(s.status, 2, s.stderr)
+    assert.ok(s.stderr.includes('01-prd.md'), s.stderr)
+    assert.ok(s.stderr.includes(SECOND_WRITE_NOTE))
+  })
+})
+
+// 复核（docs/30 §3）：花名册读坏时 H1 先拒掉派发，PostToolUse:Agent 不会跑；这一格只防 H5a 的 no-run 分支在读坏的花名册上
+// 自己抛异常、说成「门禁自己出了错」。
+test('H5a no-run：花名册读坏时不回传、不崩', () => {
+  using(() => withBrokenPlugin(noRun(), { stagesText: null, rosterText: 'null' }), (fx) => {
+    const r = run('deliverable', dispatch('PostToolUse', PM, 'agent-team:at-product'), fx.gate, fx.p)
+    assert.equal(r.stdout, '')
+    assert.doesNotMatch(r.stderr, /异常崩溃/)
   })
 })

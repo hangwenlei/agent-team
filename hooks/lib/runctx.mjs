@@ -50,7 +50,8 @@
 //                       角色认领数据却因为文件损坏而不被承认。
 //
 // M3v（docs/30，全量审查第 12 条）：unreadable 的每个出口另带一个 cause——pointer（current-run 不在而 runs/ 下有 run、
-// 读不出、空、不是合法 id、指向的目录不存在）、runs、state、project、plugin（插件的 stages.json，以及最外层兜底）。
+// 读不出、空、不是合法 id、指向的目录不存在）、runs、state、project、plugin（插件的 stages.json 读不出来或形状不对，以及
+// 最外层兜底）。
 // 门禁判不出来时要告诉 PM 怎么修，修法按它选（hooks/lib/fail-open.mjs 的 runContextFix）。它不改变 kind 的任何语义；
 // no-run 与 ok 不带它。tests/runctx.test.mjs 逐个出口钉着。
 //
@@ -344,6 +345,20 @@ export function readRunContext(projectDir, pluginDir) {
 
     const stages = readJson(join(pluginDir, 'stages.json'))
     if (!stages.ok) return { ok: false, kind: 'unreadable', cause: 'plugin', agentTeamDir: base, reason: stages.reason }
+    // M3v 复核（docs/30 §3）：解析得出、形状不对的阶段链（{}、某一段的值不是对象）也是插件坏了。此前它算读出来了，每一次派发
+    // 都落进 unknown-stage，门禁把原因说成 state.stage、叫 PM 去动 history；H3 也把 PM 的产物说成「不是任何阶段的 produces」。
+    // 只核最外一层：各段里面的字段由各个消费方自己防。
+    const chain = stages.value
+    const values = Object.keys(chain).map((k) => chain[k])
+    if (!values.length || !values.every((v) => v !== null && typeof v === 'object' && !Array.isArray(v))) {
+      return {
+        ok: false,
+        kind: 'unreadable',
+        cause: 'plugin',
+        agentTeamDir: base,
+        reason: `${inline(join(pluginDir, 'stages.json'))} 的形状不对：要至少有一个阶段，每个阶段都是一个对象`,
+      }
+    }
 
     const projectPath = join(base, 'project.json')
     const project = existsSync(projectPath) ? readJson(projectPath) : { ok: true, value: null }

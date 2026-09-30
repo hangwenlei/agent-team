@@ -35,9 +35,19 @@ test('commands/at-resume.md §1：读不到 current-run 时先 Glob runs/*/state
   assert.ok(lineWith(r, '最后建的那一趟') || lineWith(r, '问用户'))
 })
 
-test('commands/at-init.md 收尾：自检时收到的「另外，」那一句，收尾时告诉用户', () => {
+test('commands/at-init.md 收尾：自检时收到的「另外，」那一句，收尾时告诉用户——按原因说下一步', () => {
   const r = read('commands/at-init.md')
   assert.ok(lineWith(r, '「另外，」', '告诉用户'))
+  // 复核（docs/30 §3）：插件文件读不出来、runs 读不出来时 /agent-team:at-resume 修不了，不能一律指向它。
+  assert.ok(lineWith(r, '插件自己的文件读不出来', '重装'), '插件那一种要叫用户重装')
+  assert.ok(lineWith(r, '`runs` 目录读不出来', '由用户处理'), 'runs 读不出来那一种由用户处理')
+})
+
+// 复核（docs/30 §3，noise 第 0 条）：第二趟起契约写在切指针之前，ledger 判得出这次写入不在当前 run 里、一句不说；
+// 「两样都没有就是门禁没在跑」会误诊它。
+test('commands/at.md §2：判「门禁没在跑」之前先核对 current-run 是不是正在写的这一趟', () => {
+  const at = read('commands/at.md')
+  assert.ok(lineWith(at, '.agent-team/current-run', '正在写的这一趟'), at)
 })
 
 test('README 两半：正常放行默认不留记录；项目经理自己发起的调用上判不出来时，告诉项目经理、界面上给你一行', () => {
@@ -47,4 +57,7 @@ test('README 两半：正常放行默认不留记录；项目经理自己发起�
   assert.ok(lineWith(zh, '项目经理自己发起的调用上', '判不出', '一行提示'), '中文一半')
   assert.ok(lineWith(en, 'ordinary pass', 'no record'), '英文一半')
   assert.ok(lineWith(en, "project manager's own calls", 'cannot tell', 'one-line notice'), '英文一半')
+  // 复核（docs/30 §3）：没有 run 时派团队角色也会给一行——那一格门禁判得出来，不在「判不出来」那句里。
+  assert.ok(lineWith(zh, '没有进行中的 run', '一行提示'), '中文一半')
+  assert.ok(lineWith(en, 'no run is in progress', 'one-line notice'), '英文一半')
 })

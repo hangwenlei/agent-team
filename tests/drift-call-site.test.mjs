@@ -112,7 +112,7 @@ test('docs/11 §5.23 四：compareArtifacts 在 hooks/ 下只有一处调用，�
 // ⭐ 主判据二：那一处落在哪个分支区里。
 // ⚠️ 期望值是 ['stop-gate', 'deliverable'] 而不是 ['deliverable']：两道 H5 共用同一个
 // 分支头，而调用本身另有一层 `CHECK === 'deliverable'` 三元把 stop-gate 排掉（H5b 走
-// SubagentStop 的 stderr 契约，没有 additionalContext 这条通道，算了也没地方发）。
+// SubagentStop 上，exit 0 带 additionalContext 等于拦截，这条通道不能用，算了也没地方发）。
 // **这条钉的是分支区，不是那层三元**——三元那一层由 tests/gate-deliverable.test.mjs 的
 // 子进程级用例钉着。写成 ['deliverable'] 会是一条从第一天起就红的假判据。
 test('docs/11 §5.23 四：那一处调用在 H5 那个分支区里（CHECK === deliverable 与 stop-gate 共用的那个）', () => {

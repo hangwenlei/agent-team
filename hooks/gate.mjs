@@ -134,14 +134,15 @@ function loadRoster() {
 // 不需要再写 exit。
 function denyAndExit(reason, event) {
   const { stream, text, exitCode } = denyOutput(reason, event)
-  if (stream === 'stdout') STDOUT_WRITTEN = true
+  DECIDED = exitCode
   process[stream].write(text)
   process.exit(exitCode)
 }
 
-// 这次进程往 stdout 写过东西没有（M3v）。只有最外层 catch 读它：写过一份之后再崩（只有注入走得到——每个写 stdout 的
-// 出口写完都紧跟 process.exit），再写一份就是两份 JSON，拒绝失效、回传全丢。
-let STDOUT_WRITTEN = false
+// 这次进程已经写出的结果要以哪个退出码收尾（M3v）；没写出过是 null。只有最外层 catch 读它：写出结果之后再崩（只有注入走得
+// 到——每个出口写完都紧跟 process.exit），再写一份就是两份 JSON，拒绝失效、回传全丢；SubagentStop 的拒绝是 stderr + exit 2，
+// 不写 stdout，崩溃之后要照样以 2 退出，不能被改判成放行（docs/30 §3 的复核）。
+let DECIDED = null
 // 这次的 hook 输入。只有最外层 catch 读它：崩溃时按「收件人是不是 PM」选措辞。
 let INPUT = null
 
@@ -275,7 +276,7 @@ function emitHookJson(event, parts) {
   const { stdout, bug } = hookOutput(event, parts)
   if (bug) process.stderr.write(bug)
   if (stdout) {
-    STDOUT_WRITTEN = true
+    DECIDED = 0
     process.stdout.write(stdout)
   }
   process.exit(0)
@@ -1341,7 +1342,8 @@ function main() {
           })
         } else {
           const roster = loadRoster()
-          if (Object.hasOwn(roster, role) && decideDelegation(input, roster).decision === 'allow') {
+          // decideDelegation 排在前面：花名册读坏（null、数组）时它先判拒，不去对一个不是对象的值调 Object.hasOwn。
+        if (decideDelegation(input, roster).decision === 'allow' && Object.hasOwn(roster, role)) {
             emitHookJson(spec.event, { contexts: [dispatchNoRunNotice()], systemMessage: systemMessage('dispatch-no-run') })
           }
         }
@@ -1562,13 +1564,13 @@ try {
 } catch (err) {
   const spec = CHECKS[CHECK]
   const event = (spec && spec.event) || 'PreToolUse'
-  // M3v：这次进程已经往 stdout 写过一份（拒绝或回传）之后才崩——只有注入走得到：每个写 stdout 的出口写完都紧跟
-  // process.exit。再写一份就是两份 JSON，拒绝失效、回传全丢；已经写出去的那一份照样有效，这里只留痕、exit 0。
-  if (STDOUT_WRITTEN) {
+  // M3v：这次进程已经写出结果（拒绝或回传）之后才崩——只有注入走得到：每个出口写完都紧跟 process.exit。再写一份就是
+  // 两份 JSON，拒绝失效、回传全丢；已经写出去的那一份照样有效，这里只留痕，照那个结果的退出码退出（SubagentStop 的拒绝是 2）。
+  if (DECIDED !== null) {
     process.stderr.write(
       `agent-team ${CHECK} 检查项在写出结果之后异常（${quote(err?.message ?? err, { max: 120 })}）。${SECOND_WRITE_NOTE}\n`,
     )
-    process.exit(0)
+    process.exit(DECIDED)
   }
   // CHECK 此刻按理已经通过 main() 顶部的 KNOWN_CHECKS 校验，spec 应该总是存在；
   // 万一不存在（防御性兜底），按最严格的 fail closed 处理，安全边界优先于精确。

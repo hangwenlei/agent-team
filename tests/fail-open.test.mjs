@@ -19,6 +19,7 @@ import {
   unknownStageNotice,
 } from '../hooks/lib/fail-open.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
+import { decideDeliverable, isKnownStage } from '../hooks/lib/deliverable.mjs'
 
 const EVENTS = ['PreToolUse', 'PostToolUse', 'SubagentStop', 'UserPromptSubmit', undefined, 'bogus']
 const PARTS = [
@@ -120,8 +121,8 @@ test('runContextFix：project、plugin、runs 三种原因不把 PM 指去修 cu
 })
 
 test('runContextFix：atStart 时补命令开头才有的两句；project 本来就是 at-init 修的，不说「不在这里修」', () => {
-  assert.match(runContextFix('pointer', { atStart: true }), /要建新 run 的话照建，并告诉用户旧 run 还在/)
-  assert.doesNotMatch(runContextFix('pointer'), /旧 run 还在/)
+  assert.match(runContextFix('pointer', { atStart: true }), /这条命令是 \/agent-team:at 的话照建新 run/)
+  assert.doesNotMatch(runContextFix('pointer'), /照建新 run|原有的目录还在/)
   for (const c of ['pointer', 'state', 'plugin', 'runs']) {
     assert.match(runContextFix(c, { atStart: true }), /\/agent-team:at-init 的话，不在这里修，收尾时告诉用户/)
     assert.doesNotMatch(runContextFix(c), /at-init 的话/)
@@ -155,8 +156,9 @@ test('unknownStageFix：history 末条是链里的阶段时，只把 stage 改�
   assert.doesNotMatch(t, /追加/)
 })
 
-test('unknownStageFix：history 末条不在链里、为空或不是数组时，只许追加，出现过的阶段先问用户', () => {
-  for (const history of [[{ stage: 'S1' }, { stage: 'S9' }], [], undefined, 'x', [null], [{ stage: '__proto__' }]]) {
+// history 形状不对（不是数组、条目不是对象）的几格在下面「history 的形状不对」那条里。
+test('unknownStageFix：history 末条不在链里或为空时，只许追加，出现过的阶段先问用户', () => {
+  for (const history of [[{ stage: 'S1' }, { stage: 'S9' }], [], [{ stage: '__proto__' }], [{ stage: 'S1' }, {}]]) {
     const t = unknownStageFix({ state: { stage: 'S9', history }, stages: STAGES })
     assert.doesNotMatch(t, /改回/, JSON.stringify(history))
     assert.match(t, /不要改、也不要删 history 里已有的条目/)
@@ -239,6 +241,66 @@ test('crashContext：把异常消息放进引号；只有 deliverable 与 ledger
   assert.equal(crashContext('readiness', err, true), null)
   assert.equal(crashContext('stop-gate', err, true), null)
   assert.match(crashContext('ledger', { toString: 1 }, true), /^【门禁】/)
+})
+
+// ---- 复核（docs/30 §3）补的判据 ----
+
+// 变异 A10 存活过：isKnownStage 去掉「值不能是假值」之后全绿。decideDeliverable 对 {S2: null} 判 unknown-stage，这里说「在链里」
+// 就会给出一条空操作的修法（改回 S2），自检也不追加。
+test('isKnownStage：阶段链里那一项的值是假值时不算在链里——与 decideDeliverable 同口径', () => {
+  const stages = { S1: {}, S2: null }
+  assert.equal(isKnownStage(stages, 'S2'), false)
+  assert.equal(decideDeliverable({ role: 'at-product', stageId: 'S2', stages, artifactExists: () => false }).skipped, 'unknown-stage')
+  const a = selfCheckAppendix({ ok: true, state: { stage: 'S2', history: [{ stage: 'S2' }] }, stages })
+  assert.match(a, /不在阶段链里/)
+  assert.doesNotMatch(unknownStageFix({ state: { stage: 'S2', history: [{ stage: 'S2' }] }, stages }), /改回/)
+})
+
+// 复核（wording 第 0 条）：PM 在读不到运行状态时写了别的角色的产物，修好之后 H3 不让它再写——「原样再写一次」对它走不通。
+test('ledgerUnreadableNotice：原样重写只说给契约与 PM 自己阶段的产物；别人的产物叫产者重交', () => {
+  const t = ledgerUnreadableNotice('pointer')
+  assert.match(t, /若这是契约或你自己阶段的产物/)
+  assert.match(t, /写的是别的角色的产物的话，修好之后写路径门禁不让你再写它：派它的产者重交一次/)
+})
+
+// 复核（wording 第 1 条）：末条是真阶段、更早的条目里有坏阶段时走支 1，照做之后写 state.json 的回传仍报那条坏阶段，
+// 而 H6 不许改它。
+test('unknownStageFix 支 1：history 里还有别的坏阶段时，补一句那是已知残留', () => {
+  const dirty = unknownStageFix({ state: { stage: 'S3x', history: [{ stage: 'S1' }, { stage: 'S2x' }, { stage: 'S3' }] }, stages: STAGES })
+  assert.match(dirty, /改回 history 末条的 S3/)
+  assert.match(dirty, /已知残留/)
+  const clean = unknownStageFix({ state: { stage: 'S3x', history: [{ stage: 'S1' }, { stage: 'S3' }] }, stages: STAGES })
+  assert.doesNotMatch(clean, /已知残留/)
+})
+
+// 复核（wording 第 2 条）：history 不是由 {stage, at} 对象组成的数组时，H6 的计数不认它——「会拒」「出现过就记返工」都不成立。
+test('unknownStageFix：history 的形状不对时不引 H6 的说法，叫 PM 照写 state.json 时的回传改', () => {
+  for (const history of [['S1', 'S2', 'S3'], { S1: 't' }, undefined, [{ stage: 'S1' }, 'S2'], [null]]) {
+    const t = unknownStageFix({ state: { stage: 'S9', history }, stages: STAGES })
+    assert.match(t, /history 的形状也不对/, JSON.stringify(history))
+    assert.doesNotMatch(t, /返工预算门禁会拒|记一次返工|改回/, JSON.stringify(history))
+    assert.match(t, /返工计数只许增/)
+  }
+  assert.match(unknownStageFix({ state: { stage: 'S9', history: [] }, stages: STAGES }), /追加一条真实的当前阶段/)
+})
+
+// 复核（wording 第 3 条）：命令开头的追加句要分命令——/agent-team:at 要建新 run 时不该先去修一趟即将被替下的旧 run；
+// at-resume 里「一趟都没有 state.json」时不该自己补建。
+test('runContextFix / selfCheckAppendix：命令开头时 state 与 unknown-stage 也允许照建新 run；丢指针那一句分命令说', () => {
+  for (const c of ['state']) assert.match(runContextFix(c, { atStart: true }), /这条命令是 \/agent-team:at 的话照建新 run，旧 run 的问题收尾时告诉用户/)
+  for (const c of ['project', 'runs', 'plugin']) assert.doesNotMatch(runContextFix(c, { atStart: true }), /照建新 run/)
+  const a = selfCheckAppendix({ ok: true, state: { stage: 'S9', history: [{ stage: 'S2' }] }, stages: STAGES })
+  assert.match(a, /这条命令是 \/agent-team:at 的话照建新 run，旧 run 的问题收尾时告诉用户/)
+  const p = runContextFix('pointer', { atStart: true })
+  assert.match(p, /runs\/ 下原有的目录还在/)
+  assert.match(p, /\/agent-team:at-resume 里/)
+  assert.match(p, /不要自己补 state\.json，也不要删目录/)
+  assert.doesNotMatch(p, /旧 run 还在/)
+})
+
+// 真实会话（docs/30 §3）：修法只说「当前 run 的 state.json」时，haiku 把它写到了项目根。
+test('runContextFix(state)：写明 state.json 在哪', () => {
+  assert.ok(runContextFix('state').includes('`.agent-team/runs/<current-run 里的 run id>/state.json`'))
 })
 
 test('selfCheckAppendix：no-run、ok 且阶段在链里时不追加', () => {

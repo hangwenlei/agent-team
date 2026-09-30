@@ -754,7 +754,7 @@ test('H5a：协调者返回但当前阶段已经 done —— 报（这正是「�
     state.roster = f.roster
     // 账本记录与磁盘内容对齐（哈希对得上），让这条测试只钉「stageDone 分支的 h5a
     // 措辞」这一件事，不夹带账本比对（Task 4，独立信号）的 unrecorded 噪音——两者
-    // 谁报不报是分开的问题，见下面 emitLedger 调用点与 docs/11 §5.8。
+    // 谁报不报是分开的问题，见 hooks/gate.mjs 的 H5a 那几处 emitHookJson 调用点与 docs/11 §5.8。
     state.artifacts = { '05-impl/at-backend.md': sha256OfContract('fixture 05-impl/at-backend.md\n') }
     writeFileSync(statePath, JSON.stringify(state), 'utf8')
 

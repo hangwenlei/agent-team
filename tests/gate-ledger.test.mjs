@@ -72,12 +72,13 @@ test('写了 project.json：回传触达表，含 reach.json 落盘指示', () =
 // Task 2 修复轮 1：单一真源这个交付物要求的不只是「trusted.mjs 自己的单测通过」，
 // 还要「gate.mjs 三处真实调用点的真实输出确实以它开头」——否则重构可以被悄悄
 // 塌回硬编码字面量（且可能带一个字的漂移）而没有任何测试发现。这条钉的是
-// hooks/gate.mjs:134（emitLedger）。复用上面那条测试的同一份夹具与输入：它已
+// hooks/gate.mjs 放行一侧写 stdout 的那个出口（M3v 起是 emitHookJson，受信块由 hooks/lib/fail-open.mjs 的 hookOutput
+// 包，此前是 emitLedger；这里写符号名，不写行号）。复用上面那条测试的同一份夹具与输入：它已
 // 确认过这个场景会产出非空 notices（触达表分支无条件 push）。用 startsWith，
 // 不用 includes——includes 在前缀被挪到正文中间时仍然绿，测不出"前缀在不在
 // 开头"。TRUSTED_PREFIX 从 hooks/lib/trusted.mjs import，不在本文件另写一份
 // 字面量，那正是这次要防的漂移本身。
-test('emitLedger 的真实输出以受信前缀开头，不是巧合等长的别的文本', () => {
+test('ledger 回传（emitHookJson）的真实输出以受信前缀开头，不是巧合等长的别的文本', () => {
   const { projectDir, pluginDir } = makeRun({
     runId: 'r1', stage: 'S1',
     project: { paths: { 'at-product': ['docs/'], 'at-backend': ['src/server/'] } },
@@ -128,7 +129,7 @@ test('写了阶段产物：回传的哈希与磁盘实算一致', () => {
 
 // Task 2 修复轮 1 定下的形状：新增的回传路径要单独钉一条「真实输出以受信前缀开头」。
 // 这条严格说不是一个全新的 additionalContext 调用点——kind: 'produce' 的内容最终
-// 仍然流经 hooks/gate.mjs:134 的同一个 emitLedger（上面「写了 project.json」那条
+// 仍然流经 hooks/gate.mjs 的同一个 emitHookJson（上面「写了 project.json」那条
 // 已经钉过这个调用点本身会用 trustedBlock 包装，包装逻辑不分 kind），但「同一个函数
 // 所以肯定也对」是推理，不是证据——照同一个形状直接对含【产物】内容的这次真实回传
 // 断言一遍，不留这个空子。
