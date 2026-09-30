@@ -2,7 +2,7 @@
 branch: main
 worktree: C:/Users/82370/Desktop/Agent-Team
 ---
-> 更新时间：2026-09-30T18:00:00-07:00
+> 更新时间：2026-09-30T23:30:00-07:00
 
 ## 📋 任务看板
 
@@ -34,6 +34,7 @@ worktree: C:/Users/82370/Desktop/Agent-Team
 - [x] 29. project.json 形状校验（审查第 10 条）：缺键、拼错的键、被删的文件不再让 H3 静默全开；形状问题分阻断、要改、请确认三档，插件装坏单列；ledger 在写 project.json、current-run、state.json 时说出来，写坏、在 run 里被手改坏、UTF-16 也说出来，花名册坏或有阻断时不发假触达表；at-init 重跑先单独读旧文件、不读模板；四轮对抗复核；随 `v1.3.0` 发布（`docs/29`）
 - [ ] 30. `docs/29` §5 仍开着的：project.json 解析不出仍判成读不出运行上下文（改交 H3 单独阻断）、at-resume 派发前没有回传、`quote` 不转义格式字符、开头非 ASCII 的 UTF-16 判不出
 - [x] 31. fail open 看得见（审查第 12 条）：门禁判不出来时，PM 自己发起的派发与写入上回传【门禁】（修法按原因、按命令分，unknown-stage 按 history 分支）、给用户一行 systemMessage；门禁自检按运行状态追加「另外，」；输入读不出来、崩溃不再静默；PreToolUse 不发受信块、SubagentStop 什么都不发；测试出口核平台契约；设计评审加两轮对抗验证与真实会话；随 `v1.4.0` 发布（`docs/30`）
+- [x] 33. H2 给多段角色选错段（审查第 13 条）：按派发者选段（派发者是那一段的 role 或能传递派到它，与 H5a 认协调者同一口径），不按 state.stage——审查给的修法在设计评审里被推翻；at-ui 在 S2 内返修放行、S2 被裁或只交一半时架构师派它照查 S5 的前置；reach.mjs 跳过不是字符串的派发边元素；随 `v1.5.0` 发布（`docs/31`）
 - [ ] 32. `docs/30` §4 仍开着的：run 读不出来时 PM 改旧 run 没有门禁挡（只靠正文）、第二趟漏切指针时 ledger 一句不说（门禁侧有原型）、契约写到 `.agent-team` 之外只靠正文、PM 搞错项目根时自检不追加、readiness 崩溃时 PM 收不到、validateState 与 H6 对坏 history 的冲突（归第 17 条）
 - [x] 20. main 的分支保护：用户 2026-09-29 定维持现状，约定先推功能分支、等 CI 全绿再合（`docs/24` §2.3）
 - [ ] 21. 后台会话在 git 仓库里跑不起来（`docs/24` §4.2）：`at-init` 要不要提示 `worktree.bgIsolation`、README 要不要写
