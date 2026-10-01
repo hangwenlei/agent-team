@@ -172,6 +172,8 @@ test('M3x：规格 §4.4 示例里 stage_roles 各段合起来恰好是 roster',
   assert.ok(m, '规格 §4.4 里找不到 json 示例')
   const ex = JSON.parse(m[1])
   assert.deepEqual([...new Set(Object.values(ex.stage_roles).flat())].sort(), [...ex.roster].sort())
+  // 示例下面那句说「S5 里也记着被叫去分发的架构师」——口径与 /at 的例子一致，示例要真的照着写（复核的变异 r6 拿掉它全绿）。
+  assert.ok(ex.stage_roles.S5.includes('at-architect'), '规格 §4.4 示例的 S5 没记分发的架构师，与示例下面那句、与 /at 的口径不一致')
 })
 
 test('M3x：规格 §4 母表的按段那一行列着产者交代（decideCoverage）', () => {

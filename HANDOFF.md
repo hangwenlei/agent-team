@@ -30,7 +30,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/31` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查逐条的现状（原文在它的附录），下一轮从那里挑。
+- `docs/13`…`docs/32` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查逐条的现状（原文在它的附录），下一轮从那里挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
 ## 🧠 长期决策与理由
@@ -60,6 +60,10 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   什么都不发（exit 0 带回传等于拦截）。输出形状只由 `hooks/lib/fail-open.mjs` 的 `hookOutput` 定，写 stdout 只经 `emitHookJson`
   与 `denyAndExit`；`tests/helpers/gate-runner.mjs` 对每一次门禁子进程核平台契约。修法按 runctx 的 `cause` 选、按命令分，
   新写一句修法要照着做一遍、看门禁放不放行。理由在 `docs/30`。
+- **问「这一段」的消费方按段取参与者，账本比对与 H2 有意整趟**：`state.json` 的 `stage_roles`（`{ 段: [角色] }`）是 `roster`
+  按段拆开、同一个「叫到」口径，PM 在推进出那一段的同一次 Write 里记；`isStageDone` 的两处调用、产者交代、at-qa/at-status/at-resume
+  经 `hooks/lib/stages.mjs` 的 `participantsOf` 取（有字段、没这一段的键 = 还没记账 = 空集；没有字段的旧 run 退回 `roster`）。
+  `compareArtifacts` 与 `decideReadiness` 仍传整趟 `roster`：当前段记账之前按段取是空集，前者漏报漂移、后者提前放行。理由在 `docs/32`。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。
