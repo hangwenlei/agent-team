@@ -113,8 +113,10 @@ export function stageRolesInRun(stage, roster) {
   return roles.filter((r) => inRun.has(r))
 }
 
-/** 某一段**在这一趟里叫到了谁**——按段的消费方（isStageDone 的两处调用、decideCoverage、/agent-team:at-qa、
- * at-status、at-resume 的展开口径）都从这里取，再交给 stageRolesInRun 与这一段的产者求交（M3x，docs/32）。
+/** 某一段**在这一趟里叫到了谁**——按段的消费方（isStageDone 的两处调用、decideCoverage、at-status 与 at-resume 的展开口径；
+ * at-qa 的自查在角色正文里照同一口径写）都从这里取（M3x，docs/32）。isStageDone 与 at-status、at-resume 再交给 stageRolesInRun
+ * 与这一段的产者求交；decideCoverage 不经 stageRolesInRun，报的是这一段的产者减去这里给的人、再减去 trimmed 的全部键，
+ * undefined 按空集算（coverage.mjs 那段「不学 stageRolesInRun」）。
  *
  * roster 不分段：at-ui 在 S2 进过 roster，S5 的展开就把它当成 S5 的产者——S5 不派它时永远不齐，它先交又提前判齐
  * （全量审查第 14 条）。state.json 从 M3x 起多一个 stage_roles：`{ 段 id: [角色...] }`，与 roster 同一个「叫到」

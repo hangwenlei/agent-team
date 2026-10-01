@@ -560,7 +560,8 @@ const isDriverRole = (role) => isContractWriter(role)
 // ——at-ui 在 S2 叫过、S5 没记——所以三处跟着变：头一句不说「这一趟既没叫到它们」（假话），改说 state.json 没记着它在
 // 那一段被叫到；多一条出路「它在那一段真干过活、只是 stage_roles 漏记了 → 补记」（这时「把它派出去」会让它重做一遍）；
 // 「不要为了让提示消失就写进 roster」那条护栏扩到 stage_roles——补记与「只写名字」长得一样，分界是它真被叫到过没有。
-// 旧 run（perStage 为假）的文案一个字不变：那里没有 stage_roles 可补，判据也还是整趟口径。
+// 旧 run（perStage 为假）的产者交代文案只有护栏那一句换了（PM 与非 PM 两支都换了，见上面那段 M3x 订正，与 perStage 无关），其余
+// 一个字不变：那里没有 stage_roles 可补，判据也还是整趟口径。
 function buildCoverageNotice({ gaps, narrowed, perStage } = {}, recipientCanWriteState) {
   if (!Array.isArray(gaps) || !gaps.length) return null
   const lines = gaps.map((g) => `  - ${g.stage} 的 ${g.role}`)
@@ -724,8 +725,9 @@ function main() {
       // M2a：与 deliverable 分支那次 compareArtifacts 同一个口径——undefined 而不是 []，state.json 坏掉时
       // 退回「全部 producers」这个更宽的集合，宁可多判一次未完成，不要漏。
       // ⚠️ M3x：这里**有意**仍传整趟 roster，不按段取（participantsOf）——H2 放行与否取决于「齐了没」，整趟口径是更严的一侧；
-      // 按段取在当前段记账之前只剩目标自己那一份，它在就判齐、前置不查（docs/11 §5.33 的收口；判据在
-      // tests/gate-readiness.test.mjs 的「M3x」）。
+      // 按段取在当前段记账之前只剩目标自己那一份，重派时它在就判齐、前置不查。整趟口径多等的只有别段叫到过、还没交的 S5 产者
+      // （有界面的项目里是 S2 的 at-ui），其余情形两种口径一样放行——那是 H2「齐了就跳过前置」的既有设计（docs/11 §5.33 的收口；
+      // 判据在 tests/gate-readiness.test.mjs 的「readiness（M3x）」）。
       roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
       caller,
       callerReach: Object.hasOwn(reach, caller) ? reach[caller].reachableRoles : null,
@@ -1197,7 +1199,7 @@ function main() {
     // state.json 的 stage_roles[当前段]——这一段叫到了谁；没有 stage_roles 的旧 run 退回 roster，roster 不是数组时
     // 给 undefined、退回全部 producers。写法与 deliverable 分支里那次 isStageDone 一致；那次 compareArtifacts、readiness
     // 分支里那次 decideReadiness **有意**仍传整趟 roster（理由在 docs/11 §5.33 的收口：按段取会让账本比对在当前段记账之前
-    // 漏报 S2 那几份的漂移、让 H2 在 S5 记账之前把「齐了」判得太早而放行）。
+    // 漏报 S2 那几份的漂移；H2 那边整趟口径在别段叫到过的 S5 产者还没交时多查一次前置，按段取就把这一次也放过了）。
     //
     // ⚠️ M3x：此前这里传整趟 roster。roster 不分段：at-ui 在 S2 进过 roster，S5 就去等 05-impl/at-ui.md——S5 不派它时
     // 永远不齐、这条提示永远不发；它先交又提前宣布齐（全量审查第 14 条）。当前段在 PM 记账之前，参与者是空集：产物每一条

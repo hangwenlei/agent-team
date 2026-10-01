@@ -762,7 +762,8 @@ test('产者交代文案明确写出「不要为了让提示消失就写进 rost
 //
 // at-ui 在 S2 叫过、S5 没叫也没裁：整趟 roster 下它被当成交代过，按段之后报 {S5, at-ui}。这时它就在 roster 里，
 // 旧文案的头一句「这一趟既没叫到它们」是假话；它也可能在 S5 真干过活、只是 stage_roles 漏记了——那时的修法是补记，
-// 「把它派出去」会让它重做一遍。所以带 stage_roles 时多给第三条出路，护栏扩到 stage_roles。旧 run 的文案不变（上面那几条）。
+// 「把它派出去」会让它重做一遍。所以带 stage_roles 时多给第三条出路，护栏扩到 stage_roles。旧 run 的文案除护栏那句外不变
+// （护栏新旧 run 都换了，见下面「护栏不许诺」那条）。
 const WALKED_S5_PER_STAGE = {
   runId: 'r1',
   stage: 'S6',
@@ -827,6 +828,25 @@ test('M3x：产者交代的护栏不许诺「账本比对会把它报成 missing
       rmSync(projectDir, { recursive: true, force: true })
       rmSync(pluginDir, { recursive: true, force: true })
     }
+  }
+})
+
+// roster 与 stage_roles 一起漏记一个真干过活的角色：validateState 不报（它只接得住「roster 里有、哪一段都没记」），推进出那一段的
+// 那次写入由产者交代点名它（docs/11 §5.7 收口那一句的判据）。
+test('M3x：roster 与 stage_roles 一起漏记 S5 的 at-backend——推进出 S5 那次写入，产者交代点名它，【state.json】不报', () => {
+  const { projectDir, pluginDir } = makeRun({
+    ...WALKED_S5_PER_STAGE,
+    roster: ['at-product', 'at-ui', 'at-architect', 'at-frontend', 'at-qa'],
+    stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'], S5: ['at-architect', 'at-frontend', 'at-ui'], S6: ['at-qa'] },
+    trimmed: {},
+  })
+  try {
+    const ctx = ctxOf(writeState(projectDir).stdout) ?? ''
+    assert.match(ctx, /S5 的 at-backend/)
+    assert.doesNotMatch(ctx, /【state\.json】/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
   }
 })
 

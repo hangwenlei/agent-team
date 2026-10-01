@@ -204,8 +204,10 @@ U4 与 U7 是同一个机制的两个观测面，只是分别撞在「agent 宇�
 >
 > ⚠️ **`isStageDone` 单拆一行（M3x，`docs/32`）。** `roster` 不分段：`at-ui` 在 S2 进过 `roster`，S5 就把它当成
 > S5 的产者——S5 不派它时永远判不齐、它先交又提前判齐。`compareArtifacts` 与 `readiness` 有意仍按整趟 `roster`：
-> 当前段记账之前按段取是空集，前者会漏报 S2/S5 那几份的漂移，后者会把「齐了」判得太早、前置不查就放行。
-> 两行的参与者都交给同一个 `stageRolesInRun` 求交，只是从哪儿取不同。产者交代同样按段（`decideCoverage` 只与 `stageRoles` 求交）。
+> 当前段记账之前按段取是空集，前者会漏报 S2/S5 那几份的漂移；后者在 S5 记账之前只剩目标自己那一份，重派时它已在磁盘上就判「齐了」、
+> 前置不查——整趟口径多等的只有别段叫到过、还没交的 S5 产者（有界面的项目里是 S2 的 `at-ui`），其余情形两种口径一样放行。
+> 两行的参与者都交给同一个 `stageRolesInRun` 求交，只是从哪儿取不同。产者交代同样按段，但不经 `stageRolesInRun`：`decideCoverage` 报的是
+> 那一段的产者里既不在那一段叫到的人里、也不是 `trimmed` 任何一个键的那些。
 >
 > 「`roster ∩ producers`」这一组的单一真源是 `stages.mjs` 的 `stageRolesInRun(stage, roster)`——
 > **不要在调用点自己再 filter 一遍**。M2a 期间这段逻辑一度被写了两份，评审抓出后收敛。
