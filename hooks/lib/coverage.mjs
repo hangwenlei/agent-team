@@ -57,6 +57,8 @@ import { stageRoles, isPlainObject, participantsOf } from './stages.mjs'
  * ⚠️ 「不等于 state.stage」这一条，在真实数据上是承重的而不是理论上的：docs/15 §3.8
  * 记的那一趟 history 是 S1→S2→S3→S4→S5→S6→S5→S6→S7→S8，**S5 与 S6 各出现两次**
  * （两轮自发返工，rework 是 {"S5":1,"S6":1}）。所以同一个阶段 id 会在 history 里重复
+ * 【M3y 订正（docs/33 §1）：那一趟只有一次返工（S6 测试没过回 S5）。rework.S6 是 1，是因为回到 S6 时 S6 在 history 里
+ *  第二次出现、H6 按派生量逼着它加 1——转录里 PM 带着 S6: 0 推进被 H6 拒掉，带上 1 才通过。重复出现这件事照样成立。】
  * 出现——下面按 seen 去重，否则同一条 gap 会照 history 里的出现次数重复上榜。
  *
  * ⚠️ 同一条口径还有**第二个后果，上面那段没说**（M3a 全分支终审 Minor-1）：

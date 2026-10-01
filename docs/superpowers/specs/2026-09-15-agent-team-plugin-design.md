@@ -319,6 +319,7 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
     { "stage": "S5", "at": "2026-09-17T17:15:00Z" }
   ],
   "rework": { "S5": 1 },
+  "rework_base": { "05-impl/at-frontend.md": "sha256:...", "05-impl/at-backend.md": "sha256:...", "06-test.md": "sha256:..." },
   "never_invoked": ["at-ui", "at-ios", "at-android"],
   "escalations": [
     { "stage": "S4", "kind": "tradeoff", "question": "...", "answer": "...", "at": "..." }
@@ -377,10 +378,19 @@ S5 重做，所以 S5 在 `history` 里出现两次、`rework.S5` 是 1，而 S6
 值里的角色都在 `roster` 里，`roster` 里的角色都在某一段里。示例是一趟完整的账：各段合起来就是 `roster`，S5 里也记着
 被叫去分发的架构师；S5 返工的第二轮并进同一份名单。
 
-⚠️ **`trimmed` 与 `stage_roles` 缺失不报错**，这是向后兼容：这两个字段是后加的，更早落盘的 `state.json`
-没有它们，而 `/agent-team:at-resume` 要去读那些 run（没有 `stage_roles` 的 run，按段的消费方退回 `roster`）。
+`rework_base` 记上一次回退那一刻各份产物的 sha（**M3y 补**，`docs/33`）：`{ 产物名: sha 或 "accepted" }`。回退那一次写入里记
+（`history` 新追加的一条在阶段链上不晚于它前一条；回到的那一段及之后各段在磁盘上的产物照磁盘记，更早各段的条目原样带过来），
+之后每一次写入原样带着，只许把当前段及更早段的某一条改成 `"accepted"`（这一轮接受它原样）；推进离开一段时，那一段里不许还有
+上一轮的产物。这几条由 H6 写时强制。为什么需要它：回退之后上一轮的产物都还在磁盘上，交没交、齐没齐的判据只问文件在不在，
+于是全被它们满足——零改动停下也放行，回退那一刻【阶段】就催推进，就绪门禁被旧产物满足、连前置都不查。磁盘内容与它记的
+sha 相同的产物就是上一轮的，H5a/H5b、H2、【阶段】与 H5a「停在旧阶段」都不把它算成这一轮交的（`hooks/lib/freshness.mjs`）。
+示例是 S6 驳回 S5 的那一刻：S5 及之后在磁盘上的产物都进了快照。
+
+⚠️ **`trimmed`、`stage_roles` 与 `rework_base` 缺失不报错**，这是向后兼容：这三个字段是后加的，更早落盘的 `state.json`
+没有它们，而 `/agent-team:at-resume` 要去读那些 run（没有 `stage_roles` 的 run，按段的消费方退回 `roster`；没有 `rework_base`
+的 run 当作没回退过，回退时照样要写）。
 **其余每一个顶层键都是必须的**
-（判据：拿 `templates/state.json` 逐个删键跑 `validateState`，除 `trimmed` 与 `stage_roles` 外每一个都报
+（判据：拿 `templates/state.json` 逐个删键跑 `validateState`，除 `trimmed`、`stage_roles` 与 `rework_base` 外每一个都报
 ——`tests/templates.test.mjs` 里那条从模板派生的测试钉着这件事，不在测试里另抄一份键名清单）。
 
 `artifacts` 由 `ledger` 的 `produce` 回传填写：某个阶段的 `produces` 被写到磁盘上时，
@@ -427,7 +437,7 @@ S5 重做，所以 S5 在 `history` 里出现两次、`rework.S5` 是 1，而 S6
 | H3 | PreToolUse / Edit\|Write | per-role 写路径隔离（**只管阶段产物与项目路径；控制文件不走这套判据，见 §6.2.1**） | deny | deny（fail closed） |
 | H4 | PreToolUse / Edit\|Write | 契约保护：subagent 写契约 | deny | deny（fail closed） |
 | H5 | `SubagentStop`（真拦截）+ `PostToolUse` / Agent（权威记录） | 交付物校验：声明产出却未写文件 | `SubagentStop`：deny（exit 2 附理由，约 8 次补救机会）；`PostToolUse`：记 warning，不 block | `SubagentStop`：allow（fail open，流程辅助）；`PostToolUse`：记 warning |
-| H6 | PreToolUse / Edit\|Write | 返工预算写时强制：只对 `runs/*/state.json` 生效，只拦**减少**（`history` 变短、某阶段出现次数变少、`rework` 低于派生值、`rework` 超 `REWORK_LIMIT`），不碰增加——PM 每推进一个阶段都要正常重写这个文件 | deny | deny（fail closed）；新旧任一 parse 不出 JSON 时放行，见 §4.2 ③ |
+| H6 | PreToolUse / Edit\|Write | 返工预算写时强制：只对 `runs/*/state.json` 生效，只拦**减少**（`history` 变短、某阶段出现次数变少、`rework` 低于派生值、`rework` 超 `REWORK_LIMIT`），不碰增加——PM 每推进一个阶段都要正常重写这个文件；**M3y 起**另核 `rework_base`（§4.4）：回退那一次写入照磁盘记快照、之后原样带着（只许当前段及更早段改成 `"accepted"`），推进离开一段时那一段里不许还有上一轮的产物 | deny | deny（fail closed）；新旧任一 parse 不出 JSON 时放行，见 §4.2 ③ |
 
 **表里的 warning 发给谁**（M3v 补，`docs/30`，全量审查第 12 条）：fail open 那几格的 warning 一律先往 stderr 写一行，
 那只进转录，模型与用户都看不到。另外按检查项：

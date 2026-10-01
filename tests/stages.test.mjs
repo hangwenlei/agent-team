@@ -217,6 +217,7 @@ test('M3x participantsOf：stage_roles 在、没有这一段的键时是空集�
 
 // 键在、值是 []：这一段记过账、没叫到人——空集，不退回 roster。缺键与 [] 到了消费方都是空集，只有这里分得开；
 // 第 15 条要是选「回退时把那一段清空成 []」，这一格就是承重的。
+// M3y（docs/33）没选清空：回退时 stage_roles 原样留着，上一轮的产物靠 rework_base 认出来——这一格今天不承重。
 test('M3x participantsOf：这一段的值是空数组时是空集，不退回 roster', () => {
   assert.deepEqual(participantsOf({ roster: ['at-ui'], stage_roles: { S5: [] } }, 'S5'), [])
 })

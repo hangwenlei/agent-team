@@ -334,6 +334,8 @@ test('M3x isStageDone：没有 stage_roles 的旧 run 照旧按整趟 roster 判
 
 // S2 的镜像：at-ui 只在 S5 干过活。这一格只在返工轮里到得了（S5 之后驳回 S2），返工轮的「一回退就判齐」归第 15 条
 // ——这里只钉期望集合：S2 不再去等 at-ui 的两份。
+// M3y（docs/33）收口：调用点经 freshness 之后，上一轮的 01-prd.md 不再让 S2 判齐（hook 层的判据在
+// tests/gate-rework-freshness.test.mjs）；这一格仍只钉期望集合，isStageDone 本身不知道新旧。
 test('M3x isStageDone：at-ui 只在 S5 干过，S2 按段只等 01-prd.md', () => {
   const state = { stage: 'S2', roster: ['at-product', 'at-architect', 'at-ui'], stage_roles: { S2: ['at-product'], S3: ['at-architect'], S5: ['at-ui'] } }
   assert.equal(doneByStage(state, '01-prd.md'), true)

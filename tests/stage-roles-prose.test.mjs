@@ -136,11 +136,12 @@ test('M3x：at-architect 的「不要指望后面有判据兜底」不再说那�
   assert.match(block, /`stage_roles`/)
 })
 
-test('M3x：规格 §4.4 的示例带 stage_roles，例外句点名 trimmed 与 stage_roles', () => {
+test('M3x：规格 §4.4 的示例带 stage_roles，例外句点名 trimmed 与 stage_roles（M3y 起还有 rework_base）', () => {
   const spec = read('docs/superpowers/specs/2026-09-15-agent-team-plugin-design.md')
   const sec = section(spec, '### 4.4 状态文件', '## 5.')
   assert.match(sec, /"stage_roles": \{/)
-  assert.match(sec, /除 `trimmed` 与 `stage_roles` 外每一个都报/)
+  // M3y 把 rework_base 也加进了例外句（docs/33）；名单与模板的对应由 tests/templates.test.mjs 从模板派生着核。
+  assert.match(sec, /除 `trimmed`、`stage_roles` 与 `rework_base` 外每一个都报/)
 })
 
 test('M3x：at-pm 的「怎么写、为什么」指回 at.md 时给出可读路径', () => {

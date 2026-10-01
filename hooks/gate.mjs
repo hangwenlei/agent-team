@@ -893,6 +893,7 @@ function main() {
     // hooks/lib/rework-guard.mjs 头部，不在这里重复）。判定本身（"新的比旧的少"）
     // 是纯函数 decideRework；这一段只做三件事：认出目标是不是 runs/*/state.json、
     // 把 Edit/Write 的 tool_input 拆成 before/after 两份 JSON、deny 时 fail closed。
+    // M3y（docs/33）起多一件：给 decideReworkBase 读阶段链、逐份读产物算 sha（rework_base 的几条，见下面 decideRework 之后那一段）。
     //
     // ⚠️ 不经过 readRunContext。这条判据结构上就是「任意 run 的 state.json」——
     // isControlFile 的 runs/*/state.json 模式本来就是"不只是当前那个"语义（一个

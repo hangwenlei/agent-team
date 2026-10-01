@@ -53,6 +53,12 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
   然后从下一段继续。`state.json` 里没有 `stage_roles`（更早落盘的 run）就不要加，照旧只累加 `roster`。
 - **产物不齐** → 从这一段继续，先看缺哪个产物、该派谁。
 
+**返工轮**（`state.json` 的 `rework_base` 不是空的，说明这趟 run 回退过）：产物在磁盘上不等于这一轮写过——门禁拿 `rework_base`
+记的 sha 分辨上一轮的产物，比的是统一行尾之后的 sha，不要自己算。照上面判出「齐了」就照常记账推进：那一段里还是上一轮的产物
+（没重写、也没标 `"accepted"`）会让 H6 拒掉推进的那次写入，拒绝理由点名是哪几份——照它派产者重写，或者在推进的同一次 Write
+里把它标成 `"accepted"`（只许当前段及更早段的）。回退怎么记、之后每次写入怎么原样带着 `rework_base`，见
+`${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 3 节的「回退」。
+
 契约那一段（`00-contract.md`）**不要重写**。它是这趟 run 的需求基线，S1 之后就冻结了；
 要改只能走升级流程（见 `/agent-team:at` 的第 4 节，`${CLAUDE_PLUGIN_ROOT}/commands/at.md`）。
 
