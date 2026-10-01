@@ -324,3 +324,85 @@ for (const stagesText of ['{ x', '{}', '{"S1":1}']) {
     })
   })
 }
+
+// ============================================================================ 复核补的（M3y 对抗验证）
+
+test('M3y H5a：一份没写、一份是上一轮的 → PM 收到的回传两样都说', () => {
+  const atS2 = baseOf('01-prd.md', '02-ui-spec.md', '02-wireframe.html', '03-arch.md', '03-alignment.md', '04-dispatch.md', '05-impl/at-backend.md', '06-test.md')
+  const { ['02-ui-spec.md']: _gone, ...files } = R1
+  using({ stage: 'S2', history: [...FIRST, ...H('S2')], reworkBase: atS2, files }, (fx) => {
+    const c = contextOf(run('deliverable', returned('agent-team:at-ui'), GATE, fx.p))
+    assert.match(c, /02-ui-spec\.md，但磁盘上还没有/)
+    assert.match(c, /02-wireframe\.html 还是上一轮的/)
+  })
+})
+
+test('M3y H5a：非 PM 收件时出路有重派，不只是等', () => {
+  using(AT_S5, (fx) => {
+    const c = contextOf(run('deliverable', returned('agent-team:at-backend', 'agent-team:at-architect'), GATE, fx.p))
+    assert.match(c, /重派 at-backend/)
+  })
+})
+
+// 「不是当前阶段的执行者、也派不到」那一支补的返工出路按收件人分：PM 照「回退」记一次回退，别人冒泡。首轮 run 上同样发——
+// 第一次驳回之后的返工恰好发生在一趟从没回退过的 run 上（第 16 条的典型情形）。
+test('M3y H5a「不是当前阶段的执行者」：返工出路按收件人分，首轮与返工轮都发', () => {
+  for (const opts of [AT_S5, { stage: 'S6', history: FIRST, reworkBase: {} }]) {
+    using(opts, (fx) => {
+      const pm = contextOf(run('deliverable', returned(opts.stage === 'S5' ? 'agent-team:at-qa' : 'agent-team:at-product'), GATE, fx.p))
+      assert.match(pm, /记一次回退/)
+      assert.match(pm, /记完之后把它们标 "accepted"，不必再派一遍/)
+      assert.doesNotMatch(pm, /记回退是项目经理的事/)
+      const arch = contextOf(run('deliverable', returned(opts.stage === 'S5' ? 'agent-team:at-qa' : 'agent-team:at-product', 'agent-team:at-architect'), GATE, fx.p))
+      assert.match(arch, /记回退是项目经理的事/)
+      assert.doesNotMatch(arch, /记一次回退/)
+    })
+  }
+})
+
+// runctx 读 stages.json 时剥 BOM；H6 读同一份文件也要剥，否则带 BOM 的阶段链让回退快照那几条静默跳过、别的门禁照常。
+test('M3y H6：stages.json 带 BOM → 照常核回退快照', () => {
+  using(BEFORE_S6, (fx) => {
+    const plug = withPlugin(fx, String.fromCharCode(0xfeff) + readFileSync(new URL('stages.json', REPO), 'utf8'))
+    try {
+      assert.ok(denied(run('rework', writeState(fx, restartTo(fx, 'S5')), plug.gate, fx.p)))
+    } finally {
+      plug.cleanup()
+    }
+  })
+})
+
+// 逐份读产物时 stat 失败怎么归类（gate.mjs 的 diskSha）：不在（ENOENT、ENOTDIR、是目录）→ 写了 sha 算多出来；别的错 → 在、但读不出来，不核。
+test('M3y H6：产物位置上是一个目录 → 算不在，给它写 sha 是多出来的', () => {
+  const { ['06-test.md']: _t, ...files } = R1
+  using({ ...BEFORE_S6, files }, (fx) => {
+    mkdirSync(join(fx.runDir, '06-test.md'))
+    const r = run('rework', writeState(fx, restartTo(fx, 'S5', { ...baseOf('05-impl/at-backend.md'), '06-test.md': sha('x') })), GATE, fx.p)
+    assert.ok(denied(r), r.stdout)
+    assert.match(reasonOf(r), /多出/)
+  })
+})
+
+test('M3y H6：产物的上一级是一个文件（ENOTDIR，Windows 上是 ENOENT）→ 算不在', () => {
+  const { ['05-impl/at-backend.md']: _b, ...files } = R1
+  using({ ...BEFORE_S6, files: { ...files, '05-impl': 'not a dir\n' } }, (fx) => {
+    const r = run('rework', writeState(fx, restartTo(fx, 'S5', { ...baseOf('06-test.md'), '05-impl/at-backend.md': sha('x') })), GATE, fx.p)
+    assert.ok(denied(r), r.stdout)
+    assert.match(reasonOf(r), /多出/)
+  })
+})
+
+test('M3y H6：stat 报别的错（注入 EACCES）→ 在、但读不出来：写一个 sha 放行，stderr 点名', () => {
+  using(BEFORE_S6, (fx) => {
+    const r = run(
+      'rework',
+      writeState(fx, restartTo(fx, 'S5', { ...baseOf('05-impl/at-backend.md'), '06-test.md': sha('whatever') })),
+      GATE,
+      fx.p,
+      { ...hermeticEnv(), AGENT_TEAM_TEST_THROW: 'stat:EACCES:06-test.md' },
+      { nodeArgs: ['-r', INJECT] },
+    )
+    assert.equal(r.stdout.trim(), '', r.stdout)
+    assert.match(r.stderr, /06-test\.md/)
+  })
+})

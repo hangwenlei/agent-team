@@ -127,3 +127,10 @@ test('M3y staleByStage：只问产物在不在 rework_base 里旧——每份产
   assert.equal(new Set(asked).size, asked.length)
   assert.ok(!asked.includes('06-test.md'), '更晚的段不问')
 })
+
+// 当前段与更早段的边界：只有上一段（t-1）有旧产物时，它进 earlier、带出处，current 为空——【返工】据此说「更早的段」，
+// 不会把它说成「当前段……推进出这一段时 H6 会拦」（推进把关只查离开的段）。
+test('M3y staleByStage：只有上一段的产物还旧 → 进 earlier，不进 current', () => {
+  const r = staleByStage({ stages: REAL, stageId: 'S5', isStale: staleSet('04-dispatch.md') })
+  assert.deepEqual(r, { stage: 'S5', current: [], earlier: [{ name: '04-dispatch.md', stage: 'S4' }] })
+})

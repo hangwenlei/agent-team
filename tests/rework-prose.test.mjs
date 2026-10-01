@@ -96,7 +96,9 @@ test('M3y：规格 §4.4 的示例带 rework_base、说明它的写法；§6 的
   const spec = read('docs/superpowers/specs/2026-09-15-agent-team-plugin-design.md')
   const s44 = section(spec, '### 4.4 状态文件', '## 5.')
   assert.match(s44, /"rework_base": \{/)
-  assert.match(s44, /`rework_base` 记上一次回退那一刻各份产物的 sha/)
+  // 复核改的：带过来的条目沿用更早那次快照，「上一次回退那一刻」对它们不成立。
+  assert.match(s44, /`rework_base` 记回退快照里各份产物的 sha/)
+  assert.doesNotMatch(s44, /记上一次回退那一刻/)
   const h6 = spec.split('\n').find((l) => l.startsWith('| H6 |'))
   assert.ok(h6 && h6.includes('`rework_base`'), h6)
 })
@@ -105,4 +107,44 @@ test('M3y：stages.README 的 H6 一节写到 rework_base', () => {
   const sec = section(read('stages.README.md'), '## H6 返工预算写时强制', '## ')
   assert.match(sec, /`rework_base`/)
   assert.match(sec, /decideReworkBase/)
+})
+
+// ---------------------------------------------------------------- 复核补的（M3y 对抗验证）
+
+// 返工轮里推进进 history 里已有的一段，rework 那一段也要照派生量加 1——H6 只认派生量。原来正文只在回退那一次写入里提 rework，
+// 照第 3 条记账会被 H6 拒一次（docs/15 那一趟真撞上过）。
+test('M3y：/at 第 3 条写明返工轮里再进走过的段时 rework 那一段加 1；「回退之后」也说；at-pm 与 at-resume 跟上', () => {
+  const s3 = section(AT, '## 3. 逐段推进', '### 回退')
+  const ledger = s3.slice(s3.indexOf('3. **记账**'), s3.indexOf('4. 把这一段'))
+  assert.match(ledger, /返工轮里推进进一段已经走过的[^。]*`rework` 里那一段加 1/)
+  assert.match(REWIND, /返工轮里推进进一段已经走过的[^。]*`rework` 里那一段加 1/)
+  assert.ok(read('agents/at-pm.md').split('\n').some((l) => l.includes('`rework_base`') && l.includes('`rework` 那一段也加 1')))
+  assert.match(read('commands/at-resume.md'), /下一段在 `history` 里已经出现过时还有 `rework`/)
+})
+
+// 「原样带着」只到下一次回退为止：再次回退时 H6 要求回到的那一段及之后各段按磁盘重拍，照「不改值」写会被拒。
+test('M3y：「原样带着」写明到下一次回退为止、再次回退照第三条重拍；回退那一次只记 sha', () => {
+  assert.match(REWIND, /原样带着 `rework_base`\*\*（到下一次回退为止）/)
+  assert.match(REWIND, /再次回退时照上面第三条重记/)
+  assert.match(REWIND, /这一次只记 sha，`"accepted"` 在之后的写入里标/)
+  const s3 = section(AT, '## 3. 逐段推进', '### 回退')
+  assert.match(s3, /再次回退时照「回退」重记/)
+})
+
+// 阶段链最后一段没有「推进出去」这次写入，收口不经 H6——正文不能把兜底交给 H6。
+test('M3y：最后一段收口不经 H6——/at「回退」、第 6 节收尾、/at-resume 都写明先重写或标 accepted 再收口', () => {
+  assert.match(REWIND, /最后一段没有「推进出去」这次写入，收口不经 H6/)
+  // 按行首定位：第 3 节正文里有一句「见「## 6. 收尾」」。
+  assert.match(section(AT, '\n## 6. 收尾', '## '), /收口不经任何门禁/)
+  assert.match(read('commands/at-resume.md'), /最后一段没有「推进出去」这次写入，收口不经 H6/)
+})
+
+// 一段没走完就回退：那一段还没派到的产者不写 trimmed（产者交代对链上晚于当前段的段不查，coverage.mjs）。
+test('M3y：「回退」写明一段没走完就回退时，还没派到的产者不写进 trimmed', () => {
+  assert.match(REWIND, /一段没走完就回退[^。]*还没派到的产者不写进 `trimmed`/)
+})
+
+// 【返工】只发给 PM；S1、S4、S8 的产物是它自己的。
+test('M3y：「回退」里照【返工】重写时，PM 自己那几段的产物自己写', () => {
+  assert.match(REWIND, /你自己那几段的产物自己写/)
 })

@@ -3,7 +3,7 @@
 // 回退那一次写入里，rework_base 要记下回退那一刻磁盘上各份产物的 sha（回退到的那一段及之后各段；更早各段的条目原样带过来）；
 // 之后每一次写入原样带着它，只许把当前段及更早段的某一条改成 "accepted"；推进离开一段时，那一段里还旧的产物（磁盘内容与
 // 记的 sha 相同）要么已经重写，要么在同一次 Write 里标 "accepted"。交没交、齐没齐的判据（hooks/lib/freshness.mjs）靠它
-// 分辨哪些产物还是上一轮的。磁盘由调用方注入（diskSha），子进程级的 I/O 在 tests/gate-rework.test.mjs。
+// 分辨哪些产物还是上一轮的。磁盘由调用方注入（diskSha），子进程级的 I/O 在 tests/gate-rework-freshness.test.mjs。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -300,4 +300,80 @@ test('M3y 拒绝理由里，写入内容带来的键过 quote（一对双引号�
   const r2 = decide({ before, after: state('S5', keepHistory) })
   assert.equal(r2.ok, false)
   assert.ok(!r2.reason.includes(String.fromCharCode(0x2028)), '行分隔符要转义')
+})
+
+// ------------------------------------------------------- 复核补的（M3y 对抗验证）
+
+test('M3y 没有快照时：rework_base 写成 null 或 [] → 拒（只许缺失或 {}）', () => {
+  for (const rb of [null, []]) {
+    const r = decide({ before: state('S5', H('S1', 'S5'), { rework_base: {} }), after: state('S5', H('S1', 'S5'), { rework_base: rb }) })
+    assert.equal(r.ok, false, JSON.stringify(rb))
+  }
+})
+
+test('M3y 回退写入：写入前 T 之前那一条的值不合法 → 不带过来；带上反而是多出来的', () => {
+  const before = state('S6', FIRST_ROUND, { rework_base: { '03-arch.md': 'garbage' } })
+  const afterHistory = [...FIRST_ROUND, ...H('S5')]
+  assert.equal(decide({ before, after: state('S5', afterHistory, { rework_base: EXPECTED_S5 }) }).ok, true)
+  assert.equal(decide({ before, after: state('S5', afterHistory, { rework_base: { ...EXPECTED_S5, '03-arch.md': 'garbage' } }) }).ok, false)
+})
+
+// 坏值与孤儿键只能经几条跳过路径落盘（写入前读不出来、阶段链读不出来、写入前不是对象）。落了盘，validateState 每次记账都叫 PM
+// 改掉它；H6 要是也要求原样带着，两道门禁的指令就互相矛盾，只剩再记一次回退这条路。它们让不了任何产物变成「上一轮的」
+// （isStale 只认合法 sha、只对产物名问），删掉或标 "accepted" 与现状等价——放开这两样，别的照旧。
+test('M3y 回退之后：写入前不合法的值、不是任何阶段产物的键，可以删掉或标 "accepted"；改成 sha、合法条目删掉照旧拒', () => {
+  const bad = { ...EXPECTED_S5, '05-impl/at-frontend.md': 'garbage', '05-impl/at-legacy.md': sha('x') }
+  const before = { ...IN_REWORK, rework_base: bad }
+  const ok = (rework_base) => decide({ before, after: state('S5', keepHistory, { rework_base }) })
+  const { ['05-impl/at-frontend.md']: _a, ['05-impl/at-legacy.md']: _b, ...cleaned } = bad
+  assert.equal(ok(cleaned).ok, true, '两条都删掉')
+  assert.equal(ok({ ...EXPECTED_S5, '05-impl/at-frontend.md': 'accepted', '05-impl/at-legacy.md': 'accepted' }).ok, true, '两条都标 accepted')
+  assert.equal(ok({ ...EXPECTED_S5, '05-impl/at-frontend.md': sha('frontend r1'), '05-impl/at-legacy.md': sha('x') }).ok, false, '坏值改成 sha 不开放')
+  const { ['06-test.md']: _c, ...lostGood } = cleaned
+  assert.equal(ok(lostGood).ok, false, '合法条目照旧不许删')
+  // 写入前只剩坏条目时，整个不写也行。
+  const onlyBad = { ...IN_REWORK, rework_base: { '05-impl/at-legacy.md': sha('x') } }
+  const after = state('S5', keepHistory)
+  assert.equal(decide({ before: onlyBad, after }).ok, true)
+})
+
+test('M3y 回退之后：合法的 sha 照旧只许改成当前段及更早段的 "accepted"（坏值那条放开不连带它）', () => {
+  const before = { ...IN_REWORK, rework_base: { ...EXPECTED_S5, '05-impl/at-legacy.md': 'garbage' } }
+  const r = decide({ before, after: state('S5', keepHistory, { rework_base: { ...EXPECTED_S5, '06-test.md': 'accepted' } }) })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /不在当前段/)
+})
+
+test('M3y 回退写入：读不出来的那份，拒绝理由说清不核；没写或不是对象时列出缺哪些', () => {
+  const a = decide({ before: S6_TO_S5.before, after: state('S5', S6_TO_S5.afterHistory), unreadable: ['06-test.md'] })
+  assert.equal(a.ok, false)
+  assert.match(a.reason, /06-test\.md 在磁盘上但读不出来，不核/)
+  const b = decide({ before: S6_TO_S5.before, after: state('S5', S6_TO_S5.afterHistory) })
+  assert.match(b.reason, /没写。缺：[^\n]*05-impl\/at-backend\.md/)
+  const c = decide({ before: S6_TO_S5.before, after: state('S5', S6_TO_S5.afterHistory, { rework_base: 'x' }) })
+  assert.match(c.reason, /不是一个对象。缺：[^\n]*06-test\.md/)
+})
+
+test('M3y 回退之后：拒绝理由按少了、不在当前段分开说', () => {
+  const { ['06-test.md']: _d, ...less } = EXPECTED_S5
+  assert.match(decide({ before: IN_REWORK, after: state('S5', keepHistory, { rework_base: less }) }).reason, /少了 "06-test\.md"/)
+  const later = { ...EXPECTED_S5, '06-test.md': 'accepted' }
+  assert.match(decide({ before: IN_REWORK, after: state('S5', keepHistory, { rework_base: later }) }).reason, /不在当前段/)
+})
+
+test('M3y 留痕：推进时旧的那份已经不在磁盘上 → 不留「读不出来」的痕；写入前不是对象 → 留痕说跳过', () => {
+  const after = state('S6', [...keepHistory, ...H('S6')], { rework_base: EXPECTED_S5 })
+  const { ['05-impl/at-frontend.md']: _gone, ...files } = { ...ROUND1, '05-impl/at-backend.md': 'backend r2' }
+  assert.deepEqual(decide({ before: IN_REWORK, after, files }).notes, [])
+  const r = decide({ before: { ...IN_REWORK, rework_base: ['garbage'] }, after: state('S5', keepHistory, { rework_base: {} }) })
+  assert.ok(r.notes.some((n) => n.includes('不是对象')), r.notes.join('\n'))
+})
+
+// 同一段里重派一个角色不是回退（/at「回退」末尾），但 PM 误追加了同段条目时 H6 分不出它与「原地重来」。拒绝理由给一句提醒，
+// 判定不变：原地重来那条合法回退照旧要快照。
+test('M3y 回退写入：同一段再追加一条（原地重来）被拒时，提醒「同段重派一个角色不是回退」', () => {
+  const r = decide({ before: state('S5', H('S1', 'S2', 'S3', 'S4', 'S5')), after: state('S5', H('S1', 'S2', 'S3', 'S4', 'S5', 'S5')) })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /同一段里重派一个角色/)
+  assert.doesNotMatch(decide({ before: S6_TO_S5.before, after: state('S5', S6_TO_S5.afterHistory) }).reason, /同一段里重派一个角色/)
 })

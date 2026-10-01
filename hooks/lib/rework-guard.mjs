@@ -161,8 +161,9 @@ export function parseStateText(text) {
 //
 //   - 回退那一次写入（history 新追加的条目里有一条在链上不晚于它前一条；T = 最后那条的段）：rework_base 必须逐键逐值等于
 //     「T 及之后各段在磁盘上的产物：现在的 sha」∪「写入前 rework_base 里 T 之前各段的条目，原样」。读不出来的产物不核。
-//   - 之后的每一次写入：原样带着它。只许把当前段及更早段的某一条从 sha 改成 "accepted"（这一轮接受它原样）。
-//     没回退过（写入前缺失或 {}）：只许缺失或 {}。
+//   - 之后的每一次写入（到下一次回退为止）：原样带着它。只许把当前段及更早段的某一条从 sha 改成 "accepted"（这一轮接受它原样）；
+//     写入前就坏了的条目（值不合法、或不是任何阶段的产物）可以删掉或标 "accepted"。没回退过（写入前缺失或 {}）：只许缺失或 {}。
+//     下一次回退照上一条重拍：回到的那一段及之后各段按那一刻的磁盘，标过的 "accepted" 也换回 sha。
 //   - 推进（after.stage 在链上晚于 before.stage）：离开的各段里，值是 sha、磁盘内容与它相同的产物不许留着——
 //     要么已经重写，要么在同一次 Write 里标 "accepted"。
 //
@@ -294,6 +295,12 @@ function decideAtRestart({ before, after, stages, diskSha, restart }) {
     safeJson(expected),
   ]
   if (unchecked.length) lines.push(`${names(unchecked)} 在磁盘上但读不出来，不核：不写、或写成一个 sha 都行。`)
+  if (typeof before.stage === 'string' && restart.stage === before.stage) {
+    // 同一段再追加一条：原地重来，或者 PM 把同段重派误记成了回退。H6 分不出这两样，判定不变，只提醒一句（/at「回退」末尾）。
+    lines.push(
+      '如果这只是同一段里重派一个角色（上限内的单角色重试），那不是回退：去掉新追加的这条 history，rework 也不加。',
+    )
+  }
   if (restart.followedByForward) {
     lines.push(
       '这次写入在回退那一条之后还追加了前进的条目（补记）：上面的值照磁盘现在的内容算，回退之后已经重写过的产物也会被记成' +
@@ -319,13 +326,22 @@ function decideCarry({ before, after, stages }) {
     }
   }
   const show = () => `写入前是：\n${safeJson(bb)}`
+  const stageOf = stageOfProduct(stages)
+  // 写入前就坏了的条目（值既不是 sha 也不是 "accepted"，或键不是任何阶段的产物）：只能经几条跳过路径落盘（写入前读不出来、
+  // 阶段链读不出来、写入前不是对象），落了盘 validateState 每次记账都叫 PM 改掉它——这里再要求原样带着，两道门禁的指令就
+  // 互相矛盾，只剩再记一次回退。它们让不了任何产物变成上一轮的（isStale 只认合法 sha、只对产物名问），删掉或标 "accepted"
+  // 与现状等价，放开这两样；改成 sha 不开放（那是收紧，下一次回退自然会重拍）。
+  const broken = (k) => !stageOf.has(k) || !(isSha(bb[k]) || bb[k] === ACCEPTED)
+  const anyBroken = Object.keys(bb).some(broken)
   const head =
-    'rework_base 记着上一次回退那一刻各份产物的 sha，回退之后的每一次写入都要原样带着它；只许把当前段及更早段的某一条' +
-    '从 sha 改成 "accepted"（这一轮接受它原样）。'
+    'rework_base 记着回退快照里各份产物的 sha（最近一次回退回到的那一段及之后各段按那一刻的磁盘记，更早各段沿用更早那次快照），' +
+    '回退之后、下一次回退之前的每一次写入都要原样带着它；只许把当前段及更早段的某一条从 sha 改成 "accepted"（这一轮接受它原样）。' +
+    (anyBroken ? '写入前就坏了的条目（值不合法、或不是任何阶段的产物）可以删掉或标 "accepted"。' : '')
   if (!isPlainObject(ab)) {
+    if (ab === undefined && Object.keys(bb).every(broken)) return { ok: true, notes: [] }
     return { ok: false, reason: `${head}这次写入里它${ab === undefined ? '没写' : '不是一个对象'}。${show()}` }
   }
-  const missing = Object.keys(bb).filter((k) => !Object.hasOwn(ab, k))
+  const missing = Object.keys(bb).filter((k) => !Object.hasOwn(ab, k) && !broken(k))
   const extra = Object.keys(ab).filter((k) => !Object.hasOwn(bb, k))
   if (missing.length || extra.length) {
     const parts = []
@@ -335,11 +351,16 @@ function decideCarry({ before, after, stages }) {
   }
   const { at } = stageIndexer(stages)
   const cur = at(after.stage)
-  const stageOf = stageOfProduct(stages)
   const tooLate = []
   const bad = []
   for (const k of Object.keys(bb)) {
+    // 删掉的只剩坏条目（合法条目少了，上面已经拒了）。
+    if (!Object.hasOwn(ab, k)) continue
     if (ab[k] === bb[k]) continue
+    if (broken(k)) {
+      if (ab[k] !== ACCEPTED) bad.push(quote(k))
+      continue
+    }
     if (isSha(bb[k]) && ab[k] === ACCEPTED) {
       const i = stageOf.has(k) ? stageOf.get(k) : -1
       if (i >= 0 && cur >= 0 && i <= cur) continue

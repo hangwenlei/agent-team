@@ -5,7 +5,9 @@
 //   prefix:<名字>   对这一个字符串调 startsWith 就抛——stripPluginPrefix 认目标角色时经过它；
 //   exit           第一次 process.exit 抛——「写过 stdout 之后再崩」那一格；
 //   read:<后缀>     readFileSync 读路径以这个后缀结尾（分隔符统一成 /）的文件就抛——H6 拍回退快照时逐份读产物（M3y），
-//                  一份读不出来要落「不核」、不能让整次判定 fail closed。
+//                  一份读不出来要落「不核」、不能让整次判定 fail closed；
+//   stat:<CODE>:<后缀>  statSync 对以这个后缀结尾的路径抛带 code 的错（例 stat:EACCES:06-test.md）——H6 把 ENOENT、ENOTDIR
+//                  之外的 stat 错误归为「在、但读不出来」，这一条在 Windows 上造不出真的 EACCES。
 // 写成 -r 的 .cjs 而不是 --import 的 .mjs：--import 要 Node 18.18 起才有（最低版本作业跑 16.9）。
 const modes = String(process.env.AGENT_TEAM_TEST_THROW || '').split(',').filter(Boolean)
 
@@ -29,6 +31,19 @@ for (const mode of modes) {
     const original = fs.readFileSync
     fs.readFileSync = function (p) {
       if (String(p).split('\\').join('/').endsWith(suffix)) throw new Error('injected: readFileSync')
+      return original.apply(this, arguments)
+    }
+    require('module').syncBuiltinESMExports()
+  } else if (mode.startsWith('stat:')) {
+    const m = /^stat:([A-Z]+):(.+)$/.exec(mode)
+    const fs = require('fs')
+    const original = fs.statSync
+    fs.statSync = function (p) {
+      if (m && String(p).split('\\').join('/').endsWith(m[2])) {
+        const err = new Error('injected: statSync')
+        err.code = m[1]
+        throw err
+      }
       return original.apply(this, arguments)
     }
     require('module').syncBuiltinESMExports()

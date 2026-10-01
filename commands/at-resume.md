@@ -49,14 +49,16 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
   `trimmed`（不在 `available_roles` 里的不用写）。已经在磁盘上的不要重派，该有而没在的从这一段继续派；都齐了就照下一条记账。
   「全部都在磁盘上」对空集是真命题，照字面判会把整段跳过。判「齐了」的口径只在 `hooks/lib/state.mjs` 的 `isStageDone` 一处，
   它对空集答「没齐」。run 目录下的产物用 `.agent-team/runs/<run_id>/` 开头的路径去 `Glob`。
-- **产物齐了** → 这一段其实已经做完，只是没记账。先 `Read` `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 的「逐段推进」一节（第 3、4 条），照它用同一次 Write 记账（`stage`、`history`、`roster`、`stage_roles`、`trimmed`；两个字段方向相反：`stage_roles` 是 `{ 段: [角色] }`，`trimmed` 是 `{ 角色: 段 }`），
+- **产物齐了** → 这一段其实已经做完，只是没记账。先 `Read` `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 的「逐段推进」一节（第 3、4 条），照它用同一次 Write 记账（`stage`、`history`、`roster`、`stage_roles`、`trimmed`，下一段在 `history` 里已经出现过时还有 `rework`；两个字段方向相反：`stage_roles` 是 `{ 段: [角色] }`，`trimmed` 是 `{ 角色: 段 }`），
   然后从下一段继续。`state.json` 里没有 `stage_roles`（更早落盘的 run）就不要加，照旧只累加 `roster`。
 - **产物不齐** → 从这一段继续，先看缺哪个产物、该派谁。
 
 **返工轮**（`state.json` 的 `rework_base` 不是空的，说明这趟 run 回退过）：产物在磁盘上不等于这一轮写过——门禁拿 `rework_base`
 记的 sha 分辨上一轮的产物，比的是统一行尾之后的 sha，不要自己算。照上面判出「齐了」就照常记账推进：那一段里还是上一轮的产物
 （没重写、也没标 `"accepted"`）会让 H6 拒掉推进的那次写入，拒绝理由点名是哪几份——照它派产者重写，或者在推进的同一次 Write
-里把它标成 `"accepted"`（只许当前段及更早段的）。回退怎么记、之后每次写入怎么原样带着 `rework_base`，见
+里把它标成 `"accepted"`（只许当前段及更早段的）。标之前先读驳回那一段的产物（`06-test.md`、`07-acceptance.md` 之类），确认这一份
+这一轮确实不用改；拿不准就派产者重写。阶段链最后一段没有「推进出去」这次写入，收口不经 H6：那一段的产物还是上一轮的，
+先重写或者标 `"accepted"` 再收口。回退怎么记、之后每次写入怎么原样带着 `rework_base`，见
 `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 3 节的「回退」。
 
 契约那一段（`00-contract.md`）**不要重写**。它是这趟 run 的需求基线，S1 之后就冻结了；

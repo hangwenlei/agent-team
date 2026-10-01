@@ -1613,7 +1613,8 @@ function main() {
             // rework 与 rework_base 同一次 Write 记上。按收件人分：改得了 state.json 的照「回退」一节记，改不了的冒泡。
             (recipientCanWriteState
               ? `这次派发若是驳回之后的返工，那不是把 stage 改回去，是记一次回退：照 /agent-team:at 的「回退」一节，` +
-                `同一次 Write 追加 history、记 rework 与 rework_base，再派。`
+                `同一次 Write 追加 history、记 rework 与 rework_base。这一次已经重写过的产物会被快照记成上一轮的，` +
+                `记完之后把它们标 "accepted"，不必再派一遍。`
               : `这次派发若是驳回之后的返工，记回退是项目经理的事：把这一条原样冒泡给派你的人。`)
         notices.push(notice)
       }
@@ -1665,9 +1666,10 @@ function main() {
             : `⚠️ 交付物校验：${role} 在 ${r.stageId} 的 ${staleText}。`) +
           `${SUBAGENT_STOP_RETRY_NOTE}。不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实。` +
           (recipientCanWriteState
-            ? `这一轮接受上一轮那份原样，就在 state.json 的 rework_base 里把它的值改成 "accepted"；否则等 ${role} 重写它，` +
-              `或者重派。推进出这一段时，H6 会拦住还是上一轮的产物。`
-            : `rework_base 只有项目经理改得了：等 ${role} 重写它，或者把这一条原样冒泡给派你的人，让它带到项目经理。`)
+            ? `这一轮接受上一轮那份原样，就在 state.json 的 rework_base 里把它的值改成 "accepted"；否则等 ${role} 写完` +
+              `（异步派发时），或者重派它这一轮重写。推进出这一段时，H6 会拦住还是上一轮的产物。`
+            : `rework_base 只有项目经理改得了：它这一轮还没重写，就等它写完（异步派发时），或者重派 ${role} 让它这一轮重写；` +
+              `你判断上一轮那份这一轮不用改，就把这一点冒泡给派你的人，由项目经理标 "accepted"。`)
       const notices = [notice]
       // 交付物本身还缺产物时，账本比对一样并进同一条——它审计的是全部阶段的
       // produces，不只是刚被判定缺失的这一段（比如更早的阶段被 Bash 绕过写过）。

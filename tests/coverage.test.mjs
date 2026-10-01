@@ -44,7 +44,8 @@ const m2bShapeA = (o = {}) => ({
   ...o,
 })
 
-// docs/15 §3.8 的终局 state（记录级：stage S8、那一趟真实的 roster、带两轮返工的 history）。
+// docs/15 §3.8 的终局 state（记录级：stage S8、那一趟真实的 roster、带返工的 history）。
+// M3y 订正（docs/33 §1）：原来写「带两轮返工」——那一趟只有一次返工（S6→S5），S6 出现两次是回到 S6 时派生出来的。
 const m2bFinal = (o = {}) => ({
   stage: 'S8',
   history: h('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S5', 'S6', 'S7', 'S8'),
@@ -528,4 +529,42 @@ test('docs/11 §5.25 的前提仍然成立：链尾那一段除了 at-pm 没有�
       '  **该做的是去读 docs/11 §5.25**（尤其第五节的失效条件与第六节），\n' +
       '  按它决定这条边界怎么修；修完了再回来动这条断言。',
   )
+})
+
+// ——— M3y（docs/33）：回退之后，链上晚于当前段的段不算走过 ———
+//
+// 一段没走完就回退（S5 里发现设计错，回到 S3）：S5 的 at-frontend 还没派。回退那次写入之后，S5 在 history 里、又不等于当前段，
+// 原来就算「走过」，于是 S3、S4 两段里每写一次 state.json，产者交代都点一次 at-frontend——三条出路（写 trimmed、派它、补记）
+// 一条都不对：这一轮会重走到 S5。链上晚于当前段的段要重走，等重走过它才查。首轮 history 只往前走，没有晚于当前段的段，不受影响。
+test('M3y：回退到 S3 时，S5 没派完的产者不报——S5 链上晚于当前段，这一轮要重走', () => {
+  const state = m3xState({
+    stage: 'S3',
+    history: h('S1', 'S2', 'S3', 'S4', 'S5', 'S3'),
+    stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'], S5: ['at-architect', 'at-backend'] },
+    roster: ['at-product', 'at-ui', 'at-architect', 'at-backend'],
+    trimmed: { 'at-ui': 'S5' },
+  })
+  assert.deepEqual(decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE }).gaps, [])
+})
+
+test('M3y 正向锚：重走过 S5、推进到 S6 之后，S5 没交代的那一个照报', () => {
+  const state = m3xState({
+    stage: 'S6',
+    history: h('S1', 'S2', 'S3', 'S4', 'S5', 'S3', 'S4', 'S5', 'S6'),
+    stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'], S5: ['at-architect', 'at-backend'] },
+    roster: ['at-product', 'at-ui', 'at-architect', 'at-backend'],
+    trimmed: { 'at-ui': 'S5' },
+  })
+  assert.deepEqual(decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE }).gaps, [{ stage: 'S5', role: 'at-frontend' }])
+})
+
+test('M3y：当前段不在阶段链上时不按链序剪——照旧把 history 里每一段都算走过', () => {
+  const state = m3xState({
+    stage: 'SX',
+    history: h('S1', 'S2', 'S3', 'S4', 'S5', 'SX'),
+    stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'], S5: ['at-architect', 'at-backend'] },
+    roster: ['at-product', 'at-ui', 'at-architect', 'at-backend'],
+    trimmed: { 'at-ui': 'S5' },
+  })
+  assert.deepEqual(decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE }).gaps, [{ stage: 'S5', role: 'at-frontend' }])
 })

@@ -306,3 +306,10 @@ test('M3y：重写过（current）的不报', () => {
   const r = decideDeliverable({ role: 'at-backend', stageId: 'S5', stages: REAL, ...fresh({ current: ['05-impl/at-backend.md'] }) })
   assert.equal(r.ok, true)
 })
+
+// .html 的那句提示按「还旧的」判，不按整段 produces：at-ui 只有 .md 那份还旧时不提 HTML 注释。
+test('M3y：at-ui 只有 02-ui-spec.md 还旧 → 不提 HTML 注释', () => {
+  const r = decideDeliverable({ role: 'at-ui', stageId: 'S2', stages: REAL, ...fresh({ current: ['02-wireframe.html'], stale: ['02-ui-spec.md'] }) })
+  assert.deepEqual(r.stale, ['02-ui-spec.md'])
+  assert.doesNotMatch(r.reason, /<!--/)
+})

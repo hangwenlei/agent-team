@@ -53,13 +53,17 @@ import { stageRoles, isPlainObject, participantsOf } from './stages.mjs'
  * **走过的阶段**（判据的定义，先定义后写代码）：出现在 state.history 里、**且不等于
  * state.stage** 的阶段。返工会让一个阶段重新成为当前阶段，那时它不算走过——它正在
  * 被重做，这一段的班底还没定下来。
+ * M3y（docs/33）再加一条：**当前段在阶段链上时，链上晚于它的段也不算走过**。回退之后那些段要重走，这一轮的班底同样
+ * 还没定下来；一段没走完就回退（S5 里发现设计错回 S3）时，那一段还没派到的产者否则会在 S3、S4 每写一次 state.json 就被
+ * 点一次名，而三条出路一条都不对。等重走过它、推进出去，照常查。首轮 history 只往前走，没有晚于当前段的段，不受影响。
  *
  * ⚠️ 「不等于 state.stage」这一条，在真实数据上是承重的而不是理论上的：docs/15 §3.8
  * 记的那一趟 history 是 S1→S2→S3→S4→S5→S6→S5→S6→S7→S8，**S5 与 S6 各出现两次**
  * （两轮自发返工，rework 是 {"S5":1,"S6":1}）。所以同一个阶段 id 会在 history 里重复
- * 【M3y 订正（docs/33 §1）：那一趟只有一次返工（S6 测试没过回 S5）。rework.S6 是 1，是因为回到 S6 时 S6 在 history 里
- *  第二次出现、H6 按派生量逼着它加 1——转录里 PM 带着 S6: 0 推进被 H6 拒掉，带上 1 才通过。重复出现这件事照样成立。】
  * 出现——下面按 seen 去重，否则同一条 gap 会照 history 里的出现次数重复上榜。
+ * 【M3y 订正（docs/33 §1）：上面括号里「两轮」不对，那一趟只有一次返工（S6 测试没过回 S5）。rework.S6 是 1，是因为回到 S6
+ *  时 S6 在 history 里第二次出现、H6 按派生量要它加 1——转录里 PM 带着 S6: 0 推进被 H6 拒掉，带上 1 才通过。同一个阶段 id
+ *  在 history 里重复出现这件事照样成立。】
  *
  * ⚠️ 同一条口径还有**第二个后果，上面那段没说**（M3a 全分支终审 Minor-1）：
  * **链尾那一段永远不算走过**——它停下来的时候自己就是 state.stage，之后没有下一段把它
@@ -150,6 +154,9 @@ export function decideCoverage({ stages, state, availableRoles } = {}) {
   if (!isPlainObject(stages) || !isPlainObject(state)) return { gaps, narrowed, perStage }
 
   const current = typeof state.stage === 'string' ? state.stage : null
+  // M3y：链上晚于当前段的段不算走过（头部「走过的阶段」那一段）。当前段不在链上时不按链序剪。
+  const ids = Object.keys(stages)
+  const currentAt = current !== null && Object.hasOwn(stages, current) ? ids.indexOf(current) : -1
   // 「这一段叫到了谁」逐段取（participantsOf）。它给 undefined（旧 run 的 roster 不是数组）时按空集合算——下面那段
   // 「roster 不是数组时按空集合算」的理由原样适用。
   const invokedIn = (id) => {
@@ -165,6 +172,7 @@ export function decideCoverage({ stages, state, availableRoles } = {}) {
     if (!isPlainObject(entry) || typeof entry.stage !== 'string') continue
     const id = entry.stage
     if (id === current || seen.has(id)) continue
+    if (currentAt >= 0 && ids.indexOf(id) > currentAt) continue
     seen.add(id)
     const invoked = invokedIn(id)
     // stages[id] 不存在时 stageRoles 返回空数组（它自己有 isPlainObject 守卫），
