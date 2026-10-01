@@ -91,7 +91,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   锚串替换要**断言命中数，并核对命中的是你要的那一处** —— 同一个实参有几处合法命中时，断言防不了砍错的那一刀。落盘后扫控制字节与行尾混用。
 - **后台 agent 与主会话共用工作树时**，别 `git add -A` / `checkout` / `reset`；要并行就用隔离 worktree。
 - `claude --resume` 不继承 `--plugin-dir`；local 安装下换了目录续会话，工具限制会整体掉光，而转录里看不出来。
-- 后台探针用 `claude --bg`，不用 `-p`（`-p` 下异步派发会卡死）。收尾对每个会话先 `claude stop` 再 `claude rm`：
+- 后台探针用 `claude --bg`，不用 `-p`（`-p` 下异步派发会卡死——这是 CLI 2.1.276 上的实测，`docs/13` §5.1；2.1.286 上一个 `-p` 会话跑完过 5 次异步派发，`docs/33` §3；要靠 `-p` 之前先在当前版本上核）。收尾对每个会话先 `claude stop` 再 `claude rm`：
   没 stop 过的会话在 `~/.claude.json` 里留着 `lastGracefulShutdown: false`，会一直挂在桌面应用侧边栏的「Other」下；
   `claude rm` 只删 `~/.claude/jobs/<id>/`，转录不动。
 - 变异验证用 `cp` 备份与还原，不用 `git checkout` / `git restore`；备份放仓库外。

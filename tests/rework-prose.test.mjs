@@ -30,7 +30,8 @@ test('M3y：「回退」写明同一次 Write 改 stage、history、rework、rew
 
 test('M3y：「回退」写明 rework_base 记什么——回到的那一段及之后各段在磁盘上的产物，更早各段原样带过来', () => {
   assert.match(REWIND, /回到的那一段及之后各段/)
-  assert.match(REWIND, /更早各段的条目原样带过来/)
+  // 文档核对改的：带过来的只是合法条目，坏了的不带（MUT-R10 的判据钉着行为）。
+  assert.match(REWIND, /更早各段的合法条目原样带过来（坏了的不带）/)
   assert.match(REWIND, /没有 `rework_base` 的旧 run 回退时同样要写/)
 })
 
@@ -137,7 +138,7 @@ test('M3y：「原样带着」写明到下一次回退为止、再次回退照�
 test('M3y：最后一段收口不经 H6——/at「回退」、第 6 节收尾、/at-resume 都写明先重写或标 accepted 再收口', () => {
   assert.match(REWIND, /最后一段没有「推进出去」这次写入，收口不经 H6/)
   // 按行首定位：第 3 节正文里有一句「见「## 6. 收尾」」。
-  assert.match(section(AT, '\n## 6. 收尾', '## '), /收口不经任何门禁/)
+  assert.match(section(AT, '\n## 6. 收尾', '## '), /不经 H6 的推进把关，没有门禁会因为它还是上一轮的而拦它/)
   assert.match(read('commands/at-resume.md'), /最后一段没有「推进出去」这次写入，收口不经 H6/)
 })
 

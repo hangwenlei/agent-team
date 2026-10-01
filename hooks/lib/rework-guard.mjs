@@ -160,7 +160,8 @@ export function parseStateText(text) {
 // rework_base 记着回退那一刻各份产物的 sha；hooks/lib/freshness.mjs 拿它分辨哪些产物还是上一轮的。这里管它怎么写：
 //
 //   - 回退那一次写入（history 新追加的条目里有一条在链上不晚于它前一条；T = 最后那条的段）：rework_base 必须逐键逐值等于
-//     「T 及之后各段在磁盘上的产物：现在的 sha」∪「写入前 rework_base 里 T 之前各段的条目，原样」。读不出来的产物不核。
+//     「T 及之后各段在磁盘上的产物：现在的 sha」∪「写入前 rework_base 里 T 之前各段的合法条目（是阶段产物、值是 sha 或 "accepted"），原样」；
+//     坏条目不带。读不出来的产物不核。
 //     例外：所在段不晚于写入后 stage 的，sha 那一格这一次就可以写成 "accepted"（与回退落盘后紧接着再写一次等价）。
 //   - 之后的每一次写入（到下一次回退为止）：原样带着它。只许把当前段及更早段的某一条从 sha 改成 "accepted"（这一轮接受它原样）；
 //     写入前就坏了的条目（值不合法、或不是任何阶段的产物）可以删掉或标 "accepted"。没回退过（写入前缺失或 {}）：只许缺失或 {}。
@@ -173,7 +174,8 @@ export function parseStateText(text) {
 // ⚠️ 快照按全部 producers 展开（stages.mjs 的 productsOfStage），不按这一趟叫到谁：上一轮叫过、这一轮没叫的人留下的那份
 //    同样是上一轮的。
 // ⚠️ 跳过：写入前读不出来（与 decideRework 的修复路同一条）；阶段链读不出来或形状不对；写入前的 rework_base 不是对象时
-//    不核「原样带着」。都只是不核，不放宽 decideRework。跳过的原因进 notes，由 gate.mjs 写进 stderr。
+//    不核「原样带着」。都只是不核，不放宽 decideRework。后两种的原因进 notes，由 gate.mjs 写进 stderr；写入前读不出来时不留痕
+//    （与 decideRework 的修复路一样静默）。
 // ⚠️ 磁盘由调用方注入：diskSha(name) → { exists, sha }，读不出来时 sha 为 null。逐份 try 在 gate.mjs；这里不包 try——
 //    判定代码抛异常时 H6 照旧 fail closed。
 

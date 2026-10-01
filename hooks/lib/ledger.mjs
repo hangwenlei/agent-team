@@ -264,11 +264,11 @@ export function buildLedgerNotices({
     // 跟 H3 给出互相矛盾的指示。硬约束 6 不许把提示削弱或按角色掐掉，所以补救的
     // 是措辞：把动作明确归给 PM，再给非 PM 一条不会撞 H3 的下一步。
     const who = pmOnlyNotice('改 state.json', '"这一段的产物已经齐了"这件事')
-    // M3y（docs/33）：返工轮里下一段在 history 里已经出现过（回到 S5 之后再进 S6），rework 那一段也要照派生量加 1——H6 只认
-    // 派生量。这条提示原来只列 stage、history、roster、stage_roles、trimmed，照写会被 H6 拒一次（docs/15 那一趟真撞上过）。
+    // M3y（docs/33）：返工轮里下一段在 history 里已经出现过（回到 S5 之后再进 S6），rework 那一段也要照派生量加 1——少了 H6
+    // 会拒。这条提示原来只列 stage、history、roster、stage_roles、trimmed，照写会被 H6 拒一次（docs/15 那一趟真撞上过）。
     const again =
       nxt && Array.isArray(st.history) && st.history.some((e) => e && typeof e === 'object' && e.stage === nxt)
-        ? `（${nxt} 在 history 里已经出现过：同一次 Write 把 rework 里的 ${nxt} 照派生量加 1，H6 只认派生量）`
+        ? `（${nxt} 在 history 里已经出现过：同一次 Write 把 rework 里的 ${nxt} 照派生量加 1，少了 H6 会拒）`
         : ''
     out.push(
       nxt

@@ -62,7 +62,7 @@ import { stageRoles, isPlainObject, participantsOf } from './stages.mjs'
  * （两轮自发返工，rework 是 {"S5":1,"S6":1}）。所以同一个阶段 id 会在 history 里重复
  * 出现——下面按 seen 去重，否则同一条 gap 会照 history 里的出现次数重复上榜。
  * 【M3y 订正（docs/33 §1）：上面括号里「两轮」不对，那一趟只有一次返工（S6 测试没过回 S5）。rework.S6 是 1，是因为回到 S6
- *  时 S6 在 history 里第二次出现、H6 按派生量要它加 1——转录里 PM 带着 S6: 0 推进被 H6 拒掉，带上 1 才通过。同一个阶段 id
+ *  时 S6 在 history 里第二次出现、H6 按派生量要它加 1——转录里 PM 推进时 rework 里没写 S6，被 H6 按 0 拒掉，补上 S6: 1 才通过。同一个阶段 id
  *  在 history 里重复出现这件事照样成立。】
  *
  * ⚠️ 同一条口径还有**第二个后果，上面那段没说**（M3a 全分支终审 Minor-1）：
