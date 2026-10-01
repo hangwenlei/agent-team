@@ -46,17 +46,41 @@ const withoutKey = (k) => {
   return validateState(s, { stages }).problems
 }
 
-test('state.json 模板里除 trimmed 之外的每个顶层键，删掉就会被 validateState 报', () => {
+// 缺失即合法的那几个键：都是后加的字段，更早落盘的 state.json 没有它们（M3a 的 trimmed、M3x 的 stage_roles）。
+// 正文里的例外名单（commands/at.md 建 run 那一段、主规格 §4.4）由下面「例外名单与正文一致」那条对着它核。
+const OPTIONAL_STATE_KEYS = ['trimmed', 'stage_roles']
+
+test('state.json 模板里除 trimmed 与 stage_roles 之外的每个顶层键，删掉就会被 validateState 报', () => {
   for (const k of stateTemplateKeys()) {
-    if (k === 'trimmed') continue
+    if (OPTIONAL_STATE_KEYS.includes(k)) continue
     assert.notDeepEqual(
       withoutKey(k),
       [],
       `templates/state.json 的 ${k} 删掉之后 validateState 一声不吭——` +
-        'commands/at.md 建 run 那一段与主规格 §4.4 都写着「除 trimmed 以外，少任何一个都会被' +
+        'commands/at.md 建 run 那一段与主规格 §4.4 都写着「除 trimmed 与 stage_roles 以外，少任何一个都会被' +
         '账本回传报成状态不合法」，那句话因此对 ' + k + ' 变假了。' +
         '要么给这个键补上必填校验，要么把那两处正文里的例外名单改对——别只改一处。',
     )
+  }
+})
+
+test('state.json 模板的 stage_roles 删掉不报——M3x 的向后兼容例外（没有它的旧 run 门禁按 roster 判）', () => {
+  assert.ok(stateTemplateKeys().includes('stage_roles'), 'templates/state.json 里没有 stage_roles——新 run 照模板建出来就是旧 run 的形状')
+  assert.deepEqual(withoutKey('stage_roles'), [])
+})
+
+// 例外名单与正文一致：commands/at.md 建 run 那一段「除 … 以外」点名的键、主规格 §4.4「除 … 外每一个都报」点名的键，
+// 都要恰好是模板里删了不报的那几个——从模板与 validateState 派生，不抄名单。
+test('state.json 的例外名单：/at 建 run 那一段与规格 §4.4 点名的，恰好是模板里删了不报的那些键', () => {
+  const optional = stateTemplateKeys().filter((k) => withoutKey(k).length === 0).sort()
+  assert.deepEqual(optional, [...OPTIONAL_STATE_KEYS].sort())
+  const at = readFileSync(new URL('../commands/at.md', import.meta.url), 'utf8')
+  const spec = readFileSync(new URL('../docs/superpowers/specs/2026-09-15-agent-team-plugin-design.md', import.meta.url), 'utf8')
+  for (const [where, re] of [['commands/at.md', /除 ((?:`[a-z_]+`(?: 与 )?)+) 以外，少任何一个/], ['主规格 §4.4', /除 ((?:`[a-z_]+`(?: 与 )?)+) 外每一个都报/]]) {
+    const m = (where === 'commands/at.md' ? at : spec).match(re)
+    assert.ok(m, `${where} 里找不到那句例外名单——句式改了的话，这条判据的定位要跟着改`)
+    const named = [...m[1].matchAll(/`([a-z_]+)`/g)].map((x) => x[1]).sort()
+    assert.deepEqual(named, optional, `${where} 的例外名单与「模板里删了不报的键」对不上`)
   }
 })
 

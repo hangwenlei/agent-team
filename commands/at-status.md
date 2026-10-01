@@ -25,9 +25,14 @@ description: 显示当前 run 的阶段、产物、返工计数、主动裁掉�
 ⚠️ **不要直接拿 `produces` 字段当文件名清单用。** 它有两种形式（数组 / 对象），而且数组
 形式里可能是**模式**（含 `<role>` 占位符）而不是字面文件名——照字面 `Glob` 会对着一个
 永远不存在的名字报 ✗。正确的口径是 `hooks/lib/stages.mjs` 的
-`expandProduces(stage, stageRolesInRun(stage, roster))`——`roster` 取 `state.json` 里这一趟
-派了谁。展开规则**只在那一处**，这里不复述；要看它说了什么，读
+`expandProduces(stage, stageRolesInRun(stage, participantsOf(state, stage)))`——`participantsOf` 取的是
+`state.json` 的 `stage_roles` 在那一段记着的人（这一段叫到了谁）；没有 `stage_roles` 的旧 run 退回 `roster`。
+别拿整趟 `roster` 展开：`at-ui` 在 S2 干过活，S5 就会去等一份它根本没被派去写的实现记录。
+展开规则**只在那一处**，这里不复述；要看它说了什么，读
 `${CLAUDE_PLUGIN_ROOT}/stages.README.md` 的「`produces` 的两种形式」。
+
+当前段还没记账（有 `stage_roles`、却还没有这一段的键——PM 在推进出一段时才记它）时，这一段取不到产出角色：
+S5 按 `04-dispatch.md` 的分工、S2 按磁盘上已有的报，并在这一段后面标「本段未记账」，不要报成「这一段没有产物该在」。
 
 ## 3. 报什么
 

@@ -346,6 +346,83 @@ test('M3k：同一份夹具、只把 at-ui 加进 roster——它的两份产物
   }
 })
 
+// ---------------------------------------------------------------------------
+// M3x：【阶段】按段取参与者（全量审查第 14 条，docs/32）
+// ---------------------------------------------------------------------------
+//
+// ⚠️ 上面 M3k 那一对的夹具没有 stage_roles——是更早落盘的旧 run 的形状，按段的取法对它退回整趟 roster，所以那一对
+// 一个字不改，**它们现在钉的是「旧 run 退回 roster」**。它们的另一个前提（产者写 01-prd.md 那一刻 roster 里已经有它）
+// 在正路上到不了：commands/at.md 先派、核实，再在推进的同一次 Write 里记 roster 与 stage_roles。下面这几条是正路
+// 到得了的形状。
+//
+// 成对的那一组（GL1/GL6）与 M3k 同一条规矩：两份夹具**只差 stage_roles 一个字段**。推进到 S3 之后不发是因为 03-arch.md
+// 不在磁盘上，与参与者怎么取无关——拿它当对照分辨不了口径，所以不用。
+const m3xH = (...ids) => ids.map((stage) => ({ stage, at: '2026-09-17T14:30:00Z' }))
+function m3xLedger({ write, agent = 'at-pm', ...runOpts }) {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', ...runOpts })
+  try {
+    const { stdout } = run('ledger', {
+      tool_name: 'Write', agent_type: agent,
+      tool_input: { file_path: join(projectDir, '.agent-team', 'runs', 'r1', write) },
+    }, GATE, projectDir)
+    return ctxOf(stdout) ?? ''
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+}
+const M3X_S2 = {
+  stage: 'S2', roster: ['at-product'], trimmed: { 'at-ui': 'S2' }, history: m3xH('S1', 'S2'),
+  artifacts: ['00-contract.md', '01-prd.md'], write: 'state.json',
+}
+
+test('M3x GL1：S2 记了账（stage_roles.S2 = [at-product]、裁掉 at-ui）还没推进——【阶段】S2 发', () => {
+  assert.match(m3xLedger({ ...M3X_S2, stage_roles: { S2: ['at-product'] } }), /【阶段】S2 的产物已经齐了/)
+})
+
+test('M3x GL6：同一份夹具、stage_roles 没记 S2——这一段还没记账，【阶段】不发，【state.json】报 at-product 哪一段都没记', () => {
+  const ctx = m3xLedger({ ...M3X_S2, stage_roles: {} })
+  assert.doesNotMatch(ctx, /【阶段】/, '有 stage_roles、没有当前段的键 = 这一段还没记账，判不齐；退回 roster 就会照 M3k 的旧形状发')
+  assert.match(ctx, /roster 里有 "at-product"，但 stage_roles 没有任何一段记着它/)
+})
+
+// at-ui 在 S2 干过活、S5 没派它：整趟 roster 下 S5 去等 05-impl/at-ui.md，永远不齐，【阶段】永远不发——第 14 条本体。
+const M3X_S5_ACCOUNTED = {
+  stage: 'S5',
+  roster: ['at-product', 'at-ui', 'at-architect', 'at-backend', 'at-frontend'],
+  stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'], S5: ['at-architect', 'at-backend', 'at-frontend'] },
+  history: m3xH('S1', 'S2', 'S3', 'S4', 'S5'),
+  artifacts: ['05-impl/at-backend.md', '05-impl/at-frontend.md'],
+  write: 'state.json',
+}
+
+test('M3x GL4：at-ui 只在 S2 干过、S5 记了账还没推进、backend 与 frontend 都交了——【阶段】S5 发', () => {
+  assert.match(m3xLedger(M3X_S5_ACCOUNTED), /【阶段】S5 的产物已经齐了/)
+})
+
+// P1：S5 还没记账，at-ui 在 S2 进过 roster，它的实现记录先落盘——整趟 roster 下这一刻就宣布 S5 齐了，backend 还没交。
+test('M3x GL5：S5 还没记账、at-ui 的实现记录先落盘——【阶段】不发', () => {
+  const ctx = m3xLedger({
+    stage: 'S5', roster: ['at-product', 'at-ui', 'at-architect'],
+    stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'] },
+    history: m3xH('S1', 'S2', 'S3', 'S4', 'S5'), artifacts: ['05-impl/at-ui.md'],
+    write: '05-impl/at-ui.md', agent: 'at-ui',
+  })
+  assert.match(ctx, /【产物】/, '写的是 S5 的真产物，【产物】那一段本来就该在——它不在说明夹具坏了')
+  assert.doesNotMatch(ctx, /【阶段】/)
+})
+
+// 登记的边界（docs/32 §4）：产者落盘那一刻当前段还没记账，S2/S5 的【阶段】在正路上只在「记了账没推进」时发。
+// 基线同样不发（那一刻 roster 里也还没有这一段的人）。这条钉的是边界本身：哪天时序那一半修了，它会红，回 docs/32 改登记。
+test('M3x 边界：S2 正路上 at-product 写 01-prd.md 那一刻还没记账——【阶段】不发', () => {
+  const ctx = m3xLedger({
+    stage: 'S2', roster: [], stage_roles: {}, history: m3xH('S1', 'S2'),
+    artifacts: ['00-contract.md', '01-prd.md'], write: '01-prd.md', agent: 'at-product',
+  })
+  assert.match(ctx, /【产物】/)
+  assert.doesNotMatch(ctx, /【阶段】/)
+})
+
 test('ledger 永不拒绝——输出里不会出现 permissionDecision', () => {
   const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S1', artifacts: ['00-contract.md'] })
   try {
@@ -653,6 +730,72 @@ test('产者交代文案明确写出「不要为了让提示消失就写进 rost
   const { projectDir, pluginDir } = makeRun(WALKED_S2)
   try {
     assert.match(ctxOf(writeState(projectDir).stdout), /不要为了让这条提示消失就把名字写进 roster/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// ——— M3x：带 stage_roles 的 run，产者交代按段判（docs/32）———
+//
+// at-ui 在 S2 叫过、S5 没叫也没裁：整趟 roster 下它被当成交代过，按段之后报 {S5, at-ui}。这时它就在 roster 里，
+// 旧文案的头一句「这一趟既没叫到它们」是假话；它也可能在 S5 真干过活、只是 stage_roles 漏记了——那时的修法是补记，
+// 「把它派出去」会让它重做一遍。所以带 stage_roles 时多给第三条出路，护栏扩到 stage_roles。旧 run 的文案不变（上面那几条）。
+const WALKED_S5_PER_STAGE = {
+  runId: 'r1',
+  stage: 'S6',
+  history: ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'].map((stage) => ({ stage, at: '2026-09-20T10:00:00Z' })),
+  roster: ['at-product', 'at-ui', 'at-architect', 'at-backend', 'at-qa'],
+  stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'], S5: ['at-architect', 'at-backend'], S6: ['at-qa'] },
+  trimmed: { 'at-frontend': 'S5' },
+  project: { available_roles: M2B_AVAILABLE, paths: {} },
+}
+
+test('M3x：at-ui 在 S2 叫过、S5 没叫也没裁——产者交代点名 S5 的 at-ui，头一句按段说', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S5_PER_STAGE)
+  try {
+    const ctx = ctxOf(writeState(projectDir).stdout) ?? ''
+    assert.match(ctx, /【产者交代】/)
+    assert.match(ctx, /S5 的 at-ui/)
+    assert.doesNotMatch(ctx, /这一趟既没叫到它们/, '它在 roster 里——「这一趟既没叫到它们」是假话')
+    assert.match(ctx, /既没记着这一趟在那一段叫到过它们/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('M3x：带 stage_roles 时 PM 收到三条出路，第三条是补记 stage_roles，护栏扩到 stage_roles', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S5_PER_STAGE)
+  try {
+    const ctx = ctxOf(writeState(projectDir).stdout) ?? ''
+    assert.match(ctx, /三条出路，逐个按事实选一条/)
+    assert.match(ctx, /③ 它在那一段真的被叫到过、只是 stage_roles 没记[\s\S]*把它并进 state\.json 的 stage_roles 那一段/)
+    assert.match(ctx, /不要为了让这条提示消失就把名字写进 roster 或 stage_roles/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('M3x：带 stage_roles、收件人改不了 state.json 时，第三条出路说清补记是 PM 的动作', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S5_PER_STAGE)
+  try {
+    const ctx = ctxOf(writeState(projectDir, 'at-backend').stdout) ?? ''
+    assert.match(ctx, /③ 它在那一段真的被叫到过、只是 stage_roles 没记[\s\S]*补记是 PM 的动作/)
+    assert.match(ctx, /不要把它说成「把名字写进 roster 或 stage_roles 就行」/)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('M3x：旧 run（没有 stage_roles）的产者交代不给第三条出路——那里没有 stage_roles 可补', () => {
+  const { projectDir, pluginDir } = makeRun(WALKED_S2)
+  try {
+    const ctx = ctxOf(writeState(projectDir).stdout) ?? ''
+    assert.match(ctx, /两条出路，逐个按事实选一条/)
+    assert.doesNotMatch(ctx, /③|stage_roles/)
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })

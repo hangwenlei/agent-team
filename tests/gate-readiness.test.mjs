@@ -277,3 +277,20 @@ test('readiness（M3w）：stage 没推进（停在 S2）、S2 已齐、03/04 �
     }
   })
 })
+
+// ——— M3x（docs/32，全量审查第 14 条）：H2 保持整趟口径 ———
+//
+// 【阶段】与 H5a 的「齐了没」改成按段取参与者（participantsOf），H2 的 done 判定没有改：它是放行/拒绝的门禁，整趟 roster
+// 是更严的一侧。S5 还没记账时 participantsOf 给空集，按段取会让 S5 只等 at-backend 自己那一份——它在、S5 就「齐了」，
+// 04-dispatch.md 缺着也放行。理由在 docs/11 §5.33 的收口。
+test('readiness（M3x）：S5 还没记账、at-ui 在 S2 干过、at-backend 的实现记录已在、04 缺——架构师再派 at-backend 照样拒', () => {
+  withRun({
+    stage: 'S5', roster: ['at-product', 'at-ui', 'at-architect'],
+    stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'] },
+    artifacts: [...S2_DONE, '03-arch.md', '05-impl/at-backend.md', '05-impl/at-frontend.md'],
+  }, (dirs) => {
+    const input = { ...dispatchUi('agent-team:at-architect'), tool_input: { subagent_type: 'agent-team:at-backend', prompt: 'x' } }
+    const { stdout } = run('readiness', input, undefined, dirs.projectDir)
+    assert.equal(decisionOf(stdout)?.permissionDecision, 'deny', stdout)
+  })
+})

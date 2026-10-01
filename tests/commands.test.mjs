@@ -4,7 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { CONTROL_FILES } from '../hooks/lib/control-files.mjs'
 import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
-import { producedNames, expandProduces, stageRolesInRun } from '../hooks/lib/stages.mjs'
+import { producedNames, expandProduces, stageRolesInRun, participantsOf } from '../hooks/lib/stages.mjs'
 import { isStageDone } from '../hooks/lib/state.mjs'
 import { COMMAND_NAMES } from './helpers/command-names.mjs'
 import { ROLES_WITHOUT_PATHS } from './helpers/roles-without-paths.mjs'
@@ -481,14 +481,20 @@ test('/at-resume 第 2 节写明「展开为空集不算齐了」，且 isStageD
     'commands/at-resume.md 第 2 节没写「展开出来是空集 → 不算齐了」——对空集，「全部都在磁盘上」是真命题，' +
       '照字面判的 PM 会把一段整个跳过（docs/11 §5.37）',
   )
-  const s5Start = ['at-product', 'at-architect']
+  // M3x（docs/32）：第 2 节的展开口径改成 participantsOf(state, stage)。S5 开头取 at-ui 在 S2 进过 roster 的那一种：
+  // 按整趟 roster 展开它不是空集（[05-impl/at-ui.md]），按段才是——这一格正是第 14 条。
+  const s5Start = {
+    stage: 'S5',
+    roster: ['at-product', 'at-ui', 'at-architect'],
+    stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'] },
+  }
   assert.deepEqual(
-    expandProduces(stages.S5, stageRolesInRun(stages.S5, s5Start)),
+    expandProduces(stages.S5, stageRolesInRun(stages.S5, participantsOf(s5Start, 'S5'))),
     [],
-    '前置：S5 开头（实现角色一个都没派）按 roster 展开应该是空集——不是的话，下面那条问的就不是空集',
+    '前置：S5 开头（这一段还没记账）按段展开应该是空集——不是的话，下面那条问的就不是空集',
   )
   assert.equal(
-    isStageDone({ stage: 'S5', stages, artifactExists: () => true, roster: s5Start }),
+    isStageDone({ stage: 'S5', stages, artifactExists: () => true, roster: participantsOf(s5Start, 'S5') }),
     false,
     'isStageDone 对空集答了「齐了」——commands/at-resume.md 第 2 节写的是「空集不算齐了」，两边要一起改',
   )

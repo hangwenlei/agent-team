@@ -142,6 +142,11 @@ test('返工：S5 在 history 里出现两次、且正是当前阶段 → S5 不
 // **这条哪天因为有人改成按段判而变红，先去读那一节，不要直接改这里的期望值。**
 // （实测：模拟那个修法——roster 里的名字只对它遇到的第一个产者阶段算交代——
 // 708 → 705 / 3，第一条红的就是这一条。）
+//
+// ⚠️ M3x（docs/32）：roster 那一半改成按段了——但只对带 stage_roles 的 run。这份 state 没有 stage_roles，
+// 是更早落盘的旧 run 的形状，按段的消费方对它退回整趟 roster，所以期望值一个字不动：**它现在钉的是「旧 run
+// 退回 roster」**。新 run 上同一个形状报出 {S5, at-ui}，由下面「M3x：有 stage_roles 时按段判」那一组钉着。
+// trimmed 按键判那一半没改。
 test('正向自检锚（返工）：同一份 roster，返工做完推到 S6 之后 S5 才报，且每条只报一次', () => {
   const state = {
     stage: 'S6',
@@ -355,6 +360,83 @@ test('trimmed 的值是出处不是匹配键：at-ui 记在 S2，S5 那一段也
     trimmed: { 'at-ui': 'S2', 'at-ios': 'S5', 'at-android': 'S5' },
   }
   assert.deepEqual(decideCoverage({ stages, state, availableRoles: FULL_AVAILABLE }).gaps, [])
+})
+
+// ——— M3x：有 stage_roles 时按段判（全量审查第 14 条，docs/32）———
+//
+// 走过的段 S，「叫到了」取 stage_roles[S]（hooks/lib/stages.mjs 的 participantsOf），不取整趟 roster：at-ui 在 S2 叫过，
+// 不能替它在 S5 交代。没有 stage_roles 的旧 run 退回 roster（上面那条返工锚钉着）。字段在、某一段没键 = 那一段没记账，
+// 是空集，不退回 roster。trimmed 照旧按键判。
+const M3X_ROSTER = ['at-product', 'at-ui', 'at-architect', 'at-backend', 'at-frontend', 'at-qa']
+const m3xState = (o = {}) => ({
+  stage: 'S7',
+  history: h('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'),
+  roster: M3X_ROSTER,
+  stage_roles: {
+    S2: ['at-product', 'at-ui'],
+    S3: ['at-architect'],
+    S5: ['at-architect', 'at-backend', 'at-frontend'],
+    S6: ['at-qa'],
+  },
+  trimmed: {},
+  ...o,
+})
+
+test('M3x：at-ui 在 S2 叫过、S5 没叫也没裁——报 {S5, at-ui}（整趟 roster 下看不见）', () => {
+  assert.deepEqual(decideCoverage({ stages, state: m3xState(), availableRoles: M2B_AVAILABLE }).gaps, [{ stage: 'S5', role: 'at-ui' }])
+})
+
+test('M3x：同一份 state 去掉 stage_roles（旧 run）——退回整趟 roster，不报', () => {
+  const state = m3xState()
+  delete state.stage_roles
+  assert.deepEqual(decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE }).gaps, [])
+})
+
+test('M3x：字段在、只缺 S3 这一段的键——S3 没记账，报 {S3, at-architect}，不退回 roster', () => {
+  const state = m3xState()
+  delete state.stage_roles.S3
+  assert.deepEqual(decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE }).gaps, [
+    { stage: 'S3', role: 'at-architect' },
+    { stage: 'S5', role: 'at-ui' },
+  ])
+})
+
+test('M3x：trimmed 照旧按键判——at-ui 记在 S2 的裁剪，S5 那一段也算交代过', () => {
+  assert.deepEqual(decideCoverage({ stages, state: m3xState({ trimmed: { 'at-ui': 'S2' } }), availableRoles: M2B_AVAILABLE }).gaps, [])
+})
+
+// 架构师在 S3 叫 at-ios 做调研：它在 S3 被叫到（stage_roles.S3 记着），不替它在 S5 交代——它是 S5 的产者，S5 没叫它就得裁。
+test('M3x：在 S3 被叫去调研的 at-ios 不算在 S5 交代过', () => {
+  const state = m3xState({
+    roster: [...M3X_ROSTER, 'at-ios'],
+    stage_roles: { ...m3xState().stage_roles, S3: ['at-architect', 'at-ios'] },
+    trimmed: { 'at-ui': 'S2', 'at-android': 'S5' },
+  })
+  assert.deepEqual(decideCoverage({ stages, state, availableRoles: FULL_AVAILABLE }).gaps, [{ stage: 'S5', role: 'at-ios' }])
+})
+
+// 返工轮：stage_roles[S] 跨轮取并集。第二轮只叫回 at-backend 时照「并入」写不报；照「覆盖」写把 at-frontend 当成没交代
+// ——覆盖写的那一格在这里报出来（validateState 那一侧也报它不在任何一段）。
+test('M3x 返工：S5 两轮的 stage_roles 并入——不报', () => {
+  const state = m3xState({ stage: 'S6', history: h('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S5', 'S6'), trimmed: { 'at-ui': 'S2' } })
+  assert.deepEqual(decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE }).gaps, [])
+})
+
+test('M3x 返工：S5 第二轮把 stage_roles.S5 覆盖成只剩 at-backend——报 {S5, at-frontend}', () => {
+  const state = m3xState({
+    stage: 'S6',
+    history: h('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S5', 'S6'),
+    stage_roles: { ...m3xState().stage_roles, S5: ['at-architect', 'at-backend'] },
+    trimmed: { 'at-ui': 'S2' },
+  })
+  assert.deepEqual(decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE }).gaps, [{ stage: 'S5', role: 'at-frontend' }])
+})
+
+test('M3x：perStage 说的是这一次有没有按段判——有 stage_roles 为真，旧 run 为假', () => {
+  assert.equal(decideCoverage({ stages, state: m3xState(), availableRoles: M2B_AVAILABLE }).perStage, true)
+  const old = m3xState()
+  delete old.stage_roles
+  assert.equal(decideCoverage({ stages, state: old, availableRoles: M2B_AVAILABLE }).perStage, false)
 })
 
 // ——— docs/11 §5.25：链尾那一段的产者永远进不了这条判据的宇宙 ———

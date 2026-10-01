@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { ESCALATION_KINDS, REJECTION_KINDS, REWORK_LIMIT, isStageDone, nextStage, rejectTo, reworkFromHistory, validateState } from '../hooks/lib/state.mjs'
+import { participantsOf } from '../hooks/lib/stages.mjs'
 
 const STAGES = {
   S1: { role: 'at-pm', requires: [], produces: ['00-contract.md'] },
@@ -279,6 +280,127 @@ test('isStageDone：roster 缺省时按全部 producers 判——不传 roster �
     artifactExists: have('05-impl/at-backend.md'),
   })
   assert.equal(done, false)
+})
+
+// ---------------------------------------------------------------------------
+// M3x：isStageDone 按段取参与者（全量审查第 14 条，docs/32）
+// ---------------------------------------------------------------------------
+//
+// 门禁的两处调用把 participantsOf(state, state.stage) 交给 isStageDone 的 roster 形参（形参名不改）。这一组用
+// 真实 stages.json 钉这个组合在 at-ui 两段身份上的答案：at-ui 是 S2 与 S5 的产者，整趟的 roster 分不出它在哪一段干的活。
+// 成对写：同一个开局，只差这一段记没记账或记了谁。
+const REAL_STAGES = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
+const doneByStage = (state, ...disk) =>
+  isStageDone({ stage: state.stage, stages: REAL_STAGES, artifactExists: have(...disk), roster: participantsOf(state, state.stage) })
+const S5_BF = ['05-impl/at-backend.md', '05-impl/at-frontend.md']
+// at-ui 在 S2 干过活、S5 记了账（叫到 at-architect 分发、at-backend 与 at-frontend 实现）、还没推进。
+const S5_ACCOUNTED = {
+  stage: 'S5',
+  roster: ['at-product', 'at-ui', 'at-architect', 'at-backend', 'at-frontend'],
+  stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'], S5: ['at-architect', 'at-backend', 'at-frontend'] },
+}
+
+test('M3x isStageDone：at-ui 只在 S2 干过、S5 记了账没派它——backend 与 frontend 交齐就是齐（整趟 roster 下永远不齐）', () => {
+  assert.equal(doneByStage(S5_ACCOUNTED, ...S5_BF), true)
+  // 对照：同一份 state 按整趟 roster 判，S5 会去等 05-impl/at-ui.md——第 14 条报的就是这一格。
+  assert.equal(isStageDone({ stage: 'S5', stages: REAL_STAGES, artifactExists: have(...S5_BF), roster: S5_ACCOUNTED.roster }), false)
+})
+
+test('M3x isStageDone：S5 还没记账、at-ui 在 S2 进过 roster、它的实现记录先落盘——不齐（整趟 roster 下会提前判齐）', () => {
+  const state = { stage: 'S5', roster: ['at-product', 'at-ui', 'at-architect'], stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'] } }
+  assert.equal(doneByStage(state, '05-impl/at-ui.md'), false)
+  assert.equal(isStageDone({ stage: 'S5', stages: REAL_STAGES, artifactExists: have('05-impl/at-ui.md'), roster: state.roster }), true)
+})
+
+test('M3x isStageDone：S5 记着叫到 at-ui 与 at-backend、只有 at-ui 交了——不齐', () => {
+  const state = { ...S5_ACCOUNTED, stage_roles: { ...S5_ACCOUNTED.stage_roles, S5: ['at-ui', 'at-backend'] } }
+  assert.equal(doneByStage(state, '05-impl/at-ui.md'), false)
+})
+
+test('M3x isStageDone：没有 stage_roles 的旧 run 照旧按整趟 roster 判', () => {
+  assert.equal(doneByStage({ stage: 'S5', roster: ['at-architect', 'at-backend'] }, '05-impl/at-backend.md'), true)
+  assert.equal(doneByStage({ stage: 'S5', roster: ['at-architect', 'at-backend', 'at-frontend'] }, '05-impl/at-backend.md'), false)
+})
+
+// S2 的镜像：at-ui 只在 S5 干过活。这一格只在返工轮里到得了（S5 之后驳回 S2），返工轮的「一回退就判齐」归第 15 条
+// ——这里只钉期望集合：S2 不再去等 at-ui 的两份。
+test('M3x isStageDone：at-ui 只在 S5 干过，S2 按段只等 01-prd.md', () => {
+  const state = { stage: 'S2', roster: ['at-product', 'at-architect', 'at-ui'], stage_roles: { S2: ['at-product'], S3: ['at-architect'], S5: ['at-ui'] } }
+  assert.equal(doneByStage(state, '01-prd.md'), true)
+})
+
+// ---------------------------------------------------------------------------
+// M3x：validateState 的 stage_roles 校验
+// ---------------------------------------------------------------------------
+//
+// stage_roles 是 roster 按段拆开：值里的每个角色都要在 roster 里，roster 里的每个角色都要在某一段里。不要求是那一段的
+// 产者——架构师在 S5 分发、在 S3 叫执行角色做调研，都是「叫到」。缺失不报：更早落盘的旧 run 没有它，门禁按 roster 判。
+const SR_OK = () => ({
+  run_id: '20260917-1430-login-sso',
+  stage: 'S6',
+  contract_sha: SHA,
+  roster: ['at-product', 'at-ui', 'at-architect', 'at-ios', 'at-backend', 'at-frontend', 'at-qa'],
+  stage_roles: {
+    S2: ['at-product', 'at-ui'],
+    S3: ['at-architect', 'at-ios'],
+    S5: ['at-architect', 'at-backend', 'at-frontend'],
+    S6: ['at-qa'],
+  },
+  trimmed: { 'at-ios': 'S5' },
+  artifacts: {},
+  rework: {},
+  never_invoked: [],
+  escalations: [],
+  history: ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'].map((stage) => ({ stage, at: '2026-09-17T14:30:00Z' })),
+})
+const srProblems = (over) => validateState({ ...SR_OK(), ...over }, { stages: REAL_STAGES }).problems
+
+test('M3x validateState：合法的 stage_roles 通过——非产者的叫到（S5 的架构师、S3 调研叫的 at-ios）也合法', () => {
+  assert.deepEqual(srProblems({}), [])
+})
+
+test('M3x validateState：没有 stage_roles 不报——旧 run', () => {
+  const s = SR_OK()
+  delete s.stage_roles
+  assert.deepEqual(validateState(s, { stages: REAL_STAGES }).problems, [])
+})
+
+test('M3x validateState：stage_roles 不是对象时报出来', () => {
+  assert.ok(srProblems({ stage_roles: ['S2'] }).some((x) => /stage_roles 不是对象/.test(x)))
+  assert.ok(srProblems({ stage_roles: null }).some((x) => /stage_roles 不是对象/.test(x)))
+})
+
+test('M3x validateState：stage_roles 的键不在阶段链里时报出来', () => {
+  const r = srProblems({ stage_roles: { ...SR_OK().stage_roles, S9: [] } })
+  assert.ok(r.some((x) => /stage_roles 里有 "S9"，但 stages\.json 里没有这个阶段/.test(x)), r.join('\n'))
+})
+
+test('M3x validateState：stage_roles 的值不是字符串数组时报出来', () => {
+  const r = srProblems({ stage_roles: { ...SR_OK().stage_roles, S7: 'at-acceptance' } })
+  assert.ok(r.some((x) => /stage_roles\["S7"\] 不是字符串数组/.test(x)), r.join('\n'))
+})
+
+test('M3x validateState：stage_roles 里记着、roster 里没有的角色报出来', () => {
+  const r = srProblems({ stage_roles: { ...SR_OK().stage_roles, S5: ['at-architect', 'at-backend', 'at-frontend', 'at-android'] } })
+  assert.ok(r.some((x) => /stage_roles\["S5"\] 里有 "at-android"，roster 里却没有它/.test(x)), r.join('\n'))
+})
+
+test('M3x validateState：roster 里有、stage_roles 哪一段都没记的角色报出来', () => {
+  const r = srProblems({ stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect', 'at-ios'], S6: ['at-qa'] } })
+  assert.ok(r.some((x) => /roster 里有 "at-backend"，但 stage_roles 没有任何一段记着它/.test(x)), r.join('\n'))
+  assert.ok(r.some((x) => /roster 里有 "at-frontend"，但 stage_roles 没有任何一段记着它/.test(x)), r.join('\n'))
+})
+
+// 叫到之后又裁掉（预算耗尽之类）：stage_roles 与 trimmed 同一段同时记着它，两样都是真事，不报。
+test('M3x validateState：同一段既在 stage_roles 又在 trimmed 不报——叫到之后又裁掉', () => {
+  assert.deepEqual(srProblems({ trimmed: { 'at-frontend': 'S5' } }), [])
+})
+
+test('M3x validateState：不给 stages 时跳过键的归属校验，其余照查', () => {
+  const s = { ...SR_OK(), stage_roles: { ...SR_OK().stage_roles, S9: ['at-nobody'] } }
+  const r = validateState(s, {}).problems
+  assert.ok(!r.some((x) => /stages\.json 里没有这个阶段/.test(x)), r.join('\n'))
+  assert.ok(r.some((x) => /stage_roles\["S9"\] 里有 "at-nobody"，roster 里却没有它/.test(x)), r.join('\n'))
 })
 
 // Task 7：驳回路由。规格 §4.3 那张表此前没有任何代码消费它，nextStage 只会前进一格。

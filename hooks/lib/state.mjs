@@ -154,6 +154,11 @@ export function rejectTo(kind) {
  * produces，而 S2 就在枚举的「S1–S4」里面：传了 roster 的那一趟，S2 的 isStageDone 走的
  * 正是 roster ∩ producers。改成按条件说、不枚举阶段号——哪些阶段没有 producers，
  * 去 stages.json 看。同族另外三处（deliverable/writepath/artifact-drift）一并改了。
+ *
+ * M3x（docs/32，全量审查第 14 条）：形参名仍叫 roster，门禁的两处调用传的却不再是整趟 roster，是
+ * participantsOf(state, state.stage)——state.json 的 stage_roles 在当前段记着的人，没有 stage_roles 的旧 run 退回 roster。
+ * 整趟 roster 不分段：at-ui 在 S2 进过 roster，S5 就去等 05-impl/at-ui.md。本函数一个字没改，判据在调用点
+ * （tests/stage-done-call-site.test.mjs）。当前段还没记账时传进来的是 []，展开为空、答 false。
  */
 export function isStageDone({ stage, stages, artifactExists, roster }) {
   // stage 来自 state.json：不是字符串、或者不是 stages 自己的键，就不算完成（M3s，docs/27 §3）。
@@ -238,6 +243,47 @@ export function validateState(state, { stages } = {}) {
         }
         if (trimmable && !trimmable.has(role)) {
           p(`trimmed 里有 ${quote(role)}，但它不是任何阶段的产者——裁掉一个本来就什么都不产出的角色不构成交代`)
+        }
+      }
+    }
+  }
+
+  // ——— stage_roles（M3x，docs/32）：roster 按段拆开 ———
+  //
+  // roster 不分段，按段判「齐了没」「谁没交代」的消费方从这里取这一段叫到了谁（hooks/lib/stages.mjs 的 participantsOf）。
+  // 口径与 roster 同一个「叫到」，所以两条不变量是双向的：值里的每个角色都在 roster 里；roster 里的每个角色都在某一段里
+  // ——后一条接住「累加了 roster、忘了记 stage_roles」，那一格按段判时这个角色的产物不被期待，提前判齐。
+  //
+  // ⚠️ 不要求是那一段的产者：架构师在 S5 分发、在 S3 叫执行角色调研，都是如实的叫到（agents/at-architect.md）。
+  // ⚠️ 不与 trimmed 比：叫到之后又裁掉（预算耗尽）两样都是真事；拿 trimmed 的值当匹配键还会撞上 §5.22 那条
+  //    「值是出处」，返工轮叫回首轮裁掉的角色也会误报。
+  // ⚠️ 缺失不报，与 trimmed 同一个向后兼容：更早落盘的 run 没有它，门禁对它们按 roster 判。
+  if (Object.hasOwn(state, 'stage_roles')) {
+    if (!isPlainObject(state.stage_roles)) {
+      p('stage_roles 不是对象——它是 { 阶段 id: [这一段叫到的角色] } 的映射，按段记这一趟叫到了谁')
+    } else {
+      const rosterSet = isStringArray(state.roster) ? new Set(state.roster) : null
+      const recorded = new Set()
+      for (const [stage, roles] of Object.entries(state.stage_roles)) {
+        if (isPlainObject(stages) && !Object.hasOwn(stages, stage)) {
+          p(`stage_roles 里有 ${quote(stage)}，但 stages.json 里没有这个阶段`)
+        }
+        if (!isStringArray(roles)) {
+          p(`stage_roles[${quote(stage)}] 不是字符串数组`)
+          continue
+        }
+        for (const role of roles) {
+          recorded.add(role)
+          if (rosterSet && !rosterSet.has(role)) {
+            p(`stage_roles[${quote(stage)}] 里有 ${quote(role)}，roster 里却没有它——stage_roles 是 roster 按段拆开，叫到的角色两边都要记`)
+          }
+        }
+      }
+      if (rosterSet) {
+        for (const role of rosterSet) {
+          if (!recorded.has(role)) {
+            p(`roster 里有 ${quote(role)}，但 stage_roles 没有任何一段记着它——把它并进它被叫到的那一段`)
+          }
         }
       }
     }

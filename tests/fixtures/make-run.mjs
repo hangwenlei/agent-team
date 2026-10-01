@@ -39,7 +39,11 @@ import { join, dirname } from 'node:path'
 //   - trimmed：缺省**不写这个键**，而不是写成 {}。这不是偷懒：M3a 之前落盘的 state.json
 //     没有这个字段，validateState 对缺失不报错（向后兼容），缺省保持缺失能让既有夹具
 //     顺带覆盖那条真实存在的形状。要测「声明过的裁剪」就显式传进来。
-export function makeRun({ runId = 'r1', stage = 'S2', artifacts = [], project = null, stages = null, roster = [], history = null, trimmed = null } = {}) {
+//
+// M3x：加可选 stage_roles（{ 段: [角色] }，roster 按段拆开，docs/32）。缺省 null 时**不写这个键**，与 trimmed 同一个
+// 写法：没有它的 state.json 是更早落盘的旧 run，按段的消费方（isStageDone 的两处调用、产者交代）对它退回整趟 roster，
+// 所以上面那段「空 roster 让账本比对看不见 01-prd.md」对缺省夹具照样成立。传了它，当前段没有键就是「这一段还没记账」。
+export function makeRun({ runId = 'r1', stage = 'S2', artifacts = [], project = null, stages = null, roster = [], history = null, trimmed = null, stage_roles = null } = {}) {
   // 两个根分开造：projectDir 模拟用户仓库，pluginDir 模拟插件安装目录。
   // realpath（M3p，CI 第一次在 macOS 上跑）：macOS 的 tmpdir() 是 /var/folders/...，而 /var 是
   // /private/var 的软链接。当时门禁按字面比较路径，子进程的 process.cwd() 给的是解析后的
@@ -63,6 +67,7 @@ export function makeRun({ runId = 'r1', stage = 'S2', artifacts = [], project = 
       contract_sha: 'PENDING',
       roster,
       ...(trimmed === null ? {} : { trimmed }),
+      ...(stage_roles === null ? {} : { stage_roles }),
       artifacts: {},
       rework: {},
       never_invoked: [],

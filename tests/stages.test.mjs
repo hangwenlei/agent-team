@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { stageRoles, expandProduces, producedNames, expectedArtifacts, isPlainObject } from '../hooks/lib/stages.mjs'
+import { stageRoles, expandProduces, producedNames, expectedArtifacts, isPlainObject, participantsOf } from '../hooks/lib/stages.mjs'
 
 const S5 = { role: 'at-backend', producers: ['at-backend', 'at-frontend', 'at-ui'], produces: ['05-impl/<role>.md'] }
 const S1 = { role: 'at-pm', produces: ['00-contract.md'] }
@@ -187,4 +187,53 @@ test('数组形式行为逐字不变：<role> 仍按角色展开', () => {
 test('数组形式行为逐字不变：不含 <role> 的条目仍原样保留一次', () => {
   const s1 = { role: 'at-pm', produces: ['00-contract.md'] }
   assert.deepEqual(expandProduces(s1, ['at-pm', 'at-product']), ['00-contract.md'])
+})
+
+// ---------------------------------------------------------------------------
+// M3x：participantsOf —— 某一段「这一趟叫到了谁」（全量审查第 14 条，docs/32）
+// ---------------------------------------------------------------------------
+//
+// roster 不分段：at-ui 在 S2 进过 roster，S5 的展开就把它当成 S5 的产者。state.json 从 M3x 起多一个
+// stage_roles（{ 段: [角色] }，与 roster 同一个「叫到」口径、按段拆开），按段的消费方经这个函数取参与者。
+// 没有这个字段的旧 run 退回 roster——v1.5.0 的行为原样保留。每种形状各占一条：缺省方向写反、键缺时退回
+// roster、stageId 不先判类型，各自只有一条会红。
+test('M3x participantsOf：没有 stage_roles 的旧 run 退回 roster', () => {
+  assert.deepEqual(participantsOf({ roster: ['at-product', 'at-ui'] }, 'S5'), ['at-product', 'at-ui'])
+})
+
+test('M3x participantsOf：旧 run 的 roster 不是数组时返回 undefined（交给 stageRolesInRun 退回全部 producers）', () => {
+  assert.equal(participantsOf({ roster: null }, 'S5'), undefined)
+})
+
+test('M3x participantsOf：stage_roles 不是普通对象（null、数组）时当它不在，退回 roster', () => {
+  assert.deepEqual(participantsOf({ roster: ['at-ui'], stage_roles: null }, 'S5'), ['at-ui'])
+  assert.deepEqual(participantsOf({ roster: ['at-ui'], stage_roles: ['S5'] }, 'S5'), ['at-ui'])
+})
+
+test('M3x participantsOf：stage_roles 在、没有这一段的键时是空集——这一段还没记账，不退回 roster', () => {
+  assert.deepEqual(participantsOf({ roster: ['at-ui'], stage_roles: { S2: ['at-ui'] } }, 'S5'), [])
+})
+
+test('M3x participantsOf：有这一段的键时取它，只留字符串', () => {
+  assert.deepEqual(participantsOf({ roster: ['at-ui', 'at-backend'], stage_roles: { S5: ['at-backend', 1, null] } }, 'S5'), ['at-backend'])
+})
+
+test('M3x participantsOf：这一段的值不是数组时是空集', () => {
+  assert.deepEqual(participantsOf({ roster: ['at-backend'], stage_roles: { S5: 'at-backend' } }, 'S5'), [])
+})
+
+// docs/27 §2.5：stageId 来自 state.json，{"toString":1} 拿去当属性键会让 ToPropertyKey 抛异常——ledger 与
+// deliverable 在算参与者时整条崩掉，本该报出这个坏值的【state.json】也跟着消失。先判类型再查键。
+test('M3x participantsOf：stageId 不是字符串时是空集，不抛', () => {
+  const state = { roster: ['at-ui'], stage_roles: { S5: ['at-ui'] } }
+  assert.deepEqual(participantsOf(state, { toString: 1 }), [])
+  assert.deepEqual(participantsOf(state, undefined), [])
+})
+
+test('M3x participantsOf：state 不是对象时返回 undefined', () => {
+  assert.equal(participantsOf(null, 'S5'), undefined)
+})
+
+test('M3x participantsOf：键是继承来的（toString）不算这一段记过账', () => {
+  assert.deepEqual(participantsOf({ roster: ['at-ui'], stage_roles: {} }, 'toString'), [])
 })

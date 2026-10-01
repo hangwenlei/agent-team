@@ -35,7 +35,10 @@
 //
 // ⚠️ 本模块**不改 isStageDone**（设计 §5 明写排除）。isStageDone 按 roster 收窄是对的
 // ——它答的是「这一趟这一段齐了没」；形状 A 由这条判据接住，不是由它。
-import { stageRoles, isPlainObject } from './stages.mjs'
+// ⚠️ M3x（docs/32）订正上一句的前提：「按 roster 收窄」对多段角色不对——at-ui 在 S2 进过 roster，S5 就把它当成 S5 的产者。
+// 现在两边都按段：isStageDone 的两处调用与本模块都经 participantsOf 取「那一段叫到了谁」（state.json 的 stage_roles，
+// 旧 run 退回 roster）。分工没变：齐没齐归 isStageDone，谁没交代归这里。
+import { stageRoles, isPlainObject, participantsOf } from './stages.mjs'
 
 /**
  * 「已经走过的阶段」里，有没有哪个**这个项目用得上**的产者既不在 roster、也不在 trimmed。
@@ -96,6 +99,10 @@ import { stageRoles, isPlainObject } from './stages.mjs'
  *
  * **交代**（roster ∪ trimmed）：
  *   - 在 roster 里 = 这一趟真的叫到过它；
+ *     ⚠️ M3x（docs/32）：带 stage_roles 的 run 按段取——在 stage_roles[这一段] 里 = 这一段真的叫到过它。at-ui 在 S2
+ *     叫过，不替它在 S5 交代（整趟 roster 下那一格看不见，docs/11 §5.22 B 格）。取法是 participantsOf：没有
+ *     stage_roles 的旧 run 退回 roster；有字段、没这一段的键 = 这一段没记账 = 空集，不退回 roster。返回值的
+ *     perStage 说的就是这一次按没按段判，文案据此决定给不给「补记 stage_roles」那条出路。
  *   - 在 trimmed 里 = 这一趟主动不叫它，而且这个决定被写下来了。
  * 两边都不在 = 静默漏掉 → 一条 gap。
  *
@@ -129,18 +136,22 @@ import { stageRoles, isPlainObject } from './stages.mjs'
  */
 export function decideCoverage({ stages, state, availableRoles } = {}) {
   const gaps = []
+  const perStage = isPlainObject(state) && isPlainObject(state.stage_roles)
   const usable = Array.isArray(availableRoles)
     ? availableRoles.filter((r) => typeof r === 'string')
     : []
   const narrowed = usable.length > 0
   const universe = narrowed ? new Set(usable) : null
 
-  if (!isPlainObject(stages) || !isPlainObject(state)) return { gaps, narrowed }
+  if (!isPlainObject(stages) || !isPlainObject(state)) return { gaps, narrowed, perStage }
 
   const current = typeof state.stage === 'string' ? state.stage : null
-  const invoked = new Set(
-    Array.isArray(state.roster) ? state.roster.filter((r) => typeof r === 'string') : [],
-  )
+  // 「这一段叫到了谁」逐段取（participantsOf）。它给 undefined（旧 run 的 roster 不是数组）时按空集合算——下面那段
+  // 「roster 不是数组时按空集合算」的理由原样适用。
+  const invokedIn = (id) => {
+    const who = participantsOf(state, id)
+    return new Set(Array.isArray(who) ? who : [])
+  }
   // trimmed 缺失是合法的（向后兼容 M3a 之前落盘的 run，见 validateState 里那一段）：
   // 缺失 = 没有任何声明过的裁剪 = 空集合，不是「判不了、别报」。
   const declared = isPlainObject(state.trimmed) ? new Set(Object.keys(state.trimmed)) : new Set()
@@ -151,6 +162,7 @@ export function decideCoverage({ stages, state, availableRoles } = {}) {
     const id = entry.stage
     if (id === current || seen.has(id)) continue
     seen.add(id)
+    const invoked = invokedIn(id)
     // stages[id] 不存在时 stageRoles 返回空数组（它自己有 isPlainObject 守卫），
     // 这一段就不产生 gap——history 里有个不存在的阶段 id 这件事由 validateState 报。
     for (const role of stageRoles(stages[id])) {
@@ -160,5 +172,5 @@ export function decideCoverage({ stages, state, availableRoles } = {}) {
     }
   }
 
-  return { gaps, narrowed }
+  return { gaps, narrowed, perStage }
 }

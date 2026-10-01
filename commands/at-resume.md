@@ -34,17 +34,20 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 形式里可能是**模式**（含 `<role>` 占位符）而不是字面文件名——照字面 `Glob` 一个
 `05-impl/<role>.md` 永远查不到，结果是把一段已经做完的 S5 判成「产物不齐」、白白重跑。
 正确的口径是 `hooks/lib/stages.mjs` 的
-`expandProduces(stage, stageRolesInRun(stage, roster))`——`roster` 取 `state.json` 里这一趟
-派了谁。展开规则**只在那一处**，这里不复述（复述就是第二份）；要看它说了什么，
+`expandProduces(stage, stageRolesInRun(stage, participantsOf(state, stage)))`——`participantsOf` 取的是
+`state.json` 的 `stage_roles` 在那一段记着的人（这一段叫到了谁）；没有 `stage_roles` 的旧 run 退回 `roster`。
+展开规则**只在那一处**，这里不复述（复述就是第二份）；要看它说了什么，
 读 `${CLAUDE_PLUGIN_ROOT}/stages.README.md` 的「`produces` 的两种形式」。
 
 展开之后：
 
-- **展开出来是空集 → 不算齐了。** 空集说明这一段的产者这一趟还一个都没派（刚进 S2 或 S5
-  时就是这样），从这一段继续派。「全部都在磁盘上」对空集是真命题，照字面判会把整段跳过。
+- **展开出来是空集 → 不算齐了。** 空集只说明这一段还没记账（`stage_roles` 里还没有这一段；旧 run 是
+  `roster` 里还没有这一段的产者——PM 在推进出一段时才记它），不说明没人干过活。S5 去看 `04-dispatch.md`
+  的分工、S2 去看 `01-prd.md` 与 `02-ui-spec.md`、`02-wireframe.html` 在不在：已经在磁盘上的不要重派，
+  没在的从这一段继续派；都齐了就照下一条记账。「全部都在磁盘上」对空集是真命题，照字面判会把整段跳过。
   判「齐了」的口径只在 `hooks/lib/state.mjs` 的 `isStageDone` 一处，它对空集答「没齐」。
-- **产物齐了** → 这一段其实已经做完，只是没记账。把 `stage` 推到下一段并往 `history`
-  追加一条，然后从那一段继续。
+- **产物齐了** → 这一段其实已经做完，只是没记账。照 `/agent-team:at` 第 3 节第 3、4 条用同一次 Write 记账（`stage`、`history`、`roster`、`stage_roles`、`trimmed`），
+  然后从下一段继续。`state.json` 里没有 `stage_roles`（更早落盘的 run）就不要加，照旧只累加 `roster`。
 - **产物不齐** → 从这一段继续，先看缺哪个产物、该派谁。
 
 契约那一段（`00-contract.md`）**不要重写**。它是这趟 run 的需求基线，S1 之后就冻结了；
