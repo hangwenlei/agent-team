@@ -184,13 +184,16 @@ export function isStageDone({ stage, stages, artifactExists, roster }) {
 // M3z（docs/34，全量审查第 16 条）：多一个 grants（门禁记下的返工批准，budget.mjs 的 readGrants）与一个返回值 budget——按 history 的
 // 派生值超过上限（limitOf）的段，{ stage, rounds, limit }。它不进 problems：problems 那一块的抬头是「改完再继续」，越限的唯一出路却是
 // 问用户（把计数改小会被 H6 以「不可重置」拒，O6），ledger 把它单列成【返工预算】。ok 在两样都空时才为真。
+// 复核（docs/34 §3，budget-3）：还多一个 legacy——history 里不在阶段链上的条目（v1.7.0 及更早写进去的 DONE 之类）。H6 现在不许改也
+// 不许删已有的条目，它们永远在；报进 problems 会让【state.json】每次都叫「改完再继续」，而那是改不了的。只单列，ledger 不发。
 export function validateState(state, { stages, grants } = {}) {
   const problems = []
   const budget = []
+  const legacy = []
   const p = (msg) => problems.push(msg)
 
   if (!isPlainObject(state)) {
-    return { ok: false, problems: ['state.json 的内容不是一个 JSON 对象'], budget }
+    return { ok: false, problems: ['state.json 的内容不是一个 JSON 对象'], budget, legacy }
   }
 
   if (typeof state.run_id !== 'string' || !RUN_ID_RE.test(state.run_id)) {
@@ -362,7 +365,7 @@ export function validateState(state, { stages, grants } = {}) {
         return p(`history[${i}] 不是 { stage, at } 形状`)
       }
       if (isPlainObject(stages) && !Object.hasOwn(stages, e.stage)) {
-        p(`history[${i}].stage 是 ${quote(e.stage)}，但 stages.json 里没有这个阶段`)
+        legacy.push(`history[${i}].stage 是 ${quote(e.stage)}，不在阶段链上`)
       }
     })
     const last = state.history[state.history.length - 1]
@@ -402,5 +405,5 @@ export function validateState(state, { stages, grants } = {}) {
     }
   }
 
-  return { ok: problems.length === 0 && budget.length === 0, problems, budget }
+  return { ok: problems.length === 0 && budget.length === 0, problems, budget, legacy }
 }

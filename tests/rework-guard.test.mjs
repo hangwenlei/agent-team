@@ -341,7 +341,7 @@ test('replayEdit：只折成对的 CRLF，孤立的 \\r 原样留在结果里', 
 // - 判据④只罚改大：值超过上限、而且比写入前大才拒；原样带着的不重复拒（批准文件丢了也不把整趟锁死）。类型照旧先验。
 // - stage 不变量（阶段链读得出时）：after.stage 在链上；这次新追加的 history 条目都在链上；after.stage 等于 history 末条。
 //   写入前读不出来（修坏文件）只核 after.stage 在链上。
-import { approvalLabel } from '../hooks/lib/budget.mjs'
+import { approvalLabel, needOf } from '../hooks/lib/budget.mjs'
 import { reworkFromHistory } from '../hooks/lib/state.mjs'
 import { restartInfo } from '../hooks/lib/rework-guard.mjs'
 
@@ -517,4 +517,67 @@ test('M3z 正路不受影响：首轮整链逐段推进、回退一次、再推�
     const r = decide(steps[i - 1], steps[i])
     assert.equal(r.ok, true, `${steps[i].join(',')}: ${r.reason}`)
   }
+})
+
+// 复核（docs/34 §3，prose-2）：一次写入先往前记一段、再回退（[..., S6, S5]）。预判把前进的那一条算进去（它确是这一轮的），记录器
+// 却只能从磁盘现在的样子模拟「回到 S5」，S6 少算一次——批准盖不全，原样重写照样被拒，再问又说不需要，死循环。拒绝理由要叫它拆开写。
+test('复核 回退预判：同一次写入里回退之前还追加了前进的条目、越限 → 拒，理由叫它先单独写推进；不冒同段重派的提示', () => {
+  const before = [...roundsOf(2), 'S5']
+  const r = decide(before, [...before, 'S6', 'S5'])
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /先单独写一次推进/)
+  assert.doesNotMatch(r.reason, /如果这只是同一段里重派一个角色/)
+  // 拆开之后：推进那一次放行，回退那一次照常预判（给标签）。
+  assert.equal(decide(before, [...before, 'S6']).ok, true)
+  const r2 = decide([...before, 'S6'], [...before, 'S6', 'S5'])
+  assert.equal(r2.ok, false)
+  assert.ok(r2.reason.includes(approvalLabel('S5')), r2.reason)
+  assert.doesNotMatch(r2.reason, /先单独写一次推进/)
+})
+
+// 复核（docs/34 §3，budget-1，高）：「history 只许追加」此前只核条数与各段出现次数——把一条更早的 S5 改成还有额度的 S2、同时照常
+// 追加一条 S5，各段次数都不降，S5 的派生值却不涨：第 4、5、6 轮都不经批准做成，还能把回退藏起来（对调两条旧条目的段名）。
+test('复核 H6：写入前已有的 history 条目，段名一个字都不许改（at 可以改）', () => {
+  const before = sv(roundsOf(3))
+  const changed = sv([...roundsOf(3), 'S5'])
+  changed.history[6] = { stage: 'S2', at: 'x' }
+  changed.rework = reworkFromHistory(changed.history)
+  const r = decideRework({ before, after: changed, stages: CHAIN, grants: [] })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /history\[6\]/)
+  assert.match(r.reason, /已有的条目/)
+  // 只改 at：放行。
+  const at = sv(roundsOf(3))
+  at.history[6] = { stage: 'S5', at: '2026-10-01T09:00:00Z' }
+  assert.equal(decideRework({ before, after: at, stages: CHAIN, grants: [] }).ok, true)
+  // 阶段链读不出来时照样核（这一条不靠阶段链）。
+  assert.equal(decideRework({ before, after: changed, stages: null, grants: [] }).ok, false)
+})
+
+// 复核（budget-2、budget-3）：v1.7.0 落盘的 run 停在 DONE（history 末条是链外的收口标记）。回退要认得出：拿新追加的条目与最近一条
+// 在链上的条目比——否则 DONE→S5 不算回退，快照不要求、预判不跑，判据④给的标签又记不下（记录器也认不出这是回退），死循环。
+test('复核 restartInfo：跳过链外条目，与最近一条在链上的条目比——DONE 之后追加 S5 是回退', () => {
+  const ids = [...FIRST6, 'S7', 'S8', 'DONE']
+  const before = sv(ids)
+  assert.deepEqual(restartInfo({ before, after: sv([...ids, 'S5']), stages: CHAIN }), { stage: 'S5', followedByForward: false, index: ids.length })
+})
+
+test('复核 H6：停在 DONE 的旧 run、预算已满时回退 → 预判给标签；照标签记下的批准盖得住（needOf 同一个口径）', () => {
+  const full = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8']
+  for (let i = 0; i < 3; i++) full.push('S5', 'S6', 'S7', 'S8')
+  const ids = [...full, 'DONE']
+  const r = decide(ids, [...ids, 'S5'])
+  assert.equal(r.ok, false)
+  assert.ok(r.reason.includes(approvalLabel('S5')), r.reason)
+  const covers = needOf({ state: sv(ids), stages: CHAIN, grants: [], target: 'S5' })
+  assert.deepEqual(covers, ['S5', 'S6', 'S7', 'S8'])
+  assert.equal(decide(ids, [...ids, 'S5'], { grants: [{ reworkTo: 'S5', covers }] }).ok, true)
+})
+
+// 复核（budget-4）：一次写入记两轮（回退记晚了两次：[S5, S6, S5]）、第二轮越限——预判按最后那条回退之前计数，记录器从磁盘只模拟
+// 一次回退，判成不需要。叫它拆开写，不给记不下的标签。
+test('复核 回退预判：一次写入记了不止一轮、越限 → 拒，理由叫它拆开写', () => {
+  const r = decide(roundsOf(2), [...roundsOf(2), 'S5', 'S6', 'S5'])
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /拆开写/)
 })

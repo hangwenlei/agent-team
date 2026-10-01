@@ -10,7 +10,8 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { run, hermeticEnv, GATE } from './helpers/gate-runner.mjs'
+import { run, runAsync, hermeticEnv, GATE } from './helpers/gate-runner.mjs'
+import { spawnSync } from 'node:child_process'
 import { makeRun } from './fixtures/make-run.mjs'
 import { reworkFromHistory } from '../hooks/lib/state.mjs'
 import { approvalLabel } from '../hooks/lib/budget.mjs'
@@ -314,14 +315,14 @@ test('ledger：PM 写 state.json 之后拍交付快照——早于当前段的�
   const files = { '00-contract.md': 'c\n', '01-prd.md': 'p\n', '03-arch.md': 'a\n', '04-dispatch.md': 'd\n', '05-impl/at-backend.md': 'b\n', '06-test.md': 't\n' }
   using({ ids: FIRST6, files }, (fx) => {
     run('ledger', postedState(fx), GATE, fx.p)
-    const snap = JSON.parse(readFileSync(fx.deliveredPath, 'utf8'))
+    const snap = JSON.parse(readFileSync(fx.deliveredPath, 'utf8')).products
     assert.equal(snap['05-impl/at-backend.md'], sha('b\n'))
     assert.equal(snap['00-contract.md'], sha('c\n'))
     assert.equal(Object.hasOwn(snap, '06-test.md'), false)
     // 回退到 S5（直接改磁盘模拟落盘）：S5 那份不再在快照里。
     writeFileSync(fx.statePath, JSON.stringify(stateOf([...FIRST6, 'S5'])))
     run('ledger', postedState(fx), GATE, fx.p)
-    assert.equal(Object.hasOwn(JSON.parse(readFileSync(fx.deliveredPath, 'utf8')), '05-impl/at-backend.md'), false)
+    assert.equal(Object.hasOwn(JSON.parse(readFileSync(fx.deliveredPath, 'utf8')).products, '05-impl/at-backend.md'), false)
   })
 })
 
@@ -343,7 +344,7 @@ test('ledger【返工预算】：第 4 轮记好之后批准记录丢了 → 写
 
 // ============================================================================ H2 / H3：不记回退就重派、重做
 
-const IMPL = { '00-contract.md': 'c\n', '01-prd.md': 'p\n', '03-arch.md': 'a\n', '04-dispatch.md': 'd\n', '05-impl/at-backend.md': 'b\n' }
+const IMPL = { '00-contract.md': 'c\n', '01-prd.md': 'p\n', '03-arch.md': 'a\n', '03-alignment.md': 'al\n', '04-dispatch.md': 'd\n', '05-impl/at-backend.md': 'b\n' }
 
 test('H2 B2：S6 里架构师再派 at-backend——快照拍过（PM 推进时记过账）之后拒，之前放行', () => {
   using({ ids: FIRST6, files: IMPL }, (fx) => {
@@ -401,5 +402,100 @@ test('H3：PM 自己的早段产物（契约、04-dispatch.md）随时可写', (
   using({ ids: FIRST6, files: IMPL }, (fx) => {
     run('ledger', postedState(fx), GATE, fx.p)
     assert.equal(run('writepath', writeFile(join(fx.runDir, '04-dispatch.md'), 'at-pm'), GATE, fx.p).stdout, '')
+  })
+})
+
+// ============================================================================ 复核（docs/34 §3）
+
+// platform-1：先拿字面末段筛一道，8.3 短名、末段是 `.` 的写法、指向它的链接都漏过去——主线程豁免就在后面。物理段名（norm 之后）
+// 每一次都认一遍。
+test('复核 H3：门禁专属文件的别名写法——末段 `.`、`x/..`、8.3 短名——主线程写也拒', () => {
+  using({ ids: roundsOf(3) }, (fx) => {
+    writeFileSync(fx.approvalsPath, '')
+    const sep = process.platform === 'win32' ? String.fromCharCode(92) : '/'
+    for (const p of [fx.approvalsPath + sep + '.', join(fx.approvalsPath, 'x', '..')]) {
+      assert.ok(denied(run('writepath', writeFile(p, null), GATE, fx.p)), p)
+    }
+    if (process.platform === 'win32') {
+      const dir = spawnSync('cmd', ['/c', 'dir', '/x', fx.runDir], { encoding: 'utf8' }).stdout ?? ''
+      const m = /\s(\S+~\d+\.JSO)\s+approvals\.jsonl/i.exec(dir)
+      if (m) assert.ok(denied(run('writepath', writeFile(join(fx.runDir, m[1]), null), GATE, fx.p)), m[1])
+    }
+  })
+})
+
+// platform-2：approvals.jsonl 末行没有换行（手改过、echo -n 写过）时，追加的一行会和它粘在一起，两条一起失效。
+test('复核 approval-ask：已有的一行没有结尾换行时，追加之前先补换行——两条都算数', () => {
+  const old = { at: 't', source: 'ask', rework_to: 'S5', covers: ['S5', 'S6'] }
+  using({ ids: [...roundsOf(4)] }, (fx) => {
+    writeFileSync(fx.approvalsPath, JSON.stringify(old))
+    const r = run('approval-ask', asked({ q: L5 }), GATE, fx.p)
+    assert.equal(lines(fx.approvalsPath).length, 2, readFileSync(fx.approvalsPath, 'utf8'))
+    assert.match(contextOf(r), /这一趟共 2 条/)
+  })
+})
+
+// platform-3：插件被加载了两份时，同一个批准事件上会并行起几个记录器——各自读到「还没有批准」、各记一条，额度凭空多出几轮。
+test('复核 approval-prompt：同一个批准事件上并行起几个记录器，只记一条', async () => {
+  const fx = fixture({ ids: roundsOf(3) })
+  try {
+    await Promise.all(Array.from({ length: 6 }, () => runAsync('approval-prompt', prompted(L5), { cwd: fx.p })))
+    assert.equal(lines(fx.approvalsPath).length, 1, readFileSync(fx.approvalsPath, 'utf8'))
+  } finally {
+    fx.cleanup()
+  }
+})
+
+// 复核（redo-4）：补派还在跑时 PM 写了一次 state.json（补记 stage_roles、记 escalation），stage 没变——快照不重拍，补派写几次都放行。
+test('复核 ledger：stage 没变的 state.json 写入不重拍快照——补派的窗口直到下一次推进或回退才关', () => {
+  using({ ids: FIRST6, files: IMPL }, (fx) => {
+    run('ledger', postedState(fx), GATE, fx.p)
+    const fe = join(fx.runDir, '05-impl/at-frontend.md')
+    writeFileSync(fe, 'fe\n')
+    writeFileSync(fx.statePath, JSON.stringify({ ...fx.state, stage_roles: { S5: ['at-architect', 'at-backend', 'at-frontend'] } }, null, 2))
+    run('ledger', postedState(fx), GATE, fx.p)
+    assert.equal(Object.hasOwn(JSON.parse(readFileSync(fx.deliveredPath, 'utf8')).products, '05-impl/at-frontend.md'), false)
+    assert.equal(run('writepath', writeFile(fe, 'agent-team:at-frontend'), GATE, fx.p).stdout, '')
+    // 推进到 S7：重拍，补派那份进快照。
+    writeFileSync(fx.statePath, JSON.stringify(stateOf([...FIRST6, 'S7']), null, 2))
+    run('ledger', postedState(fx), GATE, fx.p)
+    assert.equal(JSON.parse(readFileSync(fx.deliveredPath, 'utf8')).products['05-impl/at-frontend.md'], sha('fe\n'))
+  })
+})
+
+// 复核（budget-2）：停在 DONE 的旧 run（v1.7.0 写进去的收口标记）、S5–S8 都满了三轮——回退到 S5 被预判拒、给标签；照标签问、门禁记下，
+// 原样重写放行。此前记录器认不出这是回退（末条在链外），判「不需要」，死循环。
+test('复核 H6：停在 DONE 的旧 run 满额时回退 → 拒、给标签 → 照标签批准、门禁记下 → 重写放行', () => {
+  const full = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8']
+  for (let i = 0; i < 3; i++) full.push('S5', 'S6', 'S7', 'S8')
+  const ids = [...full, 'DONE']
+  using({ ids }, (fx) => {
+    const back = stateOf([...ids, 'S5'])
+    const r1 = run('rework', writeState(fx, back), GATE, fx.p)
+    assert.ok(denied(r1))
+    assert.ok(reasonOf(r1).includes(L5), reasonOf(r1))
+    run('approval-ask', asked({ q: L5 }), GATE, fx.p)
+    assert.deepEqual(lines(fx.approvalsPath).map((l) => l.covers), [['S5', 'S6', 'S7', 'S8']])
+    assert.equal(run('rework', writeState(fx, back), GATE, fx.p).stdout, '')
+  })
+})
+
+// 复核（prose-2）：一次写入先推进、再回退（[..., S6, S5]）、越限——拒，叫它拆开写；照做：推进那一次放行，回退那一次给标签，
+// 照标签批准之后重写放行。
+test('复核 H6：先推进再回退写在一次里被拒 → 拆开写 → 回退那一次照标签批准 → 放行', () => {
+  const base = [...roundsOf(2), 'S5']
+  using({ ids: base }, (fx) => {
+    const r1 = run('rework', writeState(fx, stateOf([...base, 'S6', 'S5'])), GATE, fx.p)
+    assert.ok(denied(r1))
+    assert.match(reasonOf(r1), /拆开写/)
+    const forward = stateOf([...base, 'S6'])
+    assert.equal(run('rework', writeState(fx, forward), GATE, fx.p).stdout, '')
+    writeFileSync(fx.statePath, JSON.stringify(forward, null, 2))
+    const back = stateOf([...base, 'S6', 'S5'])
+    const r2 = run('rework', writeState(fx, back), GATE, fx.p)
+    assert.ok(denied(r2))
+    assert.ok(reasonOf(r2).includes(L5), reasonOf(r2))
+    run('approval-ask', asked({ q: L5 }), GATE, fx.p)
+    assert.equal(run('rework', writeState(fx, back), GATE, fx.p).stdout, '')
   })
 })

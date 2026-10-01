@@ -87,8 +87,10 @@ export const GATE_FILES = ['runs/*/approvals.jsonl', 'runs/*/delivered.json']
 export const APPROVALS_FILE = 'approvals.jsonl'
 export const DELIVERED_FILE = 'delivered.json'
 
-/** 按规范化之后的末段认：门禁认不出的写法（流后缀、结尾带点）也认。不认 8.3 短名——那只在文件已经存在时才有，那时 norm() 的
- * realpath 认得出；照抄 mayBeStateFile 的 `~` 规则会把 state.json 的短名也当成它。 */
+/** 按规范化之后的字面末段认：门禁认不出的写法（流后缀、结尾带点）也认——gate.mjs 拿它决定要不要先查 exoticPath。不认 8.3 短名：
+ * 短名只在文件已经存在时才有，那时 isGateFile 经 norm() 的 realpath 认得出，而 gate.mjs 对每一次写入都调 isGateFile（复核 platform-1：
+ * 上一版只在这里命中时才调它，短名、末段是 `.` 的写法都从这一筛漏过去）。照抄 mayBeStateFile 的 `~` 规则会把 state.json 的短名
+ * 也当成它。 */
 export function mayBeGateFile(filePath) {
   const leaf = leafName(filePath)
   return leaf === APPROVALS_FILE || leaf === DELIVERED_FILE

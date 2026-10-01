@@ -10,7 +10,7 @@
 // 入口只做「该检查项声明的前置校验」，不做统一校验——H1–H5 分布在三种
 // hook 事件上，输入形状不同（规格 §6 注记）。
 
-import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
@@ -299,7 +299,8 @@ function emitHookJson(event, parts) {
 // M3z（docs/34）：给用户的那一行只在 PreToolUse、PostToolUse 上发——SubagentStop 上 stdout 等于拦截，UserPromptSubmit 上 stdout
 // 进模型上下文（hookOutput 对这两种事件有东西要发就报 BUG）。
 function inputUnreadable(spec, what) {
-  process.stderr.write(`agent-team ${CHECK}：读不出这次的 hook 输入（${what}），没有做校验、放行。\n`)
+  const outcome = spec.recorder === true ? '这次的回答没有记下' : '没有做校验、放行'
+  process.stderr.write(`agent-team ${CHECK}：读不出这次的 hook 输入（${what}），${outcome}。\n`)
   emitHookJson(spec.event, userFacing(spec.event) ? { systemMessage: systemMessage('input', { check: CHECK }) } : {})
 }
 
@@ -654,7 +655,7 @@ function buildCoverageNotice({ gaps, narrowed, perStage } = {}, recipientCanWrit
 // M3z（docs/34）：「交过」——交付快照里有、磁盘与快照相同、不是上一轮的（hooks/lib/redo.mjs）。H2、H3 的重做判据共用。
 function deliveredOf(ctx, fresh) {
   return makeDelivered({
-    snapshot: readSnapshot(ctx.artifactBytes(DELIVERED_FILE)),
+    snapshot: readSnapshot(ctx.artifactBytes(DELIVERED_FILE)).products,
     artifactSha: (name) => {
       const bytes = ctx.artifactBytes(name)
       return bytes ? sha256OfContract(bytes) : null
@@ -664,8 +665,12 @@ function deliveredOf(ctx, fresh) {
 }
 
 // M3z：PM 写完 state.json 之后拍交付快照。只做 I/O；拍什么由 deliveredSnapshot 定。出错只留痕（少拦一侧）。
+// 复核（redo-4）：只在 stage 变了（推进、回退）或者还没有快照时重拍——补记 stage_roles、记 escalation、标 accepted 这些写入不关补派
+// 与【返工】出口的窗口。快照里记着拍它时的 stage。
 function writeDeliveredSnapshot(ctx) {
   try {
+    const prev = ctx.artifactBytes(DELIVERED_FILE)
+    if (prev && readSnapshot(prev).stage === ctx.state?.stage) return
     const snapshot = deliveredSnapshot({
       stages: ctx.stages,
       stageId: ctx.state?.stage,
@@ -675,10 +680,7 @@ function writeDeliveredSnapshot(ctx) {
       },
     })
     if (!snapshot) return
-    const text = `${JSON.stringify(snapshot, null, 2)}\n`
-    const prev = ctx.artifactBytes(DELIVERED_FILE)
-    if (prev && prev.toString('utf8') === text) return
-    writeFileSync(join(ctx.runDir, DELIVERED_FILE), text)
+    writeFileSync(join(ctx.runDir, DELIVERED_FILE), `${JSON.stringify({ stage: ctx.state.stage, products: snapshot }, null, 2)}\n`)
   } catch (err) {
     process.stderr.write(`agent-team ledger 回传：交付快照没有写成（${quote(err?.message ?? err, { max: 120 })}），不记回退的重做这次少拦。\n`)
   }
@@ -686,11 +688,11 @@ function writeDeliveredSnapshot(ctx) {
 
 // M3z：门禁专属文件的拒绝理由。路径是这次调用给的，过 inline。
 function gateFileReason(checked, exotic) {
-  const approvals = leafName(checked) === APPROVALS_FILE
+  const approvals = leafName(checked) === APPROVALS_FILE || (typeof checked === 'string' && leafName(norm(checked)) === APPROVALS_FILE)
   const what = approvals
     ? '这是门禁自己记的返工批准。用户在 AskUserQuestion 里选了「再返工一轮：回到 <段>」、或者在对话里单独发了这一条，而这一轮真的' +
       '需要批准时，门禁自己记下它；照返工预算门禁拒绝理由里的问法去问用户。'
-    : '这是门禁自己拍的交付快照，PM 每次写 state.json 之后由门禁照磁盘重拍，不用、也不许改。'
+    : '这是门禁自己拍的交付快照，PM 推进或回退之后由门禁照磁盘重拍，不用、也不许改。'
   return (
     `agent-team 门禁：不得写 ${inline(checked)}——${exotic ? `${exotic}；它可能就是门禁专属文件。` : ''}${what}` +
     '任何人（包括项目经理与主线程）都不用 Edit/Write 写它。'
@@ -716,6 +718,40 @@ function approvalDiagnostic(stateFile) {
     return ''
   } catch {
     return ''
+  }
+}
+
+// M3z 复核（platform-3）：批准记录的排他锁。run 目录里一个 approvals.jsonl.lock，open 'wx' 拿得到才算拿到；拿不到每 25ms 再试，
+// 最多约 5 秒；锁文件比 5 秒还旧就当是崩掉的进程留下的，删了再拿。到头还拿不到就不加锁照做——记录器 fail open，宁可在极端情形下
+// 多记一条，也不让一条真的批准因为锁丢掉。锁文件在 run 目录里不是任何阶段的产物，H3 不让角色碰它。
+function withApprovalsLock(runDir, body) {
+  const lock = join(runDir, `${APPROVALS_FILE}.lock`)
+  let fd = null
+  for (let i = 0; i < 200 && fd === null; i++) {
+    try {
+      fd = openSync(lock, 'wx')
+    } catch (err) {
+      if (err?.code !== 'EEXIST') break
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > 5000) {
+          unlinkSync(lock)
+          continue
+        }
+      } catch {}
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25)
+    }
+  }
+  try {
+    return body()
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd)
+      } catch {}
+      try {
+        unlinkSync(lock)
+      } catch {}
+    }
   }
 }
 
@@ -847,10 +883,11 @@ function main() {
     // 排在主线程豁免与读运行上下文之前，与门禁自检同一个位置。按路径形状认任何项目的 runs/<id>/ 下的这两个名字；写法认不出
     // （流后缀、结尾带点）时末段先规范化（control-files.mjs 的 leafName），.agent-team 在的项目里认不出的写法一律拒（与 H6 认
     // state.json 同一个口径）。
-    if (mayBeGateFile(checked)) {
-      const exotic = existsSync(join(ROOT_PROJECT, '.agent-team')) ? exoticPath(checked, ROOT_PROJECT) : null
-      if (exotic || isGateFile(checked)) denyAndExit(gateFileReason(checked, exotic), spec.event)
-    }
+    // 复核（platform-1）：上一版先拿字面末段筛一道，8.3 短名、末段是 `.` 的写法、指向它的链接都从筛子里漏过去，而主线程豁免就在
+    // 后面。isGateFile 走 norm()（解析 .、..、链接、8.3 短名），每一次 Edit/Write 都认一遍；字面末段只用来决定要不要先查认不出的写法。
+    const exotic =
+      mayBeGateFile(checked) && existsSync(join(ROOT_PROJECT, '.agent-team')) ? exoticPath(checked, ROOT_PROJECT) : null
+    if (exotic || isGateFile(checked)) denyAndExit(gateFileReason(checked, exotic), spec.event)
 
     // MAIN（无 agent_type）不受 per-role 隔离约束——H3 隔离的是
     // project.paths 里登记的各角色之间的边，主线程不是参与路径认领的
@@ -1354,7 +1391,7 @@ function main() {
     const validation = kind === 'state' ? validateState(ctx.state, { stages: ctx.stages, grants }) : null
     const stateProblems = validation ? validation.problems : []
 
-    // M3z：交付快照。PM 每次写 state.json 之后照磁盘拍：早于当前段的各段产物记 sha（hooks/lib/redo.mjs 的 deliveredSnapshot）。
+    // M3z：交付快照。PM 写 state.json、而 stage 变了之后照磁盘拍：早于当前段的各段产物记 sha（hooks/lib/redo.mjs 的 deliveredSnapshot）。
     // H2、H3 拿它分辨「交过」——不依赖 PM 把 sha 记进 artifacts（那条回传只发给写者，第 28 条）。写不进、读不出都只是少拦，
     // 留一行痕。内容没变就不写。
     if (kind === 'state') writeDeliveredSnapshot(ctx)
@@ -1523,24 +1560,32 @@ function main() {
         results = found.items.map((item) => (item.stage ? { stage: item.stage, why } : item))
       } else {
         stages = ctx.stages
-        const file = join(ctx.runDir, APPROVALS_FILE)
-        const bytes = ctx.artifactBytes(APPROVALS_FILE)
-        const grants = readGrants(bytes ? bytes.toString('utf8') : null, ctx.stages)
-        total = grants.length
-        results = []
-        for (const p of planApprovals({ items: found.items, state: ctx.state, stages: ctx.stages, grants })) {
-          if (!p.covers) {
-            results.push(p)
-            continue
+        // 复核（platform-3）：读批准、判需不需要、追加，三步在一把锁里做——插件被加载了两份时，同一个事件上会并行起几个记录器，
+        // 各自读到「还没有批准」、各记一条，额度凭空多出几轮。拿锁之后重读。
+        results = withApprovalsLock(ctx.runDir, () => {
+          const file = join(ctx.runDir, APPROVALS_FILE)
+          const bytes = ctx.artifactBytes(APPROVALS_FILE)
+          const grants = readGrants(bytes ? bytes.toString('utf8') : null, ctx.stages)
+          total = grants.length
+          // 复核（platform-2）：末行没有换行（手改过、echo -n 写过）时先补一个，否则新的一行会和它粘在一起、两条一起失效。
+          let sep = bytes && bytes.length && bytes[bytes.length - 1] !== 0x0a ? '\n' : ''
+          const out = []
+          for (const p of planApprovals({ items: found.items, state: ctx.state, stages: ctx.stages, grants })) {
+            if (!p.covers) {
+              out.push(p)
+              continue
+            }
+            try {
+              appendFileSync(file, `${sep}${approvalLine({ at: new Date().toISOString(), source: ask ? 'ask' : 'prompt', stage: p.stage, covers: p.covers })}\n`)
+              sep = ''
+              total += 1
+              out.push(p)
+            } catch {
+              out.push({ stage: p.stage, why: 'write-failed' })
+            }
           }
-          try {
-            appendFileSync(file, `${approvalLine({ at: new Date().toISOString(), source: ask ? 'ask' : 'prompt', stage: p.stage, covers: p.covers })}\n`)
-            total += 1
-            results.push(p)
-          } catch {
-            results.push({ stage: p.stage, why: 'write-failed' })
-          }
-        }
+          return out
+        })
       }
     }
     for (const r of results) {
@@ -1935,7 +1980,7 @@ try {
   // 什么。不按调用者门控——ctx 正常时崩溃，只有这次调用的发起者看得见；非 PM 收到冒泡句。PM 收件时给用户一行。
   // readiness 在 PreToolUse 上只给用户一行（那里不发受信块），stop-gate 在 SubagentStop 上什么都不发（hookOutput 定）。
   // 这一段自己再抛就会掉进 boot.mjs 的「加载失败」退路、说错原因，所以整段兜住：兜不住就只剩上面那行 stderr。
-  process.stderr.write(crashNotice(CHECK, err))
+  process.stderr.write(crashNotice(CHECK, err, spec?.recorder === true))
   try {
     const pm = isPlainObject(INPUT) && isContractWriter(INPUT.agent_type)
     const context = crashContext(CHECK, err, pm)

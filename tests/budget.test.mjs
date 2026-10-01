@@ -160,7 +160,9 @@ test('lastRestart：最后一条「在链上不晚于前一条」的条目下标
   assert.equal(lastRestart(H(...FIRST), STAGES), -1)
   assert.equal(lastRestart(rounds(2), STAGES), FIRST.length + 2)
   assert.equal(lastRestart(H('S1', 'S2', 'S2'), STAGES), 2)
-  assert.equal(lastRestart(H('S1', 'S2', 'DONE', 'S1'), STAGES), -1)
+  // 复核（budget-2）：链外条目跳过，与最近一条在链上的条目比——DONE 之后的 S1 早于 S2，是回退。
+  assert.equal(lastRestart(H('S1', 'S2', 'DONE', 'S1'), STAGES), 3)
+  assert.equal(lastRestart(H('S1', 'S2', 'DONE', 'S3'), STAGES), -1)
   assert.equal(lastRestart([], STAGES), -1)
   assert.equal(lastRestart(H('S1', 'S2', 'S1'), null), -1)
 })
@@ -223,7 +225,9 @@ test('needOf：T 晚于 history 末条（不是回退）、T 不在链上、hist
   assert.deepEqual(needOf({ state: s, stages: STAGES, grants: [], target: 'S7' }), [])
   assert.deepEqual(needOf({ state: s, stages: STAGES, grants: [], target: 'S9' }), [])
   assert.deepEqual(needOf({ state: s, stages: STAGES, grants: [], target: 'toString' }), [])
-  assert.deepEqual(needOf({ state: { stage: 'DONE', history: [...rounds(3), ...H('DONE')] }, stages: STAGES, grants: [], target: 'S5' }), [])
+  // 复核（budget-2）：末条是链外的 DONE 时，与最近一条在链上的条目（S6）比——回到 S5 是回退，照样算。
+  assert.deepEqual(needOf({ state: { stage: 'DONE', history: [...rounds(3), ...H('DONE')] }, stages: STAGES, grants: [], target: 'S5' }), ['S5', 'S6'])
+  assert.deepEqual(needOf({ state: { stage: 'DONE', history: H('DONE') }, stages: STAGES, grants: [], target: 'S5' }), [])
   assert.deepEqual(needOf({ state: null, stages: STAGES, grants: [], target: 'S5' }), [])
   assert.deepEqual(needOf({ state: s, stages: null, grants: [], target: 'S5' }), [])
   assert.deepEqual(needOf({ state: { stage: 'S6', history: 'x' }, stages: STAGES, grants: [], target: 'S5' }), [])

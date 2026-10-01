@@ -214,7 +214,7 @@ export function buildLedgerNotices({
       '返工批准（批准记录丢了、读不出来，或者 history 被别处改过）。不要改计数——改小会被返工预算门禁以「不可重置」拒掉。'
     out.push(
       onChain.length
-        ? `${head}\n${askUserText(approvalTargetFor({ history: st.history, stages, stage: onChain[0].stage }), grants, '这一块之后就不再出现。')}`
+        ? `${head}\n${askUserText(approvalTargetFor({ history: st.history, stages, stage: onChain[0].stage }), grants, '再写一次 state.json 记上那条 escalation 与新的 contract_sha，照常往下走这一轮——不要为它再记一次回退；这一块之后就不再出现。')}`
         : `${head}这些段不在阶段链上，问用户也补不上：把这件事告诉用户。`,
     )
   }
@@ -296,11 +296,15 @@ export function buildLedgerNotices({
     // 的预判已经把这一轮要用到的段一起批了，走到这里多半是批准记录丢了、或者 history 被别处改过。
     const entered = nxt && Array.isArray(st.history) ? st.history.filter((e) => isPlainObject(e) && e.stage === nxt).length : 0
     const nextLimit = limitOf(nxt, grants)
+    // 复核（docs/34 §3，prose-3）：写产物触发的【阶段】会发给执行角色——它没有 AskUserQuestion、改不了 state.json，前面的 pmOnlyNotice
+    // 已经叫非 PM 回报上级。问用户的做法只在写 state.json（写者只能是 PM）时给全。
+    const overHead = `\n推进到 ${nxt} 会让它到第 ${entered} 轮返工，超过上限 ${nextLimit}（规格 §4.2 ③：第 3 轮终局，不过则升级），H6 会拒这次推进`
     const over =
-      entered > nextLimit
-        ? `\n推进到 ${nxt} 会让它到第 ${entered} 轮返工，超过上限 ${nextLimit}（规格 §4.2 ③：第 3 轮终局，不过则升级），` +
-          `H6 会拒这次推进。${askUserText(approvalTargetFor({ history: st.history, stages, stage: nxt }), grants, '再推进。')}`
-        : ''
+      entered <= nextLimit
+        ? ''
+        : kind === 'state'
+          ? `${overHead}。${askUserText(approvalTargetFor({ history: st.history, stages, stage: nxt }), grants, '再推进——推进那一次 Write 连同那条 escalation 与新的 contract_sha 一起记。')}`
+          : `${overHead}：PM 推进之前要先问用户。`
     out.push(
       nxt
         ? `【阶段】${st.stage} 的产物已经齐了。这一段如果确实结束了，需要把 state.stage 推进到 ` +

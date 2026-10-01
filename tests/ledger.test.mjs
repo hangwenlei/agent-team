@@ -284,9 +284,9 @@ test('M3z【返工预算】：段名不在阶段链上（history 被别处写坏
 })
 
 test('M3z【阶段】：推进进下一段会越限 → 说会超过上限、先问用户，标签回到最后一次回退回到的那一段', () => {
-  // 第 4 轮回到 S5 时只批了 S5；S6 已经出现 4 次，再进是第 4 轮。
+  // 第 4 轮回到 S5 时只批了 S5；S6 已经出现 4 次，再进是第 4 轮。写 state.json（写者是 PM）时给全问用户的做法。
   const s = buildLedgerNotices({
-    ...base, stages: REAL_STAGES, stageDone: true, state: { stage: 'S5', history: FOURTH },
+    ...base, kind: 'state', stages: REAL_STAGES, stageDone: true, state: { stage: 'S5', history: FOURTH },
     grants: [{ reworkTo: 'S5', covers: ['S5'] }],
   }).join('\n')
   assert.match(s, /推进到 S6 会让它到第 4 轮返工，超过上限 3/)
@@ -301,4 +301,16 @@ test('M3z【阶段】：批准覆盖了下一段 → 照旧只说 rework 那一�
   }).join('\n')
   assert.match(s, /S6 在 history 里已经出现过[^。]*rework/)
   assert.doesNotMatch(s, /超过上限/)
+})
+
+// 复核（docs/34 §3，prose-3）：写产物触发的【阶段】会发给执行角色，它没有 AskUserQuestion、也改不了 state.json——越限那一句
+// 不对它下「问用户」的命令，只说推进之前 PM 要先问用户（前面的 pmOnlyNotice 已经叫非 PM 回报上级）。
+test('复核【阶段】：写产物时（不是写 state.json）越限那一句不带问用户的做法', () => {
+  const s = buildLedgerNotices({
+    ...base, kind: 'produce', stages: REAL_STAGES, stageDone: true, state: { stage: 'S5', history: FOURTH },
+    grants: [{ reworkTo: 'S5', covers: ['S5'] }],
+  }).join('\n')
+  assert.match(s, /推进到 S6 会让它到第 4 轮返工，超过上限 3/)
+  assert.match(s, /PM 推进之前要先问用户/)
+  assert.doesNotMatch(s, /AskUserQuestion/)
 })

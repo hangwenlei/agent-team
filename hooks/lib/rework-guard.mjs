@@ -51,7 +51,8 @@ const SAME_STAGE_HINT =
   '如果这只是同一段里重派一个角色（它这一次没交齐，再派它一次），那不是回退：去掉新追加的这条 history，rework 也不加——' +
   '同段重派不计返工。'
 
-const askUser = (target, grants) => askUserText(target, grants, '再原样重写这次写入。')
+const askUser = (target, grants) =>
+  askUserText(target, grants, '再把这次写入连同那条 escalation（budget-exhausted）与新的 contract_sha 一起重写——同一次 Write。')
 
 /**
  * H6 返工计数的写时判据。M3z（docs/34，全量审查第 16 条）多两个参数：stages 是插件自己的阶段链（gate.mjs 读 stages.json，读不出来
@@ -86,6 +87,22 @@ function decideCounts({ before, after, stages, grants }) {
     return { ok: false, reason: `history 从 ${hb.length} 条变成 ${ha.length} 条——阶段进入日志只许追加，不许删。返工计数是它的派生量（规格 §4.2 ③），删 history 等于改计数。` }
   }
 
+  // 复核（docs/34 §3，budget-1，高）：「只许追加」此前只核条数与各段出现次数——把一条更早的 S5 改成还有额度的段、同时照常追加一条 S5，
+  // 各段次数都不降，S5 的派生值却不涨，第 4、5、6 轮都不经批准做成；对调两条旧条目的段名还能把回退藏起来。写入前已有的条目，段名
+  // 一个字都不许改（at 可以订正）。写入前就坏了的条目（不是 { stage 字符串 }）不管：计数本来就不数它。
+  for (let i = 0; i < hb.length; i++) {
+    const old = hb[i]
+    if (!isPlainObject(old) || typeof old.stage !== 'string') continue
+    const now = ha[i]
+    if (isPlainObject(now) && now.stage === old.stage) continue
+    return {
+      ok: false,
+      reason:
+        `history[${i}] 是写入前就有的条目，段名是 ${quote(old.stage)}，这次写入把它改了——history 只许追加：已有的条目不许改段名、` +
+        '不许删（at 可以订正）。返工计数是它的派生量（规格 §4.2 ③），改旧条目的段名等于改计数。',
+    }
+  }
+
   const cb = counts(hb)
   const ca = counts(ha)
   for (const [stage, n] of Object.entries(cb)) {
@@ -101,13 +118,26 @@ function decideCounts({ before, after, stages, grants }) {
     const restart = restartInfo({ before, after, stages })
     if (restart) {
       const over = overLimit({ history: ha, restartIndex: restart.index, stages, grants })
+      if (over.length && restart.index > hb.length) {
+        // 复核（docs/34 §3，prose-2）：回退那一条之前、同一次写入里还追加了前进的条目（先推进、再回退）。预判把它们算进去（它们确是
+        // 这一轮的），记录器却只能从磁盘现在的样子模拟「回到那一段」——批准盖不全，原样重写照样被拒，再问又说不需要。叫它拆开写：
+        // 推进那一次单独写（它自己越限时判据④会给标签），回退那一次照常预判。
+        return {
+          ok: false,
+          budget: true,
+          reason:
+            `这次写入在最后那条回退之前还往 history 追加了别的条目（先推进再回退，或者一次记了不止一轮），这一轮走完会越限。拆开写：` +
+            '先单独写一次推进或较早那一轮（最后那条回退之前的部分），再单独写回退——回退那一次越限的话，拒绝理由会给你问用户用的标签。' +
+            '门禁记批准时按磁盘上现在的样子算「回到那一段」，几样写在同一次里，批准盖不全。',
+        }
+      }
       if (over.length) {
         const target = Object.keys(stages).find((id) => id === restart.stage)
         const list = over.map((o) => `${o.stage}（第 ${o.rounds} 轮，上限 ${o.limit}）`).join('、')
         const head =
           `这次写入记了一次回退：这一轮回到 ${target}，走完会让 ${list} 的返工超过上限` +
           `（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级；上限 = ${REWORK_LIMIT} + 门禁记下的、覆盖那一段的返工批准条数）。`
-        const same = typeof before.stage === 'string' && before.stage === restart.stage ? `${SAME_STAGE_HINT}\n` : ''
+        const same = restart.index === hb.length && typeof before.stage === 'string' && before.stage === restart.stage ? `${SAME_STAGE_HINT}\n` : ''
         return { ok: false, budget: true, reason: `${same}${head}\n${askUser(target, grants)}` }
       }
     }
@@ -315,11 +345,14 @@ export function restartInfo({ before, after, stages }) {
   const hb = historyOf(before)
   const ha = historyOf(after)
   const stageAt = (j) => (isPlainObject(ha[j]) ? at(ha[j].stage) : -1)
+  // 复核（docs/34 §3，budget-2）：与它之前最近一条在链上的条目比，链外条目跳过——停在 DONE 的旧 run 回退时要认得出（快照、预判）。
   let last = -1
-  for (let j = Math.max(hb.length, 1); j < ha.length; j++) {
+  let prev = -1
+  for (let j = 0; j < ha.length; j++) {
     const cur = stageAt(j)
-    const prev = stageAt(j - 1)
-    if (cur >= 0 && prev >= 0 && cur <= prev) last = j
+    if (cur < 0) continue
+    if (j >= hb.length && prev >= 0 && cur <= prev) last = j
+    prev = cur
   }
   if (last < 0) return null
   // index（M3z）：回退预判按「这条回退条目之前」的出现次数算（hooks/lib/budget.mjs 的 overLimit）。

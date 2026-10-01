@@ -60,9 +60,10 @@ test('deliveredSnapshot：在、但读不出来的不记（少拦一侧）；sta
 })
 
 test('readSnapshot：只留值是合法 sha 的条目；坏文件、不是对象 → 空', () => {
-  assert.deepEqual(readSnapshot(JSON.stringify({ a: SHA('a'), b: 'x', c: 1 })), { a: SHA('a') })
-  assert.deepEqual(readSnapshot(String.fromCharCode(0xfeff) + JSON.stringify({ a: SHA('a') })), { a: SHA('a') })
-  for (const t of [null, undefined, '{坏', '[]', '"x"', '']) assert.deepEqual(readSnapshot(t), {}, String(t))
+  const wrap = (products) => JSON.stringify({ stage: 'S5', products })
+  assert.deepEqual(readSnapshot(wrap({ a: SHA('a'), b: 'x', c: 1 })).products, { a: SHA('a') })
+  assert.deepEqual(readSnapshot(String.fromCharCode(0xfeff) + wrap({ a: SHA('a') })).products, { a: SHA('a') })
+  for (const t of [null, undefined, '{坏', '[]', '"x"', '']) assert.deepEqual(readSnapshot(t), { stage: null, products: {} }, String(t))
 })
 
 test('makeDelivered：快照里有、磁盘与快照相同、不是上一轮的，才算交过；读不出来一律不算', () => {
@@ -210,4 +211,20 @@ test('H3：当前段与更晚的段不判；stage 不在链上不判', () => {
   assert.equal(redo({ role: 'at-backend', stageId: 'S5', produces: '05-impl/at-backend.md' }).decision, 'allow')
   assert.equal(redo({ role: 'at-qa', stageId: 'S5', produces: '06-test.md' }).decision, 'allow')
   assert.equal(redo({ role: 'at-backend', stageId: 'S9', produces: '05-impl/at-backend.md' }).decision, 'allow')
+})
+
+// 复核（docs/34 §3，redo-3）：交了一半的补派——H2 因为「没全交过」放行，H3 却按单份产物拦下已交的那一半。两边同一个口径：写者在那一段
+// 自己的产物全都交过，才算重做。
+test('复核 H3：写者在那一段自己的产物没全交过（交了一半的补派）→ 放行', () => {
+  const half = (n) => n === '02-ui-spec.md'
+  assert.equal(redo({ role: 'at-ui', stageId: 'S6', produces: '02-ui-spec.md', isDelivered: half }).decision, 'allow')
+  assert.equal(redo({ role: 'at-ui', stageId: 'S6', produces: '02-ui-spec.md' }).decision, 'deny')
+})
+
+// 复核（redo-4）：快照只在 stage 变了的那次 state.json 写入之后重拍——PM 补记 stage_roles、记 escalation、标 accepted 不关补派的窗口。
+test('复核 readSnapshot：delivered.json 是 { stage, products }；读出 stage 与产物', () => {
+  const text = JSON.stringify({ stage: 'S6', products: { a: SHA('a'), b: 'x' } })
+  assert.deepEqual(readSnapshot(text), { stage: 'S6', products: { a: SHA('a') } })
+  assert.deepEqual(readSnapshot('{坏'), { stage: null, products: {} })
+  assert.deepEqual(readSnapshot(JSON.stringify({ a: SHA('a') })), { stage: null, products: {} })
 })

@@ -30,7 +30,7 @@ function good(over = {}) {
 }
 
 test('合法的 state 通过', () => {
-  assert.deepEqual(validateState(good(), { stages: STAGES }), { ok: true, problems: [], budget: [] })
+  assert.deepEqual(validateState(good(), { stages: STAGES }), { ok: true, problems: [], budget: [], legacy: [] })
 })
 
 test('rework 由 history 推导：某阶段出现 n 次就是 n-1 次返工', () => {
@@ -102,7 +102,7 @@ test('门禁记下的返工批准覆盖这一段时不越限', () => {
   for (let i = 0; i <= REWORK_LIMIT + 1; i++) history.push({ stage: 'S2', at: 'x' })
   const s = good({ stage: 'S2', history, rework: reworkFromHistory(history) })
   const r = validateState(s, { stages: STAGES, grants: [{ reworkTo: 'S2', covers: ['S2'] }] })
-  assert.deepEqual(r, { ok: true, problems: [], budget: [] })
+  assert.deepEqual(r, { ok: true, problems: [], budget: [], legacy: [] })
   // 覆盖的是别的段：照样越限。
   assert.equal(validateState(s, { stages: STAGES, grants: [{ reworkTo: 'S3', covers: ['S3'] }] }).budget.length, 1)
 })
@@ -557,4 +557,15 @@ test('M3y validateState：rework_base 的值既不是 sha 也不是 "accepted" �
 test('M3y validateState：不给 stages 时跳过键的归属校验，值照查', () => {
   const r = validateState({ ...SR_OK(), rework_base: { '09-extra.md': SHA, '06-test.md': 'x' } }, {}).problems
   assert.deepEqual(r, ['rework_base["06-test.md"] 既不是 sha256:<64 位十六进制> 也不是 "accepted"'])
+})
+
+// 复核（docs/34 §3，budget-3）：history 里链外的条目（v1.7.0 及更早写进去的收口标记 DONE）现在改不了也删不掉（H6：已有条目的段名
+// 不许改、条目不许删）。报进 problems 会让【state.json】每次都叫「改完再继续」——单列成 legacy，ledger 说明不用管。
+test('复核：history 里不在阶段链上的条目单列在 legacy，不进 problems', () => {
+  const history = [{ stage: 'S1', at: 'x' }, { stage: 'S2', at: 'x' }, { stage: 'DONE', at: 'x' }, { stage: 'S2', at: 'x' }]
+  const r = validateState(good({ stage: 'S2', history, rework: { S2: 1 } }), { stages: STAGES })
+  assert.deepEqual(r.problems, [])
+  assert.equal(r.legacy.length, 1)
+  assert.match(r.legacy[0], /history\[2\]/)
+  assert.match(r.legacy[0], /"DONE"/)
 })

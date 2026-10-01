@@ -39,11 +39,21 @@ export function askAnswers(toolResponse) {
   }
   if (!items.length) return none
   const tr = toolResponse
+  // 复核（docs/34 §3，platform-7）：用户在批准那道题的选项旁写了备注（annotations[题].notes），模型看得到它；门禁不能比模型看到的更宽。
+  const notes = Object.entries(tr.answers).some(
+    ([text, answer]) =>
+      approvalIntent(answer) &&
+      isPlainObject(tr.annotations) &&
+      isPlainObject(tr.annotations[text]) &&
+      typeof tr.annotations[text].notes === 'string' &&
+      tr.annotations[text].notes.trim() !== '',
+  )
   const excluded =
     tr.afkTimeoutMs !== undefined ? 'afk'
       : tr.followUp === true ? 'follow-up'
         : typeof tr.response === 'string' && tr.response.trim() !== '' ? 'response'
-          : null
+          : notes ? 'notes'
+            : null
   return excluded ? { excluded, items: [] } : { excluded: null, items }
 }
 
@@ -96,6 +106,8 @@ function whyText(why, name, cause) {
       return `用户要追问，没有确认。先回答用户的追问，${ASK_AGAIN}`
     case 'response':
       return `用户另写了一段话（以那段话为准，照原话办，它不算批准）。用户要再返工一轮的话，${ASK_AGAIN}`
+    case 'notes':
+      return `用户在选项旁写了备注（以备注为准，照它办，这一次不算批准）。用户确认要再返工一轮的话，${ASK_AGAIN}请用户不写备注直接选。`
     case 'multi':
     case 'array':
       return `这是一道多选题（或者答案是多选的形状），一个勾选不等于只选了这一项。${ASK_AGAIN}`
@@ -113,7 +125,10 @@ function whyText(why, name, cause) {
     case 'unreadable':
       return `门禁读不到这个项目的运行状态，批准记不下。修法：${runContextFix(cause)}修好之后重新问一次。`
     case 'write-failed':
-      return '门禁写不进批准记录（run 目录里的 approvals.jsonl）。把这件事告诉用户；用户可以在对话里单独发一条整条只写那个标签的消息再试一次。'
+      return (
+        '门禁写不进批准记录（run 目录里的 approvals.jsonl）。把这件事告诉用户，请用户检查那个文件（是不是成了目录、有没有写权限、' +
+        '磁盘满没满），修好之后再问一次——对话里单独发标签那一路写的是同一个文件，同样记不下。'
+      )
     default:
       return ASK_AGAIN
   }
@@ -130,7 +145,9 @@ export function approvalNotices({ results, total, cause, stages } = {}) {
     if (Array.isArray(r.covers)) {
       out.push(
         `【门禁】已记下返工批准：回到 ${r.stage}（覆盖 ${r.covers.join('、')}；这一趟共 ${total} 条）。` +
-          '照 /agent-team:at 第 4 节记 escalations 与契约修订块，再写这次回退（之前被拒的那次写入原样重写）。',
+          '照 /agent-team:at 第 4 节：契约追加修订块（回传给你新的 contract_sha）；之前那次被拒的写入（回退或推进），在原来的内容上' +
+          '补进这条 escalation 与新的 contract_sha 再写一次。没有被拒的写入、是【阶段】或【返工预算】叫你问的：记上 escalation 与 ' +
+          'contract_sha，照常往下走这一轮，不要为它再记一次回退。',
       )
       continue
     }

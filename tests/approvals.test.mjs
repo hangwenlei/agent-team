@@ -113,7 +113,7 @@ test('approvalLine：一行 JSON，带 at、source、rework_to、covers', () => 
 test('approvalNotices：记下了 → 说记下了哪一段、覆盖哪几段、这一趟共几条，下一步写回退', () => {
   const s = approvalNotices({ results: [{ stage: 'S5', covers: ['S5', 'S6'] }], total: 1 }).join('\n')
   assert.match(s, /^【门禁】已记下返工批准：回到 S5（覆盖 S5、S6；这一趟共 1 条）/)
-  assert.match(s, /escalations/)
+  assert.match(s, /escalation/)
 })
 
 test('approvalNotices：没记下 → 每种原因各有一句，并说怎么重问', () => {
@@ -147,4 +147,34 @@ test('approvalNotices：读不到运行状态时带上按原因的修法', () =>
 test('approvalNotices：段名只在是链上的段时原样出现，别的不回显', () => {
   const s = approvalNotices({ results: [{ stage: 'S9', why: 'off-chain' }], total: 0 }).join('\n')
   assert.match(s, /"S9"/)
+})
+
+// ============================================================================ 复核（docs/34 §3）
+
+// prose-1、prose-4：记下批准之后的下一步。不是每一次都有一次被拒的回退在等着（【阶段】、【返工预算】叫 PM 问的那两条路上没有）；
+// 照「原样重写那次被拒的写入」做还会把刚记的 escalation 与新的 contract_sha 一起覆盖掉。
+test('复核 approvalNotices：记下了之后，被拒的那次写入要补进 escalation 与新的 contract_sha 再写；没有被拒的写入就照常往下走', () => {
+  const s = approvalNotices({ results: [{ stage: 'S5', covers: ['S5'] }], total: 1 }).join('\n')
+  assert.match(s, /补进这条 escalation 与新的 contract_sha/)
+  assert.match(s, /没有被拒的写入/)
+  assert.match(s, /不要为它再记一次回退/)
+  assert.doesNotMatch(s, /原样重写/)
+})
+
+// platform-7：用户选了标签，又在选项旁的备注里写了保留意见——模型看得到备注，门禁不能比模型看到的更宽。
+test('复核 askAnswers：批准那道题带非空备注（annotations[题].notes）→ 整次不记，原因是 notes；空白备注照记', () => {
+  const tr = (notes) => ({ questions: [Q('q')], answers: { q: L5 }, annotations: { q: { notes } } })
+  assert.equal(askAnswers(tr('先别动，我再想想')).excluded, 'notes')
+  assert.deepEqual(askAnswers(tr('  ')).items, [{ stage: 'S5' }])
+  assert.deepEqual(askAnswers({ questions: [Q('q')], answers: { q: L5 }, annotations: { other: { notes: 'x' } } }).items, [{ stage: 'S5' }])
+  const s = approvalNotices({ results: [{ why: 'notes' }], total: 0 }).join('\n')
+  assert.match(s, /备注/)
+})
+
+// platform-6：写不进批准记录时，「单独发一条消息再试」写的是同一个文件，同样会失败——而那一路一个字都回传不了。
+test('复核 approvalNotices：写不进批准记录时，叫用户检查那个文件，不把「单独发一条」当绕开的办法', () => {
+  const s = approvalNotices({ results: [{ stage: 'S5', why: 'write-failed' }], total: 0 }).join('\n')
+  assert.match(s, /approvals\.jsonl/)
+  assert.match(s, /检查/)
+  assert.doesNotMatch(s, /单独发一条/)
 })

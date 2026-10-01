@@ -14,6 +14,7 @@
 // （docs/27 §1 的第四条通道）。受信块里的外部值照 docs/27 的规矩引：stage 用 quote，异常消息用 quote；reason 不拼进来
 // ——它带绝对路径，修法用原因短码（runctx 的 cause）选。
 import { isKnownStage } from './deliverable.mjs'
+import { CHECKS } from './checks.mjs'
 import { quote, trustedBlock } from './trusted.mjs'
 
 // 最外层 catch 发现这次进程已经写出结果（拒绝或回传）时，往 stderr 补的那一句：再写一份，两份 JSON 会让拒绝失效、回传
@@ -34,7 +35,7 @@ export const GATE_NAME = {
   'approval-prompt': '返工批准',
 }
 // 记录器不放行任何东西：它读不出输入、自己出错，后果是「这次的回答没有记下」，通用文案里的「放行」会说错后果（P3）。
-const RECORDERS = new Set(['approval-ask', 'approval-prompt'])
+const RECORDERS = new Set(Object.keys(CHECKS).filter((c) => CHECKS[c].recorder === true))
 
 const CAUSE_PHRASE = {
   pointer: 'current-run 指针丢了或坏了',
@@ -162,15 +163,14 @@ export function unknownStageFix({ state, stages }) {
     return (
       `把 state.stage 改回 history 末条的 ${lastStage}，history 不动（用 Write 整份重写 state.json）。` +
       (residue
-        ? 'history 里更早还有不在阶段链里的条目：写 state.json 时的回传仍会报它，是已知残留，不要改也不要删（返工预算门禁会拒）。'
+        ? 'history 里更早还有不在阶段链里的条目：是已知残留，不要改也不要删（返工预算门禁会拒），写 state.json 时的回传不再报它。'
         : '')
     )
   }
   return (
     'history 末条也不在阶段链里（或者 history 是空的）。不要改、也不要删 history 里已有的条目——返工预算门禁会拒；' +
     '往 history 追加一条真实的当前阶段，同时把 state.stage 设成它。这个阶段要是在 history 里出现过，追加会记一次返工：' +
-    '那就停下，把取舍告诉用户，不要自己追加。修完之后，写 state.json 时的回传仍会报 history 里那条坏阶段，' +
-    '是已知残留，不用再修。'
+    '那就停下，把取舍告诉用户，不要自己追加。history 里那条坏阶段是已知残留，不用再修，写 state.json 时的回传不再报它。'
   )
 }
 

@@ -65,7 +65,8 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 **返工到了上限**（H6 拒了回退或推进、理由里给了规范标签「再返工一轮：回到 <段>」，或者写 `state.json` 之后收到【返工预算】）：
 照 `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 4 节「返工预算耗尽」那一段问用户。上一个会话里用户已经批过、门禁回传说记下了的，
-批准还在（门禁记在 run 目录里，`/agent-team:at-status` 的「返工批准」一行列得出），不用再问；被拒的那次写入原样重写就行。
+批准还在（门禁记在 run 目录里，`/agent-team:at-status` 的「返工批准」一行列得出），不用再问；被拒的那次写入照第 4 节重写
+（连同那条 escalation 与新的 `contract_sha`，上一个会话里记过的就带着）。
 
 契约那一段（`00-contract.md`）**不要重写**。它是这趟 run 的需求基线，S1 之后就冻结了；
 要改只能走升级流程（见 `/agent-team:at` 的第 4 节，`${CLAUDE_PLUGIN_ROOT}/commands/at.md`）。

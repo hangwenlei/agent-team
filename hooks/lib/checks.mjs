@@ -35,8 +35,10 @@ export const CHECKS = {
   // （H6 照样拒那次回退），方向安全，所以 fail open。一个检查项只挂一个事件（本表的契约），两个来源拆成两个检查名。
   // approval-prompt 在 UserPromptSubmit 上：stdout 会进模型上下文、exit 2 会拦掉用户的话——它两样都不做（hookOutput 对这个事件
   // 恒给空 stdout，denyOutput 对它写 stderr、exit 0）。
-  'approval-ask': { event: 'PostToolUse', toolNames: ['AskUserQuestion'], failClosed: false },
-  'approval-prompt': { event: 'UserPromptSubmit', toolNames: null, failClosed: false },
+  // recorder：失败的后果是「这次的回答没有记下」，不是「放行」——boot.mjs、deny.mjs 的 crashNotice、gate.mjs 与 fail-open.mjs 在
+  // 失败路径上照它选说法（复核 platform-5）。
+  'approval-ask': { event: 'PostToolUse', toolNames: ['AskUserQuestion'], failClosed: false, recorder: true },
+  'approval-prompt': { event: 'UserPromptSubmit', toolNames: null, failClosed: false, recorder: true },
 }
 
 export const KNOWN_CHECKS = new Set(Object.keys(CHECKS))

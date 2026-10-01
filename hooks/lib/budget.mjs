@@ -102,8 +102,8 @@ export function askUserText(target, grants, then) {
   const label = approvalLabel(target)
   return [
     `先用 AskUserQuestion 问用户：一道单选题（multiSelect 设 false），两个选项的标签逐字写「${label}」与「${STOP_LABEL}」——` +
-      '推荐写在问题正文或选项说明里，不要加进标签。用户选了前者，门禁会记下这条批准（回传里会说记没记下），' +
-      `照 /agent-team:at 第 4 节记 escalations 与契约修订块，${then}`,
+      '推荐写在问题正文或选项说明里，不要加进标签。用户选了前者，门禁会记下这条批准（回传里会说记没记下）。之后照 ' +
+      `/agent-team:at 第 4 节：契约追加修订块（回传给你新的 contract_sha），${then}`,
     `用户选「${STOP_LABEL}」：不回退也不推进，往 escalations 记一条 budget-exhausted（用户原话照记），` +
       '把现状、run id 与续跑的办法告诉用户，停下等用户。',
     `问不了用户（-p、--bg 会话里没有 AskUserQuestion）：停下，告诉用户在对话里单独发一条消息、整条只写「${label}」也算批准。`,
@@ -120,16 +120,22 @@ function entryStage(e) {
   return isPlainObject(e) && typeof e.stage === 'string' ? e.stage : undefined
 }
 
-/** history 里最后一条回退条目的下标：在阶段链上不晚于它前一条（两条都得在链上）。没有就是 -1。 */
+/**
+ * history 里最后一条回退条目的下标：在阶段链上不晚于它之前最近一条在链上的条目。链外条目（v1.7.0 及更早写进去的 DONE 之类）
+ * 跳过，不打断比较（复核 budget-2：停在 DONE 的旧 run 回退时要认得出）。没有就是 -1。与 rework-guard.mjs 的 restartInfo 同一个口径。
+ */
 export function lastRestart(history, stages) {
   if (!Array.isArray(history) || !isStageChain(stages)) return -1
   const at = chainIndex(stages)
-  for (let j = history.length - 1; j >= 1; j--) {
-    const cur = at(entryStage(history[j]))
-    const prev = at(entryStage(history[j - 1]))
-    if (cur >= 0 && prev >= 0 && cur <= prev) return j
-  }
-  return -1
+  let prev = -1
+  let last = -1
+  history.forEach((e, j) => {
+    const cur = at(entryStage(e))
+    if (cur < 0) return
+    if (prev >= 0 && cur <= prev) last = j
+    prev = cur
+  })
+  return last
 }
 
 /**
@@ -165,7 +171,9 @@ export function needOf({ state, stages, grants, target }) {
   const at = chainIndex(stages)
   const t = at(target)
   if (t < 0 || state.history.length === 0) return []
-  const last = at(entryStage(state.history[state.history.length - 1]))
+  // 与最近一条在链上的条目比（链外条目跳过，同 lastRestart）。
+  const onChain = state.history.map((e) => at(entryStage(e))).filter((i) => i >= 0)
+  const last = onChain.length ? onChain[onChain.length - 1] : -1
   if (last < 0 || t > last) return []
   const history = [...state.history, { stage: target }]
   return overLimit({ history, restartIndex: history.length - 1, stages, grants }).map((o) => o.stage)

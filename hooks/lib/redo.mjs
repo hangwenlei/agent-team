@@ -12,10 +12,10 @@
 //     放行（真实 run 里出现过，L2）。PM 自己的产物不判（契约修订块、04-dispatch.md 的增补都是正文明令，L3）。
 //
 // 「交过」= 交付快照（runs/<id>/delivered.json）里有它、磁盘内容与快照相同、而且不是上一轮的（freshness 的 isStale）。快照由门禁
-// 在 PM 每次写 state.json 之后照磁盘拍（gate.mjs 的 ledger 分支，deliveredSnapshot）：早于当前段的各段产物记 sha，当前段及之后
-// 的不记。于是：
+// 在 PM 写 state.json、而 stage 变了（推进、回退）之后照磁盘拍（gate.mjs 的 ledger 分支，deliveredSnapshot；快照里记着拍它时的
+// stage）：早于当前段的各段产物记 sha，当前段及之后的不记。于是：
 //   - 推进之后才落盘的（补派、提前推进之后迟到的交付）、快照之后改过的、还是上一轮的（【返工】的出口）：不算交过，写几次都放行，
-//     直到 PM 下一次记账（O4：门禁自己指出去的两条路，第二次写不能拒）；
+//     直到下一次推进或回退（O4：门禁自己指出去的两条路，第二次写不能拒；复核 redo-4：只记账、不动 stage 的写入不关这个窗口）；
 //   - 不依赖 PM 把 sha 记进 artifacts（那条回传只发给写者，第 28 条）。
 // 快照是门禁专属文件（H3 对 Edit/Write 一律拒，control-files.mjs 的 GATE_FILES）。读不出来、算不出 sha：一律当没交过——少拦一侧。
 //
@@ -52,19 +52,23 @@ export function deliveredSnapshot({ stages, stageId, diskSha }) {
   return out
 }
 
-/** delivered.json 的原文 → { 产物名: sha }。坏文件、不是对象、值不是 sha：那一条（或整份）不算。 */
+/**
+ * delivered.json 的原文 → { stage: 拍快照时的 state.stage, products: { 产物名: sha } }。坏文件、不是对象：{ stage: null, products: {} }；
+ * 值不是 sha 的那一条不算。stage 用来判「这次写 state.json 要不要重拍」：stage 没变就不重拍（复核 redo-4）。
+ */
 export function readSnapshot(text) {
-  if (typeof text !== 'string' && !Buffer.isBuffer(text)) return {}
+  const none = { stage: null, products: {} }
+  if (typeof text !== 'string' && !Buffer.isBuffer(text)) return none
   let v
   try {
     v = JSON.parse(normalizeText(text))
   } catch {
-    return {}
+    return none
   }
-  if (!isPlainObject(v)) return {}
-  const out = {}
-  for (const [k, sha] of Object.entries(v)) if (isSha(sha)) out[k] = sha
-  return out
+  if (!isPlainObject(v) || !isPlainObject(v.products)) return none
+  const products = {}
+  for (const [k, sha] of Object.entries(v.products)) if (isSha(sha)) products[k] = sha
+  return { stage: typeof v.stage === 'string' ? v.stage : null, products }
 }
 
 /** 「交过」：快照里有、磁盘 sha 与快照相同、不是上一轮的。artifactSha(name) → sha 或 null；任何一步抛异常都算没交过。 */
@@ -132,7 +136,9 @@ export function decideRedoWrite({ stages, stageId, role, owner, filePath, isDeli
   const x = indexIn(stages, owner.stageId)
   if (c < 0 || x < 0 || x >= c) return { decision: 'allow' }
   if (hasWorkIn({ stages, stageId, role, reachableRoles })) return { decision: 'allow' }
-  if (!isDelivered(owner.produces)) return { decision: 'allow' }
+  // 复核（docs/34 §3，redo-3）：与 H2 同一个「整段」口径——写者在那一段自己的产物全都交过，才算重做；交了一半的补派（另一份还没交）放行。
+  const own = expandProduces(stages[owner.stageId], [role])
+  if (!own.includes(owner.produces) || !own.every((n) => isDelivered(n))) return { decision: 'allow' }
   const ids = Object.keys(stages)
   const cur = ids[c]
   const was = ids[x]
