@@ -43,22 +43,22 @@ test('M3y restartInfo：只往前追加 → 不是回退', () => {
 
 test('M3y restartInfo：追加的一条在链上早于前一条 → 回退，T 是它的段', () => {
   const r = restartInfo({ before: state('S6', FIRST_ROUND), after: state('S5', [...FIRST_ROUND, ...H('S5')]), stages: STAGES })
-  assert.deepEqual(r, { stage: 'S5', followedByForward: false })
+  assert.deepEqual(r, { stage: 'S5', followedByForward: false, index: FIRST_ROUND.length })
 })
 
 test('M3y restartInfo：原地重来（S5 之后再追加 S5）也是回退', () => {
   const r = restartInfo({ before: state('S5', H('S1', 'S5')), after: state('S5', H('S1', 'S5', 'S5')), stages: STAGES })
-  assert.deepEqual(r, { stage: 'S5', followedByForward: false })
+  assert.deepEqual(r, { stage: 'S5', followedByForward: false, index: 2 })
 })
 
 test('M3y restartInfo：一次追加几条时取最后一条回退的段；它之后还有前进的条目就记下（补记）', () => {
   const before = state('S6', FIRST_ROUND)
   const a = restartInfo({ before, after: state('S5', [...FIRST_ROUND, ...H('S3', 'S4', 'S5')]), stages: STAGES })
-  assert.deepEqual(a, { stage: 'S3', followedByForward: true })
+  assert.deepEqual(a, { stage: 'S3', followedByForward: true, index: FIRST_ROUND.length })
   const b = restartInfo({ before, after: state('S3', [...FIRST_ROUND, ...H('S5', 'S3')]), stages: STAGES })
-  assert.deepEqual(b, { stage: 'S3', followedByForward: false })
+  assert.deepEqual(b, { stage: 'S3', followedByForward: false, index: FIRST_ROUND.length + 1 })
   const c = restartInfo({ before, after: state('S6', [...FIRST_ROUND, ...H('S5', 'S6')]), stages: STAGES })
-  assert.deepEqual(c, { stage: 'S5', followedByForward: true })
+  assert.deepEqual(c, { stage: 'S5', followedByForward: true, index: FIRST_ROUND.length })
 })
 
 test('M3y restartInfo：第一条记录、链上没有的段、不是 {stage} 形状的条目都不算回退', () => {

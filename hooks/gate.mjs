@@ -10,14 +10,14 @@
 // 入口只做「该检查项声明的前置校验」，不做统一校验——H1–H5 分布在三种
 // hook 事件上，输入形状不同（规格 §6 注记）。
 
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
 import { MAIN, callerOf, decideDelegation, stripPluginPrefix } from './lib/decide.mjs'
 import { denyOutput, crashNotice } from './lib/deny.mjs'
 import { projectRootFrom, readProjectConfig, readRunContext } from './lib/runctx.mjs'
-import { decideReadiness } from './lib/readiness.mjs'
+import { candidateStages, decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideRework, decideReworkBase, parseStateText, replayEdit } from './lib/rework-guard.mjs'
@@ -25,7 +25,10 @@ import { makeFreshness, staleByStage } from './lib/freshness.mjs'
 import { normalizeText } from './lib/text-norm.mjs'
 import { decideDeliverable } from './lib/deliverable.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
-import { isControlFile, mayBeStateFile } from './lib/control-files.mjs'
+import { APPROVALS_FILE, DELIVERED_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
+import { readGrants } from './lib/budget.mjs'
+import { askAnswers, promptAnswer, planApprovals, approvalLine, approvalNotices } from './lib/approvals.mjs'
+import { deliveredSnapshot, readSnapshot, makeDelivered, decideRedispatch, decideRedoWrite } from './lib/redo.mjs'
 import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
 import { sha256OfContract, shaOrNote } from './lib/contract-hash.mjs'
@@ -45,6 +48,7 @@ import {
   dispatchUnreadableNotice,
   hookOutput,
   ledgerUnreadableNotice,
+  runContextFix,
   selfCheckAppendix,
   systemMessage,
   unknownStageNotice,
@@ -292,9 +296,15 @@ function emitHookJson(event, parts) {
 
 // 输入读不出来（stdin 不是一个 JSON 对象、缺 tool_name）时 fail open 的那一支（M3v）：往 stderr 留一行，Pre/Post 上再
 // 给用户一行。不进模型——模型做不了什么，这多半是 Claude Code 改了 hook 输入的形状，要更新的是插件或 Claude Code。
+// M3z（docs/34）：给用户的那一行只在 PreToolUse、PostToolUse 上发——SubagentStop 上 stdout 等于拦截，UserPromptSubmit 上 stdout
+// 进模型上下文（hookOutput 对这两种事件有东西要发就报 BUG）。
 function inputUnreadable(spec, what) {
   process.stderr.write(`agent-team ${CHECK}：读不出这次的 hook 输入（${what}），没有做校验、放行。\n`)
-  emitHookJson(spec.event, spec.event === 'SubagentStop' ? {} : { systemMessage: systemMessage('input', { check: CHECK }) })
+  emitHookJson(spec.event, userFacing(spec.event) ? { systemMessage: systemMessage('input', { check: CHECK }) } : {})
+}
+
+function userFacing(event) {
+  return event === 'PreToolUse' || event === 'PostToolUse'
 }
 
 // 门禁自检理由末尾的追加句（M3v）：只在调用者是 PM、自检写在门禁认的项目根下时追加——丢指针时 PM 在 /agent-team:at-resume
@@ -641,6 +651,74 @@ function buildCoverageNotice({ gaps, narrowed, perStage } = {}, recipientCanWrit
   )
 }
 
+// M3z（docs/34）：「交过」——交付快照里有、磁盘与快照相同、不是上一轮的（hooks/lib/redo.mjs）。H2、H3 的重做判据共用。
+function deliveredOf(ctx, fresh) {
+  return makeDelivered({
+    snapshot: readSnapshot(ctx.artifactBytes(DELIVERED_FILE)),
+    artifactSha: (name) => {
+      const bytes = ctx.artifactBytes(name)
+      return bytes ? sha256OfContract(bytes) : null
+    },
+    isStale: fresh.isStale,
+  })
+}
+
+// M3z：PM 写完 state.json 之后拍交付快照。只做 I/O；拍什么由 deliveredSnapshot 定。出错只留痕（少拦一侧）。
+function writeDeliveredSnapshot(ctx) {
+  try {
+    const snapshot = deliveredSnapshot({
+      stages: ctx.stages,
+      stageId: ctx.state?.stage,
+      diskSha: (name) => {
+        const bytes = ctx.artifactBytes(name)
+        return bytes ? { exists: true, sha: sha256OfContract(bytes) } : { exists: ctx.artifactExists(name), sha: null }
+      },
+    })
+    if (!snapshot) return
+    const text = `${JSON.stringify(snapshot, null, 2)}\n`
+    const prev = ctx.artifactBytes(DELIVERED_FILE)
+    if (prev && prev.toString('utf8') === text) return
+    writeFileSync(join(ctx.runDir, DELIVERED_FILE), text)
+  } catch (err) {
+    process.stderr.write(`agent-team ledger 回传：交付快照没有写成（${quote(err?.message ?? err, { max: 120 })}），不记回退的重做这次少拦。\n`)
+  }
+}
+
+// M3z：门禁专属文件的拒绝理由。路径是这次调用给的，过 inline。
+function gateFileReason(checked, exotic) {
+  const approvals = leafName(checked) === APPROVALS_FILE
+  const what = approvals
+    ? '这是门禁自己记的返工批准。用户在 AskUserQuestion 里选了「再返工一轮：回到 <段>」、或者在对话里单独发了这一条，而这一轮真的' +
+      '需要批准时，门禁自己记下它；照返工预算门禁拒绝理由里的问法去问用户。'
+    : '这是门禁自己拍的交付快照，PM 每次写 state.json 之后由门禁照磁盘重拍，不用、也不许改。'
+  return (
+    `agent-team 门禁：不得写 ${inline(checked)}——${exotic ? `${exotic}；它可能就是门禁专属文件。` : ''}${what}` +
+    '任何人（包括项目经理与主线程）都不用 Edit/Write 写它。'
+  )
+}
+
+// M3z：H6 因为返工预算拒绝时，补一句「用户的批准会不会记不下」——记录器记在 current-run 指向的那一趟 run 里，读不到运行状态、
+// 或者这份 state.json 不在那一趟里时，照拒绝理由问了也白问。出任何意外都只是不补。
+function approvalDiagnostic(stateFile) {
+  try {
+    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    if (!ctx.ok) {
+      return ctx.kind === 'no-run'
+        ? '\n另外：门禁现在找不到进行中的 run（.agent-team/current-run 不在），用户的回答会记不下——先把 current-run 指回这一趟 run。'
+        : `\n另外：门禁现在读不到这个项目的运行状态，用户的回答会记不下——先修：${runContextFix(ctx.cause)}`
+    }
+    if (norm(ctx.runDir) !== norm(dirname(stateFile))) {
+      return (
+        `\n另外：这份 state.json 不在 current-run 指向的那一趟 run 里（current-run 指向 ${quote(ctx.runId)}）——用户的回答会记到那一趟，` +
+        '不算这一趟的批准。先把 current-run 指回这一趟。'
+      )
+    }
+    return ''
+  } catch {
+    return ''
+  }
+}
+
 function main() {
   // 门禁留痕用：只是一个标记，不参与任何判定（见上面 TRACE_STATE 那段）。
   TRACE_STATE.entered = true
@@ -741,6 +819,20 @@ function main() {
       callerCanWriteState: isContractWriter(input?.agent_type),
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
+
+    // M3z（docs/34，全量审查第 16 条）：不记回退就重派。叶子角色（花名册里派不出任何人）按派发者选出的候选段全都早于 state.stage、
+    // 它在这些段的产物都交过（交付快照里有、磁盘与快照相同、不是上一轮的）→ 再派它就是重做，拒。判定与理由在 hooks/lib/redo.mjs。
+    const roster = loadRoster()
+    const rd = decideRedispatch({
+      stages: ctx.stages,
+      stageId: ctx.state?.stage,
+      target,
+      roster,
+      candidates: candidateStages(ctx.stages, target, caller, Object.hasOwn(reach, caller) ? reach[caller].reachableRoles : null),
+      isDelivered: deliveredOf(ctx, fresh),
+      callerCanWriteState: isContractWriter(input?.agent_type),
+    })
+    if (rd.decision === 'deny') denyAndExit(rd.reason, spec.event)
   }
 
   if (CHECK === 'writepath') {
@@ -750,6 +842,15 @@ function main() {
     // M3v：调用者是 PM 时，理由末尾可能追加一句运行状态的说明（selfCheckTail）。
     const checked = input.tool_name === 'NotebookEdit' ? input?.tool_input?.notebook_path : input?.tool_input?.file_path
     if (isGateCheck(checked)) denyAndExit(gateCheckReason() + selfCheckTail(input, checked), spec.event)
+
+    // M3z（docs/34，全量审查第 16 条）：门禁专属文件（返工批准记录、交付快照）任何人都不用 Edit/Write 改，PM 与主线程也不行——
+    // 排在主线程豁免与读运行上下文之前，与门禁自检同一个位置。按路径形状认任何项目的 runs/<id>/ 下的这两个名字；写法认不出
+    // （流后缀、结尾带点）时末段先规范化（control-files.mjs 的 leafName），.agent-team 在的项目里认不出的写法一律拒（与 H6 认
+    // state.json 同一个口径）。
+    if (mayBeGateFile(checked)) {
+      const exotic = existsSync(join(ROOT_PROJECT, '.agent-team')) ? exoticPath(checked, ROOT_PROJECT) : null
+      if (exotic || isGateFile(checked)) denyAndExit(gateFileReason(checked, exotic), spec.event)
+    }
 
     // MAIN（无 agent_type）不受 per-role 隔离约束——H3 隔离的是
     // project.paths 里登记的各角色之间的边，主线程不是参与路径认领的
@@ -835,6 +936,26 @@ function main() {
       roster: loadRoster(),
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
+
+    // M3z（docs/34，全量审查第 16 条）：不记回退就重做。非 PM 写 run 目录里自己名下、早于 state.stage 那一段的产物，它在当前段
+    // 又没有活、那份已经交过 → 拒（hooks/lib/redo.mjs）。PM 自己的产物不判（契约修订块、04-dispatch.md 的增补都是正文明令）。
+    if (!isContractWriter(role) && typeof filePath === 'string' && ctx.runDir && underDir(filePath, ctx.runDir)) {
+      const owner = stageOwnerOfRunPath(ctx.stages, norm(ctx.runDir), norm(filePath))
+      if (owner && owner.role === role) {
+        const reach = computeReach({ roster: loadRoster(), paths: {} })
+        const fresh = makeFreshness({ artifactExists: ctx.artifactExists, artifactBytes: ctx.artifactBytes, reworkBase: ctx.state?.rework_base })
+        const rd = decideRedoWrite({
+          stages: ctx.stages,
+          stageId: ctx.state?.stage,
+          role,
+          owner,
+          filePath,
+          isDelivered: deliveredOf(ctx, fresh),
+          reachableRoles: Object.hasOwn(reach, role) ? reach[role].reachableRoles : null,
+        })
+        if (rd.decision === 'deny') denyAndExit(rd.reason, spec.event)
+      }
+    }
   }
 
   if (CHECK === 'contract') {
@@ -894,6 +1015,7 @@ function main() {
     // 是纯函数 decideRework；这一段只做三件事：认出目标是不是 runs/*/state.json、
     // 把 Edit/Write 的 tool_input 拆成 before/after 两份 JSON、deny 时 fail closed。
     // M3y（docs/33）起多一件：给 decideReworkBase 读阶段链、逐份读产物算 sha（rework_base 的几条，见下面 decideRework 之后那一段）。
+    // M3z（docs/34）起再多一件：读同一个 run 目录里的返工批准，返工计数的上限按它放宽（hooks/lib/budget.mjs）。
     //
     // ⚠️ 不经过 readRunContext。这条判据结构上就是「任意 run 的 state.json」——
     // isControlFile 的 runs/*/state.json 模式本来就是"不只是当前那个"语义（一个
@@ -986,8 +1108,24 @@ function main() {
       // 与 runctx 读 state.json 同一份归一化。
       const before = parseStateText(beforeText)
       const after = parseStateText(afterText)
-      const r = decideRework({ before, after })
-      if (!r.ok) denyAndExit(r.reason, spec.event)
+
+      // M3y（docs/33）读阶段链；M3z（docs/34，全量审查第 16 条）起返工计数那几条也要它（回退预判、stage 不变量），提到 decideRework
+      // 之前。返工批准读这份 state.json 同一个目录下的 approvals.jsonl（门禁专属，hooks/lib/budget.mjs 的 readGrants）：读不出来
+      // 当一条都没有——更严的一侧；拒绝理由末尾的诊断会说批准为什么可能记不下。
+      let stagesForRework = null
+      try {
+        stagesForRework = JSON.parse(normalizeText(readFileSync(join(ROOT, 'stages.json'), 'utf8')))
+      } catch {
+        stagesForRework = null
+      }
+      let approvalsText = null
+      try {
+        approvalsText = readFileSync(join(dirname(filePath), APPROVALS_FILE), 'utf8')
+      } catch {
+        approvalsText = null
+      }
+      const r = decideRework({ before, after, stages: stagesForRework, grants: readGrants(approvalsText, stagesForRework) })
+      if (!r.ok) denyAndExit(r.reason + (r.budget ? approvalDiagnostic(filePath) : ''), spec.event)
 
       // M3y（docs/33，全量审查第 15 条）：rework_base——回退那一次写入照磁盘记下各份产物的 sha，之后原样带着，推进离开一段时
       // 那一段里不许还有上一轮的产物。规则在 decideReworkBase（hooks/lib/rework-guard.mjs 的 M3y 一节），这里只做 I/O：
@@ -995,12 +1133,6 @@ function main() {
       //   - 产物逐份读：run 目录就是 state.json 所在的目录。stat 不到（ENOENT、ENOTDIR）算不在，别的错与读、算 sha 出错都算
       //     「在、但读不出来」——判定那边对它不核。逐份 try，一份读不出来不让整次判定 fail closed；
       //   - 判定本身不包 try：它抛异常时照旧落进最外层 catch，H6 fail closed。
-      let stagesForRework = null
-      try {
-        stagesForRework = JSON.parse(normalizeText(readFileSync(join(ROOT, 'stages.json'), 'utf8')))
-      } catch {
-        stagesForRework = null
-      }
       const runDir = dirname(filePath)
       const diskSha = (name) => {
         let st
@@ -1215,8 +1347,17 @@ function main() {
       kind === 'project' && ctx.project
         ? computeReach({ roster: loadRoster(), paths: ctx.project.paths })
         : null
-    const stateProblems =
-      kind === 'state' ? validateState(ctx.state, { stages: ctx.stages }).problems : []
+    // M3z（docs/34，全量审查第 16 条）：返工批准（runs/<id>/approvals.jsonl，门禁专属）。validateState 按它放宽上限、把按 history
+    // 派生值越限的段单列成 budget（【返工预算】）；【阶段】按它判推进会不会越限。
+    const approvalsBytes = ctx.artifactBytes(APPROVALS_FILE)
+    const grants = readGrants(approvalsBytes ? approvalsBytes.toString('utf8') : null, ctx.stages)
+    const validation = kind === 'state' ? validateState(ctx.state, { stages: ctx.stages, grants }) : null
+    const stateProblems = validation ? validation.problems : []
+
+    // M3z：交付快照。PM 每次写 state.json 之后照磁盘拍：早于当前段的各段产物记 sha（hooks/lib/redo.mjs 的 deliveredSnapshot）。
+    // H2、H3 拿它分辨「交过」——不依赖 PM 把 sha 记进 artifacts（那条回传只发给写者，第 28 条）。写不进、读不出都只是少拦，
+    // 留一行痕。内容没变就不写。
+    if (kind === 'state') writeDeliveredSnapshot(ctx)
 
     // M3u（docs/29）：project.json 的形状问题只有 PM 改得了，在它写控制文件的几个时机说出来——写 project.json
     // 本身（三档全报）；每趟 run 开头写 current-run（三档全报，已装用户的旧配置在 S1 就露面，不等 S5 撞上拒绝）；
@@ -1293,6 +1434,8 @@ function main() {
       produceSha: produceBytes ? sha256OfContract(produceBytes) : null,
       projectReport,
       reworkStale,
+      budget: validation ? validation.budget : [],
+      grants,
     })
 
     // M3a Task 2：产者交代判据的触发点是「state.stage 推进出去时」（设计 §3.2），
@@ -1355,6 +1498,63 @@ function main() {
     }
 
     emitHookJson(spec.event, { contexts: notices })
+  }
+
+  if (CHECK === 'approval-ask' || CHECK === 'approval-prompt') {
+    // M3z（docs/34，全量审查第 16 条）：返工批准的两个记录器。不是门禁：不拒任何东西，只在用户选了（approval-ask）或单独发了
+    // （approval-prompt）规范标签、而这一轮真的需要批准时，往当前 run 的 approvals.jsonl 追加一行。认回答、判需不需要、回传怎么说
+    // 在 hooks/lib/approvals.mjs；标签与上限在 hooks/lib/budget.mjs。
+    // approval-ask 在 PostToolUse 上：记下了、没记下（像批准却不记）都回一段【门禁】，给用户一行；一个像批准的回答都没有时不出声。
+    // approval-prompt 在 UserPromptSubmit 上：stdout 会进模型上下文，一个字都不写（hookOutput 对这个事件恒给空），只往 stderr 留痕。
+    const ask = CHECK === 'approval-ask'
+    const found = ask ? askAnswers(input.tool_response) : { excluded: null, items: promptAnswer(input.prompt) ? [{ stage: promptAnswer(input.prompt) }] : [] }
+    if (!found.excluded && !found.items.length) process.exit(0)
+    let results
+    let total = 0
+    let cause = null
+    let stages = null
+    if (found.excluded) {
+      results = [{ why: found.excluded }]
+    } else {
+      const ctx = readRunContext(ROOT_PROJECT, ROOT)
+      if (!ctx.ok) {
+        cause = ctx.cause ?? null
+        const why = ctx.kind === 'no-run' ? 'no-run' : 'unreadable'
+        results = found.items.map((item) => (item.stage ? { stage: item.stage, why } : item))
+      } else {
+        stages = ctx.stages
+        const file = join(ctx.runDir, APPROVALS_FILE)
+        const bytes = ctx.artifactBytes(APPROVALS_FILE)
+        const grants = readGrants(bytes ? bytes.toString('utf8') : null, ctx.stages)
+        total = grants.length
+        results = []
+        for (const p of planApprovals({ items: found.items, state: ctx.state, stages: ctx.stages, grants })) {
+          if (!p.covers) {
+            results.push(p)
+            continue
+          }
+          try {
+            appendFileSync(file, `${approvalLine({ at: new Date().toISOString(), source: ask ? 'ask' : 'prompt', stage: p.stage, covers: p.covers })}\n`)
+            total += 1
+            results.push(p)
+          } catch {
+            results.push({ stage: p.stage, why: 'write-failed' })
+          }
+        }
+      }
+    }
+    for (const r of results) {
+      process.stderr.write(
+        `agent-team ${CHECK}：` +
+          (r.covers ? `已记下返工批准：回到 ${r.stage}（覆盖 ${r.covers.join('、')}）。` : `没有记成返工批准（${r.why}${r.stage ? `，${quote(r.stage)}` : ''}）。`) +
+          '\n',
+      )
+    }
+    if (!ask) process.exit(0)
+    emitHookJson(spec.event, {
+      contexts: approvalNotices({ results, total, cause, stages }),
+      systemMessage: systemMessage(results.some((r) => r.covers) ? 'approval-recorded' : 'approval-skipped'),
+    })
   }
 
   if (CHECK === 'stop-gate' || CHECK === 'deliverable') {
@@ -1603,7 +1803,7 @@ function main() {
             `执行者，但它能（传递地）派到当前阶段的执行角色——这原本是合法的层级协调。` +
             `只是当前阶段的产物已经全部齐备，state.stage 大概率没有随之推进到下一阶段：` +
             `这正是**停在旧阶段**，H5 会对新阶段全程哑火。去 run 目录核实产物是否真的都已` +
-            `完成，确认后把 state.stage 推进到正确的阶段。`
+            `完成，确认后照 /agent-team:at 第 3 节记推进的账：stage 与 history 用同一次 Write 推进，roster、stage_roles、trimmed 一起记。`
           : `⚠️ 交付物校验：刚返回的 ${inline(role)} 不是当前阶段（state.stage = ${stageLabel}）的` +
             `执行者，**而且它也派不到那个执行者**（所以不是一次层级协调），所以这次校验` +
             `**没有意见**——不是它查过了没问题。两种可能：state.stage 停在旧阶段没推进，` +
@@ -1614,7 +1814,7 @@ function main() {
             (recipientCanWriteState
               ? `这次派发若是驳回之后的返工，那不是把 stage 改回去，是记一次回退：照 /agent-team:at 的「回退」一节，` +
                 `同一次 Write 追加 history、记 rework 与 rework_base。这一次已经重写过的产物会被快照记成上一轮的，` +
-                `记完之后把它们标 "accepted"，不必再派一遍。`
+                `记完之后把它们标 "accepted"，不必再派一遍；被门禁拦下、没写成的，记完回退之后照常再派。`
               : `这次派发若是驳回之后的返工，记回退是项目经理的事：把这一条原样冒泡给派你的人。`)
         notices.push(notice)
       }
@@ -1741,7 +1941,7 @@ try {
     const context = crashContext(CHECK, err, pm)
     emitHookJson(event, {
       contexts: context ? [context] : [],
-      systemMessage: pm && event !== 'SubagentStop' ? systemMessage('crash', { check: CHECK }) : null,
+      systemMessage: pm && userFacing(event) ? systemMessage('crash', { check: CHECK }) : null,
     })
   } catch {
     process.exit(0)

@@ -24,7 +24,17 @@ export const SECOND_WRITE_NOTE = 'agent-team：这次进程已经写出过结果
 export const CAUSES = ['pointer', 'runs', 'state', 'project', 'plugin']
 
 // README 里的门禁名（「顺序由门禁强制」那一条）；ledger 不是门禁，用户那一侧叫它账本。
-export const GATE_NAME = { readiness: '前置就绪', deliverable: '交付物核验', 'stop-gate': '交付物核验', ledger: '账本' }
+// M3z（docs/34）：两个返工批准记录器（approval-ask、approval-prompt）用户那一侧叫「返工批准」。
+export const GATE_NAME = {
+  readiness: '前置就绪',
+  deliverable: '交付物核验',
+  'stop-gate': '交付物核验',
+  ledger: '账本',
+  'approval-ask': '返工批准',
+  'approval-prompt': '返工批准',
+}
+// 记录器不放行任何东西：它读不出输入、自己出错，后果是「这次的回答没有记下」，通用文案里的「放行」会说错后果（P3）。
+const RECORDERS = new Set(['approval-ask', 'approval-prompt'])
 
 const CAUSE_PHRASE = {
   pointer: 'current-run 指针丢了或坏了',
@@ -192,6 +202,11 @@ export function crashContext(check, err, recipientIsPm) {
     text =
       `【门禁】交付物核验这次没有做完——门禁自己出了错（${msg}）：这次派发的交付物核验与账本比对都没有。` +
       '等被派角色返回后，自己去 run 目录核实它该交的产物在不在；再出错就把这一段原样告诉用户。'
+  } else if (check === 'approval-ask') {
+    // M3z（docs/34）：approval-prompt 在 UserPromptSubmit 上，什么都发不了（hookOutput），这里只有 approval-ask。
+    text =
+      `【门禁】这次的回答没有记下——门禁自己出了错（${msg}）：用户选的若是「再返工一轮」，它没有记成返工批准。` +
+      '重新问一次；再出错就停下，把这一段原样告诉用户。'
   } else {
     return null
   }
@@ -230,12 +245,20 @@ export function systemMessage(kind, { cause, check } = {}) {
       return `agent-team 账本：这次写入没有回传哈希——${causePhrase(cause)}。${tail}`
     case 'unknown-stage':
       return 'agent-team 交付物核验：这次派发没有做——state.stage 不在阶段链里。项目经理已收到修法。'
+    case 'approval-recorded':
+      return 'agent-team 返工批准：已记下，项目经理已收到。'
+    case 'approval-skipped':
+      return 'agent-team 返工批准：这次的回答没有记成批准，项目经理已收到原因。'
     case 'input':
+      if (RECORDERS.has(check)) {
+        return 'agent-team 返工批准：读不出这次的 hook 输入，这次的回答没有记下。Claude Code 与插件的版本可能不匹配，两者都更新后再试。'
+      }
       return (
         `agent-team ${GATE_NAME[check] ?? '门禁'}：读不出这次的 hook 输入，没有做校验、放行。` +
         'Claude Code 与插件的版本可能不匹配，两者都更新后再试。'
       )
     case 'crash':
+      if (RECORDERS.has(check)) return 'agent-team 返工批准：门禁这次出错，这次的回答没有记下。'
       return check === 'readiness'
         ? 'agent-team 前置就绪：门禁这次出错，这次派发没有做前置产物校验、放行。'
         : `agent-team ${GATE_NAME[check] ?? '门禁'}：门禁这次出错，没有做完校验、放行。`

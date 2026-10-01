@@ -151,3 +151,71 @@ test('M3y：「回退」写明一段没走完就回退时，还没派到的产�
 test('M3y：「回退」里照【返工】重写时，PM 自己那几段的产物自己写', () => {
   assert.match(REWIND, /你自己那几段的产物自己写/)
 })
+
+// ============================================================================
+// M3z（docs/34，全量审查第 16 条）：第 4 轮有了诚实的写法，不记回退的重做被门禁拦下之后，正文里那几句关键的话。
+// 门禁拒绝理由里给得出规范标签与出路，给不出「什么时候问、问完怎么记、用户叫停怎么办」；这里钉那几句在不在、方向对不对。
+
+const S4 = section(AT, '## 4. 什么时候必须停下来问用户', '## ')
+
+test('M3z：「回退」写明 S7 验收要补测回 S6，门禁在派发与写入两帧拦不记回退的重做，只改 stage 被 H6 拒', () => {
+  assert.match(REWIND, /S7 验收判不了、要人补跑测试，\n?回 S6/)
+  assert.match(REWIND, /拦在派发那一帧/)
+  assert.match(REWIND, /拦在写入那一帧/)
+  assert.match(REWIND, /只改 `stage`、不往 `history` 追加，H6 拒/)
+})
+
+test('M3z：「回退」写明要问已经走过的那一段里干活的人，不要派它，读产物或问用户；协调者派发时不判', () => {
+  assert.match(REWIND, /要问已经走过的那一段里干活的人点什么/)
+  assert.match(REWIND, /自己读它的产物与代码，或者问用户/)
+  assert.match(REWIND, /两个协调者，派发时门禁不判/)
+})
+
+test('M3z：/at 第 4 节写明返工预算耗尽怎么问——规范标签、单选、推荐不写进标签、门禁记、叫停、别的话、问不了、上限内不记', () => {
+  assert.match(S4, /返工预算耗尽（`budget-exhausted`）不靠你自己数/)
+  assert.match(S4, /再返工一轮：回到 <段>/)
+  assert.match(S4, /`multiSelect` 设为 false/)
+  assert.match(S4, /推荐写在问题正文或\n?\s*选项说明里，\*\*不要写进标签\*\*/)
+  assert.match(S4, /门禁自己记下这条批准/)
+  assert.match(S4, /用户选了「停在这里」：不回退也不推进/)
+  assert.match(S4, /用户写了别的话：照原话办，它不算批准/)
+  assert.match(S4, /问不了用户（`-p`、`--bg` 会话里没有 `AskUserQuestion`）/)
+  assert.match(S4, /上限内不用问，问了门禁也不记/)
+})
+
+// 「上限内的单角色重试」暗示同段重派也有一个上限、也许还计返工——它不计，也没有那个上限。六处一起改，留一处就是两种说法。
+test('M3z：「上限内的单角色重试」在插件正文、模板、规格与门禁代码里一处都不剩', () => {
+  const files = [
+    'commands/at.md', 'commands/at-resume.md', 'commands/at-status.md', 'agents/at-pm.md', 'templates/04-dispatch.md',
+    'docs/superpowers/specs/2026-09-15-agent-team-plugin-design.md', 'hooks/lib/rework-guard.mjs',
+  ]
+  for (const f of files) assert.ok(!read(f).includes('上限内的单角色重试'), f)
+  for (const f of ['commands/at.md', 'agents/at-pm.md', 'templates/04-dispatch.md']) {
+    assert.match(read(f), /同一段里重派一个角色（不计返工）/, f)
+  }
+})
+
+test('M3z：at-pm 指向第 4 节的返工批准；at-resume 说【返工预算】不靠改 state.json；at-status 列返工批准', () => {
+  assert.match(read('agents/at-pm.md'), /第 3 轮之后还要再来一轮，得用户批准、由门禁记下/)
+  const resume = read('commands/at-resume.md')
+  assert.match(resume, /【返工预算】是例外：它不是改 `state\.json` 修得好的/)
+  assert.match(resume, /批准还在（门禁记在 run 目录里/)
+  assert.match(read('commands/at-status.md'), /返工批准:\s+<\.agent-team\/runs\/<run_id>\/approvals\.jsonl/)
+})
+
+test('M3z：at-architect、at-product 写明越过那一段之后派执行角色、改早段产物会被当成重做拦下，冒泡给 PM；at-acceptance 一次列全', () => {
+  const arch = read('agents/at-architect.md')
+  assert.match(arch, /`S5` 之后再派执行角色，会被当成不记回退的重做拦下/)
+  assert.match(arch, /记回退是 PM 的事/)
+  assert.match(read('agents/at-product.md'), /都会被门禁当成不记回退的重做拦下/)
+  assert.match(read('agents/at-acceptance.md'), /一次把判不了的条目列全/)
+})
+
+test('M3z：规格 §4.2 ③ 写到用户经规范标签批准、门禁记下；§6 的 H6 那一行不再说「只拦减少」', () => {
+  const spec = read('docs/superpowers/specs/2026-09-15-agent-team-plugin-design.md')
+  assert.match(spec, /\*\*第 3 轮之后（M3z 补/)
+  assert.match(spec, /门禁自己记下这条批准（`runs\/<id>\/approvals\.jsonl`/)
+  const h6 = spec.split('\n').find((l) => l.startsWith('| H6 |'))
+  assert.ok(h6 && !h6.includes('只拦**减少**'), h6)
+  assert.match(h6, /比写入前大才拒/)
+})

@@ -20,6 +20,8 @@
 import { producedNames, expandProduces, stageRoles, stageRolesInRun, isPlainObject } from './stages.mjs'
 import { SHA_RE } from './contract-hash.mjs'
 import { quote } from './trusted.mjs'
+// M3z（docs/34）：上限的单一真源挪到 budget.mjs（limitOf 要它，留在这里就成了环）；这里原样再导出，既有的 import 不用改。
+import { REWORK_LIMIT, limitOf } from './budget.mjs'
 
 // validateState 的问题文案会进受信回传【state.json】；state.json 是写得进它的任何人都能写的，
 // 键名与值一律过 quote（M3s，docs/27）——阶段名也一样：它在这里是 state.json 里写着的那个值，
@@ -28,7 +30,7 @@ import { quote } from './trusted.mjs'
 // SHA_RE 的单一真源在 contract-hash.mjs（M3s）。
 const RUN_ID_RE = /^\d{8}-\d{4}-[a-z0-9][a-z0-9-]*$/
 
-export const REWORK_LIMIT = 3
+export { REWORK_LIMIT }
 
 // 「返工计数是个合法的数」——H6 写时闸（hooks/lib/rework-guard.mjs 判据④）与下面
 // validateState 的事后校验**共用这一份**。
@@ -45,6 +47,9 @@ export const REWORK_LIMIT = 3
 // Task 2 修复轮 1 ③ 判过「不值得抽」的那一类。有变体空间的是这个手写的多条件布尔
 // 表达式，抽的就是它。validateState 还要靠这一半把两种认知状态分开报（「不是非负
 // 整数」/「超过硬上限」），合成一个谓词会把那个区分抹平。
+// ⚠️ M3z（docs/34）订正：上限那一边不再是「拿 REWORK_LIMIT 做的单次比较」——两处都改经 budget.mjs 的 limitOf（3 + 门禁记下的、
+// 覆盖那一段的返工批准条数），这正是上面那条「单一真源」的另一处落点。而且两处比的不再是同一个东西：H6 比写着的值（只罚
+// 改大），validateState 比 history 的派生值、报进单列的 budget。「不是非负整数」这一半仍然共用本函数。
 export function isNonNegativeInteger(v) {
   return Number.isInteger(v) && v >= 0
 }
@@ -176,12 +181,16 @@ export function isStageDone({ stage, stages, artifactExists, roster }) {
   return names.every((p) => artifactExists(p))
 }
 
-export function validateState(state, { stages } = {}) {
+// M3z（docs/34，全量审查第 16 条）：多一个 grants（门禁记下的返工批准，budget.mjs 的 readGrants）与一个返回值 budget——按 history 的
+// 派生值超过上限（limitOf）的段，{ stage, rounds, limit }。它不进 problems：problems 那一块的抬头是「改完再继续」，越限的唯一出路却是
+// 问用户（把计数改小会被 H6 以「不可重置」拒，O6），ledger 把它单列成【返工预算】。ok 在两样都空时才为真。
+export function validateState(state, { stages, grants } = {}) {
   const problems = []
+  const budget = []
   const p = (msg) => problems.push(msg)
 
   if (!isPlainObject(state)) {
-    return { ok: false, problems: ['state.json 的内容不是一个 JSON 对象'] }
+    return { ok: false, problems: ['state.json 的内容不是一个 JSON 对象'], budget }
   }
 
   if (typeof state.run_id !== 'string' || !RUN_ID_RE.test(state.run_id)) {
@@ -367,7 +376,6 @@ export function validateState(state, { stages } = {}) {
   } else {
     for (const [k, v] of Object.entries(state.rework)) {
       if (!isNonNegativeInteger(v)) p(`rework[${quote(k)}] 不是非负整数`)
-      else if (v > REWORK_LIMIT) p(`rework[${quote(k)}] 是 ${v}，超过硬上限 ${REWORK_LIMIT}（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级）`)
       if (isPlainObject(stages) && !Object.hasOwn(stages, k)) p(`rework 里有 ${quote(k)}，但 stages.json 里没有这个阶段`)
     }
     // §4.2 ③「不可重置」的落点：rework 必须严格等于 history 的派生量。
@@ -386,5 +394,13 @@ export function validateState(state, { stages } = {}) {
     }
   }
 
-  return { ok: problems.length === 0, problems }
+  // 上限按派生值判，不按写着的值：写着的值与派生值对不上由上面那一条报（改成派生值，H6 放行）；派生值越限只能问用户。
+  if (Array.isArray(state.history)) {
+    for (const [stage, rounds] of Object.entries(reworkFromHistory(state.history))) {
+      const limit = limitOf(stage, grants)
+      if (rounds > limit) budget.push({ stage, rounds, limit })
+    }
+  }
+
+  return { ok: problems.length === 0 && budget.length === 0, problems, budget }
 }

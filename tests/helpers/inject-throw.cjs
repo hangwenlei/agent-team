@@ -4,6 +4,7 @@
 //   hash           crypto.createHash 一调就抛——ledger 算契约与产物的哈希、H5a 的账本比对都经过它；
 //   prefix:<名字>   对这一个字符串调 startsWith 就抛——stripPluginPrefix 认目标角色时经过它；
 //   exit           第一次 process.exit 抛——「写过 stdout 之后再崩」那一格；
+//   normalize      String.prototype.normalize 一调就抛——返工批准的两个记录器认标签时经过它（M3z）；
 //   read:<后缀>     readFileSync 读路径以这个后缀结尾（分隔符统一成 /）的文件就抛——H6 拍回退快照时逐份读产物（M3y），
 //                  一份读不出来要落「不核」、不能让整次判定 fail closed；
 //   stat:<CODE>:<后缀>  statSync 对以这个后缀结尾的路径抛带 code 的错（例 stat:EACCES:06-test.md）——H6 把 ENOENT、ENOTDIR
@@ -47,6 +48,10 @@ for (const mode of modes) {
       return original.apply(this, arguments)
     }
     require('module').syncBuiltinESMExports()
+  } else if (mode === 'normalize') {
+    String.prototype.normalize = function () {
+      throw new Error('injected: normalize')
+    }
   } else if (mode === 'exit') {
     const original = process.exit
     let first = true

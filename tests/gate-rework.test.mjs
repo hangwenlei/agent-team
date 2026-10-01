@@ -488,10 +488,17 @@ test('对照：CRLF 的 state.json 上，合法地推进一段（改 stage、追
   const dirs = makeRun({ runId: 'r1', stage: 'S5' })
   try {
     writeCrlf(dirs, SPENT)
+    // M3z（docs/34）：stage 要等于 history 末条（H6 的 stage 不变量），推进是一次跨 stage 到 history 的 Edit——此前这里只追加
+    // history、stage 不动，那正是现在要拒的「只改一半」。old_string 用 LF 写，照样匹配 CRLF 的文件。
+    const lf = (o) => JSON.stringify(o, null, 2)
+    const from = (text, stage) => text.slice(text.indexOf(`"stage": "${stage}",\n  "contract_sha"`))
+    const next = { ...SPENT, stage: 'S6', history: [...SPENT.history, { stage: 'S6', at: '2026-09-17T15:20:00Z' }] }
+    const r1 = gateEdit(dirs, from(lf(SPENT), 'S5'), from(lf(next), 'S6'))
+    assert.equal(r1.stdout, '', '改 stage、追加一条 history')
+    // 只追加 history、stage 不动：拒。
     const last = '    {\n      "stage": "S5",\n      "at": "2026-09-17T15:10:00Z"\n    }\n  ]'
     const appended = '    {\n      "stage": "S5",\n      "at": "2026-09-17T15:10:00Z"\n    },\n    {\n      "stage": "S6",\n      "at": "2026-09-17T15:20:00Z"\n    }\n  ]'
-    const r1 = gateEdit(dirs, last, appended)
-    assert.equal(r1.stdout, '', 'history 追加一条')
+    assert.ok(isDeny(gateEdit(dirs, last, appended)), '只追加 history')
   } finally {
     cleanup(dirs)
   }

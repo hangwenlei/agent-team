@@ -15,6 +15,8 @@
 import { compareContractSha, shaOrNote } from './contract-hash.mjs'
 import { inline, quote, safeJson } from './trusted.mjs'
 import { nextStage } from './state.mjs'
+import { approvalTargetFor, askUserText, limitOf } from './budget.mjs'
+import { isPlainObject, isStageChain } from './stages.mjs'
 
 // 「这个动作只能由 PM 执行、非 PM 请回报上级」——stageDone 与 produce 两个分支都要
 // 说这句话：推进/收口 state.stage 与把哈希写进 artifacts，改的都是同一份控制文件
@@ -132,7 +134,7 @@ export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 =
 }
 
 export function buildLedgerNotices({
-  kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha, projectReport, reworkStale,
+  kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha, projectReport, reworkStale, budget, grants,
 } = {}) {
   const out = []
   const st = state && typeof state === 'object' ? state : {}
@@ -194,6 +196,26 @@ export function buildLedgerNotices({
     out.push(
       `【state.json】刚写进去的状态有问题，逐条如下——改完再继续，不要带着它往下跑：\n` +
         stateProblems.map((p) => `  - ${p}`).join('\n'),
+    )
+  }
+
+  // M3z（docs/34，全量审查第 16 条）：按 history 的派生值越限（validateState 的 budget，上限 = 3 + 覆盖它的返工批准条数）。此前混在
+  // 【state.json】那一块里，抬头是「改完再继续」——可唯一的出路是问用户，把计数改小会被 H6 以「不可重置」拒（O6）。只在写 state.json
+  // 时发；写它的只有 PM。标签回到最早越限那一段之前最后一次回退回到的那一段（approvalTargetFor），与【阶段】、H6 判据④同一个取法。
+  // 越限的段名来自 history（谁都写得进），不在阶段链上的加引号、不给标签（问用户补不上它）。
+  if (kind === 'state' && Array.isArray(budget) && budget.length) {
+    const chain = isStageChain(stages)
+    const known = (s) => chain && typeof s === 'string' && Object.hasOwn(stages, s)
+    const ids = chain ? Object.keys(stages) : []
+    const named = budget.map((b) => `${known(b.stage) ? b.stage : quote(b.stage)} 已经返工 ${b.rounds} 轮，上限 ${b.limit}`)
+    const onChain = budget.filter((b) => known(b.stage)).sort((a, b) => ids.indexOf(a.stage) - ids.indexOf(b.stage))
+    const head =
+      `【返工预算】history 显示 ${named.join('；')}（规格 §4.2 ③：第 3 轮终局，不过则升级），门禁在这一趟 run 里读不到覆盖它的` +
+      '返工批准（批准记录丢了、读不出来，或者 history 被别处改过）。不要改计数——改小会被返工预算门禁以「不可重置」拒掉。'
+    out.push(
+      onChain.length
+        ? `${head}\n${askUserText(approvalTargetFor({ history: st.history, stages, stage: onChain[0].stage }), grants, '这一块之后就不再出现。')}`
+        : `${head}这些段不在阶段链上，问用户也补不上：把这件事告诉用户。`,
     )
   }
 
@@ -270,12 +292,21 @@ export function buildLedgerNotices({
       nxt && Array.isArray(st.history) && st.history.some((e) => e && typeof e === 'object' && e.stage === nxt)
         ? `（${nxt} 在 history 里已经出现过：同一次 Write 把 rework 里的 ${nxt} 照派生量加 1，少了 H6 会拒）`
         : ''
+    // M3z（docs/34）：加 1 之后超过上限（3 + 覆盖它的返工批准条数）时，H6 判据④会拒这次推进——先叫 PM 问用户。正路上回退那一次
+    // 的预判已经把这一轮要用到的段一起批了，走到这里多半是批准记录丢了、或者 history 被别处改过。
+    const entered = nxt && Array.isArray(st.history) ? st.history.filter((e) => isPlainObject(e) && e.stage === nxt).length : 0
+    const nextLimit = limitOf(nxt, grants)
+    const over =
+      entered > nextLimit
+        ? `\n推进到 ${nxt} 会让它到第 ${entered} 轮返工，超过上限 ${nextLimit}（规格 §4.2 ③：第 3 轮终局，不过则升级），` +
+          `H6 会拒这次推进。${askUserText(approvalTargetFor({ history: st.history, stages, stage: nxt }), grants, '再推进。')}`
+        : ''
     out.push(
       nxt
         ? `【阶段】${st.stage} 的产物已经齐了。这一段如果确实结束了，需要把 state.stage 推进到 ` +
           `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "<ISO 时间>" }${again}——用同一次 Write 把这一段的账一起记掉：` +
           `叫到的人累加进 roster（state.json 里有 stage_roles 的，同一批人并进它的这一段），决定不叫的产出角色写进 trimmed。` +
-          `分两次写，推进那一次会被产者交代当成漏派。${who}${tail}`
+          `分两次写，推进那一次会被产者交代当成漏派。${who}${tail}${over}`
         : `【阶段】${st.stage} 的产物已经齐了，而它是阶段链的最后一段——该收口了。${who}${tail}`,
     )
   }

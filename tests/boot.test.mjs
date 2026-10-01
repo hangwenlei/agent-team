@@ -55,6 +55,14 @@ const INPUTS = {
   deliverable: { hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-product' } },
   'stop-gate': { hook_event_name: 'SubagentStop', agent_type: 'agent-team:at-product' },
   ledger: { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: '/p/x', content: '' } },
+  'approval-ask': {
+    hook_event_name: 'PostToolUse',
+    tool_name: 'AskUserQuestion',
+    agent_type: 'at-pm',
+    tool_input: { questions: [] },
+    tool_response: { questions: [], answers: {} },
+  },
+  'approval-prompt': { hook_event_name: 'UserPromptSubmit', prompt: 'x' },
 }
 
 test('前置：INPUTS 覆盖 checks.mjs 里的每一个检查项——否则下面的逐项断言在空转', () => {

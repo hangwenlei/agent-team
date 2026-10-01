@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
-import { CONTROL_FILES } from '../hooks/lib/control-files.mjs'
+import { CONTROL_FILES, GATE_FILES } from '../hooks/lib/control-files.mjs'
 import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { producedNames, expandProduces, stageRolesInRun, participantsOf } from '../hooks/lib/stages.mjs'
@@ -304,13 +304,14 @@ test('命令正文里出现的每个 NN-*.md 产物名都是 stages.json 的 pro
   }
 })
 
-test('命令正文里出现的每个 .agent-team 路径都是控制文件或 run 目录下的产物', () => {
+test('命令正文里出现的每个 .agent-team 路径都是控制文件、门禁专属文件或 run 目录下的产物', () => {
   // M2b Task 2：produces 现在有数组/对象两种形式（S2 是对象），flatMap 对对象值
   // 不展平，原地重算会静默产出一个混进对象的 Set，导致 has() 恒为 false。改用
   // producedNames(stages)（单一真源，已经走 expandProduces 认两种形式）。
   const produced = producedNames(stages)
   const ok = (rel) =>
-    CONTROL_FILES.some((c) => new RegExp(`^${c.replace('*', '[^/]+')}$`).test(rel)) ||
+    // M3z（docs/34）：门禁专属文件（返工批准记录、交付快照）也是 .agent-team 下的合法路径——/agent-team:at-status 要读前者。
+    [...CONTROL_FILES, ...GATE_FILES].some((c) => new RegExp(`^${c.replace('*', '[^/]+')}$`).test(rel)) ||
     /^runs\/[^/]+\/?$/.test(rel) ||
     [...produced].some((p) => rel.endsWith(p))
   // 字符类里有 *（M3v）：正文会写 Glob 模式（`.agent-team/runs/*/state.json`，commands/at-resume.md 找丢了指针的 run），

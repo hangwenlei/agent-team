@@ -30,6 +30,13 @@ export const CHECKS = {
   // 算不出来的派生事实（契约 sha256、触达表、state.json 的校验结果）交回给 PM。
   // failClosed: false 因为它根本没有「拒绝」这个出口。
   ledger: { event: 'PostToolUse', toolNames: ['Edit', 'Write', 'NotebookEdit'], failClosed: false },
+  // M3z（docs/34，全量审查第 16 条）：返工批准的两个记录器，不是门禁——它们不拒任何东西，只在用户选了（或单独发了）规范标签
+  // 「再返工一轮：回到 <段>」、而这一轮真的需要批准时，往当前 run 的 approvals.jsonl 追加一条。失败的后果只是「没有记下」
+  // （H6 照样拒那次回退），方向安全，所以 fail open。一个检查项只挂一个事件（本表的契约），两个来源拆成两个检查名。
+  // approval-prompt 在 UserPromptSubmit 上：stdout 会进模型上下文、exit 2 会拦掉用户的话——它两样都不做（hookOutput 对这个事件
+  // 恒给空 stdout，denyOutput 对它写 stderr、exit 0）。
+  'approval-ask': { event: 'PostToolUse', toolNames: ['AskUserQuestion'], failClosed: false },
+  'approval-prompt': { event: 'UserPromptSubmit', toolNames: null, failClosed: false },
 }
 
 export const KNOWN_CHECKS = new Set(Object.keys(CHECKS))

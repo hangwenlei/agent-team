@@ -57,3 +57,49 @@ test('控制文件清单是闭集合，改了要回头同步规格 §6.2.1 与�
     'runs/*/state.json',
   ])
 })
+
+// ============================================================================
+// M3z（docs/34，全量审查第 16 条）：门禁专属文件——门禁自己写、任何人（含 PM 与主线程）的 Edit/Write/NotebookEdit 都拒。
+// approvals.jsonl 是返工批准记录，PM 写得进它就能给自己批第 4 轮；delivered.json 是交付快照，改得了它就能让重做的判据失效。
+import { GATE_FILES, leafName, mayBeGateFile, isGateFile, mayBeStateFile } from '../hooks/lib/control-files.mjs'
+
+test('M3z 门禁专属文件清单是闭集合', () => {
+  assert.deepEqual([...GATE_FILES].sort(), ['runs/*/approvals.jsonl', 'runs/*/delivered.json'])
+})
+
+test('M3z isGateFile：任意项目、任意 run 下的 approvals.jsonl、delivered.json；它们不是控制文件（PM 也写不了）', () => {
+  for (const p of ['/proj/.agent-team/runs/r1/approvals.jsonl', '/proj/.agent-team/runs/other/delivered.json', '/elsewhere/.agent-team/runs/r9/APPROVALS.JSONL']) {
+    assert.equal(isGateFile(p), true, p)
+    assert.equal(isControlFile(p, AT), false, p)
+  }
+})
+
+test('M3z isGateFile：多一层、少一层、.agent-team 之外、退化输入都不算', () => {
+  for (const p of ['/proj/.agent-team/approvals.jsonl', '/proj/.agent-team/runs/r1/x/delivered.json', '/proj/src/delivered.json', '/proj/runs/r1/delivered.json', '', undefined]) {
+    assert.equal(isGateFile(p), false, String(p))
+  }
+  assert.equal(isGateFile('/proj/.agent-team/runs/r1/../r2/approvals.jsonl'), true)
+  assert.equal(isGateFile('/proj/.agent-team/runs/r1/approvals.jsonl/../x'), false)
+})
+
+test('M3z leafName：剥流后缀、结尾的点与空格，转小写', () => {
+  assert.equal(leafName('C:\\p\\.agent-team\\runs\\r1\\APPROVALS.JSONL::$DATA'), 'approvals.jsonl')
+  assert.equal(leafName('/p/runs/r1/delivered.json. '), 'delivered.json')
+  assert.equal(leafName('/p/runs/r1/state.json:x'), 'state.json')
+  assert.equal(leafName(''), '')
+})
+
+test('M3z mayBeGateFile：按规范化之后的末段认，写法认不出时也认；别的名字、8.3 短名不认', () => {
+  for (const p of ['C:\\p\\.agent-team\\runs\\r1\\approvals.jsonl::$DATA', '/p/runs/r1/APPROVALS.JSONL.', '/p/delivered.json']) {
+    assert.equal(mayBeGateFile(p), true, p)
+  }
+  for (const p of ['/p/runs/r1/state.json', '/p/runs/r1/approvals.jsonl.bak', '/p/runs/r1/APPROV~1.JSO', '', null]) {
+    assert.equal(mayBeGateFile(p), false, String(p))
+  }
+})
+
+test('M3z mayBeStateFile 与 mayBeGateFile 共用一份末段规范化（行为不变）', () => {
+  assert.equal(mayBeStateFile('C:\\p\\runs\\r1\\STATE.JSON::$DATA'), true)
+  assert.equal(mayBeStateFile('/p/runs/r1/STATE~1.JSO'), true)
+  assert.equal(mayBeStateFile('/p/runs/r1/approvals.jsonl'), false)
+})

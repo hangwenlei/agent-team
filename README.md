@@ -111,6 +111,8 @@ flowchart TB
 
 每次提问都会引用契约原文，给出 2–4 个具体选项、各自的后果和它的推荐；你的回答会作为修订写进契约。技术选型、裁掉哪些角色、代码风格这类事，它自己决定。
 
+返工用尽时，只有选项「再返工一轮：回到 <段>」会被门禁记成再来一轮的批准；会话问不了你时（后台会话、`-p`），单独发一条只写这一句的消息也算。
+
 ### 产物在哪
 
 ```text
@@ -121,6 +123,8 @@ flowchart TB
 └── runs/<run_id>/
     ├── 00-contract.md  契约：你的原话与修订记录
     ├── …               各阶段的产物（实现阶段每个执行角色各一份）
+    ├── approvals.jsonl 你批准过的额外返工轮（门禁自己记）
+    ├── delivered.json  门禁记下的已交付产物快照
     └── state.json      这一趟的账本
 ```
 
@@ -288,6 +292,8 @@ The project manager is the only role that talks to you, and it stops to ask abou
 
 Each question quotes the contract and offers two to four concrete options with their consequences and a recommendation; your answer is added to the contract as a revision. Technology choices, which roles to leave out and code style are decided without asking you.
 
+When rework runs out, only the option 「再返工一轮：回到 <stage>」 is recorded by the gates as approval for another round; in a session that cannot ask you (a background session, `-p`), a message containing just that line counts too.
+
 ### Where things land
 
 ```text
@@ -298,6 +304,8 @@ Each question quotes the contract and offers two to four concrete options with t
 └── runs/<run_id>/
     ├── 00-contract.md  the contract: your words and its revisions
     ├── …               each stage's deliverables (one per implementation role in the implementation stage)
+    ├── approvals.jsonl extra rework rounds you approved (recorded by the gates)
+    ├── delivered.json  the gates' snapshot of delivered artifacts
     └── state.json      the run's ledger
 ```
 

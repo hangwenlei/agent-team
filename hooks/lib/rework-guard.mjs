@@ -10,6 +10,12 @@
 // decideReworkBase 管 rework_base，那几条不是「新的比旧的少」的形状：没记回退就写快照、推进离开一段时那一段里还有
 // 上一轮的产物，都拦。推进本身照样放行——离开的段里的产物都重写过或标了 "accepted" 就行，所以「拦增加会把整条链
 // 锁死」那条理由不受影响。
+// ⚠️ M3z（docs/34，全量审查第 16 条）再订正一次：返工计数那几条也不再全是「新的比旧的少」。判据④（超过上限）本来就是
+// 「拦增加」的形状——上限内它从不触发，到了上限它让第 4 轮没有任何诚实的写法（与判据③互斥）。现在：判据④只罚「比写入前大、
+// 又超过上限」（上限 = 3 + 门禁记下的、覆盖这一段的返工批准条数，hooks/lib/budget.mjs）；回退那一次写入先做预判（这一轮走完
+// 会越限就拒，理由给用户批准的规范标签）；另加一条 stage 不变量（stage 与这次追加的 history 条目都在阶段链上、stage 等于
+// history 末条），把「只改 stage 不记 history」与链外的段这两条绕路堵上。推进本身照样放行：上限内的推进与回退一个都不多拒，
+// 「拦增加会把整条链锁死」那条理由针对的那种拦法仍然没有。
 //
 // ⚠️ 只有**旧的**读不出来（本趟第一次写、或者文件本来就坏了）才放行——那是 PM 把坏文件修回去
 // 的路，与 gate.mjs 里 I2 豁免同一个理由（不要把运维人逼进死角）。**新的**必须永远是合法的
@@ -25,6 +31,7 @@
 import { reworkFromHistory, REWORK_LIMIT, isNonNegativeInteger } from './state.mjs'
 // isPlainObject 走 stages.mjs 同一份（M2b 终审 A2），原先是这里的私有拷贝。
 import { isPlainObject, isStageChain, productsOfStage } from './stages.mjs'
+import { approvalTargetFor, askUserText, limitOf, overLimit } from './budget.mjs'
 import { normalizeText } from './text-norm.mjs'
 // 拒绝理由会被模型读到；阶段名与计数值来自 state.json（磁盘或这次写入的内容），一律过 quote（M3s，docs/27）。
 import { quote, safeJson } from './trusted.mjs'
@@ -39,7 +46,21 @@ function counts(history) {
   return c
 }
 
-export function decideRework({ before, after }) {
+// 同一段原地重来（history 末条之后再追加同一段）在门禁眼里就是回退；PM 把同段重派误记成回退时，这一句先说出来。
+const SAME_STAGE_HINT =
+  '如果这只是同一段里重派一个角色（它这一次没交齐，再派它一次），那不是回退：去掉新追加的这条 history，rework 也不加——' +
+  '同段重派不计返工。'
+
+const askUser = (target, grants) => askUserText(target, grants, '再原样重写这次写入。')
+
+/**
+ * H6 返工计数的写时判据。M3z（docs/34，全量审查第 16 条）多两个参数：stages 是插件自己的阶段链（gate.mjs 读 stages.json，读不出来
+ * 给 null），grants 是门禁记下的返工批准（hooks/lib/budget.mjs 的 readGrants，读这份 state.json 同一个目录下的 approvals.jsonl）。
+ * 判据按这个顺序：新内容是对象 → history 只许追加、各段出现次数不许少 → 回退预判 → ③ 不低于派生值 → ④ 类型与上限 → stage 不变量。
+ * 回退预判排在③④之前：PM 第 4 轮不管把 rework 写成多少，拿到的都是带规范标签的那一条理由。
+ * 预判与④的上限那一半拒的时候带 budget: true——gate.mjs 据此在理由末尾补一句「批准会不会记不下」的诊断。
+ */
+export function decideRework({ before, after, stages = null, grants = [] }) {
   // 新的必须是合法的 JSON 对象；旧的读不出来（第一次写、或者本来就坏了）才放行。理由见头部。
   if (!isPlainObject(after)) {
     return {
@@ -49,8 +70,15 @@ export function decideRework({ before, after }) {
         '洗掉的第一步（先写坏、再写一份清零的）。写一份合法的 JSON 对象；要整份重写就用 Write。',
     }
   }
-  if (!isPlainObject(before)) return { ok: true }
+  const chain = isStageChain(stages) ? stages : null
+  if (isPlainObject(before)) {
+    const counted = decideCounts({ before, after, stages: chain, grants })
+    if (!counted.ok) return counted
+  }
+  return chain ? decideChainInvariant({ before: isPlainObject(before) ? before : null, after, stages: chain }) : { ok: true }
+}
 
+function decideCounts({ before, after, stages, grants }) {
   const hb = Array.isArray(before.history) ? before.history : []
   const ha = Array.isArray(after.history) ? after.history : []
 
@@ -63,6 +91,25 @@ export function decideRework({ before, after }) {
   for (const [stage, n] of Object.entries(cb)) {
     if ((ca[stage] ?? 0) < n) {
       return { ok: false, reason: `history 里 ${quote(stage)} 的出现次数从 ${n} 变成 ${ca[stage] ?? 0}——只许追加，不许删。` }
+    }
+  }
+
+  // M3z：回退预判。这次写入记了一次回退（restartInfo），就按「这一轮走完」算：阶段链上不早于回到的那一段、在最后那条回退条目
+  // 之前出现过 n 次的段，这一轮重进它就是第 n 轮返工（hooks/lib/budget.mjs 的 overLimit，O5 的计数）。有一段超过上限就在这一次
+  // 拒——此前要等到三段之后推进进那一段才撞上判据④，而【阶段】还指着那条会被拒的写法。
+  if (stages) {
+    const restart = restartInfo({ before, after, stages })
+    if (restart) {
+      const over = overLimit({ history: ha, restartIndex: restart.index, stages, grants })
+      if (over.length) {
+        const target = Object.keys(stages).find((id) => id === restart.stage)
+        const list = over.map((o) => `${o.stage}（第 ${o.rounds} 轮，上限 ${o.limit}）`).join('、')
+        const head =
+          `这次写入记了一次回退：这一轮回到 ${target}，走完会让 ${list} 的返工超过上限` +
+          `（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级；上限 = ${REWORK_LIMIT} + 门禁记下的、覆盖那一段的返工批准条数）。`
+        const same = typeof before.stage === 'string' && before.stage === restart.stage ? `${SAME_STAGE_HINT}\n` : ''
+        return { ok: false, budget: true, reason: `${same}${head}\n${askUser(target, grants)}` }
+      }
     }
   }
 
@@ -97,8 +144,73 @@ export function decideRework({ before, after }) {
     // 被 validateState 报出来。M2b 终审 A5 把这道不对称的**剩下半边**也补上了：
     // 判据从 `Number(raw)` 改成直接验 raw 的类型，两边共用同一个谓词，
     // `{"S5": true}` 与 `{"S5": " 1 "}` 不再从这里溜过去。
-    if (!isNonNegativeInteger(raw) || raw > REWORK_LIMIT) {
-      return { ok: false, reason: `rework[${quote(stage)}] 是 ${quote(raw)}，不是 0 到 ${REWORK_LIMIT} 之间的整数（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级）。` }
+    if (!isNonNegativeInteger(raw)) {
+      return { ok: false, reason: `rework[${quote(stage)}] 是 ${quote(raw)}，不是非负整数——返工计数是 history 的派生量（规格 §4.2 ③）。` }
+    }
+    // M3z：上限按 limitOf（3 + 覆盖这一段的返工批准条数），而且只罚「比写入前大」——原样带着的旧值不重复拒：批准文件丢了、
+    // 读不出来时，已经记好的第 4 轮不该让之后每一次记账都被拒（那会把整趟锁死，出路只剩改小计数，而那会被判据③拒）。
+    // 写入前不是合法整数也算改大。
+    const limit = limitOf(stage, grants)
+    if (raw > limit) {
+      const prev = isPlainObject(before.rework) ? before.rework[stage] : undefined
+      if (!isNonNegativeInteger(prev) || raw > prev) {
+        const head =
+          `rework[${quote(stage)}] 写成 ${quote(raw)}，超过返工上限 ${limit}` +
+          `（${REWORK_LIMIT} 轮，加上门禁这一趟记下的、覆盖它的返工批准 ${limit - REWORK_LIMIT} 条；规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级）。`
+        if (!stages) {
+          return {
+            ok: false,
+            budget: true,
+            reason: `${head}阶段链读不出来，门禁这次既记不下也认不出返工批准：停下，告诉用户插件可能装坏了（重装或更新 agent-team 插件）。`,
+          }
+        }
+        if (!Object.hasOwn(stages, stage)) {
+          return { ok: false, budget: true, reason: `${head}它不是阶段链上的段：rework 只记链上各段的返工。` }
+        }
+        const target = Object.keys(stages).find((id) => id === approvalTargetFor({ history: ha, stages, stage }))
+        return { ok: false, budget: true, reason: `${head}\n${askUser(target, grants)}` }
+      }
+    }
+  }
+  return { ok: true }
+}
+
+// M3z（O3）：stage 不变量。validateState 早就把「stage 不在链上」「history 条目不在链上」「history 末条不等于 stage」定义成问题，
+// 这里把它们升成写时判据——事后告警挡不住的两条绕路：只改 stage、不追加 history（零代价地撤回一次推进、或者不记账就回到早段
+// 重做，事后只报一次、改回去不留痕）；把 stage 或 history 写成链外的段（S5b、「需求驳回」、DONE——回退预判、回退快照、第 16 条
+// 的重做判据都只认链上的段，一写全部失效）。
+// 写入前读不出来（第一次写、修坏文件）时只核 stage 在链上：那是把坏文件修回去的路，原样保留的旧 history 不核（fail-open.mjs 的
+// 修法叫 PM 照原样保留能认出来的 history）。
+function decideChainInvariant({ before, after, stages }) {
+  const ids = Object.keys(stages)
+  const tail =
+    `收口不往 stage 或 history 里写「DONE」之类的标记——阶段链最后一段（${ids[ids.length - 1]}）就是终点；` +
+    '返工是回到链上的某一段（照 /agent-team:at 第 3 节的「回退」）。'
+  if (typeof after.stage !== 'string' || !Object.hasOwn(stages, after.stage)) {
+    return { ok: false, reason: `state.json 的 stage 写成 ${quote(after.stage)}，它不是阶段链上的段（${ids.join('、')}）。${tail}` }
+  }
+  if (!before) return { ok: true }
+  const hb = Array.isArray(before.history) ? before.history : []
+  const ha = Array.isArray(after.history) ? after.history : []
+  for (let j = hb.length; j < ha.length; j++) {
+    const e = ha[j]
+    if (isPlainObject(e) && typeof e.stage === 'string' && Object.hasOwn(stages, e.stage)) continue
+    const what = isPlainObject(e) && Object.hasOwn(e, 'stage') ? `（stage 是 ${quote(e.stage)}）` : ''
+    return {
+      ok: false,
+      reason:
+        `history 新追加的第 ${j + 1} 条${what}不是 { "stage": 阶段链上的段, "at": "<ISO 时间>" } 的形状。` +
+        `history 只记进入过阶段链上的哪一段。${tail}`,
+    }
+  }
+  const last = ha.length ? ha[ha.length - 1] : undefined
+  if (isPlainObject(last) && last.stage !== after.stage) {
+    return {
+      ok: false,
+      reason:
+        `stage 写成 ${quote(after.stage)}，history 的最后一条却是 ${quote(last.stage)}。推进与回退都是同一次 Write 改 stage、` +
+        '往 history 追加同一段（回退还要记 rework 与 rework_base，照 /agent-team:at 第 3 节）；只改 stage 不记 history，' +
+        '返工计数就漏记了（规格 §4.2 ③）。',
     }
   }
   return { ok: true }
@@ -210,7 +322,8 @@ export function restartInfo({ before, after, stages }) {
     if (cur >= 0 && prev >= 0 && cur <= prev) last = j
   }
   if (last < 0) return null
-  return { stage: ha[last].stage, followedByForward: last < ha.length - 1 }
+  // index（M3z）：回退预判按「这条回退条目之前」的出现次数算（hooks/lib/budget.mjs 的 overLimit）。
+  return { stage: ha[last].stage, followedByForward: last < ha.length - 1, index: last }
 }
 
 // 每个产物名所在的段（链上最早的那一段）的下标。
@@ -309,9 +422,7 @@ function decideAtRestart({ before, after, stages, diskSha, restart }) {
   if (unchecked.length) lines.push(`${names(unchecked)} 在磁盘上但读不出来，不核：不写、或写成一个 sha 都行。`)
   if (typeof before.stage === 'string' && restart.stage === before.stage) {
     // 同一段再追加一条：原地重来，或者 PM 把同段重派误记成了回退。H6 分不出这两样，判定不变，只提醒一句（/at「回退」末尾）。
-    lines.push(
-      '如果这只是同一段里重派一个角色（上限内的单角色重试），那不是回退：去掉新追加的这条 history，rework 也不加。',
-    )
+    lines.push(SAME_STAGE_HINT)
   }
   if (restart.followedByForward) {
     lines.push(

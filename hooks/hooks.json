@@ -108,6 +108,21 @@
             "statusMessage": "回传契约哈希与触达表…"
           }
         ]
+      },
+      {
+        "matcher": "^AskUserQuestion$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "approval-ask"
+            ],
+            "timeout": 30,
+            "statusMessage": "记录返工批准…"
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -117,6 +132,20 @@
             "type": "command",
             "command": "echo 'agent-team reminder: before the first Agent dispatch or the first write under .agent-team in this turn, run the gate self-check from your role file. Earlier results do not count: this session may have been resumed in another process.'",
             "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "approval-prompt"
+            ],
+            "timeout": 30,
+            "statusMessage": "核对返工批准…"
           }
         ]
       }
