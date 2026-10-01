@@ -68,6 +68,11 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   之后到下一次回退为止原样带着；磁盘内容与它记的 sha 相同就是上一轮的，交没交、齐没齐的判据（`gate.mjs` 里 `isStageDone`、`decideDeliverable`、
   `decideReadiness` 的每一处调用，`tests/freshness-call-site.test.mjs` 钉着）都经 `hooks/lib/freshness.mjs`。接受原样要显式标 `"accepted"`，
   不许删条目（删得掉就能悄悄丢掉一条）；推进把关放在 H6，不靠事后回传。不用 mtime 与 `history.at`。理由在 `docs/33`。
+- **返工到上限之后的批准由门禁记，不由 PM 写**：用户经规范标签「再返工一轮：回到 <段>」批准（`AskUserQuestion` 单选，或者对话里单独发这一句），
+  两个记录器（`approval-ask`、`approval-prompt`）只在那一刻真会越限时往 `runs/<id>/approvals.jsonl` 追加一行，`covers` 是越限的段；上限 = 3 + 覆盖那一段的
+  批准条数，`hooks/lib/budget.mjs` 是标签、上限与预判的单一真源。H6 在回退那一次写入就预判；写入前已有的 `history` 条目段名不许改。不记回退的重做
+  按交付快照（`delivered.json`，推进或回退之后由门禁拍）判「交过」：H2 只管叶子角色的重派，H3 只管非 PM 改早段自己的产物，协调者派发时不判
+  （`hooks/lib/redo.mjs`）。两份都是门禁专属文件，H3 对任何人的 Edit/Write 都拒、排在主线程豁免之前。理由在 `docs/34`。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。
