@@ -314,3 +314,14 @@ test('复核【阶段】：写产物时（不是写 state.json）越限那一句
   assert.match(s, /PM 推进之前要先问用户/)
   assert.doesNotMatch(s, /AskUserQuestion/)
 })
+
+// 变异 L06：【返工预算】不按链序取最早越限的段时全绿——上面几条只有一段越限。
+test('变异 L06：几段同时越限、budget 不按链序给 → 标签取链上最早那一段之前最后一次回退回到的段', () => {
+  const s = buildLedgerNotices({
+    // 最后一次回退回到 S5：越限的若取 S5，标签是「回到 S5」；取链上最早的 S2，标签是「回到 S2」（approvalTargetFor 不越过越限的段）。
+    ...base, kind: 'state', stages: REAL_STAGES, state: { stage: 'S5', history: hh('S1', 'S2', 'S3', 'S2', 'S3', 'S2', 'S3', 'S2', 'S3', 'S4', 'S5', 'S6', 'S5') },
+    budget: [{ stage: 'S5', rounds: 4, limit: 3 }, { stage: 'S2', rounds: 4, limit: 3 }],
+  }).join('\n')
+  assert.ok(s.includes(approvalLabel('S2')), s)
+  assert.ok(!s.includes(approvalLabel('S5')), s)
+})

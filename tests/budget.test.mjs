@@ -262,3 +262,16 @@ test('approvalTargetFor 给的段，needOf 照它算出来的 covers 盖得住�
   assert.ok(covers.includes('S6'), JSON.stringify(covers))
   assert.ok(covers.includes('S5'), JSON.stringify(covers))
 })
+
+// ============================================================================ 变异补的判据（docs/34 §3）
+
+// B11：limitOf 也数 rework_to 时，上面那条全绿——那几条批准的 rework_to 都恰好在 covers 里。
+test('变异 B11：rework_to 不在 covers 里的批准，不给 rework_to 那一段额度', () => {
+  assert.equal(limitOf('S5', [{ reworkTo: 'S5', covers: ['S6'] }]), REWORK_LIMIT)
+})
+
+// B16：needOf 去掉「T 晚于末条就不是回退」时，上面那条全绿——那份 history 里晚于末条的段从没进过、算不出越限。
+test('变异 B16：往前走一段（不是回退）不需要批准，哪怕那一段之前已经进过很多次', () => {
+  const h = H('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S6', 'S7', 'S6', 'S7', 'S6', 'S7', 'S6')
+  assert.deepEqual(needOf({ state: state(h), stages: STAGES, grants: [], target: 'S7' }), [])
+})

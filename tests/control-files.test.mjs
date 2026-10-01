@@ -103,3 +103,9 @@ test('M3z mayBeStateFile 与 mayBeGateFile 共用一份末段规范化（行为�
   assert.equal(mayBeStateFile('/p/runs/r1/STATE~1.JSO'), true)
   assert.equal(mayBeStateFile('/p/runs/r1/approvals.jsonl'), false)
 })
+
+// 变异 C07：isGateFile 的末段不过 leafName 时，Windows 上照样全绿（norm 折小写）；流后缀那一种两个平台都靠它。
+test('变异 C07：isGateFile 认带流后缀、结尾带点的末段', () => {
+  assert.equal(isGateFile('/proj/.agent-team/runs/r1/approvals.jsonl::$DATA'), true)
+  assert.equal(isGateFile('/proj/.agent-team/runs/r1/delivered.json:x'), true)
+})

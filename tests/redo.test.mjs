@@ -215,9 +215,7 @@ test('H3：当前段与更晚的段不判；stage 不在链上不判', () => {
 
 // 复核（docs/34 §3，redo-3）：交了一半的补派——H2 因为「没全交过」放行，H3 却按单份产物拦下已交的那一半。两边同一个口径：写者在那一段
 // 自己的产物全都交过，才算重做。
-test('复核 H3：写者在那一段自己的产物没全交过（交了一半的补派）→ 放行', () => {
-  const half = (n) => n === '02-ui-spec.md'
-  assert.equal(redo({ role: 'at-ui', stageId: 'S6', produces: '02-ui-spec.md', isDelivered: half }).decision, 'allow')
+test('复核 H3：写者在那一段自己的产物全交过 → 拦（交了一半的情形见下面「兄弟产物」那一条）', () => {
   assert.equal(redo({ role: 'at-ui', stageId: 'S6', produces: '02-ui-spec.md' }).decision, 'deny')
 })
 
@@ -227,4 +225,44 @@ test('复核 readSnapshot：delivered.json 是 { stage, products }；读出 stag
   assert.deepEqual(readSnapshot(text), { stage: 'S6', products: { a: SHA('a') } })
   assert.deepEqual(readSnapshot('{坏'), { stage: null, products: {} })
   assert.deepEqual(readSnapshot(JSON.stringify({ a: SHA('a') })), { stage: null, products: {} })
+})
+
+// ============================================================================ 变异补的判据（docs/34 §3）
+
+// R05：makeDelivered 的 catch 改成「算交过」时全绿——上面那条抛异常的产物不在快照里，走不到 try。
+test('变异 R05：快照里有、读的时候抛异常 → 不算交过', () => {
+  const delivered = makeDelivered({ snapshot: { boom: SHA('b') }, artifactSha: () => { throw new Error('x') }, isStale: () => false })
+  assert.equal(delivered('boom'), false)
+  const stale = makeDelivered({ snapshot: { a: SHA('a') }, artifactSha: () => SHA('a'), isStale: () => { throw new Error('x') } })
+  assert.equal(stale('a'), false)
+})
+
+// R07：「候选段全都早于当前段」改成「有一段早于」时全绿。派发者认不出（不在花名册里）时候选段退回全部：at-ui 的 S2 与 S5。
+test('变异 R07：候选段里有一段不早于当前段（派发者认不出、at-ui 退回两段）→ 不判', () => {
+  const r = decideRedispatch({
+    stages: STAGES, stageId: 'S5', target: 'at-ui', roster: ROSTER,
+    candidates: candidateStages(STAGES, 'at-ui', 'someone-else', null),
+    isDelivered: allDelivered, callerCanWriteState: true,
+  })
+  assert.equal(r.decision, 'allow')
+})
+
+// R10：去掉「自己的产物非空」时全绿。叶子角色在候选段里一份自己的产物都没有（对象形式的 produces 里没有它）→ 不判。
+test('变异 R10：叶子角色在候选段里没有自己的产物 → 不判', () => {
+  const stages = {
+    S1: { role: 'at-pm', produces: ['00-contract.md'] },
+    S2: { role: 'at-qa', producers: ['at-qa'], produces: { other: ['x.md'] } },
+    S3: { role: 'at-pm', produces: ['y.md'] },
+  }
+  const r = decideRedispatch({ stages, stageId: 'S3', target: 'at-qa', roster: ROSTER, candidates: [['S2', stages.S2]], isDelivered: allDelivered, callerCanWriteState: true })
+  assert.equal(r.decision, 'allow')
+})
+
+// 复核（redo-3 的核验）：「整段」口径会让一份从没写过的兄弟产物（常年缺席的 03-alignment.md）把 H3 对那一段永久放开。收窄成：兄弟产物
+// 在磁盘上、却不算交过（这一窗口刚补的）才当补派放行；兄弟产物根本不在，照拦。
+test('复核 H3：兄弟产物这一窗口刚补（在磁盘上、不在快照里）→ 当补派放行；兄弟产物从没写过 → 照拦', () => {
+  const base = { stages: STAGES, stageId: 'S6', role: 'at-ui', owner: { stageId: 'S2', produces: '02-ui-spec.md' }, filePath: '/p/x', reachableRoles: null }
+  const isDelivered = (n) => n === '02-ui-spec.md'
+  assert.equal(decideRedoWrite({ ...base, isDelivered, artifactExists: (n) => n === '02-wireframe.html' || n === '02-ui-spec.md' }).decision, 'allow')
+  assert.equal(decideRedoWrite({ ...base, isDelivered, artifactExists: (n) => n === '02-ui-spec.md' }).decision, 'deny')
 })

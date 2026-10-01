@@ -7,7 +7,8 @@
 //   - ledger 拍交付快照、出【返工预算】；H2、H3 拿快照判「交过」。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { run, runAsync, hermeticEnv, GATE } from './helpers/gate-runner.mjs'
@@ -497,5 +498,66 @@ test('复核 H6：先推进再回退写在一次里被拒 → 拆开写 → 回�
     assert.ok(reasonOf(r2).includes(L5), reasonOf(r2))
     run('approval-ask', asked({ q: L5 }), GATE, fx.p)
     assert.equal(run('rework', writeState(fx, back), GATE, fx.p).stdout, '')
+  })
+})
+
+// ============================================================================ 变异补的判据（docs/34 §3）
+
+// G05：记录器不读已有批准时全绿——上面那几条在同一次调用里累加，从没有「文件里已经有一条盖住了」这一格。
+test('变异 G05：approvals.jsonl 里已有一条盖住了 → 再选一次标签不记', () => {
+  using({ ids: roundsOf(3), approvals: [{ at: 't', source: 'ask', rework_to: 'S5', covers: ['S5', 'S6'] }] }, (fx) => {
+    const r = run('approval-ask', asked({ q: L5 }), GATE, fx.p)
+    assert.equal(lines(fx.approvalsPath).length, 1)
+    assert.match(contextOf(r), /不需要/)
+  })
+})
+
+// G06：没有 run 与读不出运行状态不分时全绿。
+test('变异 G06：没有进行中的 run → 回传说没有 run，不给修法', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agent-team-norun-'))
+  try {
+    const r = run('approval-ask', asked({ q: L5 }), GATE, dir)
+    assert.match(contextOf(r), /没有进行中的 run/)
+    assert.doesNotMatch(contextOf(r), /修法/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// C10：去掉「认不出的写法」那一支时全绿——别的写法都被路径形状认出来了。网络路径的形状看不穿（norm 不碰网络），只有它拦得住。
+test('变异 C10：主线程经网络共享写门禁专属文件（形状里没有 .agent-team）→ 拒', { skip: process.platform !== 'win32' }, () => {
+  using({ ids: roundsOf(3) }, (fx) => {
+    const r = run('writepath', writeFile('\\\\localhost\\share\\runs\\r1\\approvals.jsonl', null), GATE, fx.p)
+    assert.ok(denied(r), r.stdout)
+  })
+})
+
+// 变异 L07：ledger 不读批准时全绿——【返工预算】那条用的是丢了批准的夹具。
+test('变异 L07：第 4 轮记好、批准还在 → 写 state.json 时不出【返工预算】', () => {
+  using({ ids: [...roundsOf(3), 'S5'], approvals: [{ at: 't', source: 'ask', rework_to: 'S5', covers: ['S5', 'S6'] }] }, (fx) => {
+    const r = run('ledger', postedState(fx), GATE, fx.p)
+    assert.doesNotMatch(contextOf(r), /【返工预算】/)
+  })
+})
+
+// 变异 D02：「交过」不认上一轮的产物时全绿。回退到 S5 记晚了、stage 已经是 S6：05-impl 还是上一轮的（rework_base 记的就是磁盘这份），
+// 那是【返工】的出口——派它重写、它重写都放行。
+test('变异 D02：早段的产物还是上一轮的（rework_base 与磁盘、快照都相同）→ 不算交过，重派与重写都放行', () => {
+  const extra = { rework_base: { '05-impl/at-backend.md': sha('b\n') } }
+  using({ ids: [...FIRST6, 'S5', 'S6'], files: IMPL, extra }, (fx) => {
+    run('ledger', postedState(fx), GATE, fx.p)
+    assert.equal(run('readiness', dispatch('agent-team:at-backend', 'agent-team:at-architect'), GATE, fx.p).stdout, '')
+    assert.equal(run('writepath', writeFile(join(fx.runDir, '05-impl/at-backend.md'), 'agent-team:at-backend'), GATE, fx.p).stdout, '')
+  })
+})
+
+// 变异 D04：H2 不按派发者剪候选段时全绿。at-product 在 S5 派 at-ui：剪过是 S2（早于 S5）→ 拒；不剪就是 S2 与 S5，S5 不早于当前段 → 放。
+test('变异 D04：S5 里 at-product 派 at-ui、at-ui 的 S2 产物交过 → 拒（候选段按派发者剪成 S2）', () => {
+  const files = { ...IMPL, '02-ui-spec.md': 'u\n', '02-wireframe.html': '<p>w</p>\n' }
+  using({ ids: FIRST6.slice(0, 5), files }, (fx) => {
+    run('ledger', postedState(fx), GATE, fx.p)
+    const r = run('readiness', dispatch('agent-team:at-ui', 'agent-team:at-product'), GATE, fx.p)
+    assert.ok(denied(r), r.stdout)
+    assert.match(reasonOf(r), /不记回退重做 S2/)
   })
 })

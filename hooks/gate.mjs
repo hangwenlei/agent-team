@@ -989,6 +989,7 @@ function main() {
           filePath,
           isDelivered: deliveredOf(ctx, fresh),
           reachableRoles: Object.hasOwn(reach, role) ? reach[role].reachableRoles : null,
+          artifactExists: ctx.artifactExists,
         })
         if (rd.decision === 'deny') denyAndExit(rd.reason, spec.event)
       }

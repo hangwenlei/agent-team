@@ -130,15 +130,18 @@ export function decideRedispatch({ stages, stageId, target, roster, candidates, 
  * H3：非 PM 写早段自己名下的产物。owner 是 writepath.mjs 的 stageOwnerOfRunPath 给的 { stageId, produces }（产物名是插件自己的
  * 名字）；filePath 是这次调用给的路径，过 inline。PM 不在这里判（调用方先排掉）。
  */
-export function decideRedoWrite({ stages, stageId, role, owner, filePath, isDelivered, reachableRoles }) {
+export function decideRedoWrite({ stages, stageId, role, owner, filePath, isDelivered, reachableRoles, artifactExists }) {
   if (!isStageChain(stages) || !isPlainObject(owner)) return { decision: 'allow' }
   const c = indexIn(stages, stageId)
   const x = indexIn(stages, owner.stageId)
   if (c < 0 || x < 0 || x >= c) return { decision: 'allow' }
   if (hasWorkIn({ stages, stageId, role, reachableRoles })) return { decision: 'allow' }
-  // 复核（docs/34 §3，redo-3）：与 H2 同一个「整段」口径——写者在那一段自己的产物全都交过，才算重做；交了一半的补派（另一份还没交）放行。
-  const own = expandProduces(stages[owner.stageId], [role])
-  if (!own.includes(owner.produces) || !own.every((n) => isDelivered(n))) return { decision: 'allow' }
+  // 复核（docs/34 §3，redo-3）：交了一半的补派——写者在那一段的另一份产物这一窗口刚补上（在磁盘上、却不算交过），这一次改已交的那份
+  // 当补派的一部分放行（例：at-ui 补上线框图之后改 02-ui-spec.md 去引用它）。不用「整段都交过才算重做」：一份从没写过的兄弟产物
+  // （常年缺席的 03-alignment.md）会让这一段的 H3 永久放开（核验者实测）。
+  const siblings = expandProduces(stages[owner.stageId], [role]).filter((n) => n !== owner.produces)
+  const supplementing = typeof artifactExists === 'function' && siblings.some((n) => artifactExists(n) && !isDelivered(n))
+  if (supplementing || !isDelivered(owner.produces)) return { decision: 'allow' }
   const ids = Object.keys(stages)
   const cur = ids[c]
   const was = ids[x]
