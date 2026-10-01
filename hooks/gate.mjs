@@ -108,6 +108,10 @@ function isValidInput(input) {
 // 「不在花名册里」的调用者放行，{} 会让所有人都「不在花名册里」。所以 decideWritePath 先用 decide.mjs 的
 // isValidRoster（与 H1 同一份）核花名册：读坏时，除 PM 与没有键的 at-qa、at-acceptance 之外一律拒，不走那条
 // 放行。validateProject 读坏时不核对角色名，单列一条【插件】（其余键上的问题照报）。
+// ⚠️ M3v：deliverable 分支没有 run 时判「这次派发派不派得动」（decideDelegation，读坏时判拒，于是不发「有意的放行」那一段）。
+// ⚠️ M3w：H2（readiness）也消费它——按派发者给多段角色选段，要派发者沿派发边的触达（computeReach）。读坏时触达是空的、
+// callerReach 传 null，按派发者选段退回老规则：既可能多拒（S2 已齐后返修 at-ui）也可能少查（S2 被裁时架构师派 at-ui），
+// 但同一次派发 H1 对一切派发都拒（花名册不合法），所以结果不受影响。
 function loadRoster() {
   try {
     return JSON.parse(readFileSync(join(ROOT, 'roster.json'), 'utf8'))
@@ -266,6 +270,8 @@ function isCoordinatorFor(ctx, role) {
   const reach = computeReach({ roster: loadRoster(), paths: {} })
   return (reach[role]?.reachableRoles ?? []).includes(stageRole)
 }
+// ⚠️ M3w（docs/31）：H2 按派发者给多段角色选段（hooks/lib/readiness.mjs 的 candidateStages）用的是同一个口径——「是那一段的
+// role、或能传递派到它」，读 stages[X].role 单数。两处都靠 docs/11 §5.12 的口径甲；改一处要连另一处。
 
 // 放行一侧写 stdout 的唯一出口（M3v，docs/30）：受信回传（contexts，并成一份受信块）与给用户的一行（systemMessage）。
 // 输出长什么样由纯函数 hookOutput（hooks/lib/fail-open.mjs）定：PreToolUse 上不发受信块，SubagentStop 上什么都不发，
@@ -686,6 +692,11 @@ function main() {
       )
       process.exit(0)
     }
+    // M3w（docs/31，全量审查第 13 条）：多段角色（at-ui 在 S2 与 S5）此刻做哪一段由派发者决定——at-product 派的是 S2 的活，
+    // at-architect 派的是 S5 的活。把派发者与它沿花名册派得到的角色传进去，判定在 decideReadiness 里（口径与理由在那里）。
+    // 派发者不在花名册里时 reach 里没有它，传 null，decideReadiness 退回不剪。
+    const caller = callerOf(input)
+    const reach = computeReach({ roster: loadRoster(), paths: {} })
     const r = decideReadiness({
       targetRole: target,
       stages: ctx.stages,
@@ -693,6 +704,8 @@ function main() {
       // M2a：与 deliverable 分支同一个口径——undefined 而不是 []，state.json 坏掉时
       // 退回「全部 producers」这个更宽的集合，宁可多判一次未完成，不要漏。
       roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
+      caller,
+      callerReach: Object.hasOwn(reach, caller) ? reach[caller].reachableRoles : null,
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
   }

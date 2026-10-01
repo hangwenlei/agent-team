@@ -18,7 +18,7 @@
 // Task 3 评审 Minor 5：!target 分支也是 fail open，同样要留痕，第三条测试钉住。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, decisionOf } from './helpers/gate-runner.mjs'
@@ -187,4 +187,93 @@ test('readiness：坏指针时仍然 fail open，但措辞说「读不到运行�
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })
   }
+})
+
+// ——— M3w（docs/31，全量审查第 13 条）：at-ui 按派发者选段 ———
+//
+// 纯函数那一层在 tests/readiness.test.mjs。这里钉的是门禁把派发者（hook 输入的 agent_type）与花名册的触达接进去了：
+// 忘了传派发者或触达时，第一格会退回老规则、按 S5 拒。
+const dispatchUi = (caller) => ({
+  hook_event_name: 'PreToolUse', tool_name: 'Agent', agent_type: caller, tool_input: { subagent_type: 'agent-team:at-ui', prompt: 'x' },
+})
+const S2_DONE = ['00-contract.md', '01-prd.md', '02-ui-spec.md', '02-wireframe.html']
+const withRun = (opts, body) => {
+  const dirs = makeRun({ runId: 'r1', ...opts })
+  try {
+    return body(dirs)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+}
+
+test('readiness（M3w）：S2 已齐之后 at-product 让 at-ui 返修——放行（此前按 S5 的前置拒）', () => {
+  withRun({ stage: 'S2', roster: ['at-product', 'at-ui'], artifacts: S2_DONE }, (dirs) => {
+    const { stdout } = run('readiness', dispatchUi('agent-team:at-product'), undefined, dirs.projectDir)
+    assert.equal(stdout, '', stdout)
+  })
+})
+
+test('readiness（M3w）：S2 被裁、stage 是 S5、04-dispatch.md 缺，架构师派 at-ui——拒，理由点名 04-dispatch.md（此前放行）', () => {
+  withRun({ stage: 'S5', roster: ['at-product', 'at-architect'], trimmed: { 'at-ui': 'S2' }, artifacts: ['00-contract.md', '01-prd.md', '03-arch.md', '03-alignment.md'] }, (dirs) => {
+    const out = decisionOf(run('readiness', dispatchUi('agent-team:at-architect'), undefined, dirs.projectDir).stdout)
+    assert.equal(out?.permissionDecision, 'deny')
+    assert.match(out.permissionDecisionReason, /04-dispatch\.md/)
+  })
+})
+
+test('readiness（M3w）：S2 只交了一半、stage 是 S3——架构师派 at-ui 拒（S5 的前置），at-product 派它补 S2 放行', () => {
+  withRun({ stage: 'S3', roster: ['at-product'], artifacts: ['00-contract.md', '01-prd.md', '02-ui-spec.md'] }, (dirs) => {
+    const arch = decisionOf(run('readiness', dispatchUi('agent-team:at-architect'), undefined, dirs.projectDir).stdout)
+    assert.equal(arch?.permissionDecision, 'deny')
+    assert.match(arch.permissionDecisionReason, /S5/)
+    assert.equal(run('readiness', dispatchUi('agent-team:at-product'), undefined, dirs.projectDir).stdout, '')
+  })
+})
+
+// 派发者不在花名册里（别的插件的代理、用户自己的 subagent）：H1 对它放行，前置只有 H2 在查。不剪、也不因此放行或崩溃——
+// 两格：前置缺照样拒；派多段角色时退回老规则，那一段前置齐了就放行（R3 那一行在门禁层就是这里走得到），stderr 为空。
+test('readiness（M3w）：派发者不在花名册里——前置缺照样拒；派 at-ui、只有契约时按老规则放行，不崩', () => {
+  withRun({ stage: 'S5', artifacts: ['00-contract.md', '01-prd.md', '03-arch.md'] }, (dirs) => {
+    const be = { ...dispatchUi('other-plugin:helper'), tool_input: { subagent_type: 'agent-team:at-backend', prompt: 'x' } }
+    const out = decisionOf(run('readiness', be, undefined, dirs.projectDir).stdout)
+    assert.equal(out?.permissionDecision, 'deny')
+    assert.match(out.permissionDecisionReason, /04-dispatch\.md/)
+  })
+  withRun({ stage: 'S2', artifacts: ['00-contract.md'] }, (dirs) => {
+    const r = run('readiness', dispatchUi('other-plugin:helper'), undefined, dirs.projectDir)
+    assert.equal(r.stdout, '')
+    assert.equal(r.stderr, '')
+  })
+})
+
+// 花名册里某条派发边的元素不是字符串（{"toString":1} 这种）：M3w 起 H2 每次派发都要算触达，computeReach 在这个形状上抛过
+// 异常、H2 对所有派发 fail open（H1 照常放行合法的边）。reach.mjs 现在跳过不是字符串的元素。插件副本里改 roster.json。
+test('readiness（M3w）：花名册的派发边里混进一个不是字符串的元素——H2 照常判，不崩', () => {
+  const plugin = realpathSync(mkdtempSync(join(tmpdir(), 'agent-team-h2-roster-')))
+  try {
+    const repo = new URL('../', import.meta.url)
+    cpSync(new URL('hooks', repo), join(plugin, 'hooks'), { recursive: true })
+    cpSync(new URL('stages.json', repo), join(plugin, 'stages.json'))
+    const roster = JSON.parse(readFileSync(new URL('roster.json', repo), 'utf8'))
+    roster['at-pm'].can_delegate_to.push({ toString: 1 })
+    writeFileSync(join(plugin, 'roster.json'), JSON.stringify(roster), 'utf8')
+    withRun({ stage: 'S4', artifacts: ['00-contract.md', '01-prd.md'] }, (dirs) => {
+      const be = { ...dispatchUi('agent-team:at-architect'), tool_input: { subagent_type: 'agent-team:at-backend', prompt: 'x' } }
+      const r = run('readiness', be, join(plugin, 'hooks', 'boot.mjs'), dirs.projectDir)
+      assert.equal(decisionOf(r.stdout)?.permissionDecision, 'deny', r.stderr)
+      assert.doesNotMatch(r.stderr, /异常崩溃/)
+    })
+  } finally {
+    rmSync(plugin, { recursive: true, force: true })
+  }
+})
+
+test('readiness（M3w）：stage 没推进（停在 S2）、S2 已齐、03/04 缺——架构师派 at-ui 拒，与 at-backend 一致', () => {
+  withRun({ stage: 'S2', roster: ['at-product', 'at-ui'], artifacts: S2_DONE }, (dirs) => {
+    for (const target of ['agent-team:at-ui', 'agent-team:at-backend']) {
+      const input = { ...dispatchUi('agent-team:at-architect'), tool_input: { subagent_type: target, prompt: 'x' } }
+      assert.equal(decisionOf(run('readiness', input, undefined, dirs.projectDir).stdout)?.permissionDecision, 'deny', target)
+    }
+  })
 })

@@ -152,6 +152,15 @@ test('坏形状一律不抛：roster / paths / can_delegate_to / paths 值', () 
   assert.deepEqual(computeReach({ roster: ROSTER, paths: null })['at-pm'].reach, [])
 })
 
+// M3w（docs/31 §3）：can_delegate_to 里的元素不是字符串时不抛、也不算一个角色。此前 {"toString":1} 这样的元素让 BFS 拿它当
+// 属性键抛异常——H5a、ledger 早就在这个形状上崩，M3w 起 H2 每一次派发都要算触达，同一个崩溃会让它对所有派发 fail open。
+test('can_delegate_to 里不是字符串的元素：不抛，不进 reachableRoles', () => {
+  const roster = { a: { can_delegate_to: ['b', { toString: 1 }, 3, null] }, b: { can_delegate_to: [] } }
+  const r = computeReach({ roster, paths: { b: ['pb/'] } })
+  assert.deepEqual(r.a.reachableRoles, ['b'])
+  assert.deepEqual(r.a.reach.sort(), ['pb/'])
+})
+
 // ——— 账二「变更时必须被确认」的那一半 ———
 //
 // 上面所有用例都在夹具上跑，它们对 roster.json 改了一条边不会有任何反应。
@@ -205,6 +214,7 @@ test('花名册的派发边拓扑没有变——变了就必须回来确认触�
     'roster.json 的派发边变了。这不是让你改这条断言了事：一条 can_delegate_to 的变动' +
       '会改变各角色的**实际写入触达**（规格 §6.4 / docs/09 账二）——先用 computeReach ' +
       '算一遍新旧两版，确认哪个角色的触达被放大、放大到谁的地盘，确认这是有意的之后再' +
-      '更新这里。顺带：H4 契约保护的 at-pm 豁免也依赖这份拓扑，见 tests/roster-closure.test.mjs。',
+      '更新这里。顺带：H4 契约保护的 at-pm 豁免也依赖这份拓扑，见 tests/roster-closure.test.mjs；' +
+      'H2 按派发者给多段角色选段、H5a 的协调者集合也依赖它，见 tests/readiness.test.mjs 的「M3w 前提」与 stages.README.md。',
   )
 })
