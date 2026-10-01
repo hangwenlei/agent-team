@@ -401,13 +401,24 @@ test('M3x：字段在、只缺 S3 这一段的键——S3 没记账，报 {S3, a
   ])
 })
 
+test('M3x：S3 的值是 []（记过账、没叫到人）——与缺键同一个答案，不退回 roster', () => {
+  const state = m3xState()
+  state.stage_roles.S3 = []
+  assert.deepEqual(decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE }).gaps, [
+    { stage: 'S3', role: 'at-architect' },
+    { stage: 'S5', role: 'at-ui' },
+  ])
+})
+
 test('M3x：trimmed 照旧按键判——at-ui 记在 S2 的裁剪，S5 那一段也算交代过', () => {
   assert.deepEqual(decideCoverage({ stages, state: m3xState({ trimmed: { 'at-ui': 'S2' } }), availableRoles: M2B_AVAILABLE }).gaps, [])
 })
 
-// 架构师在 S3 叫 at-ios 做调研：它在 S3 被叫到（stage_roles.S3 记着），不替它在 S5 交代——它是 S5 的产者，S5 没叫它就得裁。
-test('M3x：在 S3 被叫去调研的 at-ios 不算在 S5 交代过', () => {
+// 返工轮回到 S3、架构师叫 at-ios 做调研：它在 S3 被叫到（stage_roles.S3 记着），不替它在 S5 交代——它是 S5 的产者，S5 没叫它
+// 就得裁。首轮 S3 时 04-dispatch.md 还不在，架构师派执行角色会被 H2 按 S5 的前置拒掉，所以夹具是返工轮的 history。
+test('M3x：返工轮在 S3 被叫去调研的 at-ios 不算在 S5 交代过', () => {
   const state = m3xState({
+    history: h('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S3', 'S4', 'S5', 'S6', 'S7'),
     roster: [...M3X_ROSTER, 'at-ios'],
     stage_roles: { ...m3xState().stage_roles, S3: ['at-architect', 'at-ios'] },
     trimmed: { 'at-ui': 'S2', 'at-android': 'S5' },
@@ -437,6 +448,10 @@ test('M3x：perStage 说的是这一次有没有按段判——有 stage_roles �
   const old = m3xState()
   delete old.stage_roles
   assert.equal(decideCoverage({ stages, state: old, availableRoles: M2B_AVAILABLE }).perStage, false)
+  // 字段在、形状坏了：participantsOf 当它不在、退回 roster，文案也得按整趟说——与判法同一个开关。
+  for (const bad of [null, [], ['S2'], 'x', 0]) {
+    assert.equal(decideCoverage({ stages, state: m3xState({ stage_roles: bad }), availableRoles: M2B_AVAILABLE }).perStage, false, JSON.stringify(bad))
+  }
 })
 
 // ——— docs/11 §5.25：链尾那一段的产者永远进不了这条判据的宇宙 ———

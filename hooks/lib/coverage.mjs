@@ -41,10 +41,12 @@
 import { stageRoles, isPlainObject, participantsOf } from './stages.mjs'
 
 /**
- * 「已经走过的阶段」里，有没有哪个**这个项目用得上**的产者既不在 roster、也不在 trimmed。
+ * 「已经走过的阶段」里，有没有哪个**这个项目用得上**的产者，既不在那一段叫到的人里（participantsOf：带 stage_roles
+ * 时取 stage_roles[那一段]，旧 run 退回 roster），也不在 trimmed 里。
  *
- * 返回 `{ gaps, narrowed }`。`narrowed` 说的是「这一次到底有没有按 available_roles
- * 收窄」——调用方要靠它决定留不留痕、要不要在文案里说清口径比平时宽。
+ * 返回 `{ gaps, narrowed, perStage }`。`narrowed` 说的是「这一次到底有没有按 available_roles
+ * 收窄」——调用方要靠它决定留不留痕、要不要在文案里说清口径比平时宽。`perStage` 说的是这一次有没有按段判
+ * （state.stage_roles 是普通对象时为真，与 participantsOf 的开关同一个）——文案据此决定头一句怎么说、给不给补记那条出路。
  *
  * ---
  *
@@ -97,8 +99,8 @@ import { stageRoles, isPlainObject, participantsOf } from './stages.mjs'
  * 下一个人看到「at-pm 是 S1 的产者却不在 roster 里」会先愣一下：不是记漏了，是 roster
  * 答的本来就不是那个问题。
  *
- * **交代**（roster ∪ trimmed）：
- *   - 在 roster 里 = 这一趟真的叫到过它；
+ * **交代**（那一段叫到的人 ∪ trimmed）：
+ *   - 在那一段叫到的人里 = 这一段真的叫到过它（旧 run 就是 roster：这一趟真的叫到过它）；
  *     ⚠️ M3x（docs/32）：带 stage_roles 的 run 按段取——在 stage_roles[这一段] 里 = 这一段真的叫到过它。at-ui 在 S2
  *     叫过，不替它在 S5 交代（整趟 roster 下那一格看不见，docs/11 §5.22 B 格）。取法是 participantsOf：没有
  *     stage_roles 的旧 run 退回 roster；有字段、没这一段的键 = 这一段没记账 = 空集，不退回 roster。返回值的

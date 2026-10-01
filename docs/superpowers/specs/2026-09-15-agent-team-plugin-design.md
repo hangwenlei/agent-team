@@ -197,7 +197,7 @@ U4 与 U7 是同一个机制的两个观测面，只是分别撞在「agent 宇�
 > | 展开成 | 决策点 |
 > |---|---|
 > | **写入者自己** | `writepath.mjs` 的 `stageOwnerOfRunPath`（H3 归属；`ledger` 的 `produce` 回传**与它共用同一份**）<br>`deliverable.mjs` 的 `expandProduces(stage, [role])`（H5 交付物展开） |
-> | **这一段叫到的人 `∩ producers`**（M3x） | `state.mjs` 的 `isStageDone`（`gate.mjs` 的两处调用都传 `participantsOf(state, state.stage)`：`stage_roles` 在当前段记着的人，没有 `stage_roles` 的旧 run 退回 `roster`） |
+> | **这一段叫到的人 `∩ producers`**（M3x） | `state.mjs` 的 `isStageDone`（`gate.mjs` 的两处调用都传 `participantsOf(state, state.stage)`：`stage_roles` 在当前段记着的人，没有 `stage_roles` 的旧 run 退回 `roster`）<br>`coverage.mjs` 的 `decideCoverage`（走过的每一段各取那一段的人，∪ `trimmed` 的键，对 `producers ∩ available_roles`） |
 > | **`roster ∩ producers`** | `artifact-drift.mjs` 的 `compareArtifacts` 的 **`drifted` / `missing`**（经 `expectedArtifacts`）<br>`readiness.mjs` 的 `done` |
 > | **全部 `producers`** | `state.mjs` 的 `validateState`（经 `producedNames`）<br>`artifact-drift.mjs` 的 `compareArtifacts` 的 **`unrecorded`**（经 `producedNames`）<br>`readiness.mjs` 的 `producerOf` |
 > | **归属判据（「这一段归不归我」）** | `deliverable.mjs`：`stageRoles(stage).includes(role)`<br>`readiness.mjs`：`stageRoles(s).includes(targetRole)` |
@@ -205,7 +205,7 @@ U4 与 U7 是同一个机制的两个观测面，只是分别撞在「agent 宇�
 > ⚠️ **`isStageDone` 单拆一行（M3x，`docs/32`）。** `roster` 不分段：`at-ui` 在 S2 进过 `roster`，S5 就把它当成
 > S5 的产者——S5 不派它时永远判不齐、它先交又提前判齐。`compareArtifacts` 与 `readiness` 有意仍按整趟 `roster`：
 > 当前段记账之前按段取是空集，前者会漏报 S2/S5 那几份的漂移，后者会把「齐了」判得太早、前置不查就放行。
-> 两行的参与者都交给同一个 `stageRolesInRun` 求交，只是从哪儿取不同。
+> 两行的参与者都交给同一个 `stageRolesInRun` 求交，只是从哪儿取不同。产者交代同样按段（`decideCoverage` 只与 `stageRoles` 求交）。
 >
 > 「`roster ∩ producers`」这一组的单一真源是 `stages.mjs` 的 `stageRolesInRun(stage, roster)`——
 > **不要在调用点自己再 filter 一遍**。M2a 期间这段逻辑一度被写了两份，评审抓出后收敛。
@@ -216,7 +216,7 @@ U4 与 U7 是同一个机制的两个观测面，只是分别撞在「agent 宇�
 > `unrecorded` 问的是「**磁盘上有谁没交代的东西**」，而 `roster` 是 PM 在派发并核实之后
 > 才写的——产物落盘那一刻它必然还不含写它的那个人，**按 `roster` 收窄的 `unrecorded`
 > 因此与它自己声明的用途矛盾**。完整论证在 `hooks/lib/artifact-drift.mjs` 的 M3a 注释块，
-> 不在这里抄第二份。**`stages.README.md` 那张摘要表是这张表的摘要，两处要一起改。**
+> 不在这里抄第二份。**`stages.README.md` 那张摘要表是这张表的摘要，两处要一起改。**（README 那张表另外列出正文层的消费方：`/at-resume`、`/at-status`、`at-qa`。）
 >
 > **漏掉的三处分别会怎样**（都是实测，不是推演）：`writepath.mjs` 的 `producesOf` 对
 > `<role>` 产物恒答「不是你的」，H3 会把 **at-backend 自己**也拒在写
@@ -303,8 +303,8 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
   "run_id": "20260915-1430-login-sso",
   "stage": "S5",
   "contract_sha": "sha256:...",
-  "roster": ["at-frontend", "at-backend", "at-qa"],
-  "stage_roles": { "S5": ["at-frontend", "at-backend"], "S6": ["at-qa"] },
+  "roster": ["at-product", "at-architect", "at-frontend", "at-backend", "at-qa"],
+  "stage_roles": { "S2": ["at-product"], "S3": ["at-architect"], "S5": ["at-architect", "at-frontend", "at-backend"], "S6": ["at-qa"] },
   "trimmed": { "at-ui": "S2" },
   "artifacts": { "01-prd.md": "sha256:..." },
   "history": [
@@ -370,9 +370,10 @@ S5 重做，所以 S5 在 `history` 里出现两次、`rework.S5` 是 1，而 S6
 **同一次** Write 里与 `stage`、`history`、`roster`、`trimmed` 一起记；返工轮只并入、不删。为什么需要它：`roster`
 不分段，`at-ui` 在 S2 叫过，S5 就把它当成 S5 的产者——S5 不派它时永远判不齐、它先交又提前判齐，产者交代
 也看不见「S5 没叫它、也没裁它」。按段读它的是 `isStageDone` 的两处调用与产者交代判据（经 `stages.mjs` 的
-`participantsOf`；有字段、没某一段的键 = 那一段还没记账 = 空集）。`validateState` 核它与 `roster` 双向一致：
-值里的角色都在 `roster` 里，`roster` 里的角色都在某一段里。示例里 S2、S3 没有键，对应的是 `roster` 里也没有
-那两段的人——示例只示形状。
+`participantsOf`；有字段、没某一段的键 = 那一段还没记账 = 空集——这层意思只对产物随参与者展开的段成立：PM 自己做的段
+不写键，对它们没有键就是没叫到谁，不是漏记）。`validateState` 核它与 `roster` 双向一致：
+值里的角色都在 `roster` 里，`roster` 里的角色都在某一段里。示例是一趟完整的账：各段合起来就是 `roster`，S5 里也记着
+被叫去分发的架构师；S5 返工的第二轮并进同一份名单。
 
 ⚠️ **`trimmed` 与 `stage_roles` 缺失不报错**，这是向后兼容：这两个字段是后加的，更早落盘的 `state.json`
 没有它们，而 `/agent-team:at-resume` 要去读那些 run（没有 `stage_roles` 的 run，按段的消费方退回 `roster`）。

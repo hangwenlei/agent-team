@@ -413,7 +413,29 @@ test('M3x GL5：S5 还没记账、at-ui 的实现记录先落盘——【阶段�
 })
 
 // 登记的边界（docs/32 §4）：产者落盘那一刻当前段还没记账，S2/S5 的【阶段】在正路上只在「记了账没推进」时发。
-// 基线同样不发（那一刻 roster 里也还没有这一段的人）。这条钉的是边界本身：哪天时序那一半修了，它会红，回 docs/32 改登记。
+// S2 首轮基线同样不发（那一刻 roster 里还没有这一段的人）；S5 上 at-ui 在 S2 进过 roster 时，基线从它的实现记录落盘起
+// 每次写入都发——之后还有人没交时是 P1 的提前宣布，最后一份落盘起碰巧是对的，新代码这几条一律不发（docs/32 §4）。
+// 这条钉的是边界本身：哪天时序那一半修了，它会红，回 docs/32 改登记。
+// 产物固定的段与这一段记没记账无关：S6 没有键、at-qa 写完 06-test.md，【阶段】照发（与基线相同）。防的是把「当前段没记账」
+// 读成「一律判不齐」——那会让这些段的【阶段】在记账之前全部哑掉，M3k 那种失败形状。
+test('M3x：产物固定的段（S6）还没记账、产物齐了——【阶段】照发', () => {
+  const ctx = m3xLedger({
+    stage: 'S6', roster: ['at-product', 'at-architect', 'at-backend'],
+    stage_roles: { S2: ['at-product'], S3: ['at-architect'], S5: ['at-architect', 'at-backend'] },
+    trimmed: { 'at-ui': 'S2' },
+    history: m3xH('S1', 'S2', 'S3', 'S4', 'S5', 'S6'), artifacts: ['06-test.md'],
+    write: '06-test.md', agent: 'at-qa',
+  })
+  assert.match(ctx, /【阶段】S6 的产物已经齐了/)
+})
+
+// 【阶段】叫 PM 推进时要说清推进与记账是同一次 Write：只改 stage 与 history，推进那一次就会被产者交代当成漏派
+// （commands/at.md 第 3 节第 3 条的理由）。旧 run 的 PM 不该因此加 stage_roles——文案写成「有 stage_roles 的」。
+test('M3x：【阶段】的推进说明写明同一次 Write 记账，stage_roles 只对有它的 run 说', () => {
+  const ctx = m3xLedger({ ...M3X_S2, stage_roles: { S2: ['at-product'] } })
+  assert.match(ctx, /【阶段】S2 的产物已经齐了[\s\S]*同一次 Write[\s\S]*state\.json 里有 stage_roles 的/)
+})
+
 test('M3x 边界：S2 正路上 at-product 写 01-prd.md 那一刻还没记账——【阶段】不发', () => {
   const ctx = m3xLedger({
     stage: 'S2', roster: [], stage_roles: {}, history: m3xH('S1', 'S2'),
@@ -787,6 +809,37 @@ test('M3x：带 stage_roles、收件人改不了 state.json 时，第三条出�
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 护栏原来许诺「只写名字不派人，下一次账本比对会把它报成 missing」——那是假的：compareArtifacts 只比对记过账的产物，
+// 没记账的名字直接跳过（从 M3a 写下那天起就不成立，docs/32 §3）。M3x 把护栏扩到 stage_roles，补记与只写名字在 state.json
+// 里一模一样，那句许诺就更不能留。两支、新旧 run 都钉。
+test('M3x：产者交代的护栏不许诺「账本比对会把它报成 missing」', () => {
+  for (const [fixture, who] of [[WALKED_S5_PER_STAGE, 'at-pm'], [WALKED_S5_PER_STAGE, 'at-backend'], [WALKED_S2, 'at-pm'], [WALKED_S2, 'at-backend']]) {
+    const { projectDir, pluginDir } = makeRun(fixture)
+    try {
+      const ctx = ctxOf(writeState(projectDir, who).stdout) ?? ''
+      assert.match(ctx, /【产者交代】/, `前置：${who} 收到的回传里没有产者交代`)
+      assert.doesNotMatch(ctx, /账本比对会把它报成/, who)
+      assert.match(ctx, /门禁不会再报它/, who)
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
+      rmSync(pluginDir, { recursive: true, force: true })
+    }
+  }
+})
+
+// 收窄失效那一句指着下面的出路——带 stage_roles 的 run 是三条，旧 run 是两条。
+test('M3x：收窄失效时那句「不要照着下面的出路动手」按 run 的形状说条数', () => {
+  for (const [fixture, want] of [[{ ...WALKED_S5_PER_STAGE, project: null }, /在补上之前不要照着下面几条出路动手/], [{ ...WALKED_S2, project: null }, /在补上之前不要照着下面两条出路动手/]]) {
+    const { projectDir, pluginDir } = makeRun(fixture)
+    try {
+      assert.match(ctxOf(writeState(projectDir).stdout) ?? '', want)
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
+      rmSync(pluginDir, { recursive: true, force: true })
+    }
   }
 })
 

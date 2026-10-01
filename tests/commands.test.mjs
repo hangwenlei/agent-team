@@ -451,6 +451,33 @@ test('templates/state.json 的每个顶层键都在 /at 那段「照模板写」
   )
 })
 
+// 同一段列举的另一半：「先留空对象」「先留空数组」前面点名的键，要恰好是模板里值为 {} / [] 的那些（M3x 复核补：
+// 从「先留空对象」里删掉 stage_roles 全绿——上一条只核「点没点名」，不核「填成什么」）。从模板派生，两个方向都核。
+const EMPTY_FILL_RE = /((?:`[a-z_]+`(?:、| 与 )?\s*)+)先留空(对象|数组)/g
+function emptyFillsNamed() {
+  const out = { 对象: new Set(), 数组: new Set() }
+  for (const m of makeRunBlocks()[0].replace(/\s*\n\s*/g, '').matchAll(EMPTY_FILL_RE)) {
+    for (const k of m[1].matchAll(/`([a-z_]+)`/g)) out[m[2]].add(k[1])
+  }
+  return out
+}
+
+test('前置条件：/at 建 run 那一段「先留空对象」「先留空数组」各抠得出至少一个键', () => {
+  const named = emptyFillsNamed()
+  assert.ok(named.对象.size > 0 && named.数组.size > 0, '句式改了，下面那条定位不到列举——它会空转')
+})
+
+test('/at 建 run 那一段「先留空对象 / 数组」的点名，恰好是模板里值为 {} / [] 的顶层键', () => {
+  const named = emptyFillsNamed()
+  const isEmptyObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length === 0
+  const want = {
+    对象: Object.keys(stateTemplate).filter((k) => isEmptyObj(stateTemplate[k])).sort(),
+    数组: Object.keys(stateTemplate).filter((k) => Array.isArray(stateTemplate[k]) && stateTemplate[k].length === 0).sort(),
+  }
+  assert.deepEqual([...named.对象].sort(), want.对象, 'commands/at.md 建 run 那一段「先留空对象」的点名与模板对不上')
+  assert.deepEqual([...named.数组].sort(), want.数组, 'commands/at.md 建 run 那一段「先留空数组」的点名与模板对不上')
+})
+
 // docs/04 §9 ②：H3/H4/H5b 的拒绝父级只有转述，没有硬证据。PM 判断「这一段完成
 // 没完成」必须 stat 磁盘，不能靠对话记忆或子代理回报。四条命令都要写明这一条。
 test('每条命令都写明「核实磁盘，不信子代理自述」', () => {
@@ -460,7 +487,8 @@ test('每条命令都写明「核实磁盘，不信子代理自述」', () => {
 })
 
 // ⭐ docs/11 §5.37：`/agent-team:at-resume` 第 2 节让 PM 按
-// `expandProduces(stage, stageRolesInRun(stage, roster))` 展开、再「齐了 → 推进」。刚进 S2 / S5、
+// `expandProduces(stage, stageRolesInRun(stage, roster))` 展开、再「齐了 → 推进」（§5.37 当时的口径；M3x 起改走
+// participantsOf，见下面这条判据里的开局）。刚进 S2 / S5、
 // 这一段的产者还一个都没派时，展开是空集，而「全部都在磁盘上」对空集是真命题——照字面判会把
 // 整段跳过。跳过 S5 时没有门禁拦得住：S6 的 `requires` 里没有任何一份 `05-impl`。
 //

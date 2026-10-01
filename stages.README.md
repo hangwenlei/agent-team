@@ -55,8 +55,9 @@ S5 是第一种（一个模式配 N 个角色），S2 是第二种（`at-product
 
 ⚠️ **两种形式的展开都收在 `hooks/lib/stages.mjs` 的 `expandProduces` 一处**——它是全部
 消费方的单一真源，**不要在任何调用点另写分支**，也不要在正文里复述展开规则（那会是
-第二份）。要知道「某一阶段这一趟该有哪些产物」，走 `expandProduces(stage,
-stageRolesInRun(stage, roster))`；要知道「某个名字是不是任何一个合法产者的产物」，走
+第二份）。要知道「某一阶段该有哪些产物」，走 `expandProduces(stage, stageRolesInRun(stage, <角色集合>))`——问「这一段
+齐没齐」的（`isStageDone`、`/at-status`、`/at-resume`、`at-qa`）传 `participantsOf(state, stage)`（这一段叫到的人，M3x），
+账本比对与 H2 有意按整趟取，各自传什么见下面那张消费方表；要知道「某个名字是不是任何一个合法产者的产物」，走
 `producedNames`。两者答的是不同的问题，见 `stages.mjs` 头部。
 
 **`<role>` 的展开按消费方不同而不同**，完整表格与理由见主规格 §4 阶段表下方
@@ -194,10 +195,14 @@ Task 4 修复轮 1 补（裁定「豁免不覆盖被证伪的预测」：叙述�
 | S2 | `at-product` | `__main__`、`at-pm` | 实际上不会——返回的角色不会是它们 | 不会 |
 | S3 | `at-architect` | `__main__`、`at-pm` | 实际上不会——返回的角色不会是它们 | 不会 |
 | S4 | `at-pm` | 没有角色派得到 `at-pm` | 不会 | 不会——同 S1 |
-| S5 | `at-backend` | `__main__`、`at-pm`、`at-architect` | **会**——靠的是 `at-architect`；`at-pm`/`__main__` 虽然也派得到，但返回的角色不会是它们 | **看第 2 条**：这一趟派的执行角色都交了 → 报（停在旧阶段）；没交齐 → 静默（合法协调） |
+| S5 | `at-backend` | `__main__`、`at-pm`、`at-architect` | **会**——靠的是 `at-architect`；`at-pm`/`__main__` 虽然也派得到，但返回的角色不会是它们 | **看第 2 条**：`stage_roles.S5` 记着的执行角色（与 S5 `producers` 求交后非空）都交了 → 报（停在旧阶段）；没交齐、S5 还没记账、或记着的人里没有 S5 产者 → 静默（合法协调）；没有 `stage_roles` 的旧 run 看 `roster` |
 | S6 | `at-qa` | `__main__`、`at-pm` | 实际上不会——返回的角色不会是它们 | 不会 |
 | S7 | `at-acceptance` | `__main__`、`at-pm` | 实际上不会——返回的角色不会是它们 | 不会 |
 | S8 | `at-pm` | 没有角色派得到 `at-pm` | 不会 | 不会——同 S1 |
+
+⚠️ **S5 那一行的第 2 条按段判（M3x，`docs/32`）**：在 `/at`「同一次 Write」的正路上，这一格只在两种情况下会响——记了账
+没推进；或返工轮回到 S5 时，上一轮的 S5 名单还在（`docs/32` §4 的时序与返工轮，归第 15 条）。M3x 之前按整趟 `roster`
+判，`at-ui` 在 S2 进过 `roster` 时，S5 正常收尾、PM 还没记账，架构师一返回就被报成停在旧阶段。
 
 「谁派得到它」这一列是拿 `computeReach` 对**改完之后**的真实 `roster.json` 逐阶段跑出来的，
 不是手推的，也不是照着上一版改的（上一版的 S5 行本身就是错的，见本节末尾）。

@@ -47,7 +47,8 @@ export function isPlainObject(v) {
 // ⚠️ producedNames 与 expectedArtifacts 答的是**不同的问题**，别合并：
 //   - producedNames：这个名字是不是**任何一个**合法产者的产物（validateState 校验
 //     artifacts 的键用它——账本里记着 05-impl/at-frontend.md 必须算合法）
-//   - expectedArtifacts：**这一趟**该有哪些（compareArtifacts 与 isStageDone 用它）
+//   - expectedArtifacts：**这一趟**该有哪些（compareArtifacts 的 drifted/missing 用它，整趟口径；isStageDone 从来没经过它，
+//     它自己调 expandProduces + stageRolesInRun，M3x 起参与者由 participantsOf 按段取）
 // 混用会重演 docs/11 §5.6 那个缺口。设计 §1.1 的表里写死了四个消费方各自的集合。
 const ROLE_TOKEN = '<role>'
 
@@ -124,8 +125,8 @@ export function stageRolesInRun(stage, roster) {
  *     缺失是更早落盘的旧 run，v1.5.0 的行为原样保留；形状坏了由 validateState 报；
  *   - stage_roles 是对象：stageId 不是字符串、没有这个键（自有属性）、值不是数组 → []；否则只留字符串。
  *
- * ⚠️ 「有字段、没这一段的键」是空集，**不退回 roster**：那正是「这一段还没记账」——当前段在 PM 记账之前一律判不齐，
- * 走过的段漏记由产者交代报出来。退回 roster 就把这一条要修的错原样请回来。
+ * ⚠️ 「有字段、没这一段的键」是空集，**不退回 roster**：那正是「这一段还没记账」——产物随参与者展开的段在 PM 记账之前
+ * 判不齐（产物固定的段不受影响，照磁盘判），走过的段漏记由产者交代报出来。退回 roster 就把这一条要修的错原样请回来。
  * ⚠️ stageId 先判类型再查键（docs/27 §2.5）：它来自 state.json，{"toString":1} 拿去当属性键会抛。
  * ⚠️ 整趟口径的消费方（compareArtifacts、decideReadiness、never_invoked）**不经这里**，理由在 docs/11 §5.33 的收口。 */
 export function participantsOf(state, stageId) {

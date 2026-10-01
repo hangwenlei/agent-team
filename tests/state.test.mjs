@@ -317,6 +317,16 @@ test('M3x isStageDone：S5 记着叫到 at-ui 与 at-backend、只有 at-ui 交�
   assert.equal(doneByStage(state, '05-impl/at-ui.md'), false)
 })
 
+// 产物固定的段（produces 里没有一条随参与者展开）与这一段记没记账无关：参与者是空集也照磁盘判。
+// 防的是「当前段没记账一律判不齐」那种读法——那会让这些段的【阶段】与 H5a 在记账之前全部哑掉。
+test('M3x isStageDone：产物固定的段没记账（参与者是空集）也照磁盘判', () => {
+  for (const stage of ['S1', 'S3', 'S4', 'S6', 'S7', 'S8']) {
+    const state = { stage, roster: ['at-product'], stage_roles: { S2: ['at-product'] } }
+    assert.deepEqual(participantsOf(state, stage), [], `前置：${stage} 没有键，参与者应是空集`)
+    assert.equal(isStageDone({ stage, stages: REAL_STAGES, artifactExists: () => true, roster: participantsOf(state, stage) }), true, stage)
+  }
+})
+
 test('M3x isStageDone：没有 stage_roles 的旧 run 照旧按整趟 roster 判', () => {
   assert.equal(doneByStage({ stage: 'S5', roster: ['at-architect', 'at-backend'] }, '05-impl/at-backend.md'), true)
   assert.equal(doneByStage({ stage: 'S5', roster: ['at-architect', 'at-backend', 'at-frontend'] }, '05-impl/at-backend.md'), false)
@@ -334,15 +344,16 @@ test('M3x isStageDone：at-ui 只在 S5 干过，S2 按段只等 01-prd.md', () 
 // ---------------------------------------------------------------------------
 //
 // stage_roles 是 roster 按段拆开：值里的每个角色都要在 roster 里，roster 里的每个角色都要在某一段里。不要求是那一段的
-// 产者——架构师在 S5 分发、在 S3 叫执行角色做调研，都是「叫到」。缺失不报：更早落盘的旧 run 没有它，门禁按 roster 判。
+// 产者——架构师在 S5 被叫去分发、PM 在 S3 叫 at-product 澄清需求，都是首轮走得到的「叫到」。缺失不报：更早落盘的旧 run
+// 没有它，门禁按 roster 判。
 const SR_OK = () => ({
   run_id: '20260917-1430-login-sso',
   stage: 'S6',
   contract_sha: SHA,
-  roster: ['at-product', 'at-ui', 'at-architect', 'at-ios', 'at-backend', 'at-frontend', 'at-qa'],
+  roster: ['at-product', 'at-ui', 'at-architect', 'at-backend', 'at-frontend', 'at-qa'],
   stage_roles: {
     S2: ['at-product', 'at-ui'],
-    S3: ['at-architect', 'at-ios'],
+    S3: ['at-architect', 'at-product'],
     S5: ['at-architect', 'at-backend', 'at-frontend'],
     S6: ['at-qa'],
   },
@@ -355,7 +366,7 @@ const SR_OK = () => ({
 })
 const srProblems = (over) => validateState({ ...SR_OK(), ...over }, { stages: REAL_STAGES }).problems
 
-test('M3x validateState：合法的 stage_roles 通过——非产者的叫到（S5 的架构师、S3 调研叫的 at-ios）也合法', () => {
+test('M3x validateState：合法的 stage_roles 通过——非产者的叫到（S5 的架构师、S3 叫来澄清需求的 at-product）也合法', () => {
   assert.deepEqual(srProblems({}), [])
 })
 
@@ -373,11 +384,19 @@ test('M3x validateState：stage_roles 不是对象时报出来', () => {
 test('M3x validateState：stage_roles 的键不在阶段链里时报出来', () => {
   const r = srProblems({ stage_roles: { ...SR_OK().stage_roles, S9: [] } })
   assert.ok(r.some((x) => /stage_roles 里有 "S9"，但 stages\.json 里没有这个阶段/.test(x)), r.join('\n'))
+  // 继承来的键名也不在阶段链里（hasOwn，不是 in）。
+  for (const k of ['constructor', 'toString']) {
+    const rk = srProblems({ stage_roles: { ...SR_OK().stage_roles, [k]: [] } })
+    assert.ok(rk.some((x) => x.includes(`stage_roles 里有 "${k}"，但 stages.json 里没有这个阶段`)), `${k}：${rk.join('\n')}`)
+  }
 })
 
-test('M3x validateState：stage_roles 的值不是字符串数组时报出来', () => {
-  const r = srProblems({ stage_roles: { ...SR_OK().stage_roles, S7: 'at-acceptance' } })
-  assert.ok(r.some((x) => /stage_roles\["S7"\] 不是字符串数组/.test(x)), r.join('\n'))
+// 每一种坏值都恰好报一条、不抛：报完不再往下核这个值（字符串会被逐字当成角色、null 迭代会抛，ledger 整条崩掉）。
+test('M3x validateState：stage_roles 的值不是字符串数组时恰好报一条，不抛', () => {
+  for (const bad of [null, 5, { a: 1 }, true, [1], 'at-acceptance']) {
+    const r = srProblems({ stage_roles: { ...SR_OK().stage_roles, S7: bad } })
+    assert.deepEqual(r.filter((x) => x.includes('stage_roles["S7"]')), ['stage_roles["S7"] 不是字符串数组'], JSON.stringify(bad))
+  }
 })
 
 test('M3x validateState：stage_roles 里记着、roster 里没有的角色报出来', () => {

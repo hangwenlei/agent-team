@@ -197,8 +197,9 @@ test('数组形式行为逐字不变：不含 <role> 的条目仍原样保留一
 // stage_roles（{ 段: [角色] }，与 roster 同一个「叫到」口径、按段拆开），按段的消费方经这个函数取参与者。
 // 没有这个字段的旧 run 退回 roster——v1.5.0 的行为原样保留。每种形状各占一条：缺省方向写反、键缺时退回
 // roster、stageId 不先判类型，各自只有一条会红。
-test('M3x participantsOf：没有 stage_roles 的旧 run 退回 roster', () => {
+test('M3x participantsOf：没有 stage_roles 的旧 run 退回 roster（只留字符串）', () => {
   assert.deepEqual(participantsOf({ roster: ['at-product', 'at-ui'] }, 'S5'), ['at-product', 'at-ui'])
+  assert.deepEqual(participantsOf({ roster: ['at-product', 1, null, 'at-ui'] }, 'S5'), ['at-product', 'at-ui'])
 })
 
 test('M3x participantsOf：旧 run 的 roster 不是数组时返回 undefined（交给 stageRolesInRun 退回全部 producers）', () => {
@@ -212,6 +213,12 @@ test('M3x participantsOf：stage_roles 不是普通对象（null、数组）时�
 
 test('M3x participantsOf：stage_roles 在、没有这一段的键时是空集——这一段还没记账，不退回 roster', () => {
   assert.deepEqual(participantsOf({ roster: ['at-ui'], stage_roles: { S2: ['at-ui'] } }, 'S5'), [])
+})
+
+// 键在、值是 []：这一段记过账、没叫到人——空集，不退回 roster。缺键与 [] 到了消费方都是空集，只有这里分得开；
+// 第 15 条要是选「回退时把那一段清空成 []」，这一格就是承重的。
+test('M3x participantsOf：这一段的值是空数组时是空集，不退回 roster', () => {
+  assert.deepEqual(participantsOf({ roster: ['at-ui'], stage_roles: { S5: [] } }, 'S5'), [])
 })
 
 test('M3x participantsOf：有这一段的键时取它，只留字符串', () => {
@@ -234,6 +241,9 @@ test('M3x participantsOf：state 不是对象时返回 undefined', () => {
   assert.equal(participantsOf(null, 'S5'), undefined)
 })
 
-test('M3x participantsOf：键是继承来的（toString）不算这一段记过账', () => {
+// 对 JSON 解析出来的 state，Object.prototype 上没有数组值，继承键本来就被「值不是数组 → []」兜住（第一行守的是不抛）；
+// 第二行守的是注释里「自有属性」那条承诺——原型链上挂了数组的输入（原型污染之类）也不算这一段记过账。
+test('M3x participantsOf：键是继承来的不算这一段记过账', () => {
   assert.deepEqual(participantsOf({ roster: ['at-ui'], stage_roles: {} }, 'toString'), [])
+  assert.deepEqual(participantsOf({ roster: ['at-ui'], stage_roles: Object.create({ S5: ['at-ui'] }) }, 'S5'), [])
 })

@@ -237,7 +237,9 @@ export function buildLedgerNotices({
     out.push(
       nxt
         ? `【阶段】${st.stage} 的产物已经齐了。这一段如果确实结束了，需要把 state.stage 推进到 ` +
-          `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "<ISO 时间>" }。${who}${tail}`
+          `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "<ISO 时间>" }——用同一次 Write 把这一段的账一起记掉：` +
+          `叫到的人累加进 roster（state.json 里有 stage_roles 的，同一批人并进它的这一段），决定不叫的产出角色写进 trimmed。` +
+          `分两次写，推进那一次会被产者交代当成漏派。${who}${tail}`
         : `【阶段】${st.stage} 的产物已经齐了，而它是阶段链的最后一段——该收口了。${who}${tail}`,
     )
   }

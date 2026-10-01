@@ -42,16 +42,19 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 展开之后：
 
 - **展开出来是空集 → 不算齐了。** 空集只说明这一段还没记账（`stage_roles` 里还没有这一段；旧 run 是
-  `roster` 里还没有这一段的产者——PM 在推进出一段时才记它），不说明没人干过活。S5 去看 `04-dispatch.md`
-  的分工、S2 去看 `01-prd.md` 与 `02-ui-spec.md`、`02-wireframe.html` 在不在：已经在磁盘上的不要重派，
-  没在的从这一段继续派；都齐了就照下一条记账。「全部都在磁盘上」对空集是真命题，照字面判会把整段跳过。
-  判「齐了」的口径只在 `hooks/lib/state.mjs` 的 `isStageDone` 一处，它对空集答「没齐」。
-- **产物齐了** → 这一段其实已经做完，只是没记账。照 `/agent-team:at` 第 3 节第 3、4 条用同一次 Write 记账（`stage`、`history`、`roster`、`stage_roles`、`trimmed`），
+  `roster` 里还没有这一段的产者——PM 在推进出一段时才记它），不说明没人干过活。`stage` 还等于这一段，就说明它
+  还没推进出去：`history` 里有它只说明进过，`artifacts` 里有哈希只说明产物交过。S5 去看 `04-dispatch.md` 的分工；
+  S2 先看 `01-prd.md` 在不在，在就不要重派 `at-product`——`at-ui` 那两份（`02-ui-spec.md`、`02-wireframe.html`）只在这一趟要用 `at-ui` 时才算缺，
+  用不用按磁盘判（契约、`01-prd.md`、`project.json` 的 `available_roles`），不凭记忆；不用，就在记账那次 Write 里把它写进
+  `trimmed`（不在 `available_roles` 里的不用写）。已经在磁盘上的不要重派，该有而没在的从这一段继续派；都齐了就照下一条记账。
+  「全部都在磁盘上」对空集是真命题，照字面判会把整段跳过。判「齐了」的口径只在 `hooks/lib/state.mjs` 的 `isStageDone` 一处，
+  它对空集答「没齐」。run 目录下的产物用 `.agent-team/runs/<run_id>/` 开头的路径去 `Glob`。
+- **产物齐了** → 这一段其实已经做完，只是没记账。先 `Read` `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 的「逐段推进」一节（第 3、4 条），照它用同一次 Write 记账（`stage`、`history`、`roster`、`stage_roles`、`trimmed`；两个字段方向相反：`stage_roles` 是 `{ 段: [角色] }`，`trimmed` 是 `{ 角色: 段 }`），
   然后从下一段继续。`state.json` 里没有 `stage_roles`（更早落盘的 run）就不要加，照旧只累加 `roster`。
 - **产物不齐** → 从这一段继续，先看缺哪个产物、该派谁。
 
 契约那一段（`00-contract.md`）**不要重写**。它是这趟 run 的需求基线，S1 之后就冻结了；
-要改只能走升级流程（见 `/agent-team:at` 的第 4 节）。
+要改只能走升级流程（见 `/agent-team:at` 的第 4 节，`${CLAUDE_PLUGIN_ROOT}/commands/at.md`）。
 
 ## 3. 状态文件有问题时
 
@@ -62,7 +65,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 ## 4. 接着跑
 
-回到 `/agent-team:at` 的第 3 节，按同一套动作推进：派 → 去磁盘核实 → 记账。
+回到 `/agent-team:at` 的第 3 节（`${CLAUDE_PLUGIN_ROOT}/commands/at.md` 的「逐段推进」），按同一套动作推进：派 → 去磁盘核实 → 记账。
 派发同样的规矩：执行角色在第三层，S5 要派 `at-architect` 去分发。
 
 先用一段话告诉用户你读到的位置：哪一趟 run、停在哪一段、磁盘上已经有哪些产物、
