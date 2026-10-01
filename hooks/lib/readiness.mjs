@@ -56,7 +56,20 @@ export function candidateStages(stages, targetRole, caller, callerReach) {
 
 // caller 是这次的派发者（hook 输入的 agent_type，经 callerOf），callerReach 是它沿花名册的派发边（传递地）派得到的角色
 // （hooks/lib/reach.mjs 的 computeReach 算的 reachableRoles）。两者缺一时不按派发者剪枝，见 candidateStages。
-export function decideReadiness({ targetRole, stages, artifactExists, roster, caller, callerReach }) {
+// M3y（docs/33，全量审查第 15 条）：调用方把 artifactExists 换成 freshness 的 artifactCurrent，另传 artifactStale。「齐了没」与
+// 「前置在不在」都按 current 判——回退之后上一轮的产物不让一段判齐、不算前置在。还是上一轮的前置与「缺」分开说，出口按收件人分：
+// callerCanWriteState（派发者写得了 state.json，gate.mjs 用 isContractWriter 算）为真给「标 accepted」，否则（含缺省）叫它冒泡。
+// 没有上一轮的前置时，文案与 v1.6.0 逐字相同。
+export function decideReadiness({
+  targetRole,
+  stages,
+  artifactExists,
+  artifactStale = () => false,
+  roster,
+  caller,
+  callerReach,
+  callerCanWriteState = false,
+}) {
   if (!stages || typeof stages !== 'object') return { decision: 'allow' }
 
   // 一个角色可能是多个阶段的执行者（如 at-pm 既是 S1 又是 S4，at-ui 既是 S2 又是 S5）。先按派发者把候选段收窄（M3w，
@@ -135,21 +148,38 @@ export function decideReadiness({ targetRole, stages, artifactExists, roster, ca
     const done = expandProduces(stage, stageRolesInRun(stage, inRun)).every((p) => artifactExists(p))
     if (done) continue
 
-    const missing = (stage.requires || []).filter((r) => !artifactExists(r))
-    if (missing.length === 0) return { decision: 'allow' }
+    const requires = stage.requires || []
+    const stale = requires.filter((r) => artifactStale(r))
+    const missing = requires.filter((r) => !artifactExists(r) && !stale.includes(r))
+    if (missing.length === 0 && stale.length === 0) return { decision: 'allow' }
 
-    const detail = missing
-      .map((m) => {
-        const from = producerOf(stages, m)
-        return from ? `${m}（${from} 的产物）` : m
-      })
-      .join('、')
+    const named = (list) =>
+      list
+        .map((m) => {
+          const from = producerOf(stages, m)
+          return from ? `${m}（${from} 的产物）` : m
+        })
+        .join('、')
 
+    if (stale.length === 0) {
+      return {
+        decision: 'deny',
+        reason:
+          `${targetRole} 现在要做的是 ${stageId}，但它的前置产物还缺：${named(missing)}。` +
+          `先把产出这些产物的阶段跑完再回来，不要跳过。`,
+      }
+    }
+
+    const staleNames = named(stale)
+    const gap = staleNames.endsWith('）') ? '' : ' '
+    const stalePart = `${staleNames}${gap}还是上一轮的（返工轮里回退之后还没有重写，内容与回退那一刻一样）`
+    const what = missing.length ? `还缺：${named(missing)}；${stalePart}` : ` ${stalePart}`
+    const out = callerCanWriteState
+      ? `这一轮接受上一轮那份原样，就在 state.json 的 rework_base 里把它的值改成 "accepted"（只许当前段及更早段的产物），再派发。`
+      : `rework_base 只有项目经理改得了：你判断上一轮那份这一轮不用重写，就把这一点写进你的回报冒泡给派你的人，由项目经理裁定。`
     return {
       decision: 'deny',
-      reason:
-        `${targetRole} 现在要做的是 ${stageId}，但它的前置产物还缺：${detail}。` +
-        `先把产出这些产物的阶段跑完再回来，不要跳过。`,
+      reason: `${targetRole} 现在要做的是 ${stageId}，但它的前置产物${what}。先把产出这些产物的阶段跑完再回来，不要跳过。${out}`,
     }
   }
 

@@ -120,6 +120,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { norm, underDir } from './path-norm.mjs'
 import { normalizeText } from './text-norm.mjs'
+import { isStageChain } from './stages.mjs'
 // reason 会进拒绝理由、stderr 留痕；JSON.parse 的异常消息会引用文件原文，一律过 quote（M3s，docs/27）。
 import { inline, quote } from './trusted.mjs'
 
@@ -354,10 +355,8 @@ export function readRunContext(projectDir, pluginDir) {
     if (!stages.ok) return { ok: false, kind: 'unreadable', cause: 'plugin', agentTeamDir: base, reason: stages.reason }
     // M3v 复核（docs/30 §3）：解析得出、形状不对的阶段链（{}、某一段的值不是对象）也是插件坏了。此前它算读出来了，每一次派发
     // 都落进 unknown-stage，门禁把原因说成 state.stage、叫 PM 去动 history；H3 也把 PM 的产物说成「不是任何阶段的 produces」。
-    // 只核最外一层：各段里面的字段由各个消费方自己防。
-    const chain = stages.value
-    const values = Object.keys(chain).map((k) => chain[k])
-    if (!values.length || !values.every((v) => v !== null && typeof v === 'object' && !Array.isArray(v))) {
+    // 只核最外一层：各段里面的字段由各个消费方自己防。谓词与 H6 判「读不出阶段链」共用 stages.mjs 的 isStageChain（M3y）。
+    if (!isStageChain(stages.value)) {
       return {
         ok: false,
         kind: 'unreadable',

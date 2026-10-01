@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { stageRoles, expandProduces, producedNames, expectedArtifacts, isPlainObject, participantsOf } from '../hooks/lib/stages.mjs'
+import { stageRoles, expandProduces, producedNames, expectedArtifacts, isPlainObject, participantsOf, isStageChain, productsOfStage } from '../hooks/lib/stages.mjs'
 
 const S5 = { role: 'at-backend', producers: ['at-backend', 'at-frontend', 'at-ui'], produces: ['05-impl/<role>.md'] }
 const S1 = { role: 'at-pm', produces: ['00-contract.md'] }
@@ -246,4 +246,27 @@ test('M3x participantsOf：state 不是对象时返回 undefined', () => {
 test('M3x participantsOf：键是继承来的不算这一段记过账', () => {
   assert.deepEqual(participantsOf({ roster: ['at-ui'], stage_roles: {} }, 'toString'), [])
   assert.deepEqual(participantsOf({ roster: ['at-ui'], stage_roles: Object.create({ S5: ['at-ui'] }) }, 'S5'), [])
+})
+
+// M3y（docs/33）：阶段链的最外一层形状。runctx 判「插件坏了」与 H6 判「读不出阶段链、跳过快照判据」共用这一份——
+// 两处各拼一遍等价条件，一处收紧另一处不会有提示（本文件头部那条）。
+test('M3y isStageChain：至少一段、每一段都是普通对象', () => {
+  assert.equal(isStageChain({ S1: {} }), true)
+  assert.equal(isStageChain(JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))), true)
+})
+
+test('M3y isStageChain：空对象、某一段不是普通对象、整体不是普通对象——都不是阶段链', () => {
+  for (const v of [{}, { S1: 1 }, { S1: {}, S2: null }, { S1: [] }, [], null, 'x', undefined]) {
+    assert.equal(isStageChain(v), false, JSON.stringify(v))
+  }
+})
+
+// M3y：回退那一刻拍快照拍的是「这一段可能有的全部产物」——按全部 producers 展开，不按这一趟叫到谁：上一轮叫过、这一轮
+// 没叫的人留下的产物同样是旧的。
+test('M3y productsOfStage：数组形式按全部 producers 展开，对象形式取全部映射', () => {
+  assert.deepEqual(productsOfStage(S5), ['05-impl/at-backend.md', '05-impl/at-frontend.md', '05-impl/at-ui.md'])
+  assert.deepEqual(productsOfStage(S1), ['00-contract.md'])
+  const S2 = { role: 'at-product', producers: ['at-product', 'at-ui'], produces: { 'at-product': ['01-prd.md'], 'at-ui': ['02-ui-spec.md'] } }
+  assert.deepEqual(productsOfStage(S2), ['01-prd.md', '02-ui-spec.md'])
+  assert.deepEqual(productsOfStage(null), [])
 })

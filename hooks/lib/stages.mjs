@@ -163,3 +163,18 @@ export function producedNames(stages) {
   }
   return out
 }
+
+/** 阶段链的最外一层形状：普通对象、至少一段、每一段都是普通对象。各段里面的字段由各个消费方自己防。
+ * runctx 拿它判「插件装坏了」（M3v，docs/30 §3），H6 拿它判「读不出阶段链、跳过回退快照那几条」（M3y，docs/33）——
+ * 同一个问题只留一份答案。 */
+export function isStageChain(v) {
+  if (!isPlainObject(v)) return false
+  const values = Object.keys(v).map((k) => v[k])
+  return values.length > 0 && values.every(isPlainObject)
+}
+
+/** 这一段**可能有**的全部产物：按全部 producers 展开，不按这一趟叫到了谁（M3y，docs/33）。回退那一刻的快照与「离开这一段时
+ * 还有没有上一轮的产物」都问它——上一轮叫过、这一轮没叫的人留下的那份，同样是上一轮的。 */
+export function productsOfStage(stage) {
+  return expandProduces(stage, stageRoles(stage))
+}
