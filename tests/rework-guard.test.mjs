@@ -581,3 +581,22 @@ test('复核 回退预判：一次写入记了不止一轮、越限 → 拒，�
   assert.equal(r.ok, false)
   assert.match(r.reason, /拆开写/)
 })
+
+// 变异 X32：「stage 等于 history 末条」在末条是链外段时不核也全绿。停在 DONE 的旧 run 只把 stage 改成 S5、不追加 history，等于不记回退
+// 就回到 S5——拒。
+test('变异 X32：停在 DONE 的旧 run 只改 stage、不追加 history → 拒', () => {
+  const ids = [...FIRST6, 'S7', 'S8', 'DONE']
+  const before = sv(ids)
+  const r = decideRework({ before, after: { ...before, stage: 'S5' }, stages: CHAIN, grants: [] })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /history 的最后一条/)
+})
+
+// 变异 X26：只在不是补记时做回退预判也全绿——O5 那几格只测了预算内的补记放行。补记越限要在回退这一次就拒。
+test('变异 X26：补记（回退之后同一次写入又往前记）越限 → 在这一次就拒、给标签', () => {
+  const ids = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S7', 'S5', 'S6', 'S7', 'S5', 'S6', 'S7']
+  const r = decide(ids, [...ids, 'S5', 'S6'])
+  assert.equal(r.ok, false)
+  assert.equal(r.budget, true)
+  assert.match(r.reason, /S7（第 4 轮，上限 3）/)
+})

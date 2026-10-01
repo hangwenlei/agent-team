@@ -106,7 +106,7 @@ export function askUserText(target, grants, then) {
       `/agent-team:at 第 4 节：契约追加修订块（回传给你新的 contract_sha），${then}`,
     `用户选「${STOP_LABEL}」：不回退也不推进，往 escalations 记一条 budget-exhausted（用户原话照记），` +
       '把现状、run id 与续跑的办法告诉用户，停下等用户。',
-    `问不了用户（-p、--bg 会话里没有 AskUserQuestion）：停下，告诉用户在对话里单独发一条消息、整条只写「${label}」也算批准。`,
+    `问不了用户（工具面里没有 AskUserQuestion，例如不带权限提示工具的 -p、--bg）：停下，告诉用户在对话里单独发一条消息、整条只写「${label}」也算批准。`,
     `门禁这一趟记下的返工批准：${grantsSummary(grants)}。`,
   ].join('\n')
 }

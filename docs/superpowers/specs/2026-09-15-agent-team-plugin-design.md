@@ -280,7 +280,7 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
 
 **第 3 轮之后（M3z 补，`docs/34`，全量审查第 16 条）**：「不过则升级」的去向是用户。用户经规范标签「再返工一轮：回到 <段>」
 批准（`AskUserQuestion` 里单选它，或者在对话里单独发一条整条只写它的消息），门禁自己记下这条批准（`runs/<id>/approvals.jsonl`，
-门禁专属文件，PM 写不进），PM 不为它多写任何字段。一条批准只盖记下那一刻「回到那一段、这一轮走完」会越限的段，各多一轮上限
+门禁专属文件，PM 用 Edit/Write 写不进；`Bash` 写得进，与 §6.2 同一条边界），PM 不为它多写任何字段。一条批准只盖记下那一刻「回到那一段、这一轮走完」会越限的段，各多一轮上限
 （某段的上限 = 3 + 覆盖它的批准条数）；上限内问的、重复问的都不记。H6 在回退那一次写入就按「这一轮走完」预判，越限就拒、理由给
 标签；用户叫停时不回退也不推进，记 `escalations`、把现状告诉用户，停下等用户。不记回退就派人重做，门禁在派发与写入两帧拦
 （§6 的 H2、H3）——否则预算与回退快照（§4.4 的 `rework_base`）都挂在「回退被记下」这个前提上，被一次不记账的派发整条绕过。
@@ -448,7 +448,7 @@ sha 相同的产物就是上一轮的，H5a/H5b、H2、【阶段】与 H5a「停
 | H3 | PreToolUse / Edit\|Write | per-role 写路径隔离（**只管阶段产物与项目路径；控制文件不走这套判据，见 §6.2.1**）；**M3z 起**门禁专属文件（`runs/*/approvals.jsonl`、`runs/*/delivered.json`）任何人都拒、主线程也拒；非 PM 改自己在更早一段已经交过的产物、而它在当前段没有活，拒（不记回退的重做） | deny | deny（fail closed） |
 | H4 | PreToolUse / Edit\|Write | 契约保护：subagent 写契约 | deny | deny（fail closed） |
 | H5 | `SubagentStop`（真拦截）+ `PostToolUse` / Agent（权威记录） | 交付物校验：声明产出却未写文件 | `SubagentStop`：deny（exit 2 附理由，约 8 次补救机会）；`PostToolUse`：记 warning，不 block | `SubagentStop`：allow（fail open，流程辅助）；`PostToolUse`：记 warning |
-| H6 | PreToolUse / Edit\|Write | 返工预算写时强制：只对 `runs/*/state.json` 生效。返工计数：`history` 只许追加、某阶段出现次数不许变少、`rework` 不许低于派生值；`rework` 超上限（3 + 覆盖它的返工批准条数，§4.2 ③）而且比写入前大才拒，回退那一次写入先按「这一轮走完」预判、越限就拒并给规范标签（**M3z 起**；此前这一条拦的是一切超过 `REWORK_LIMIT` 的值，第 4 轮没有诚实的写法）；**M3z 起**另核 stage 不变量（`stage` 与新追加的 `history` 条目都在阶段链上、`stage` 等于 `history` 末条）。上限内的推进与回退照常放行——PM 每推进一个阶段都要正常重写这个文件；**M3y 起**另核 `rework_base`（§4.4）：回退那一次写入照磁盘记快照（不晚于写入后 stage 的可以直接标 `"accepted"`）、之后原样带着（只许当前段及更早段改成 `"accepted"`，坏条目可删），推进离开一段时那一段里不许还有上一轮的产物 | deny | deny（fail closed）；只有旧的一侧 parse 不出 JSON 时放行（M3r 起新内容必须是合法 JSON），见 §4.2 ③；阶段链读不出来或形状不对时 `rework_base` 几条跳过、往 stderr 留痕，读不出来的产物不核 |
+| H6 | PreToolUse / Edit\|Write | 返工预算写时强制：只对 `runs/*/state.json` 生效。返工计数：`history` 只许追加、某阶段出现次数不许变少、`rework` 不许低于派生值；`rework` 超上限（3 + 覆盖它的返工批准条数，§4.2 ③）而且比写入前大才拒，回退那一次写入先按「这一轮走完」预判、越限就拒并给规范标签（**M3z 起**；此前这一条拦的是一切超过 `REWORK_LIMIT` 的值，第 4 轮没有诚实的写法）；**M3z 起**另核 stage 不变量（`stage` 与新追加的 `history` 条目都在阶段链上、`stage` 等于 `history` 末条）。上限内的推进与回退照常放行——PM 每推进一个阶段都要正常重写这个文件；**M3y 起**另核 `rework_base`（§4.4）：回退那一次写入照磁盘记快照（不晚于写入后 stage 的可以直接标 `"accepted"`）、之后原样带着（只许当前段及更早段改成 `"accepted"`，坏条目可删），推进离开一段时那一段里不许还有上一轮的产物 | deny | deny（fail closed）；只有旧的一侧 parse 不出 JSON 时放行（M3r 起新内容必须是合法 JSON），见 §4.2 ③；阶段链读不出来或形状不对时 `rework_base` 几条跳过、往 stderr 留痕（**M3z 起**回退预判与 stage 不变量也一起跳过，stderr 只留 `rework_base` 那一句；判据④照 3 轮上限拒、理由叫用户重装插件），读不出来的产物不核 |
 
 另有两个记录器（M3z 补，`docs/34`），不是门禁、不拒任何东西：`approval-ask`（`PostToolUse` / `AskUserQuestion`）与 `approval-prompt`
 （`UserPromptSubmit`）。用户选了（或单独发了）规范标签、而这一轮确实需要批准时，往当前 run 的 `approvals.jsonl` 追加一条；记不下时

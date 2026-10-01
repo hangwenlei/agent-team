@@ -179,7 +179,7 @@ test('M3z：/at 第 4 节写明返工预算耗尽怎么问——规范标签、�
   assert.match(S4, /门禁自己记下这条批准/)
   assert.match(S4, /用户选了「停在这里」：不回退也不推进/)
   assert.match(S4, /用户写了别的话：照原话办，它不算批准/)
-  assert.match(S4, /问不了用户（`-p`、`--bg` 会话里没有 `AskUserQuestion`）/)
+  assert.match(S4, /问不了用户（工具面里没有 `AskUserQuestion`，例如不带权限提示工具的 `-p`、`--bg`）/)
   assert.match(S4, /上限内不用问，问了门禁也不记/)
 })
 

@@ -275,3 +275,9 @@ test('变异 B16：往前走一段（不是回退）不需要批准，哪怕那�
   const h = H('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S6', 'S7', 'S6', 'S7', 'S6', 'S7', 'S6')
   assert.deepEqual(needOf({ state: state(h), stages: STAGES, grants: [], target: 'S7' }), [])
 })
+
+// 变异 X01：先剥推荐后缀、再删空白时全绿——「应收」里带后缀的几格都没有尾随空白、括号里也没有空格。
+test('变异 X01：推荐后缀后面跟换行、括号里带空格，照样认得出', () => {
+  assert.equal(parseApprovalLabel('再返工一轮：回到 S5 (Recommended)\n'), 'S5')
+  assert.equal(parseApprovalLabel('再返工一轮：回到 S5 ( Recommended )'), 'S5')
+})

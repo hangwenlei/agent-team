@@ -19,7 +19,9 @@
 //   - 不依赖 PM 把 sha 记进 artifacts（那条回传只发给写者，第 28 条）。
 // 快照是门禁专属文件（H3 对 Edit/Write 一律拒，control-files.mjs 的 GATE_FILES）。读不出来、算不出 sha：一律当没交过——少拦一侧。
 //
-// ⚠️ 「是不是重做」看 state.stage。stage 落后（齐了没推进）只会少拦；超前（第 17 条的提前推进）会多拦，出口是记回退。docs/31 §2.2
+// ⚠️ 「是不是重做」看 state.stage。H2 只拿候选段与 stage 比先后：stage 落后（齐了没推进）只会少拦，超前（第 17 条的提前推进）会多拦，
+//    出口是记回退。H3 还按 stage 判写者在当前段有没有活：stage 落后也会多拦（S4 齐了没推进、架构师已在做 S5 时改 03-*），那时的
+//    出口是推进 stage，拒绝理由里说了（复核的文档核对）。docs/31 §2.2
 //    「H2 选段不看 state.stage」不受影响：选段仍按派发者，这里只拿选出来的段与 stage 比先后。
 import { isPlainObject, isStageChain, productsOfStage, stageRoles, expandProduces } from './stages.mjs'
 import { SHA_RE } from './contract-hash.mjs'
@@ -150,6 +152,7 @@ export function decideRedoWrite({ stages, stageId, role, owner, filePath, isDeli
     reason:
       `${inline(role)} 不得改 ${inline(filePath)}——它是 ${was} 的产物 ${owner.produces}，这一轮已经交过；state.stage 是 ${cur}，` +
       `你在 ${cur} 没有活。改它就是不记回退重做 ${was}：把这一条冒泡给派你的人，由项目经理先记一次回退（回到 ${was}）再派你。` +
-      '只是发现它有问题：写进你的回报里，不要改它。',
+      '只是发现它有问题：写进你的回报里，不要改它。state.stage 若是停在旧阶段（当前段的产物已经齐了、其实已经在做后面的段），' +
+      '回报里说清楚：该做的是推进 stage，不是记回退。',
   }
 }

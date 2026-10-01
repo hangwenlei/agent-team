@@ -213,8 +213,8 @@ test('H3：当前段与更晚的段不判；stage 不在链上不判', () => {
   assert.equal(redo({ role: 'at-backend', stageId: 'S9', produces: '05-impl/at-backend.md' }).decision, 'allow')
 })
 
-// 复核（docs/34 §3，redo-3）：交了一半的补派——H2 因为「没全交过」放行，H3 却按单份产物拦下已交的那一半。两边同一个口径：写者在那一段
-// 自己的产物全都交过，才算重做。
+// 复核（docs/34 §3，redo-3）：交了一半的补派——H2 因为「没全交过」放行，H3 却按单份产物拦下已交的那一半。H3 的口径见下面「兄弟产物」
+// 那一条：兄弟产物这一窗口刚补上才当补派（「整段都交过才算重做」会让一份从没写过的兄弟产物把这一段永久放开）。
 test('复核 H3：写者在那一段自己的产物全交过 → 拦（交了一半的情形见下面「兄弟产物」那一条）', () => {
   assert.equal(redo({ role: 'at-ui', stageId: 'S6', produces: '02-ui-spec.md' }).decision, 'deny')
 })

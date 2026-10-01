@@ -561,3 +561,39 @@ test('变异 D04：S5 里 at-product 派 at-ui、at-ui 的 S2 产物交过 → �
     assert.match(reasonOf(r), /不记回退重做 S2/)
   })
 })
+
+// 变异 Y05：H6 改读 current-run 那一趟的批准时全绿——诊断那一条里别的 run 没有批准。批准不许串 run。
+test('变异 Y05：current-run 指向的另一趟 run 有批准，这一趟没有 → 这一趟的第 4 轮照拒', () => {
+  using({ ids: roundsOf(3) }, (fx) => {
+    const r2 = join(fx.p, '.agent-team', 'runs', 'r2')
+    mkdirSync(r2, { recursive: true })
+    writeFileSync(join(r2, 'state.json'), JSON.stringify(stateOf(roundsOf(3))))
+    writeFileSync(join(r2, 'approvals.jsonl'), JSON.stringify({ at: 't', source: 'ask', rework_to: 'S5', covers: ['S5', 'S6'] }) + '\n')
+    writeFileSync(join(fx.p, '.agent-team', 'current-run'), 'r2')
+    const r = run('rework', writeState(fx, stateOf([...roundsOf(3), 'S5'])), GATE, fx.p)
+    assert.ok(denied(r))
+    assert.match(reasonOf(r), /不在 current-run 指向的那一趟 run 里/)
+  })
+})
+
+// 变异 X11：写不进批准记录时照报「已记下」也全绿。
+test('变异 X11：approvals.jsonl 写不进（成了目录）→ 回传说写不进，不说已记下', () => {
+  using({ ids: roundsOf(3) }, (fx) => {
+    mkdirSync(fx.approvalsPath)
+    const r = run('approval-ask', asked({ q: L5 }), GATE, fx.p)
+    assert.match(contextOf(r), /写不进批准记录/)
+    assert.doesNotMatch(contextOf(r), /已记下/)
+    assert.match(out(r).systemMessage, /没有记成批准/)
+  })
+})
+
+// 变异 X15：不看 .agent-team 在不在就拒认不出的写法时全绿。没有用这支团队的项目里，同名的业务文件（哪怕写法古怪）不归门禁管。
+test('变异 X15：项目里没有 .agent-team 时，主线程用认不出的写法写同名业务文件 → 不拦', { skip: process.platform !== 'win32' }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agent-team-plain-'))
+  try {
+    const r = run('writepath', writeFile(join(dir, 'data', 'approvals.jsonl::$DATA'), null), GATE, dir)
+    assert.equal(r.stdout, '')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

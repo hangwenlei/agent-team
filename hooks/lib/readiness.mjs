@@ -41,7 +41,8 @@ function producerOf(stages, artifact) {
  * 都退回老规则，是安全的一侧。
  * ⚠️ M3z（docs/34，全量审查第 16 条）：选段仍不看 state.stage，但 H2 多了一条看它的判据——叶子角色的候选段全都早于 state.stage、
  * 它在这些段的产物都交过，就是不记回退的重做（hooks/lib/redo.mjs 的 decideRedispatch，gate.mjs 在本函数放行之后调）。那条判据
- * 只拿这里选出的段与 stage 比先后：stage 落后只会少拦，超前（第 17 条的提前推进）会多拦，出口是记回退。
+ * 只拿这里选出的段与 stage 比先后：stage 落后只会少拦，超前（第 17 条的提前推进）会多拦，出口是记回退。（H3 的同名判据还看写者在
+ * 当前段有没有活，stage 落后时也会多拦，见 redo.mjs 头部。）
  *
  * 失效条件（docs/31 §4）：某个角色 R 的 can_delegate_to 里直接有一个多段角色 X，而 X 的各段中「role 是 R、或 R 传递派得到它」
  * 的段不恰好一段——多于一段时仍按「第一个没齐」猜，零段时剪空、退回老规则。tests/readiness.test.mjs 的「M3w 前提」遍历真实
