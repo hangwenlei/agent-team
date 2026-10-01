@@ -229,3 +229,11 @@ test('M3y【阶段】：下一段在 history 里已经出现过时，提醒同�
   const first = buildLedgerNotices({ ...base, stages: REAL_STAGES, stageDone: true, state: { stage: 'S5', history: h('S1', 'S2', 'S3', 'S4', 'S5') } }).join('\n')
   assert.doesNotMatch(first, /在 history 里已经出现过/)
 })
+
+test('M3y【阶段】：history 里混着 null、字符串、数字条目时不抛，「已经出现过」照常判', () => {
+  const h = (...ids) => ids.map((stage) => ({ stage, at: 't' }))
+  for (const bad of [null, 'x', 42]) {
+    const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, stageDone: true, state: { stage: 'S5', history: [bad, ...h('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S5')] } }).join('\n')
+    assert.match(s, /S6 在 history 里已经出现过/, JSON.stringify(bad))
+  }
+})

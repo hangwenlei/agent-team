@@ -568,3 +568,34 @@ test('M3y：当前段不在阶段链上时不按链序剪——照旧把 history
   })
   assert.deepEqual(decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE }).gaps, [{ stage: 'S5', role: 'at-frontend' }])
 })
+
+// 复核（变异重放）补的：只差一段的回退（最常见）与回到链首。
+test('M3y：只差一段的回退——S5 没走完回 S4、S6 没记账回 S5——都不报', () => {
+  const s5to4 = m3xState({
+    stage: 'S4',
+    history: h('S1', 'S2', 'S3', 'S4', 'S5', 'S4'),
+    stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'], S5: ['at-backend'] },
+    roster: ['at-product', 'at-ui', 'at-architect', 'at-backend'],
+    trimmed: {},
+  })
+  assert.deepEqual(decideCoverage({ stages, state: s5to4, availableRoles: M2B_AVAILABLE }).gaps, [])
+  const s6to5 = m3xState({
+    stage: 'S5',
+    history: h('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S5'),
+    stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'], S5: ['at-backend', 'at-frontend', 'at-ui'] },
+    roster: ['at-product', 'at-ui', 'at-architect', 'at-backend', 'at-frontend'],
+    trimmed: {},
+  })
+  assert.deepEqual(decideCoverage({ stages, state: s6to5, availableRoles: M2B_AVAILABLE }).gaps, [])
+})
+
+test('M3y：回到链首 S1 时，后面各段都不报', () => {
+  const state = m3xState({
+    stage: 'S1',
+    history: h('S1', 'S2', 'S3', 'S4', 'S5', 'S1'),
+    stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'], S5: ['at-backend'] },
+    roster: ['at-product', 'at-ui', 'at-architect', 'at-backend'],
+    trimmed: {},
+  })
+  assert.deepEqual(decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE }).gaps, [])
+})

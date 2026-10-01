@@ -187,6 +187,8 @@ test('M3y H5a：PM 收件 → 说是上一轮的，出路有「标 accepted」',
     const c = contextOf(run('deliverable', returned('agent-team:at-backend'), GATE, fx.p))
     assert.match(c, /05-impl\/at-backend\.md 还是上一轮的/)
     assert.match(c, /改成 "accepted"/)
+    assert.match(c, /等 at-backend 写完/)
+    assert.match(c, /重派它这一轮重写/)
     assert.doesNotMatch(c, /磁盘上还没有/, '在磁盘上的不能说成没有')
   })
 })
@@ -195,7 +197,7 @@ test('M3y H5a：架构师收件 → 叫它冒泡，不叫它改 rework_base', ()
   using(AT_S5, (fx) => {
     const c = contextOf(run('deliverable', returned('agent-team:at-backend', 'agent-team:at-architect'), GATE, fx.p))
     assert.match(c, /05-impl\/at-backend\.md 还是上一轮的/)
-    assert.match(c, /冒泡/)
+    assert.match(c, /冒泡给派你的人，由项目经理标 "accepted"/)
     assert.doesNotMatch(c, /改成 "accepted"/)
   })
 })
@@ -404,5 +406,21 @@ test('M3y H6：stat 报别的错（注入 EACCES）→ 在、但读不出来：�
     )
     assert.equal(r.stdout.trim(), '', r.stdout)
     assert.match(r.stderr, /06-test\.md/)
+  })
+})
+
+// 「上一级是一个文件」在 Windows 上 stat 给 ENOENT，那一条打不到 ENOTDIR 那一支——注入一次，各平台都走到它。
+test('M3y H6：stat 报 ENOTDIR（注入）→ 算不在，给它写 sha 是多出来的', () => {
+  using(BEFORE_S6, (fx) => {
+    const r = run(
+      'rework',
+      writeState(fx, restartTo(fx, 'S5', { ...baseOf('05-impl/at-backend.md'), '06-test.md': sha('x') })),
+      GATE,
+      fx.p,
+      { ...hermeticEnv(), AGENT_TEAM_TEST_THROW: 'stat:ENOTDIR:06-test.md' },
+      { nodeArgs: ['-r', INJECT] },
+    )
+    assert.ok(denied(r), r.stdout)
+    assert.match(reasonOf(r), /多出/)
   })
 })

@@ -38,6 +38,8 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 `state.json` 的 `stage_roles` 在那一段记着的人（这一段叫到了谁）；没有 `stage_roles` 的旧 run 退回 `roster`。
 展开规则**只在那一处**，这里不复述（复述就是第二份）；要看它说了什么，
 读 `${CLAUDE_PLUGIN_ROOT}/stages.README.md` 的「`produces` 的两种形式」。
+`stage_roles` 某一段里不是那一段产者的人（例：S5 里被叫去分发的 `at-architect`）本来就该在，展开时被 `stageRolesInRun` 滤掉，
+不是状态不一致，不要去删它。
 
 展开之后：
 
@@ -70,6 +72,9 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 `history` 最后一条与 `stage` 分叉、`contract_sha` 漂移、【project.json】里的阻断之类），**先修它再往下跑**。
 带着一份不自洽的状态继续，后面每一步的判断都建立在它上面。收到【插件】（roster.json 读不出来）是例外：改
 `project.json` 修不好它——停下，告诉用户重装或更新 agent-team 插件。
+
+`artifacts` 里某份产物的 sha 跟不上磁盘（上一个会话里重写过、没收到【产物】回传）时，不要为了拿回传去重派，也不要自己算：
+下一次派发时的【账本比对】会给出磁盘上算出来的 sha，照它改。
 
 ## 4. 接着跑
 

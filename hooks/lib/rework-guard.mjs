@@ -161,6 +161,7 @@ export function parseStateText(text) {
 //
 //   - 回退那一次写入（history 新追加的条目里有一条在链上不晚于它前一条；T = 最后那条的段）：rework_base 必须逐键逐值等于
 //     「T 及之后各段在磁盘上的产物：现在的 sha」∪「写入前 rework_base 里 T 之前各段的条目，原样」。读不出来的产物不核。
+//     例外：所在段不晚于写入后 stage 的，sha 那一格这一次就可以写成 "accepted"（与回退落盘后紧接着再写一次等价）。
 //   - 之后的每一次写入（到下一次回退为止）：原样带着它。只许把当前段及更早段的某一条从 sha 改成 "accepted"（这一轮接受它原样）；
 //     写入前就坏了的条目（值不合法、或不是任何阶段的产物）可以删掉或标 "accepted"。没回退过（写入前缺失或 {}）：只许缺失或 {}。
 //     下一次回退照上一条重拍：回到的那一段及之后各段按那一刻的磁盘，标过的 "accepted" 也换回 sha。
@@ -261,6 +262,15 @@ function decideAtRestart({ before, after, stages, diskSha, restart }) {
   const ab = after.rework_base
   const want = Object.keys(expected)
   if (ab === undefined && want.length === 0) return { ok: true, notes }
+  // 复核（真实会话）改的：所在段不晚于写入后 stage、在快照里的产物，回退这一次就可以标 "accepted"。原来只许照磁盘记 sha——
+  // 可是回退落盘之后紧接着再写一次只改那一条是放行的（decideCarry），两条路落盘的状态一模一样，这条限制挡不住任何东西，
+  // 只让「用户回退时就说了不用改」的那一次写入多被拒一次。口径与 decideCarry 的 accepted 同一个（写入后的 stage），补记也覆盖。
+  const stageOf = stageOfProduct(stages)
+  const cur = stageIndexer(stages).at(after.stage)
+  const mayAccept = (n) => {
+    const i = stageOf.has(n) ? stageOf.get(n) : -1
+    return i >= 0 && cur >= 0 && i <= cur
+  }
 
   const missing = []
   const wrong = []
@@ -268,11 +278,11 @@ function decideAtRestart({ before, after, stages, diskSha, restart }) {
   if (isPlainObject(ab)) {
     for (const n of want) {
       if (!Object.hasOwn(ab, n)) missing.push(n)
-      else if (ab[n] !== expected[n]) wrong.push(n)
+      else if (ab[n] !== expected[n] && !(ab[n] === ACCEPTED && isSha(expected[n]) && mayAccept(n))) wrong.push(n)
     }
     for (const k of Object.keys(ab)) {
       if (Object.hasOwn(expected, k)) continue
-      if (unchecked.includes(k) && isSha(ab[k])) continue
+      if (unchecked.includes(k) && (isSha(ab[k]) || (ab[k] === ACCEPTED && mayAccept(k)))) continue
       extra.push(quote(k))
     }
     if (!missing.length && !wrong.length && !extra.length) return { ok: true, notes }
@@ -289,7 +299,7 @@ function decideAtRestart({ before, after, stages, diskSha, restart }) {
     `这次写入记了一次回退（history 新追加的 ${quote(restart.stage)} 在阶段链上不晚于它前一条），同一次写入要在 rework_base ` +
       `里记下回退那一刻磁盘上各份产物的 sha——之后交没交、齐没齐，门禁靠它分辨哪些产物还是上一轮的。` +
       `${quote(restart.stage)} 及之后各段在磁盘上的产物按现在的内容算，更早各段的条目从写入前原样带过来；` +
-      `回退这一次不能标 "accepted"，接受原样在之后的写入里标。`,
+      `这一轮接受原样的，回到的那一段及更早段（不晚于这次写入后的 stage）的产物这一次就可以写成 "accepted"，还没走到的段的不行。`,
     diff.join(''),
     'rework_base 应当整份写成：',
     safeJson(expected),
@@ -304,7 +314,7 @@ function decideAtRestart({ before, after, stages, diskSha, restart }) {
   if (restart.followedByForward) {
     lines.push(
       '这次写入在回退那一条之后还追加了前进的条目（补记）：上面的值照磁盘现在的内容算，回退之后已经重写过的产物也会被记成' +
-        '上一轮的；它们确是这一轮写的，就在之后的写入里把它们的值改成 "accepted"。',
+        '上一轮的；它们确是这一轮写的，就把它们的值写成 "accepted"（不晚于这次写入后 stage 的，这一次就可以）。',
     )
   }
   return { ok: false, reason: lines.join('\n') }

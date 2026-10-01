@@ -123,10 +123,12 @@ test('M3y：/at 第 3 条写明返工轮里再进走过的段时 rework 那一�
 })
 
 // 「原样带着」只到下一次回退为止：再次回退时 H6 要求回到的那一段及之后各段按磁盘重拍，照「不改值」写会被拒。
-test('M3y：「原样带着」写明到下一次回退为止、再次回退照第三条重拍；回退那一次只记 sha', () => {
+test('M3y：「原样带着」写明到下一次回退为止、再次回退照第三条重拍；回退那一次就可以标 accepted', () => {
   assert.match(REWIND, /原样带着 `rework_base`\*\*（到下一次回退为止）/)
   assert.match(REWIND, /再次回退时照上面第三条重记/)
-  assert.match(REWIND, /这一次只记 sha，`"accepted"` 在之后的写入里标/)
+  // 复核（真实会话）改的：回退那一次就可以标 accepted（只许回到的那一段及更早段），不用拖到「之后的写入」。
+  assert.match(REWIND, /用户已经说过这一轮不用改的[^。]*这一次就可以把它的值写成 `"accepted"`[^。]*只许回到的那一段及更早段/)
+  assert.doesNotMatch(REWIND, /在之后的写入里标/)
   const s3 = section(AT, '## 3. 逐段推进', '### 回退')
   assert.match(s3, /再次回退时照「回退」重记/)
 })

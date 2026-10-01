@@ -108,10 +108,28 @@ test('M3y 回退写入：值不对 → 拒，点名那一份', () => {
   assert.match(r.reason, /值不对[^\n]*05-impl\/at-backend\.md/)
 })
 
-test('M3y 回退写入：回退那一次就标 "accepted" → 拒（快照要照磁盘记；接受原样在之后的写入里标）', () => {
+// 复核（真实会话）改的：用户在回退时就说了「前端不用改」，PM 会顺手在回退那次 Write 里把它标 "accepted"。原来 H6 拒——可是回退
+// 落盘之后紧接着再写一次只改那一条是放行的，两条路落盘的状态一模一样，这条限制挡不住任何东西，只多一次被拒（4 个会话里 3 个
+// 撞上，haiku 还因此把用户的决定拖到了「下一次写入」）。现在回退那一次就可以标：只许快照里有的、所在段不晚于写入后 stage 的。
+test('M3y 回退写入：回到的那一段及更早段在快照里的产物，这一次就可以标 "accepted"', () => {
   const acc = { ...EXPECTED_S5, '05-impl/at-frontend.md': 'accepted' }
   const r = decide({ before: S6_TO_S5.before, after: state('S5', S6_TO_S5.afterHistory, { rework_base: acc }) })
-  assert.equal(r.ok, false)
+  assert.equal(r.ok, true, r.reason)
+})
+
+test('M3y 回退写入：还没走到的段（S6）标 "accepted"、磁盘上没有的写 "accepted" → 拒', () => {
+  const later = decide({ before: S6_TO_S5.before, after: state('S5', S6_TO_S5.afterHistory, { rework_base: { ...EXPECTED_S5, '06-test.md': 'accepted' } }) })
+  assert.equal(later.ok, false)
+  assert.match(later.reason, /值不对[^\n]*06-test\.md/)
+  const absent = decide({ before: S6_TO_S5.before, after: state('S5', S6_TO_S5.afterHistory, { rework_base: { ...EXPECTED_S5, '05-impl/at-ios.md': 'accepted' } }) })
+  assert.equal(absent.ok, false)
+  assert.match(absent.reason, /多出[^\n]*"05-impl\/at-ios\.md"/)
+})
+
+// 补记（回退之后同一次写入又往前记了几段）：写入后的 stage 晚于回到的那一段，那几段的产物（已经重写过的）这一次就能标。
+test('M3y 回退写入：补记时，写入后 stage 及更早段的产物这一次就能标 "accepted"', () => {
+  const r = decide({ before: state('S6', FIRST_ROUND), after: state('S6', [...FIRST_ROUND, ...H('S5', 'S6')], { rework_base: { ...EXPECTED_S5, '05-impl/at-backend.md': 'accepted', '06-test.md': 'accepted' } }) })
+  assert.equal(r.ok, true, r.reason)
 })
 
 test('M3y 回退写入：磁盘上没有的产物不进快照，写了就是多出来的 → 拒', () => {
@@ -328,13 +346,21 @@ test('M3y 回退之后：写入前不合法的值、不是任何阶段产物的�
   const { ['05-impl/at-frontend.md']: _a, ['05-impl/at-legacy.md']: _b, ...cleaned } = bad
   assert.equal(ok(cleaned).ok, true, '两条都删掉')
   assert.equal(ok({ ...EXPECTED_S5, '05-impl/at-frontend.md': 'accepted', '05-impl/at-legacy.md': 'accepted' }).ok, true, '两条都标 accepted')
-  assert.equal(ok({ ...EXPECTED_S5, '05-impl/at-frontend.md': sha('frontend r1'), '05-impl/at-legacy.md': sha('x') }).ok, false, '坏值改成 sha 不开放')
+  const toSha = ok({ ...EXPECTED_S5, '05-impl/at-frontend.md': sha('frontend r1'), '05-impl/at-legacy.md': sha('x') })
+  assert.equal(toSha.ok, false, '坏值改成 sha 不开放')
+  assert.match(toSha.reason, /改了 "05-impl\/at-frontend\.md" 的值/)
+  assert.doesNotMatch(toSha.reason, /不在当前段/)
+  assert.equal(ok({ ...EXPECTED_S5, '05-impl/at-frontend.md': 'garbage2', '05-impl/at-legacy.md': sha('x') }).ok, false, '坏值改成另一个坏值')
+  assert.equal(ok({ ...EXPECTED_S5, '05-impl/at-frontend.md': 42, '05-impl/at-legacy.md': sha('x') }).ok, false, '坏值改成数字')
   const { ['06-test.md']: _c, ...lostGood } = cleaned
   assert.equal(ok(lostGood).ok, false, '合法条目照旧不许删')
   // 写入前只剩坏条目时，整个不写也行。
   const onlyBad = { ...IN_REWORK, rework_base: { '05-impl/at-legacy.md': sha('x') } }
   const after = state('S5', keepHistory)
   assert.equal(decide({ before: onlyBad, after }).ok, true)
+  for (const rb of [null, [], 'x']) {
+    assert.equal(decide({ before: onlyBad, after: state('S5', keepHistory, { rework_base: rb }) }).ok, false, JSON.stringify(rb))
+  }
 })
 
 test('M3y 回退之后：合法的 sha 照旧只许改成当前段及更早段的 "accepted"（坏值那条放开不连带它）', () => {
@@ -375,5 +401,38 @@ test('M3y 回退写入：同一段再追加一条（原地重来）被拒时，�
   const r = decide({ before: state('S5', H('S1', 'S2', 'S3', 'S4', 'S5')), after: state('S5', H('S1', 'S2', 'S3', 'S4', 'S5', 'S5')) })
   assert.equal(r.ok, false)
   assert.match(r.reason, /同一段里重派一个角色/)
+  assert.match(r.reason, /去掉新追加的这条 history，rework 也不加/)
   assert.doesNotMatch(decide({ before: S6_TO_S5.before, after: state('S5', S6_TO_S5.afterHistory) }).reason, /同一段里重派一个角色/)
+})
+
+// 复核（变异重放）补的：标过 "accepted" 的合法条目不许删；拒绝理由里「坏条目可以删或标 accepted」那一句只在真有坏条目时出现。
+test('M3y 回退之后：标过 "accepted" 的条目不许删（它不是坏条目）', () => {
+  const before = { ...IN_REWORK, rework_base: { ...EXPECTED_S5, '05-impl/at-frontend.md': 'accepted' } }
+  const r = decide({ before, after: state('S5', keepHistory, { rework_base: EXPECTED_S5_WITHOUT_FRONTEND() }) })
+  assert.equal(r.ok, false)
+  assert.doesNotMatch(r.reason, /写入前就坏了的条目/)
+})
+
+test('M3y 回退之后：拒绝理由里「坏条目可以删」那一句——有坏条目时出现，没有时不出现', () => {
+  const { ['06-test.md']: _d, ...less } = EXPECTED_S5
+  const mixed = decide({ before: { ...IN_REWORK, rework_base: { ...EXPECTED_S5, '05-impl/at-legacy.md': sha('x') } }, after: state('S5', keepHistory, { rework_base: { ...less, '05-impl/at-legacy.md': sha('x') } }) })
+  assert.equal(mixed.ok, false)
+  assert.match(mixed.reason, /写入前就坏了的条目/)
+  const clean = decide({ before: IN_REWORK, after: state('S5', keepHistory, { rework_base: less }) })
+  assert.equal(clean.ok, false)
+  assert.doesNotMatch(clean.reason, /写入前就坏了的条目/)
+})
+
+function EXPECTED_S5_WITHOUT_FRONTEND() {
+  const { ['05-impl/at-frontend.md']: _f, ...rest } = EXPECTED_S5
+  return rest
+}
+
+test('M3y 回退写入：读不出来的那份不核——不晚于写入后 stage 的可以写 "accepted"，更晚的不行', () => {
+  const { ['05-impl/at-frontend.md']: _f, ...rest } = EXPECTED_S5
+  const ok = decide({ before: S6_TO_S5.before, after: state('S5', S6_TO_S5.afterHistory, { rework_base: { ...rest, '05-impl/at-frontend.md': 'accepted' } }), unreadable: ['05-impl/at-frontend.md'] })
+  assert.equal(ok.ok, true, ok.reason)
+  const { ['06-test.md']: _t, ...rest2 } = EXPECTED_S5
+  const no = decide({ before: S6_TO_S5.before, after: state('S5', S6_TO_S5.afterHistory, { rework_base: { ...rest2, '06-test.md': 'accepted' } }), unreadable: ['06-test.md'] })
+  assert.equal(no.ok, false)
 })
