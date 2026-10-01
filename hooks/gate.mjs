@@ -10,7 +10,7 @@
 // 入口只做「该检查项声明的前置校验」，不做统一校验——H1–H5 分布在三种
 // hook 事件上，输入形状不同（规格 §6 注记）。
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
@@ -20,7 +20,9 @@ import { projectRootFrom, readProjectConfig, readRunContext } from './lib/runctx
 import { decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
-import { decideRework, parseStateText, replayEdit } from './lib/rework-guard.mjs'
+import { decideRework, decideReworkBase, parseStateText, replayEdit } from './lib/rework-guard.mjs'
+import { makeFreshness, staleByStage } from './lib/freshness.mjs'
+import { normalizeText } from './lib/text-norm.mjs'
 import { decideDeliverable } from './lib/deliverable.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { isControlFile, mayBeStateFile } from './lib/control-files.mjs'
@@ -718,10 +720,15 @@ function main() {
     // 派发者不在花名册里时 reach 里没有它，传 null，decideReadiness 退回不剪。
     const caller = callerOf(input)
     const reach = computeReach({ roster: loadRoster(), paths: {} })
+    // M3y（docs/33，全量审查第 15 条）：「齐了没」与「前置在不在」按 freshness 判——返工轮里磁盘内容与 rework_base 记的 sha
+    // 相同的产物是上一轮的，不让一段判齐、不算前置在。还是上一轮的前置单独说，出口按派发者分（写得了 state.json 的给
+    // 「标 accepted」，别的叫它冒泡；谓词与 H3 同一个 isContractWriter）。
+    const fresh = makeFreshness({ artifactExists: ctx.artifactExists, artifactBytes: ctx.artifactBytes, reworkBase: ctx.state?.rework_base })
     const r = decideReadiness({
       targetRole: target,
       stages: ctx.stages,
-      artifactExists: ctx.artifactExists,
+      artifactExists: fresh.artifactCurrent,
+      artifactStale: fresh.isStale,
       // M2a：与 deliverable 分支那次 compareArtifacts 同一个口径——undefined 而不是 []，state.json 坏掉时
       // 退回「全部 producers」这个更宽的集合，宁可多判一次未完成，不要漏。
       // ⚠️ M3x：这里**有意**仍传整趟 roster，不按段取（participantsOf）——H2 放行与否取决于「齐了没」，整趟口径是更严的一侧；
@@ -731,6 +738,7 @@ function main() {
       roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
       caller,
       callerReach: Object.hasOwn(reach, caller) ? reach[caller].reachableRoles : null,
+      callerCanWriteState: isContractWriter(input?.agent_type),
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
   }
@@ -975,8 +983,42 @@ function main() {
       // 旧的读不出来（第一次写、或者本来就坏了）时放行、新的必须是合法 JSON 对象——判定在
       // decideRework 里，理由见 hooks/lib/rework-guard.mjs 头部。parseStateText 剥 BOM，
       // 与 runctx 读 state.json 同一份归一化。
-      const r = decideRework({ before: parseStateText(beforeText), after: parseStateText(afterText) })
+      const before = parseStateText(beforeText)
+      const after = parseStateText(afterText)
+      const r = decideRework({ before, after })
       if (!r.ok) denyAndExit(r.reason, spec.event)
+
+      // M3y（docs/33，全量审查第 15 条）：rework_base——回退那一次写入照磁盘记下各份产物的 sha，之后原样带着，推进离开一段时
+      // 那一段里不许还有上一轮的产物。规则在 decideReworkBase（hooks/lib/rework-guard.mjs 的 M3y 一节），这里只做 I/O：
+      //   - 阶段链读插件自己那份 stages.json，读不出来给 null，由判定那边跳过、留痕（不走 readRunContext，理由同上）；
+      //   - 产物逐份读：run 目录就是 state.json 所在的目录。stat 不到（ENOENT、ENOTDIR）算不在，别的错与读、算 sha 出错都算
+      //     「在、但读不出来」——判定那边对它不核。逐份 try，一份读不出来不让整次判定 fail closed；
+      //   - 判定本身不包 try：它抛异常时照旧落进最外层 catch，H6 fail closed。
+      let stagesForRework = null
+      try {
+        stagesForRework = JSON.parse(normalizeText(readFileSync(join(ROOT, 'stages.json'), 'utf8')))
+      } catch {
+        stagesForRework = null
+      }
+      const runDir = dirname(filePath)
+      const diskSha = (name) => {
+        let st
+        try {
+          st = statSync(join(runDir, name))
+        } catch (err) {
+          const absent = err?.code === 'ENOENT' || err?.code === 'ENOTDIR'
+          return { exists: !absent, sha: null }
+        }
+        if (!st.isFile()) return { exists: false, sha: null }
+        try {
+          return { exists: true, sha: sha256OfContract(readFileSync(join(runDir, name))) }
+        } catch {
+          return { exists: true, sha: null }
+        }
+      }
+      const rb = decideReworkBase({ before, after, stages: stagesForRework, diskSha })
+      if (!rb.ok) denyAndExit(rb.reason, spec.event)
+      for (const note of rb.notes) process.stderr.write(`agent-team H6 返工预算：${note}\n`)
     }
   }
 
@@ -1224,12 +1266,19 @@ function main() {
     // 是 deliverable 分支那段注释末尾那句「两处都改，改一处的时候去看另一处」，
     // **而它点名的那一处正是没改的那一处**——一条注释不是一条判据，这件事现在有实物
     // 了（docs/11 §5.33）。
+    //
+    // ⚠️ M3y（docs/33，全量审查第 15 条）：「齐了没」按 freshness 判——返工轮里磁盘内容与 rework_base 记的 sha 相同的产物是
+    // 上一轮的，不算这一段齐了。此前回退那一次写入一落盘，这条提示就催推进（上一轮的产物都还在）。判据在
+    // tests/freshness-call-site.test.mjs（每一处 isStageDone、decideDeliverable、decideReadiness 都经 freshness）。
+    const fresh = makeFreshness({ artifactExists: ctx.artifactExists, artifactBytes: ctx.artifactBytes, reworkBase: ctx.state?.rework_base })
     const stageDone = isStageDone({
       stage: ctx.state?.stage,
       stages: ctx.stages,
-      artifactExists: ctx.artifactExists,
+      artifactExists: fresh.artifactCurrent,
       roster: participantsOf(ctx.state, ctx.state?.stage),
     })
+    // 【返工】：写 state.json 时，当前段与更早段还是上一轮的产物（hooks/lib/ledger.mjs 那一段）。
+    const reworkStale = kind === 'state' ? staleByStage({ stages: ctx.stages, stageId: ctx.state?.stage, isStale: fresh.isStale }) : null
 
     const notices = buildLedgerNotices({
       kind,
@@ -1242,6 +1291,7 @@ function main() {
       produceName,
       produceSha: produceBytes ? sha256OfContract(produceBytes) : null,
       projectReport,
+      reworkStale,
     })
 
     // M3a Task 2：产者交代判据的触发点是「state.stage 推进出去时」（设计 §3.2），
@@ -1403,11 +1453,16 @@ function main() {
     // hooks/lib/deliverable.mjs 头部的【M1b 改】那一段。ctx.state 在这里必然
     // 存在（ctx.ok 为 true 意味着 state.json 读出来且是对象），但 stage 字段
     // 本身可能缺，那种情形由 decideDeliverable 归成 skipped:'unknown-stage'。
+    //
+    // M3y（docs/33，全量审查第 15 条）：交没交按 freshness 判——返工轮里磁盘内容与 rework_base 记的 sha 相同的产物是上一轮的，
+    // 不算这一轮交了；它与「没写」分开报（r.missing / r.stale）。此前零改动停下 H5b 放行、H5a 一声不吭。
+    const fresh = makeFreshness({ artifactExists: ctx.artifactExists, artifactBytes: ctx.artifactBytes, reworkBase: ctx.state?.rework_base })
     const r = decideDeliverable({
       role,
       stageId: ctx.state?.stage,
       stages: ctx.stages,
-      artifactExists: ctx.artifactExists,
+      artifactExists: fresh.artifactCurrent,
+      artifactStale: fresh.isStale,
     })
 
     // 账本比对（Task 4，规格 §6.2 的内容比对补偿）：排在 r.ok 分支判断之前算，因为不管
@@ -1509,10 +1564,11 @@ function main() {
       // 是因为本仓库最稳定的那个失败模式就是「更正只作用到它逐字点名的那一句上」。
       // 改一处的时候去看另一处。
       const coordinator = isCoordinatorFor(ctx, role)
+      // M3y：「齐了没」与 ledger 那一处同样按 freshness 判——上一轮的产物不让当前段判齐、把协调者的返回报成停在旧阶段。
       const stageDone = isStageDone({
         stage: ctx.state?.stage,
         stages: ctx.stages,
-        artifactExists: ctx.artifactExists,
+        artifactExists: fresh.artifactCurrent,
         roster: participantsOf(ctx.state, ctx.state?.stage),
       })
       // 'unknown-stage'：state.stage 缺失、不是字符串，或不在阶段链里——交付物核验这一次没做，在它改对之前每一次都不做。
@@ -1551,7 +1607,13 @@ function main() {
             `执行者，**而且它也派不到那个执行者**（所以不是一次层级协调），所以这次校验` +
             `**没有意见**——不是它查过了没问题。两种可能：state.stage 停在旧阶段没推进，` +
             `那样 H5 会对整个新阶段全程哑火；或者这次派发本身不该发生。去 run 目录核实。` +
-            `⚠️ **不要靠把 state.stage 改回旧阶段来消掉这条**——那正好制造前一种失效。`
+            `⚠️ **不要靠把 state.stage 改回旧阶段来消掉这条**——那正好制造前一种失效。` +
+            // M3y（docs/33）：驳回之后的返工也会落进这一格（回退没记就重派）。记回退不是「把 stage 改回去」：history 追加、
+            // rework 与 rework_base 同一次 Write 记上。按收件人分：改得了 state.json 的照「回退」一节记，改不了的冒泡。
+            (recipientCanWriteState
+              ? `这次派发若是驳回之后的返工，那不是把 stage 改回去，是记一次回退：照 /agent-team:at 的「回退」一节，` +
+                `同一次 Write 追加 history、记 rework 与 rework_base，再派。`
+              : `这次派发若是驳回之后的返工，记回退是项目经理的事：把这一条原样冒泡给派你的人。`)
         notices.push(notice)
       }
       // 账本比对：不管上面那条哑火告警发不发，只要三个清单有一个非空就并进同一条——
@@ -1587,11 +1649,25 @@ function main() {
       // 上一版这段注释开头写的理由（「因为 H5b 到点会被平台静默放行，父级看到的是
       // 干净的一次通过」）**是同一个归因的另一份**：它只覆盖同步那一种。
       // 两种情形各自为什么都不足以放心，现在由那个常量一并说清；收口 docs/11 §5.33。
-      const notices = [
-        `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，` +
+      //
+      // M3y（docs/33）：r.stale 是返工轮里还是上一轮的产物（在磁盘上，内容与回退那一刻一样）。没有它时文案与 v1.6.0 逐字
+      // 相同；有它时与「没有」分开说，出路按收件人分——改得了 state.json 的给「标 accepted」，改不了的冒泡。
+      const staleText = r.stale.length
+        ? `${r.stale.join('、')} 还是上一轮的（返工轮：磁盘内容与回退那一刻 rework_base 记的 sha 相同，这一轮还没有重写）`
+        : ''
+      const notice = !r.stale.length
+        ? `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，` +
           `但磁盘上还没有。${SUBAGENT_STOP_RETRY_NOTE}` +
-          `。不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`,
-      ]
+          `。不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`
+        : (r.missing.length
+            ? `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，但磁盘上还没有；${staleText}。`
+            : `⚠️ 交付物校验：${role} 在 ${r.stageId} 的 ${staleText}。`) +
+          `${SUBAGENT_STOP_RETRY_NOTE}。不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实。` +
+          (recipientCanWriteState
+            ? `这一轮接受上一轮那份原样，就在 state.json 的 rework_base 里把它的值改成 "accepted"；否则等 ${role} 重写它，` +
+              `或者重派。推进出这一段时，H6 会拦住还是上一轮的产物。`
+            : `rework_base 只有项目经理改得了：等 ${role} 重写它，或者把这一条原样冒泡给派你的人，让它带到项目经理。`)
+      const notices = [notice]
       // 交付物本身还缺产物时，账本比对一样并进同一条——它审计的是全部阶段的
       // produces，不只是刚被判定缺失的这一段（比如更早的阶段被 Bash 绕过写过）。
       if (driftNotice) notices.push(driftNotice)

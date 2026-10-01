@@ -132,7 +132,7 @@ export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 =
 }
 
 export function buildLedgerNotices({
-  kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha, projectReport,
+  kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha, projectReport, reworkStale,
 } = {}) {
   const out = []
   const st = state && typeof state === 'object' ? state : {}
@@ -194,6 +194,32 @@ export function buildLedgerNotices({
     out.push(
       `【state.json】刚写进去的状态有问题，逐条如下——改完再继续，不要带着它往下跑：\n` +
         stateProblems.map((p) => `  - ${p}`).join('\n'),
+    )
+  }
+
+  // M3y（docs/33，全量审查第 15 条）：返工轮里写 state.json 时，列出当前段与更早段还是上一轮的产物（磁盘内容与 rework_base
+  // 记的 sha 相同；gate.mjs 经 freshness.mjs 的 staleByStage 算好传进来）。写 state.json 的只有 PM，出路直接说给它。
+  // 产物名与段 id 都是插件自己的名字（stages.json），原样。只在写 state.json 时发：每写一份产物都刷一遍会把真正要看的东西淹掉。
+  if (kind === 'state' && reworkStale && (reworkStale.current?.length || reworkStale.earlier?.length)) {
+    const lines = []
+    if (reworkStale.current.length) {
+      lines.push(
+        `  - 当前段 ${reworkStale.stage}：${reworkStale.current.join('、')}——交没交、齐没齐的判据（H5、H2、【阶段】）不把它们` +
+          `算成这一轮的，推进出这一段时 H6 会拦。`,
+      )
+    }
+    if (reworkStale.earlier.length) {
+      lines.push(
+        `  - 更早的段：${reworkStale.earlier.map((e) => `${e.name}（${e.stage}）`).join('、')}——推进出那一段时它们本该已经` +
+          `重写或标过 "accepted"：多半是回退记晚了（补记：同一次写入在回退之后又往前记了几段，回退之后已经重写过的也照磁盘` +
+          `记成了上一轮的），或者文件被改回了旧内容。`,
+      )
+    }
+    out.push(
+      `【返工】这是返工轮：state.json 的 rework_base 记着回退那一刻各份产物的 sha，下面这些磁盘内容与它记的一样，` +
+        `还是上一轮的——\n${lines.join('\n')}\n` +
+        `出路：派它的产者这一轮重写；这一轮接受它原样，就在 state.json 的 rework_base 里把它的值改成 "accepted"` +
+        `（只许当前段及更早段的；用 Write 整份重写 state.json）。`,
     )
   }
 

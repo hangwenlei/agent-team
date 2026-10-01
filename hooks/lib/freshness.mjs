@@ -13,7 +13,7 @@
 //    sha256OfContract(null) 去比——normalizeText 把 null 当成字符串 "null"，算出来的 sha 形状合法。
 // ⚠️ 只在 rework_base 里有这一条时才读字节：首轮（没有快照）与快照外的产物一个字节都不多读。
 // ⚠️ sha 的口径与 artifacts 同一个（sha256OfContract：归一化 BOM 与 CRLF），只改行尾不算重写。
-import { isPlainObject } from './stages.mjs'
+import { isPlainObject, isStageChain, productsOfStage } from './stages.mjs'
 import { SHA_RE, sha256OfContract } from './contract-hash.mjs'
 
 export const ACCEPTED = 'accepted'
@@ -34,4 +34,27 @@ export function makeFreshness({ artifactExists, artifactBytes, reworkBase } = {}
   }
   const artifactCurrent = (name) => !!artifactExists(name) && !isStale(name)
   return { isStale, artifactCurrent }
+}
+
+/** 【返工】回传列的那两样（M3y）：当前段还是上一轮的产物，与更早各段还是上一轮的（带所在段）。更晚的段还旧是返工轮的常态
+ * （回退到 S5 时 S6 那份还是上一轮的），不列也不问。更早的段还旧，多半是回退记晚了（补记）、或者文件被改回了旧内容——
+ * 推进出那一段时 H6 本该拦下它。stageId 不在链上、阶段链形状不对时两样都空；stage 是链上那一段的 id（插件自己的名字）。
+ * 每份产物只问一次 isStale（在链上最早出现的那一段）。 */
+export function staleByStage({ stages, stageId, isStale }) {
+  const out = { stage: null, current: [], earlier: [] }
+  if (!isStageChain(stages) || typeof stageId !== 'string' || !Object.hasOwn(stages, stageId)) return out
+  const ids = Object.keys(stages)
+  const t = ids.indexOf(stageId)
+  out.stage = ids[t]
+  const seen = new Set()
+  ids.slice(0, t + 1).forEach((id, i) => {
+    for (const name of productsOfStage(stages[id])) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      if (!isStale(name)) continue
+      if (i === t) out.current.push(name)
+      else out.earlier.push({ name, stage: id })
+    }
+  })
+  return out
 }

@@ -176,3 +176,28 @@ test('退化输入一律不抛', () => {
     assert.doesNotThrow(() => buildLedgerNotices(bad ?? {}))
   }
 })
+
+// ---------------------------------------------------------------------------
+// M3y（docs/33）：【返工】——写 state.json 时，列出当前段与更早段还是上一轮的产物
+// ---------------------------------------------------------------------------
+test('M3y【返工】：写 state.json、当前段还有上一轮的产物 → 列出来，给两条出路', () => {
+  const s = joined({ kind: 'state', reworkStale: { stage: 'S5', current: ['05-impl/at-backend.md'], earlier: [] } })
+  assert.match(s, /【返工】/)
+  assert.match(s, /当前段 S5：05-impl\/at-backend\.md/)
+  assert.match(s, /重写/)
+  assert.match(s, /"accepted"/)
+  assert.doesNotMatch(s, /更早的段/)
+})
+
+test('M3y【返工】：更早段还旧的，带出处、说清多半是补记', () => {
+  const s = joined({ kind: 'state', reworkStale: { stage: 'S6', current: [], earlier: [{ name: '05-impl/at-backend.md', stage: 'S5' }] } })
+  assert.match(s, /更早的段：05-impl\/at-backend\.md（S5）/)
+  assert.match(s, /补记/)
+  assert.doesNotMatch(s, /- 当前段/)
+})
+
+test('M3y【返工】：两样都空、或者写的不是 state.json → 不发', () => {
+  assert.doesNotMatch(joined({ kind: 'state', reworkStale: { stage: 'S5', current: [], earlier: [] } }), /【返工】/)
+  assert.doesNotMatch(joined({ kind: 'state' }), /【返工】/)
+  assert.doesNotMatch(joined({ kind: 'produce', reworkStale: { stage: 'S5', current: ['05-impl/at-backend.md'], earlier: [] } }), /【返工】/)
+})
