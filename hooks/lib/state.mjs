@@ -291,6 +291,28 @@ export function validateState(state, { stages } = {}) {
     }
   }
 
+  // ——— rework_base（M3y，docs/33）：回退快照里各份产物的 sha ———
+  //
+  // { 产物名: sha | "accepted" }。回退那一次写入里记下回退那一刻磁盘上的 sha（更早各段沿用更早那次快照），之后原样带着，只许把当前段及更早段的某一条
+  // 改成 "accepted"——这些写时规则在 H6（hooks/lib/rework-guard.mjs 的 decideReworkBase），这里只核形状。
+  // ⚠️ 缺失不报，与 trimmed、stage_roles 同一个向后兼容：更早落盘的 run 没有它。
+  // ⚠️ 值不回显：写错的 sha 回显出来只是 64 位十六进制的噪声，点名是哪一条就够了。
+  if (Object.hasOwn(state, 'rework_base')) {
+    if (!isPlainObject(state.rework_base)) {
+      p('rework_base 不是对象——它是 { 产物名: sha 或 "accepted" } 的映射，记回退快照里各份产物的 sha')
+    } else {
+      const produced = producedNames(stages)
+      for (const [k, v] of Object.entries(state.rework_base)) {
+        if (!(typeof v === 'string' && (SHA_RE.test(v) || v === 'accepted'))) {
+          p(`rework_base[${quote(k)}] 既不是 sha256:<64 位十六进制> 也不是 "accepted"`)
+        }
+        if (isPlainObject(stages) && !produced.has(k)) {
+          p(`rework_base 里有 ${quote(k)}，但它不是任何阶段的 produces——rework_base 只记阶段产物`)
+        }
+      }
+    }
+  }
+
   if (!isPlainObject(state.artifacts)) {
     p('artifacts 不是对象')
   } else {

@@ -46,18 +46,18 @@ const withoutKey = (k) => {
   return validateState(s, { stages }).problems
 }
 
-// 缺失即合法的那几个键：都是后加的字段，更早落盘的 state.json 没有它们（M3a 的 trimmed、M3x 的 stage_roles）。
+// 缺失即合法的那几个键：都是后加的字段，更早落盘的 state.json 没有它们（M3a 的 trimmed、M3x 的 stage_roles、M3y 的 rework_base）。
 // 正文里的例外名单（commands/at.md 建 run 那一段、主规格 §4.4）由下面「例外名单与正文一致」那条对着它核。
-const OPTIONAL_STATE_KEYS = ['trimmed', 'stage_roles']
+const OPTIONAL_STATE_KEYS = ['trimmed', 'stage_roles', 'rework_base']
 
-test('state.json 模板里除 trimmed 与 stage_roles 之外的每个顶层键，删掉就会被 validateState 报', () => {
+test('state.json 模板里除 trimmed、stage_roles 与 rework_base 之外的每个顶层键，删掉就会被 validateState 报', () => {
   for (const k of stateTemplateKeys()) {
     if (OPTIONAL_STATE_KEYS.includes(k)) continue
     assert.notDeepEqual(
       withoutKey(k),
       [],
       `templates/state.json 的 ${k} 删掉之后 validateState 一声不吭——` +
-        'commands/at.md 建 run 那一段与主规格 §4.4 都写着「除 trimmed 与 stage_roles 以外，少任何一个都会被' +
+        'commands/at.md 建 run 那一段与主规格 §4.4 都写着「除 trimmed、stage_roles 与 rework_base 以外，少任何一个都会被' +
         '账本回传报成状态不合法」，那句话因此对 ' + k + ' 变假了。' +
         '要么给这个键补上必填校验，要么把那两处正文里的例外名单改对——别只改一处。',
     )
@@ -76,7 +76,7 @@ test('state.json 的例外名单：/at 建 run 那一段与规格 §4.4 点名�
   assert.deepEqual(optional, [...OPTIONAL_STATE_KEYS].sort())
   const at = readFileSync(new URL('../commands/at.md', import.meta.url), 'utf8')
   const spec = readFileSync(new URL('../docs/superpowers/specs/2026-09-15-agent-team-plugin-design.md', import.meta.url), 'utf8')
-  for (const [where, re] of [['commands/at.md', /除 ((?:`[a-z_]+`(?: 与 )?)+) 以外，少任何一个/], ['主规格 §4.4', /除 ((?:`[a-z_]+`(?: 与 )?)+) 外每一个都报/]]) {
+  for (const [where, re] of [['commands/at.md', /除 ((?:`[a-z_]+`(?:、| 与 )?)+) 以外，少任何一个/], ['主规格 §4.4', /除 ((?:`[a-z_]+`(?:、| 与 )?)+) 外每一个都报/]]) {
     const m = (where === 'commands/at.md' ? at : spec).match(re)
     assert.ok(m, `${where} 里找不到那句例外名单——句式改了的话，这条判据的定位要跟着改`)
     const named = [...m[1].matchAll(/`([a-z_]+)`/g)].map((x) => x[1]).sort()

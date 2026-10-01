@@ -288,6 +288,40 @@ const SCENARIOS = [
     ],
   },
   {
+    // M3y（docs/33）：rework_base 的键不是任何阶段的产物、值既不是 sha 也不是 "accepted"（值不回显，只点键）。
+    name: 'validateState 的 rework_base：键与值',
+    disk: true,
+    state: (s, P) => ({ ...s, rework_base: { [P]: SHA, '06-test.md': P } }),
+    calls: ({ run }) => [['ledger', posted('at-pm', join(run, 'state.json'))]],
+  },
+  {
+    // M3y：回退之后的写入要原样带着 rework_base。拒绝理由附写入前整份（safeJson），点名少了、多了、改了的键与标得太早的键
+    // （quote），还有当前段（quote）。写入前的 rework_base 在磁盘上。
+    name: 'rework_base 的键与 state.stage（H6：原样带着）',
+    disk: true,
+    state: (s, P) => ({ ...s, rework_base: { [P]: SHA } }),
+    calls: ({ run }, P) => {
+      const s = { ...baseState(), rework_base: { [P]: SHA } }
+      const { rework_base: _drop, ...without } = s
+      return [
+        ['rework', stateWrite(run, without)],
+        ['rework', stateWrite(run, { ...s, rework_base: {} })],
+        ['rework', stateWrite(run, { ...s, rework_base: { [P]: SHA, [P + 'E']: 'accepted' } })],
+        ['rework', stateWrite(run, { ...s, stage: P, rework_base: { [P]: 'accepted' } })],
+        ['rework', stateWrite(run, { ...s, rework_base: { [P]: 'x' } })],
+      ]
+    },
+  },
+  {
+    // M3y：回退那一次写入（history 末尾再追加一条 S5）里多出来的键（quote）。期望的整份只有产物名与照磁盘算的 sha。
+    name: 'rework_base 的键（H6：回退写入多出来的键）',
+    calls: ({ run }, P) => {
+      const s = baseState()
+      const history = [...s.history, { stage: 'S5', at: 't' }]
+      return [['rework', stateWrite(run, { ...s, history, rework: { S5: 1 }, rework_base: { [P]: 'accepted' } })]]
+    },
+  },
+  {
     name: 'project.paths 的键（H3 的拒绝理由）与元素（触达表）',
     disk: true,
     project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, [P]: ['nowhere/'], 'at-backend': ['src/server/', P] } }),

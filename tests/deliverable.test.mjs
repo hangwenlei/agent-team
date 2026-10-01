@@ -8,6 +8,7 @@
 // 字段选错、ctx 分派这类真实发生过的问题）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { decideDeliverable } from '../hooks/lib/deliverable.mjs'
 
 const STAGES = {
@@ -240,4 +241,75 @@ test('S5 多产者：不在 producers 里的角色仍然是 role-not-in-stage（
 
 test('前置条件：S5_PRODUCERS 的 producers 确实有三个且 at-architect 不在其中——上一条不是空转', () => {
   assert.deepEqual(S5_PRODUCERS.S5.producers, ['at-backend', 'at-frontend', 'at-ui'])
+})
+
+// ---------------------------------------------------------------------------
+// M3y（docs/33，全量审查第 15 条）：返工轮里还是上一轮的产物
+// ---------------------------------------------------------------------------
+//
+// 调用方把 artifactExists 换成 freshness 的 artifactCurrent（在、而且不是上一轮的），另传 artifactStale（还是上一轮的）。
+// 「缺」与「还是上一轮的」分开报：前者是没写，后者是写了、但这一轮没动过——出口不一样（后者可以在末尾追加一节说明这一轮
+// 核过、不用改）。没有上一轮的产物时，文案与 v1.6.0 逐字相同。
+const REAL = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
+const fresh = ({ current = [], stale = [] }) => ({
+  artifactExists: (n) => current.includes(n),
+  artifactStale: (n) => stale.includes(n),
+})
+
+test('M3y：没有上一轮的产物时，理由与 v1.6.0 逐字相同', () => {
+  const r = decideDeliverable({ role: 'at-product', stageId: 'S2', stages: REAL, ...fresh({}) })
+  assert.equal(
+    r.reason,
+    'at-product 在 S2 应当产出 01-prd.md，但 01-prd.md 还没有写到磁盘上。在结束之前把它写出来；如果这一段确实不需要产出，把理由写进你的回报，由上级判断。',
+  )
+  assert.deepEqual(r.stale, [])
+  const old = decideDeliverable({ role: 'at-product', stageId: 'S2', stages: REAL, artifactExists: have() })
+  assert.equal(old.reason, r.reason, '不传 artifactStale 时与传了、但一份都不旧时一样')
+})
+
+test('M3y：产物还是上一轮的 → 不 ok，归 stale 不归 missing', () => {
+  const r = decideDeliverable({ role: 'at-backend', stageId: 'S5', stages: REAL, ...fresh({ stale: ['05-impl/at-backend.md'] }) })
+  assert.equal(r.ok, false)
+  assert.deepEqual(r.missing, [])
+  assert.deepEqual(r.stale, ['05-impl/at-backend.md'])
+})
+
+test('M3y：上一轮的产物，理由说清是上一轮的、给两条出口（追加一节说明 / 不写、冒泡）', () => {
+  const r = decideDeliverable({ role: 'at-backend', stageId: 'S5', stages: REAL, ...fresh({ stale: ['05-impl/at-backend.md'] }) })
+  assert.match(r.reason, /05-impl\/at-backend\.md 还是上一轮的/)
+  assert.match(r.reason, /末尾追加一节/)
+  assert.match(r.reason, /不要写，把理由写进你的回报/)
+  assert.doesNotMatch(r.reason, /还没有写到磁盘上/, '在磁盘上的不能说成没写')
+  assert.doesNotMatch(r.reason, /<!--/, '.md 不提 HTML 注释')
+})
+
+test('M3y：上一轮的是 .html → 追加的那一节用 HTML 注释写', () => {
+  const r = decideDeliverable({
+    role: 'at-ui',
+    stageId: 'S2',
+    stages: REAL,
+    ...fresh({ current: ['02-ui-spec.md'], stale: ['02-wireframe.html'] }),
+  })
+  assert.deepEqual(r.stale, ['02-wireframe.html'])
+  assert.match(r.reason, /<!-- -->/)
+})
+
+test('M3y：一份没写、一份是上一轮的 → 两样分开报', () => {
+  const r = decideDeliverable({ role: 'at-ui', stageId: 'S2', stages: REAL, ...fresh({ stale: ['02-wireframe.html'] }) })
+  assert.deepEqual(r.missing, ['02-ui-spec.md'])
+  assert.deepEqual(r.stale, ['02-wireframe.html'])
+  assert.match(r.reason, /02-ui-spec\.md 还没有写到磁盘上/)
+  assert.match(r.reason, /02-wireframe\.html 还是上一轮的/)
+})
+
+test('M3y：重写过（current）的不报', () => {
+  const r = decideDeliverable({ role: 'at-backend', stageId: 'S5', stages: REAL, ...fresh({ current: ['05-impl/at-backend.md'] }) })
+  assert.equal(r.ok, true)
+})
+
+// .html 的那句提示按「还旧的」判，不按整段 produces：at-ui 只有 .md 那份还旧时不提 HTML 注释。
+test('M3y：at-ui 只有 02-ui-spec.md 还旧 → 不提 HTML 注释', () => {
+  const r = decideDeliverable({ role: 'at-ui', stageId: 'S2', stages: REAL, ...fresh({ current: ['02-wireframe.html'], stale: ['02-ui-spec.md'] }) })
+  assert.deepEqual(r.stale, ['02-ui-spec.md'])
+  assert.doesNotMatch(r.reason, /<!--/)
 })

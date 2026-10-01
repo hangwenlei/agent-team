@@ -428,3 +428,82 @@ test('M3w：剪枝看的是那一段的 role（单数），不是 producers—�
   const r = decideReadiness({ targetRole: 'at-ui', stages: REAL_STAGES, roster: [], artifactExists: have(...S2_DONE), ...by('at-product') })
   assert.equal(r.decision, 'allow')
 })
+
+// ---------------------------------------------------------------------------
+// M3y（docs/33，全量审查第 15 条）：返工轮里还是上一轮的前置产物
+// ---------------------------------------------------------------------------
+//
+// 调用方把 artifactExists 换成 freshness 的 artifactCurrent，另传 artifactStale。「齐了没」与「前置在不在」都按 current 判：
+// 回退之后 S5 的产物还是上一轮的，S5 就不算齐，前置要查；前置还是上一轮的，不算在。理由把它与「缺」分开说，出口按收件人分：
+// 派发者是 PM（写得了 state.json）就给「标 accepted」，不是就叫它冒泡——rework_base 只有 PM 改得了。
+const fresh = ({ current = [], stale = [] }) => ({
+  artifactExists: (n) => current.includes(n),
+  artifactStale: (n) => stale.includes(n),
+})
+const S5_REQ = ['03-arch.md', '04-dispatch.md']
+
+test('M3y H2：没有上一轮的前置时，理由与 v1.6.0 逐字相同', () => {
+  const r = decideReadiness({ targetRole: 'at-backend', stages: REAL_STAGES, roster: ['at-backend'], ...fresh({ current: ['03-arch.md'] }) })
+  assert.equal(r.reason, 'at-backend 现在要做的是 S5，但它的前置产物还缺：04-dispatch.md（S4 的产物）。先把产出这些产物的阶段跑完再回来，不要跳过。')
+})
+
+test('M3y H2：S5 的产物都还是上一轮的 → S5 不算齐，前置照查', () => {
+  const r = decideReadiness({
+    targetRole: 'at-backend',
+    stages: REAL_STAGES,
+    roster: ['at-backend'],
+    ...fresh({ current: S5_REQ, stale: ['05-impl/at-backend.md'] }),
+  })
+  assert.equal(r.decision, 'allow', '前置都在、是这一轮的，放行')
+  const r2 = decideReadiness({
+    targetRole: 'at-backend',
+    stages: REAL_STAGES,
+    roster: ['at-backend'],
+    ...fresh({ current: ['03-arch.md'], stale: ['05-impl/at-backend.md'] }),
+  })
+  assert.equal(r2.decision, 'deny', '上一轮的产物不能让 S5 判齐、跳过前置')
+})
+
+test('M3y H2：前置还是上一轮的 → 拒，说清是上一轮的、出处在哪一段', () => {
+  const r = decideReadiness({
+    targetRole: 'at-backend',
+    stages: REAL_STAGES,
+    roster: ['at-backend'],
+    ...fresh({ current: ['03-arch.md'], stale: ['04-dispatch.md'] }),
+  })
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /04-dispatch\.md（S4 的产物）还是上一轮的/)
+  assert.doesNotMatch(r.reason, /还缺/, '在磁盘上的不能说成缺')
+})
+
+test('M3y H2：派发者是 PM → 出口给「在 rework_base 里标 accepted」', () => {
+  const r = decideReadiness({
+    targetRole: 'at-backend',
+    stages: REAL_STAGES,
+    roster: ['at-backend'],
+    callerCanWriteState: true,
+    ...fresh({ current: ['03-arch.md'], stale: ['04-dispatch.md'] }),
+  })
+  assert.match(r.reason, /rework_base/)
+  assert.match(r.reason, /"accepted"/)
+})
+
+test('M3y H2：派发者不是 PM（或判不出来）→ 叫它冒泡，不叫它改 rework_base', () => {
+  for (const callerCanWriteState of [false, undefined]) {
+    const r = decideReadiness({
+      targetRole: 'at-backend',
+      stages: REAL_STAGES,
+      roster: ['at-backend'],
+      callerCanWriteState,
+      ...fresh({ current: ['03-arch.md'], stale: ['04-dispatch.md'] }),
+    })
+    assert.match(r.reason, /冒泡/)
+    assert.doesNotMatch(r.reason, /改成 "accepted"/)
+  }
+})
+
+test('M3y H2：一份缺、一份是上一轮的 → 两样分开说', () => {
+  const r = decideReadiness({ targetRole: 'at-backend', stages: REAL_STAGES, roster: ['at-backend'], ...fresh({ stale: ['04-dispatch.md'] }) })
+  assert.match(r.reason, /还缺：03-arch\.md（S3 的产物）/)
+  assert.match(r.reason, /04-dispatch\.md（S4 的产物）还是上一轮的/)
+})

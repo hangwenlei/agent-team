@@ -334,6 +334,8 @@ test('M3x isStageDone：没有 stage_roles 的旧 run 照旧按整趟 roster 判
 
 // S2 的镜像：at-ui 只在 S5 干过活。这一格只在返工轮里到得了（S5 之后驳回 S2），返工轮的「一回退就判齐」归第 15 条
 // ——这里只钉期望集合：S2 不再去等 at-ui 的两份。
+// M3y（docs/33）收口：调用点经 freshness 之后，上一轮的 01-prd.md 不再让 S2 判齐（hook 层的判据在
+// tests/gate-rework-freshness.test.mjs）；这一格仍只钉期望集合，isStageDone 本身不知道新旧。
 test('M3x isStageDone：at-ui 只在 S5 干过，S2 按段只等 01-prd.md', () => {
   const state = { stage: 'S2', roster: ['at-product', 'at-architect', 'at-ui'], stage_roles: { S2: ['at-product'], S3: ['at-architect'], S5: ['at-ui'] } }
   assert.equal(doneByStage(state, '01-prd.md'), true)
@@ -494,4 +496,43 @@ test('前置条件：上一条真的从规格里解析出了 3 行——否则�
   const spec = readFileSync(new URL('../docs/superpowers/specs/2026-09-15-agent-team-plugin-design.md', import.meta.url), 'utf8')
   const rows = [...spec.matchAll(/^\| (需求理解错|设计错|实现错) \| .*? \| (S\d) → S8 \|$/gm)]
   assert.equal(rows.length, 3)
+})
+
+// ---------------------------------------------------------------------------
+// M3y：validateState 的 rework_base 校验（docs/33）
+// ---------------------------------------------------------------------------
+//
+// rework_base 记着上一次回退那一刻各份产物的 sha（{ 产物名: sha | "accepted" }）。写时的规则在 H6（tests/rework-base.test.mjs）；
+// 这里只核形状，缺失不报——更早落盘的 run 没有它。值不回显：一个 sha 写错了，回显 64 位十六进制只是噪声。
+const rbProblems = (rework_base) => validateState({ ...SR_OK(), rework_base }, { stages: REAL_STAGES }).problems
+
+test('M3y validateState：合法的 rework_base（sha 与 "accepted"）、{} 都通过；没有 rework_base 不报', () => {
+  assert.deepEqual(rbProblems({ '05-impl/at-backend.md': SHA, '05-impl/at-ui.md': 'accepted', '06-test.md': SHA }), [])
+  assert.deepEqual(rbProblems({}), [])
+  assert.deepEqual(validateState(SR_OK(), { stages: REAL_STAGES }).problems, [])
+})
+
+test('M3y validateState：rework_base 不是对象时报出来', () => {
+  for (const bad of [null, [], 'x', 3]) {
+    assert.ok(rbProblems(bad).some((x) => /rework_base 不是对象/.test(x)), JSON.stringify(bad))
+  }
+})
+
+test('M3y validateState：rework_base 的键不是任何阶段的产物时报出来（继承来的键名也报）', () => {
+  for (const k of ['09-extra.md', 'constructor']) {
+    const r = rbProblems({ [k]: SHA })
+    assert.ok(r.some((x) => x.includes(`rework_base 里有 "${k}"，但它不是任何阶段的 produces`)), `${k}：${r.join('\n')}`)
+  }
+})
+
+test('M3y validateState：rework_base 的值既不是 sha 也不是 "accepted" 时报出来，值不回显', () => {
+  for (const bad of ['sha256:xyz', 'ACCEPTED', 'deleted-content-marker', 1, null, {}]) {
+    const r = rbProblems({ '06-test.md': bad })
+    assert.deepEqual(r, ['rework_base["06-test.md"] 既不是 sha256:<64 位十六进制> 也不是 "accepted"'], JSON.stringify(bad))
+  }
+})
+
+test('M3y validateState：不给 stages 时跳过键的归属校验，值照查', () => {
+  const r = validateState({ ...SR_OK(), rework_base: { '09-extra.md': SHA, '06-test.md': 'x' } }, {}).problems
+  assert.deepEqual(r, ['rework_base["06-test.md"] 既不是 sha256:<64 位十六进制> 也不是 "accepted"'])
 })

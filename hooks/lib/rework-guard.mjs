@@ -6,6 +6,10 @@
 //
 // ⚠️ 只拦**减少**，不碰增加。PM 每推进一个阶段都要正常重写 state.json，拦增加会把整条
 // 链锁死。四条判据全部是「新的比旧的少」的形状。
+// ⚠️ M3y（docs/33）订正这句话的适用范围：它说的是返工计数那四条（decideRework）。本文件末尾 M3y 一节的
+// decideReworkBase 管 rework_base，那几条不是「新的比旧的少」的形状：没记回退就写快照、推进离开一段时那一段里还有
+// 上一轮的产物，都拦。推进本身照样放行——离开的段里的产物都重写过或标了 "accepted" 就行，所以「拦增加会把整条链
+// 锁死」那条理由不受影响。
 //
 // ⚠️ 只有**旧的**读不出来（本趟第一次写、或者文件本来就坏了）才放行——那是 PM 把坏文件修回去
 // 的路，与 gate.mjs 里 I2 豁免同一个理由（不要把运维人逼进死角）。**新的**必须永远是合法的
@@ -20,10 +24,11 @@
 // isNonNegativeInteger 与 validateState 共用同一份（M2b 终审 A5）。
 import { reworkFromHistory, REWORK_LIMIT, isNonNegativeInteger } from './state.mjs'
 // isPlainObject 走 stages.mjs 同一份（M2b 终审 A2），原先是这里的私有拷贝。
-import { isPlainObject } from './stages.mjs'
+import { isPlainObject, isStageChain, productsOfStage } from './stages.mjs'
 import { normalizeText } from './text-norm.mjs'
 // 拒绝理由会被模型读到；阶段名与计数值来自 state.json（磁盘或这次写入的内容），一律过 quote（M3s，docs/27）。
-import { quote } from './trusted.mjs'
+import { quote, safeJson } from './trusted.mjs'
+import { SHA_RE } from './contract-hash.mjs'
 
 function counts(history) {
   const c = {}
@@ -146,4 +151,292 @@ export function parseStateText(text) {
   } catch {
     return null
   }
+}
+
+// ============================================================================
+// M3y（docs/33，全量审查第 15 条）：rework_base 的写时判据。
+//
+// 回退之后上一轮的产物都还在磁盘上，交没交、齐没齐的判据（H5a/H5b、【阶段】、H2）原来只问文件在不在，于是全被它们满足。
+// rework_base 记着回退那一刻各份产物的 sha；hooks/lib/freshness.mjs 拿它分辨哪些产物还是上一轮的。这里管它怎么写：
+//
+//   - 回退那一次写入（history 新追加的条目里有一条在链上不晚于它前一条；T = 最后那条的段）：rework_base 必须逐键逐值等于
+//     「T 及之后各段在磁盘上的产物：现在的 sha」∪「写入前 rework_base 里 T 之前各段的合法条目（是阶段产物、值是 sha 或 "accepted"），原样」；
+//     坏条目不带。读不出来的产物不核。
+//     例外：所在段不晚于写入后 stage 的，sha 那一格这一次就可以写成 "accepted"（与回退落盘后紧接着再写一次等价）。
+//   - 之后的每一次写入（到下一次回退为止）：原样带着它。只许把当前段及更早段的某一条从 sha 改成 "accepted"（这一轮接受它原样）；
+//     写入前就坏了的条目（值不合法、或不是任何阶段的产物）可以删掉或标 "accepted"。没回退过（写入前缺失或 {}）：只许缺失或 {}。
+//     下一次回退照上一条重拍：回到的那一段及之后各段按那一刻的磁盘，标过的 "accepted" 也换回 sha。
+//   - 推进（after.stage 在链上晚于 before.stage）：离开的各段里，值是 sha、磁盘内容与它相同的产物不许留着——
+//     要么已经重写，要么在同一次 Write 里标 "accepted"。
+//
+// ⚠️ 为什么用 "accepted" 而不是删掉那一条：删得掉的话，「原样带着」就只能核「不许加」，一次写入悄悄丢掉一条，那份上一轮的
+//    产物就算这一轮的了。标记是显式的，H6 能核它只落在当前段及更早段。
+// ⚠️ 快照按全部 producers 展开（stages.mjs 的 productsOfStage），不按这一趟叫到谁：上一轮叫过、这一轮没叫的人留下的那份
+//    同样是上一轮的。
+// ⚠️ 跳过：写入前读不出来（与 decideRework 的修复路同一条）；阶段链读不出来或形状不对；写入前的 rework_base 不是对象时
+//    不核「原样带着」。都只是不核，不放宽 decideRework。后两种的原因进 notes，由 gate.mjs 写进 stderr；写入前读不出来时不留痕
+//    （与 decideRework 的修复路一样静默）。
+// ⚠️ 磁盘由调用方注入：diskSha(name) → { exists, sha }，读不出来时 sha 为 null。逐份 try 在 gate.mjs；这里不包 try——
+//    判定代码抛异常时 H6 照旧 fail closed。
+
+const ACCEPTED = 'accepted'
+
+function stageIndexer(stages) {
+  const ids = Object.keys(stages)
+  const at = (s) => (typeof s === 'string' ? ids.indexOf(s) : -1)
+  return { ids, at }
+}
+
+function historyOf(state) {
+  return isPlainObject(state) && Array.isArray(state.history) ? state.history : []
+}
+
+/**
+ * 这次写入是不是一次回退：history 新追加的条目（after.history 在写入前长度之后的部分）里，有一条所在段在链上不晚于它前一条。
+ * 前一条可以是写入前就有的最后一条。两条都得是链上的段才比。
+ * @returns {null | { stage: string, followedByForward: boolean }} stage 是最后那条回退条目的段；它之后还追加了别的条目时
+ *   followedByForward 为 true（补记：回退记晚了，同一次写入又往前记了几段）。
+ */
+export function restartInfo({ before, after, stages }) {
+  if (!isStageChain(stages)) return null
+  const { at } = stageIndexer(stages)
+  const hb = historyOf(before)
+  const ha = historyOf(after)
+  const stageAt = (j) => (isPlainObject(ha[j]) ? at(ha[j].stage) : -1)
+  let last = -1
+  for (let j = Math.max(hb.length, 1); j < ha.length; j++) {
+    const cur = stageAt(j)
+    const prev = stageAt(j - 1)
+    if (cur >= 0 && prev >= 0 && cur <= prev) last = j
+  }
+  if (last < 0) return null
+  return { stage: ha[last].stage, followedByForward: last < ha.length - 1 }
+}
+
+// 每个产物名所在的段（链上最早的那一段）的下标。
+function stageOfProduct(stages) {
+  const { ids } = stageIndexer(stages)
+  const out = new Map()
+  ids.forEach((id, i) => {
+    for (const n of productsOfStage(stages[id])) if (!out.has(n)) out.set(n, i)
+  })
+  return out
+}
+
+function isSha(v) {
+  return typeof v === 'string' && SHA_RE.test(v)
+}
+
+function names(list) {
+  return list.join('、')
+}
+
+/** 回退那一刻 rework_base 应当是什么。unchecked：在、但读不出来的产物（不核）。 */
+function expectedAtRestart({ before, stages, stage, diskSha }) {
+  const { ids, at } = stageIndexer(stages)
+  const t = at(stage)
+  const later = new Set()
+  for (const id of ids.slice(t)) for (const n of productsOfStage(stages[id])) later.add(n)
+  const carried = isPlainObject(before.rework_base) ? before.rework_base : {}
+  const expected = {}
+  const unchecked = []
+  const seen = new Set()
+  ids.forEach((id, i) => {
+    for (const n of productsOfStage(stages[id])) {
+      if (seen.has(n)) continue
+      seen.add(n)
+      if (!later.has(n)) {
+        if (i < t && Object.hasOwn(carried, n) && (isSha(carried[n]) || carried[n] === ACCEPTED)) expected[n] = carried[n]
+        continue
+      }
+      const d = diskSha(n)
+      if (!d || !d.exists) continue
+      if (isSha(d.sha)) expected[n] = d.sha
+      else unchecked.push(n)
+    }
+  })
+  return { expected, unchecked }
+}
+
+function decideAtRestart({ before, after, stages, diskSha, restart }) {
+  const { expected, unchecked } = expectedAtRestart({ before, stages, stage: restart.stage, diskSha })
+  const notes = unchecked.length ? [`rework_base：${names(unchecked)} 在磁盘上但读不出来，回退快照不核它们`] : []
+  const ab = after.rework_base
+  const want = Object.keys(expected)
+  if (ab === undefined && want.length === 0) return { ok: true, notes }
+  // 复核（真实会话）改的：所在段不晚于写入后 stage、在快照里的产物，回退这一次就可以标 "accepted"。原来只许照磁盘记 sha——
+  // 可是回退落盘之后紧接着再写一次只改那一条是放行的（decideCarry），两条路落盘的状态一模一样，这条限制挡不住任何东西，
+  // 只让「用户回退时就说了不用改」的那一次写入多被拒一次。口径与 decideCarry 的 accepted 同一个（写入后的 stage），补记也覆盖。
+  const stageOf = stageOfProduct(stages)
+  const cur = stageIndexer(stages).at(after.stage)
+  const mayAccept = (n) => {
+    const i = stageOf.has(n) ? stageOf.get(n) : -1
+    return i >= 0 && cur >= 0 && i <= cur
+  }
+
+  const missing = []
+  const wrong = []
+  const extra = []
+  if (isPlainObject(ab)) {
+    for (const n of want) {
+      if (!Object.hasOwn(ab, n)) missing.push(n)
+      else if (ab[n] !== expected[n] && !(ab[n] === ACCEPTED && isSha(expected[n]) && mayAccept(n))) wrong.push(n)
+    }
+    for (const k of Object.keys(ab)) {
+      if (Object.hasOwn(expected, k)) continue
+      if (unchecked.includes(k) && (isSha(ab[k]) || (ab[k] === ACCEPTED && mayAccept(k)))) continue
+      extra.push(quote(k))
+    }
+    if (!missing.length && !wrong.length && !extra.length) return { ok: true, notes }
+  } else {
+    missing.push(...want)
+  }
+
+  const diff = []
+  if (!isPlainObject(ab)) diff.push(ab === undefined ? 'rework_base 没写。' : 'rework_base 不是一个对象。')
+  if (missing.length) diff.push(`缺：${names(missing)}。`)
+  if (wrong.length) diff.push(`值不对：${names(wrong)}。`)
+  if (extra.length) diff.push(`多出：${names(extra)}。`)
+  const lines = [
+    `这次写入记了一次回退（history 新追加的 ${quote(restart.stage)} 在阶段链上不晚于它前一条），同一次写入要在 rework_base ` +
+      `里记下回退那一刻磁盘上各份产物的 sha——之后交没交、齐没齐，门禁靠它分辨哪些产物还是上一轮的。` +
+      `${quote(restart.stage)} 及之后各段在磁盘上的产物按现在的内容算，更早各段的条目从写入前原样带过来；` +
+      `这一轮接受原样的，回到的那一段及更早段（不晚于这次写入后的 stage）的产物这一次就可以写成 "accepted"，还没走到的段的不行。`,
+    diff.join(''),
+    'rework_base 应当整份写成：',
+    safeJson(expected),
+  ]
+  if (unchecked.length) lines.push(`${names(unchecked)} 在磁盘上但读不出来，不核：不写、或写成一个 sha 都行。`)
+  if (typeof before.stage === 'string' && restart.stage === before.stage) {
+    // 同一段再追加一条：原地重来，或者 PM 把同段重派误记成了回退。H6 分不出这两样，判定不变，只提醒一句（/at「回退」末尾）。
+    lines.push(
+      '如果这只是同一段里重派一个角色（上限内的单角色重试），那不是回退：去掉新追加的这条 history，rework 也不加。',
+    )
+  }
+  if (restart.followedByForward) {
+    lines.push(
+      '这次写入在回退那一条之后还追加了前进的条目（补记）：上面的值照磁盘现在的内容算，回退之后已经重写过的产物也会被记成' +
+        '上一轮的；它们确是这一轮写的，就把它们的值写成 "accepted"（不晚于这次写入后 stage 的，这一次就可以）。',
+    )
+  }
+  return { ok: false, reason: lines.join('\n') }
+}
+
+function decideCarry({ before, after, stages }) {
+  const bb = before.rework_base
+  const ab = after.rework_base
+  if (bb !== undefined && !isPlainObject(bb)) {
+    return { ok: true, notes: ['rework_base：写入前的值不是对象，这次不核「原样带着」'] }
+  }
+  if (bb === undefined || Object.keys(bb).length === 0) {
+    if (ab === undefined || (isPlainObject(ab) && Object.keys(ab).length === 0)) return { ok: true, notes: [] }
+    return {
+      ok: false,
+      reason:
+        'rework_base 只在记回退的那一次写入里写（history 新追加一条在阶段链上不晚于它前一条的条目）。这次写入没有记回退，' +
+        '写入前也没有快照，rework_base 只许不写或写成 {}。要回退，就在同一次写入里把回退记进 history。',
+    }
+  }
+  const show = () => `写入前是：\n${safeJson(bb)}`
+  const stageOf = stageOfProduct(stages)
+  // 写入前就坏了的条目（值既不是 sha 也不是 "accepted"，或键不是任何阶段的产物）：只能经几条跳过路径落盘（写入前读不出来、
+  // 阶段链读不出来、写入前不是对象），落了盘 validateState 每次记账都叫 PM 改掉它——这里再要求原样带着，两道门禁的指令就
+  // 互相矛盾，只剩再记一次回退。它们让不了任何产物变成上一轮的（isStale 只认合法 sha、只对产物名问），删掉或标 "accepted"
+  // 与现状等价，放开这两样；改成 sha 不开放（那是收紧，下一次回退自然会重拍）。
+  const broken = (k) => !stageOf.has(k) || !(isSha(bb[k]) || bb[k] === ACCEPTED)
+  const anyBroken = Object.keys(bb).some(broken)
+  const head =
+    'rework_base 记着回退快照里各份产物的 sha（最近一次回退回到的那一段及之后各段按那一刻的磁盘记，更早各段沿用更早那次快照），' +
+    '回退之后、下一次回退之前的每一次写入都要原样带着它；只许把当前段及更早段的某一条从 sha 改成 "accepted"（这一轮接受它原样）。' +
+    (anyBroken ? '写入前就坏了的条目（值不合法、或不是任何阶段的产物）可以删掉或标 "accepted"。' : '')
+  if (!isPlainObject(ab)) {
+    if (ab === undefined && Object.keys(bb).every(broken)) return { ok: true, notes: [] }
+    return { ok: false, reason: `${head}这次写入里它${ab === undefined ? '没写' : '不是一个对象'}。${show()}` }
+  }
+  const missing = Object.keys(bb).filter((k) => !Object.hasOwn(ab, k) && !broken(k))
+  const extra = Object.keys(ab).filter((k) => !Object.hasOwn(bb, k))
+  if (missing.length || extra.length) {
+    const parts = []
+    if (missing.length) parts.push(`少了 ${names(missing.map((k) => quote(k)))}`)
+    if (extra.length) parts.push(`多了 ${names(extra.map((k) => quote(k)))}`)
+    return { ok: false, reason: `${head}这次写入里它${parts.join('，')}。${show()}` }
+  }
+  const { at } = stageIndexer(stages)
+  const cur = at(after.stage)
+  const tooLate = []
+  const bad = []
+  for (const k of Object.keys(bb)) {
+    // 删掉的只剩坏条目（合法条目少了，上面已经拒了）。
+    if (!Object.hasOwn(ab, k)) continue
+    if (ab[k] === bb[k]) continue
+    if (broken(k)) {
+      if (ab[k] !== ACCEPTED) bad.push(quote(k))
+      continue
+    }
+    if (isSha(bb[k]) && ab[k] === ACCEPTED) {
+      const i = stageOf.has(k) ? stageOf.get(k) : -1
+      if (i >= 0 && cur >= 0 && i <= cur) continue
+      tooLate.push(quote(k))
+      continue
+    }
+    bad.push(quote(k))
+  }
+  if (tooLate.length) {
+    return {
+      ok: false,
+      reason:
+        `${head}${names(tooLate)} 不在当前段（${quote(after.stage)}）或更早的段里：还没走到的段，它的产物这一轮还没轮到，` +
+        `不能先接受。${show()}`,
+    }
+  }
+  if (bad.length) return { ok: false, reason: `${head}这次写入改了 ${names(bad)} 的值。${show()}` }
+  return { ok: true, notes: [] }
+}
+
+function decideAdvance({ before, after, stages, diskSha }) {
+  const { ids, at } = stageIndexer(stages)
+  const from = at(before.stage)
+  const to = at(after.stage)
+  const ab = after.rework_base
+  if (from < 0 || to <= from || !isPlainObject(ab)) return { ok: true, notes: [] }
+  const stale = []
+  const unreadable = []
+  const seen = new Set()
+  for (const id of ids.slice(from, to)) {
+    for (const n of productsOfStage(stages[id])) {
+      if (seen.has(n)) continue
+      seen.add(n)
+      if (!Object.hasOwn(ab, n) || !isSha(ab[n])) continue
+      const d = diskSha(n)
+      if (!d || !d.exists) continue
+      if (!isSha(d.sha)) unreadable.push(n)
+      else if (d.sha === ab[n]) stale.push(n)
+    }
+  }
+  const notes = unreadable.length ? [`rework_base：${names(unreadable)} 在磁盘上但读不出来，推进时不核它们新旧`] : []
+  if (!stale.length) return { ok: true, notes }
+  return {
+    ok: false,
+    reason:
+      `从 ${quote(before.stage)} 推进到 ${quote(after.stage)}，但离开的段里还有上一轮的产物（磁盘内容与 rework_base 记的 sha ` +
+      `相同）：${names(stale)}。两条出路：让它的产者这一轮重写之后再推进；这一轮接受它原样，就在推进的同一次 Write 里把它在 ` +
+      `rework_base 里的值改成 "accepted"。`,
+  }
+}
+
+/**
+ * H6 对 rework_base 的写时判据（M3y）。规则见上面这一节的说明。
+ * @param {{ before: object|null, after: object, stages: object|null, diskSha: (name: string) => { exists: boolean, sha: string|null } }} args
+ * @returns {{ ok: true, notes: string[] } | { ok: false, reason: string }}
+ */
+export function decideReworkBase({ before, after, stages, diskSha }) {
+  if (!isPlainObject(before) || !isPlainObject(after)) return { ok: true, notes: [] }
+  if (!isStageChain(stages)) return { ok: true, notes: ['rework_base：阶段链读不出来或形状不对，回退快照的几条判据这次跳过'] }
+  const restart = restartInfo({ before, after, stages })
+  if (restart) return decideAtRestart({ before, after, stages, diskSha, restart })
+  const carry = decideCarry({ before, after, stages })
+  if (!carry.ok) return carry
+  const advance = decideAdvance({ before, after, stages, diskSha })
+  if (!advance.ok) return advance
+  return { ok: true, notes: [...carry.notes, ...advance.notes] }
 }

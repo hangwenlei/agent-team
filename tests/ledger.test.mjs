@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { buildLedgerNotices } from '../hooks/lib/ledger.mjs'
 
 const STAGES = {
@@ -174,5 +175,65 @@ test('最后一个阶段产物齐了：提示收口，不瞎报下一阶段', ()
 test('退化输入一律不抛', () => {
   for (const bad of [null, undefined, {}, { kind: 'contract' }]) {
     assert.doesNotThrow(() => buildLedgerNotices(bad ?? {}))
+  }
+})
+
+// ---------------------------------------------------------------------------
+// M3y（docs/33）：【返工】——写 state.json 时，列出当前段与更早段还是上一轮的产物
+// ---------------------------------------------------------------------------
+test('M3y【返工】：写 state.json、当前段还有上一轮的产物 → 列出来，给两条出路', () => {
+  const s = joined({ kind: 'state', reworkStale: { stage: 'S5', current: ['05-impl/at-backend.md'], earlier: [] } })
+  assert.match(s, /【返工】/)
+  assert.match(s, /当前段 S5：05-impl\/at-backend\.md/)
+  assert.match(s, /重写/)
+  assert.match(s, /"accepted"/)
+  assert.doesNotMatch(s, /更早的段/)
+})
+
+test('M3y【返工】：更早段还旧的，带出处、说清多半是补记', () => {
+  const s = joined({ kind: 'state', reworkStale: { stage: 'S6', current: [], earlier: [{ name: '05-impl/at-backend.md', stage: 'S5' }] } })
+  assert.match(s, /更早的段：05-impl\/at-backend\.md（S5）/)
+  assert.match(s, /补记/)
+  assert.doesNotMatch(s, /- 当前段/)
+})
+
+test('M3y【返工】：两样都空、或者写的不是 state.json → 不发', () => {
+  assert.doesNotMatch(joined({ kind: 'state', reworkStale: { stage: 'S5', current: [], earlier: [] } }), /【返工】/)
+  assert.doesNotMatch(joined({ kind: 'state' }), /【返工】/)
+  assert.doesNotMatch(joined({ kind: 'produce', reworkStale: { stage: 'S5', current: ['05-impl/at-backend.md'], earlier: [] } }), /【返工】/)
+})
+
+// M3y 复核：链尾那一段没有「推进出去」这次写入，收口不经 H6——【返工】不能对它说「推进出这一段时 H6 会拦」。
+const REAL_STAGES = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
+test('M3y【返工】：当前段是阶段链最后一段时，说收口不经 H6，不说推进时会拦', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S8' }, reworkStale: { stage: 'S8', current: ['08-delivery.md'], earlier: [] } }).join('\n')
+  assert.match(s, /当前段 S8：08-delivery\.md/)
+  assert.match(s, /最后一段，收口不经 H6/)
+  assert.doesNotMatch(s, /推进出这一段时 H6 会拦/)
+  const mid = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S5' }, reworkStale: { stage: 'S5', current: ['05-impl/at-backend.md'], earlier: [] } }).join('\n')
+  assert.match(mid, /推进出这一段时 H6 会拦/)
+})
+
+// 【返工】只发给写 state.json 的 PM；S1、S4、S8 的产物就是它自己的，「派它的产者」它做不到。
+test('M3y【返工】：出路分开说——PM 自己那几段的产物自己写，别的派产者', () => {
+  const s = joined({ kind: 'state', reworkStale: { stage: 'S5', current: ['05-impl/at-backend.md'], earlier: [] } })
+  assert.match(s, /你自己那几段的产物自己写/)
+})
+
+// 返工轮里推进进 history 里已有的一段（回到 S5 之后再进 S6），rework 那一段也要照派生量加 1——H6 只认派生量，正文与【阶段】
+// 原来都只列 stage、history、roster、stage_roles、trimmed，照写会被 H6 拒一次（docs/15 那一趟真撞上过）。
+test('M3y【阶段】：下一段在 history 里已经出现过时，提醒同一次 Write 把 rework 那一段加 1', () => {
+  const h = (...ids) => ids.map((stage) => ({ stage, at: 't' }))
+  const again = buildLedgerNotices({ ...base, stages: REAL_STAGES, stageDone: true, state: { stage: 'S5', history: h('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S5') } }).join('\n')
+  assert.match(again, /S6 在 history 里已经出现过[^。]*rework/)
+  const first = buildLedgerNotices({ ...base, stages: REAL_STAGES, stageDone: true, state: { stage: 'S5', history: h('S1', 'S2', 'S3', 'S4', 'S5') } }).join('\n')
+  assert.doesNotMatch(first, /在 history 里已经出现过/)
+})
+
+test('M3y【阶段】：history 里混着 null、字符串、数字条目时不抛，「已经出现过」照常判', () => {
+  const h = (...ids) => ids.map((stage) => ({ stage, at: 't' }))
+  for (const bad of [null, 'x', 42]) {
+    const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, stageDone: true, state: { stage: 'S5', history: [bad, ...h('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S5')] } }).join('\n')
+    assert.match(s, /S6 在 history 里已经出现过/, JSON.stringify(bad))
   }
 })
