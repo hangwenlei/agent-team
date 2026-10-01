@@ -47,7 +47,8 @@ export function isPlainObject(v) {
 // ⚠️ producedNames 与 expectedArtifacts 答的是**不同的问题**，别合并：
 //   - producedNames：这个名字是不是**任何一个**合法产者的产物（validateState 校验
 //     artifacts 的键用它——账本里记着 05-impl/at-frontend.md 必须算合法）
-//   - expectedArtifacts：**这一趟**该有哪些（compareArtifacts 与 isStageDone 用它）
+//   - expectedArtifacts：**这一趟**该有哪些（compareArtifacts 的 drifted/missing 用它，整趟口径；isStageDone 从来没经过它，
+//     它自己调 expandProduces + stageRolesInRun，M3x 起参与者由 participantsOf 按段取）
 // 混用会重演 docs/11 §5.6 那个缺口。设计 §1.1 的表里写死了四个消费方各自的集合。
 const ROLE_TOKEN = '<role>'
 
@@ -98,8 +99,10 @@ export function expandProduces(stage, roles) {
  * （缺省、null、传错类型）退回全部 `stageRoles`——「没告诉我这趟派了谁」不等于「一个
  * 都没派」，退回更宽的集合，宁可多算不要漏算。
  *
- * ⚠️ 这一段逻辑有两个消费方（本文件的 expectedArtifacts、state.mjs 的 isStageDone），
+ * ⚠️ 这一段逻辑当初有两个消费方（本文件的 expectedArtifacts、state.mjs 的 isStageDone），
  * Task 3 交付时它们各写了一份逐字同构的实现（一个用 Set.has、一个用 .includes）。
+ * （今天还有 readiness.mjs 的 done；M3x 起 isStageDone 收到的不再是整趟 roster，是 participantsOf 取的这一段的人——
+ * 求交仍在这里。）
  * 评审发现 1 点名了这一处，并预判 Task 4 接线 compareArtifacts 时会需要第三份——
  * 收敛在这里，第三份就不可能出现。这正是本文件头部那条「多处需要同一份知识时只留一份」
  * 的适用场景，不要再往回抄。 */
@@ -108,6 +111,34 @@ export function stageRolesInRun(stage, roster) {
   if (!Array.isArray(roster)) return roles
   const inRun = new Set(roster.filter((r) => typeof r === 'string'))
   return roles.filter((r) => inRun.has(r))
+}
+
+/** 某一段**在这一趟里叫到了谁**——按段的消费方（isStageDone 的两处调用、decideCoverage、at-status 与 at-resume 的展开口径；
+ * at-qa 的自查在角色正文里照同一口径写）都从这里取（M3x，docs/32）。isStageDone 与 at-status、at-resume 再交给 stageRolesInRun
+ * 与这一段的产者求交；decideCoverage 不经 stageRolesInRun，报的是这一段的产者减去这里给的人、再减去 trimmed 的全部键，
+ * undefined 按空集算（coverage.mjs 那段「不学 stageRolesInRun」）。
+ *
+ * roster 不分段：at-ui 在 S2 进过 roster，S5 的展开就把它当成 S5 的产者——S5 不派它时永远不齐，它先交又提前判齐
+ * （全量审查第 14 条）。state.json 从 M3x 起多一个 stage_roles：`{ 段 id: [角色...] }`，与 roster 同一个「叫到」
+ * 口径、按段拆开，PM 在推进出那一段的同一次 Write 里记。
+ *
+ *   - state 不是对象 → undefined（stageRolesInRun 退回全部 producers，与 roster 读不出时同一口径）；
+ *   - stage_roles 不是普通对象（缺失、null、数组、标量）→ 当它不在：退回 roster（数组时，只留字符串），否则 undefined。
+ *     缺失是更早落盘的旧 run，v1.5.0 的行为原样保留；形状坏了由 validateState 报；
+ *   - stage_roles 是对象：stageId 不是字符串、没有这个键（自有属性）、值不是数组 → []；否则只留字符串。
+ *
+ * ⚠️ 「有字段、没这一段的键」是空集，**不退回 roster**：那正是「这一段还没记账」——产物随参与者展开的段在 PM 记账之前
+ * 判不齐（产物固定的段不受影响，照磁盘判），走过的段漏记由产者交代报出来。退回 roster 就把这一条要修的错原样请回来。
+ * ⚠️ stageId 先判类型再查键（docs/27 §2.5）：它来自 state.json，{"toString":1} 拿去当属性键会抛。
+ * ⚠️ 整趟口径的消费方（compareArtifacts、decideReadiness、never_invoked）**不经这里**，理由在 docs/11 §5.33 的收口。 */
+export function participantsOf(state, stageId) {
+  if (!isPlainObject(state)) return undefined
+  if (!isPlainObject(state.stage_roles)) {
+    return Array.isArray(state.roster) ? state.roster.filter((r) => typeof r === 'string') : undefined
+  }
+  if (typeof stageId !== 'string' || !Object.hasOwn(state.stage_roles, stageId)) return []
+  const v = state.stage_roles[stageId]
+  return Array.isArray(v) ? v.filter((r) => typeof r === 'string') : []
 }
 
 /** 这一趟**该有**的产物名。<role> 只按 roster ∩ producers 展开；不含占位符的条目不受

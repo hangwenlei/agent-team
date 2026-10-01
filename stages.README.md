@@ -55,8 +55,9 @@ S5 是第一种（一个模式配 N 个角色），S2 是第二种（`at-product
 
 ⚠️ **两种形式的展开都收在 `hooks/lib/stages.mjs` 的 `expandProduces` 一处**——它是全部
 消费方的单一真源，**不要在任何调用点另写分支**，也不要在正文里复述展开规则（那会是
-第二份）。要知道「某一阶段这一趟该有哪些产物」，走 `expandProduces(stage,
-stageRolesInRun(stage, roster))`；要知道「某个名字是不是任何一个合法产者的产物」，走
+第二份）。要知道「某一阶段该有哪些产物」，走 `expandProduces(stage, stageRolesInRun(stage, <角色集合>))`——问「这一段
+齐没齐」的（`isStageDone`、`/at-status`、`/at-resume`、`at-qa`）传 `participantsOf(state, stage)`（这一段叫到的人，M3x），
+账本比对与 H2 有意按整趟取，各自传什么见下面那张消费方表；要知道「某个名字是不是任何一个合法产者的产物」，走
 `producedNames`。两者答的是不同的问题，见 `stages.mjs` 头部。
 
 **`<role>` 的展开按消费方不同而不同**，完整表格与理由见主规格 §4 阶段表下方
@@ -68,12 +69,22 @@ stageRolesInRun(stage, roster))`；要知道「某个名字是不是任何一个
 |---|---|
 | H3 写路径（`writepath.mjs` 的 `stageOwnerOfRunPath`） | 写入者自己 |
 | `ledger` 的 `produce` 回传 | 写入者自己——与上一行共用同一个 `stageOwnerOfRunPath` |
-| `isStageDone`（推进判据） | `roster ∩ producers` |
-| 账本比对 `compareArtifacts` 的 `drifted` / `missing` | `roster ∩ producers` |
+| `isStageDone`（推进判据，`gate.mjs` 两处调用） | 当前段叫到的人 `∩ producers`（`participantsOf`：`stage_roles`，旧 run 退回 `roster`） |
+| 产者交代 `decideCoverage`（走过的每一段） | 那一段叫到的人（`participantsOf`）∪ `trimmed` 的键，对 `producers ∩ available_roles` |
+| 账本比对 `compareArtifacts` 的 `drifted` / `missing` | `roster ∩ producers`（有意整趟） |
 | 账本比对 `compareArtifacts` 的 `unrecorded` | 全部 `producers` |
+| H2 `decideReadiness` 的 `done` | (`roster` ∪ 目标) `∩ producers`（有意整趟） |
 | `validateState` 的 artifacts 键校验 | 全部 `producers` |
-| `/at-resume` 的「产物齐没齐」核盘（`commands/at-resume.md`） | `roster ∩ producers` |
-| `/at-status` 的产物那一栏（`commands/at-status.md`） | `roster ∩ producers` |
+| `/at-resume` 的「产物齐没齐」核盘（`commands/at-resume.md`） | 这一段叫到的人 `∩ producers`（`participantsOf`） |
+| `/at-status` 的产物那一栏（`commands/at-status.md`） | 这一段叫到的人 `∩ producers`（`participantsOf`） |
+| `at-qa` 开工前的自查（`agents/at-qa.md`） | `stage_roles` 在 S5 记着的人 `∩ producers`（旧 run 看 `roster`） |
+
+⚠️ **按段与整趟分两组（M3x，`docs/32`）。** `roster` 不分段：`at-ui` 在 S2 进过 `roster`，S5 就把它当成 S5 的产者
+——S5 不派它时永远判不齐、它先交又提前判齐、架构师返回被误报停在旧阶段，产者交代也看不见「S5 没叫它、也没裁它」。
+问「这一段」的消费方于是按段取（`stages.mjs` 的 `participantsOf`，`state.json` 的 `stage_roles`）；账本比对与 H2
+有意仍按整趟：当前段记账之前按段取是空集，前者会漏报 S2/S5 那几份的漂移；后者在 S5 记账之前只剩目标自己那一份，重派时
+它已在磁盘上就判「齐了」、前置不查——整趟口径多等的只有别段叫到过、还没交的 S5 产者（有界面的项目里是 S2 的 `at-ui`），
+其余情形两种口径一样放行（H2「齐了就跳过前置」的既有设计；`docs/11` §5.33 的收口）。上一版这张表漏了 H2、产者交代与 `at-qa` 三行。
 
 ⚠️ **`compareArtifacts` 占两行不是笔误，M3a Task 3 之后它内部就是两个口径。**
 `drifted`/`missing` 问的是「**这一趟**该有的对不对得上」，`roster` 是对的口径；
@@ -185,10 +196,14 @@ Task 4 修复轮 1 补（裁定「豁免不覆盖被证伪的预测」：叙述�
 | S2 | `at-product` | `__main__`、`at-pm` | 实际上不会——返回的角色不会是它们 | 不会 |
 | S3 | `at-architect` | `__main__`、`at-pm` | 实际上不会——返回的角色不会是它们 | 不会 |
 | S4 | `at-pm` | 没有角色派得到 `at-pm` | 不会 | 不会——同 S1 |
-| S5 | `at-backend` | `__main__`、`at-pm`、`at-architect` | **会**——靠的是 `at-architect`；`at-pm`/`__main__` 虽然也派得到，但返回的角色不会是它们 | **看第 2 条**：这一趟派的执行角色都交了 → 报（停在旧阶段）；没交齐 → 静默（合法协调） |
+| S5 | `at-backend` | `__main__`、`at-pm`、`at-architect` | **会**——靠的是 `at-architect`；`at-pm`/`__main__` 虽然也派得到，但返回的角色不会是它们 | **看第 2 条**：`stage_roles.S5` 记着的执行角色（与 S5 `producers` 求交后非空）都交了 → 报（停在旧阶段）；没交齐、S5 还没记账、或记着的人里没有 S5 产者 → 静默（合法协调）；没有 `stage_roles` 的旧 run 看 `roster` |
 | S6 | `at-qa` | `__main__`、`at-pm` | 实际上不会——返回的角色不会是它们 | 不会 |
 | S7 | `at-acceptance` | `__main__`、`at-pm` | 实际上不会——返回的角色不会是它们 | 不会 |
 | S8 | `at-pm` | 没有角色派得到 `at-pm` | 不会 | 不会——同 S1 |
+
+⚠️ **S5 那一行的第 2 条按段判（M3x，`docs/32`）**：在 `/at`「同一次 Write」的正路上，这一格只在两种情况下会响——记了账
+没推进；或返工轮回到 S5 时，上一轮的 S5 名单还在（`docs/32` §4 的时序与返工轮，归第 15 条）。M3x 之前按整趟 `roster`
+判，`at-ui` 在 S2 进过 `roster` 时，S5 正常收尾、PM 还没记账，架构师一返回就被报成停在旧阶段。
 
 「谁派得到它」这一列是拿 `computeReach` 对**改完之后**的真实 `roster.json` 逐阶段跑出来的，
 不是手推的，也不是照着上一版改的（上一版的 S5 行本身就是错的，见本节末尾）。
@@ -236,9 +251,11 @@ Task 4 修复轮 1 补（裁定「豁免不覆盖被证伪的预测」：叙述�
 
 `isStageDone` 在这里的调用**新增**在 `hooks/gate.mjs` 的 `CHECK === 'deliverable'` 分支，
 与 `CHECK === 'ledger'` 分支里那处（阶段推进提示用）是两个独立调用点，互不共享——两处都要
-在，改一处不代表另一处也改了。**传参的写法**这几处一致（按 `docs/16` §3.1 列举，不报总数：
-这里、`CHECK === 'ledger'` 分支里那处 `isStageDone`、`compareArtifacts`、`readiness`）：
-`ctx.state?.roster` 不是数组时传 `undefined`，宁可多报不要漏报。
+在，改一处不代表另一处也改了。**两处 `isStageDone` 的传参逐字相同**：`roster: participantsOf(ctx.state, ctx.state?.stage)`
+——当前段叫到的人（M3x，`docs/32`）。`compareArtifacts`、`readiness` 那两处**有意不同**，仍传整趟 `roster`
+（`ctx.state?.roster` 不是数组时传 `undefined`，宁可多报不要漏报），理由见上面消费方表下那一段。
+⚠️ 上一版这里写的是「传参的写法这几处一致（这里、ledger 分支里那处、`compareArtifacts`、`readiness`）」——M3x 起只有
+两处 `isStageDone` 之间还一致。
 
 ⚠️ **M3k（2026-09-21）：`CHECK === 'ledger'` 分支里那处是这一轮才进上面这张清单的。**
 在那之前它是 `hooks/gate.mjs` 里唯一**不**传 `roster` 的一处 `isStageDone` 调用，
@@ -246,7 +263,7 @@ Task 4 修复轮 1 补（裁定「豁免不覆盖被证伪的预测」：叙述�
 （S1→S8 整链那一趟的实测：S2 与 S5 整趟零条，`docs/20` §7.8；收口 `docs/11` §5.33）。
 **下面那句「改一处的时候去看另一处」当时就写在两处，而它点名的那一处正是没改的那一处**
 ——所以这件事从此由 `tests/stage-done-call-site.test.mjs` 钉着：判据从源码派生，
-`hooks/gate.mjs` 里任何一处 `isStageDone` 调用不带 `roster`，它当场红。
+`hooks/gate.mjs` 里任何一处 `isStageDone` 调用不带 `roster`，它当场红（M3x 起它要的是按段的参与者，整趟 `roster` 也红）。
 **判据管的是「每一处都收窄」，这一节与那段注释管的是「为什么要收窄」，谁也替不了谁。**
 
 ⚠️ **但「传进去之后退回全部 `producers`」只对 `isStageDone` 与 `readiness` 说得通。**

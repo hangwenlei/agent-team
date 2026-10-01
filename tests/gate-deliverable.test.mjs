@@ -814,6 +814,89 @@ test('前置条件：上面三条的夹具互不相同——否则三条测的�
   assert.notDeepEqual(triples[1], triples[2])
 })
 
+// ---- M3x：H5a 的「当前阶段齐了没」按段取参与者（全量审查第 14 条，docs/32）----
+//
+// ⚠️ 上面那三份夹具与下面 H5A_TOPOLOGY_BEHAVIOUR.coordinatorDoneViaUi 都没有 stage_roles——更早落盘的旧 run 的形状，
+// 按段的取法对它们退回整趟 roster，所以它们一个字不改，**现在钉的是「旧 run 退回 roster」**。coordinatorDoneViaUi 的
+// roster 只有 at-ui：在旧 run 上分不出它是 S5 叫的还是 S2 叫的。下面这几条是带 stage_roles 的新 run。
+function runH5aM3x({ stage_roles, roster, diskArtifacts, returns = 'at-architect', ledger = true }) {
+  const { projectDir, pluginDir } = makeRun({
+    runId: 'r1', stage: 'S5', roster, stage_roles, artifacts: diskArtifacts,
+    history: ['S1', 'S2', 'S3', 'S4', 'S5'].map((stage) => ({ stage, at: '2026-09-17T14:30:00Z' })),
+  })
+  try {
+    if (ledger) {
+      // 账本与磁盘对齐，让这几条只看 H5a 那一支，不夹带账本比对的 unrecorded。
+      const statePath = join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+      const state = JSON.parse(readFileSync(statePath, 'utf8'))
+      state.artifacts = Object.fromEntries(diskArtifacts.map((n) => [n, sha256OfContract(`fixture ${n}\n`)]))
+      writeFileSync(statePath, JSON.stringify(state), 'utf8')
+    }
+    return run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm',
+      tool_input: { subagent_type: `agent-team:${returns}` },
+    }, GATE, projectDir).stdout
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+}
+const M3X_S5_IMPL = ['05-impl/at-backend.md', '05-impl/at-frontend.md', '05-impl/at-ui.md']
+
+// D4：S5 正常收尾、PM 还没记账，at-ui 在 S2 进过 roster——整趟 roster 下 S5 只等 05-impl/at-ui.md，架构师一返回就被
+// 报成「产物已经齐了却停在旧阶段」，而 PM 此刻正该去核实、记账。
+test('M3x H5a：S5 还没记账、at-ui 在 S2 干过、三份实现都在——架构师返回不报停在旧阶段', () => {
+  const stdout = runH5aM3x({
+    roster: ['at-product', 'at-ui', 'at-architect'],
+    stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'] },
+    diskArtifacts: M3X_S5_IMPL,
+  })
+  assert.doesNotMatch(stdout, /停在旧阶段/, stdout)
+})
+
+test('M3x H5a：S5 记了账（叫到 at-backend）没推进、它交了——架构师返回报「这正是停在旧阶段」', () => {
+  const stdout = runH5aM3x({
+    roster: ['at-product', 'at-ui', 'at-architect', 'at-backend'],
+    stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'], S5: ['at-architect', 'at-backend'] },
+    diskArtifacts: ['05-impl/at-backend.md'],
+  })
+  assert.match(stdout, /这正是\*\*停在旧阶段\*\*/)
+})
+
+test('M3x H5a：S5 记了账（叫到 at-backend 与 at-frontend）、只交了一份——架构师返回静默', () => {
+  const stdout = runH5aM3x({
+    roster: ['at-product', 'at-architect', 'at-backend', 'at-frontend'],
+    stage_roles: { S2: ['at-product'], S3: ['at-architect'], S5: ['at-architect', 'at-backend', 'at-frontend'] },
+    diskArtifacts: ['05-impl/at-backend.md'],
+  })
+  assert.equal(stdout, '')
+})
+
+// 整趟口径的消费方之一：账本比对（compareArtifacts 的 drifted/missing）不按段收窄——S5 还没记账时 participantsOf 给空集，
+// 按段取会让 S2 那几份整体掉出比对范围，记账之后被改过的 01-prd.md 就不报了。理由在 docs/11 §5.33 的收口。
+test('M3x 整趟口径：S5 还没记账、01-prd.md 记账之后被改过——架构师返回时账本比对照样报它', () => {
+  const { projectDir, pluginDir } = makeRun({
+    runId: 'r1', stage: 'S5', roster: ['at-product', 'at-architect'],
+    stage_roles: { S2: ['at-product'], S3: ['at-architect'] }, trimmed: { 'at-ui': 'S2' },
+    history: ['S1', 'S2', 'S3', 'S4', 'S5'].map((stage) => ({ stage, at: '2026-09-17T14:30:00Z' })),
+    artifacts: ['00-contract.md', '01-prd.md', '03-arch.md'],
+  })
+  try {
+    const statePath = join(projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const state = JSON.parse(readFileSync(statePath, 'utf8'))
+    state.artifacts = { '01-prd.md': 'sha256:' + 'c'.repeat(64) }
+    writeFileSync(statePath, JSON.stringify(state), 'utf8')
+    const { stdout } = run('deliverable', {
+      tool_name: 'Agent', agent_type: 'at-pm', tool_input: { subagent_type: 'agent-team:at-architect' },
+    }, GATE, projectDir)
+    assert.match(stdout, /【账本比对】/, stdout)
+    assert.match(stdout, /01-prd\.md/, stdout)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
 // ---- H5a 静默表第三次重算（M2b Task 3）：逐行钉住 stages.README.md 那八行 ----
 //
 // 这张表被重算过三次（M1b 终审提出、M2a Task 6 第一次实做、M2b Task 3 本次），每一次

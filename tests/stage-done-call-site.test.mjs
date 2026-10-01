@@ -1,4 +1,9 @@
-// `isStageDone` 的**调用点**：`hooks/gate.mjs` 里每一处都必须按 `roster` 收窄
+// `isStageDone` 的**调用点**：`hooks/gate.mjs` 里每一处都必须按段取参与者（M3x 之前是「按 `roster` 收窄」）
+//
+// ⚠️ **M3x（`docs/32`，全量审查第 14 条）改了这条判据要的东西**：按整趟 `roster` 收窄对多段角色不对——`at-ui` 在 S2
+// 进过 `roster`，S5 就把它当成 S5 的产者（S5 不派它永远不齐、它先交就提前判齐、架构师返回被误报停在旧阶段）。现在每一处
+// 调用的 `roster` 实参都必须是 `participantsOf(ctx.state, ctx.state?.stage)`：这一段叫到了谁（`state.json` 的
+// `stage_roles`，旧 run 退回 `roster`）。下面这段来历照留——「不传就哑掉」那一半原样成立，`roster: <整趟>` 现在也是违规。
 //
 // 来历（`docs/11` §5.33）：M2a §1.1 裁定（`docs/11` §5.7）让 `isStageDone` 与
 // `compareArtifacts` 按 **`roster ∩ producers`** 展开——「这一趟实际派到的执行角色都交了
@@ -117,17 +122,18 @@ function argTextOf(text, fromIdx) {
   return null
 }
 
-// 实参里有没有把 `roster` 作为一个键传进去。认两种合法写法：
-//   · `roster: <表达式>`（今天两处都是这种）
-//   · `{ …, roster }`（简写；将来有人这么重构，判据不该因此变红）
+// 实参里的 `roster` 键是不是**这一段的参与者**：`roster: participantsOf(ctx.state, ctx.state?.stage)`（M3x）。
+// 第二个实参必须是当前段——取别的段（比如写死 'S5'）同样是违规。
+// M3x 之前这里认的是「`roster` 这个键在不在」，连简写 `{ …, roster }` 都算；那一版放得过 `roster: <整趟 roster>`，
+// 而那正是第 14 条要消掉的写法（下面两条锚改成了反例）。
 // **不认** `ctx.state.roster` 这种出现在**值**里面的——前面是 `.`，正则要求 `roster`
 // 前面是行首、`{`、`,` 或空白。
-function passesRoster(argText) {
+function passesParticipants(argText) {
   if (typeof argText !== 'string') return 'unparsed'
-  return /(?:^|[{,\s])roster\s*(?::|,|\}|$)/.test(argText)
+  return /(?:^|[{,\s])roster\s*:\s*participantsOf\(\s*ctx\.state\s*,\s*ctx\.state\?\.stage\s*\)/.test(argText)
 }
 
-// 主判据与全部锚**共用这一份**：返回 `hooks/` 下每一处调用的 `{ file, checks, roster }`。
+// 主判据与全部锚**共用这一份**：返回 `hooks/` 下每一处调用的 `{ file, checks, participants }`。
 // `checks` 是守着它的那个分支声明的检查项名字数组，不在任何分支区里时为 `null`。
 // ⚠️ **行号是从 `text` 自己数出来的，不靠 `line.length` 累加。** 初稿正是那么写的
 // （`offset += line.length + 1`），而 `hooks/gate.mjs` 的行尾是 **CRLF**：
@@ -146,7 +152,7 @@ function callSites(sources) {
       const lineIdx = text.slice(0, m.index).split(/\r?\n/).length - 1
       if (!isCallLine(lines[lineIdx] ?? '')) continue
       const region = regions.find((r) => lineIdx >= r.start && lineIdx < r.end)
-      out.push({ file, checks: region ? region.checks : null, roster: passesRoster(argTextOf(text, m.index)) })
+      out.push({ file, checks: region ? region.checks : null, participants: passesParticipants(argTextOf(text, m.index)) })
     }
   }
   return out
@@ -159,18 +165,19 @@ function callSites(sources) {
 // deepEqual 一份清单：多一处调用、少一处调用、换个文件、搬到别的分支区，全都红。
 // `roster` 一起钉在同一个 deepEqual 里，**不拆成「先数调用点、再另写一条数参数」**
 // ——拆开的话「新增一处不传 roster 的调用」会只红一条，而它同时违反了两件事。
-test('docs/11 §5.33：hooks/ 下 isStageDone 只有两处调用，都在 hooks/gate.mjs，且两处都按 roster 收窄', () => {
+test('docs/11 §5.33 / docs/32：hooks/ 下 isStageDone 只有两处调用，都在 hooks/gate.mjs，且两处都按段取参与者', () => {
   assert.deepEqual(
     callSites(hookSources()),
     [
-      { file: 'hooks/gate.mjs', checks: ['ledger'], roster: true },
-      { file: 'hooks/gate.mjs', checks: ['stop-gate', 'deliverable'], roster: true },
+      { file: 'hooks/gate.mjs', checks: ['ledger'], participants: true },
+      { file: 'hooks/gate.mjs', checks: ['stop-gate', 'deliverable'], participants: true },
     ],
-    'isStageDone 的每一处调用都必须按 roster 收窄（M2a §1.1 裁定，docs/11 §5.7）。\n' +
-      '  不传它的后果不是误报，**是哑掉**：stageRolesInRun(stage, undefined) 退回全部\n' +
+    'isStageDone 的每一处调用都必须传 roster: participantsOf(ctx.state, ctx.state?.stage)（M3x，docs/32）。\n' +
+      '  不传的后果不是误报，**是哑掉**：stageRolesInRun(stage, undefined) 退回全部\n' +
       '  producers，任何有产者被裁剪的阶段结构上永远不 done——ledger 分支那条【阶段】\n' +
       '  提示（「H5 哑掉」的两条对策之一）对那些阶段一次也不发。实测 docs/20 §7.8。\n' +
-      '  ⚠️ roster 是 "unparsed" 说明括号配平没数出实参，不是「没传」——先看抽取器，\n' +
+      '  传整趟 roster 也不对：at-ui 在 S2 进过 roster，S5 就把它当成 S5 的产者（全量审查第 14 条）。\n' +
+      '  ⚠️ participants 是 "unparsed" 说明括号配平没数出实参，不是「没传」——先看抽取器，\n' +
       '  不要去补一个已经在的参数。\n' +
       '  要新增一处调用、或者判定某一处**有意不收窄**，去 docs/11 §5.33 把理由写下来，\n' +
       '  再改这份清单。',
@@ -183,7 +190,7 @@ test('docs/11 §5.33：hooks/ 下 isStageDone 只有两处调用，都在 hooks/
 //
 // 光证明它在今天的源码上是绿的，证不了它认得出违规。这里用的是**改动前 BASE
 // (`21ea786`) 上那段源码的逐字原文**——真正那个缺陷，不是一个想象出来的变异。
-test('锚：BASE 上 ledger 分支那次调用的逐字原文，判据报 roster: false', () => {
+test('锚：BASE 上 ledger 分支那次调用的逐字原文，判据报 participants: false', () => {
   const mutated = [
     'function main() {',
     "  if (CHECK === 'ledger') {",
@@ -196,8 +203,33 @@ test('锚：BASE 上 ledger 分支那次调用的逐字原文，判据报 roster
     '}',
   ].join('\n')
   assert.deepEqual(callSites([{ file: 'hooks/gate.mjs', text: mutated }]), [
-    { file: 'hooks/gate.mjs', checks: ['ledger'], roster: false },
+    { file: 'hooks/gate.mjs', checks: ['ledger'], participants: false },
   ])
+})
+
+// ⭐ 锚（M3x）：M3k 之后、M3x 之前那段源码的逐字原文——按整趟 roster 收窄。第 14 条的缺陷就是这一行，判据必须认得出它。
+test('锚：M3k 之后的逐字原文（按整趟 roster 收窄），判据报 participants: false', () => {
+  const mutated = [
+    'function main() {',
+    "  if (CHECK === 'ledger') {",
+    '    const stageDone = isStageDone({',
+    '      stage: ctx.state?.stage,',
+    '      stages: ctx.stages,',
+    '      artifactExists: ctx.artifactExists,',
+    '      roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,',
+    '    })',
+    '  }',
+    '}',
+  ].join('\n')
+  assert.deepEqual(callSites([{ file: 'hooks/gate.mjs', text: mutated }]), [
+    { file: 'hooks/gate.mjs', checks: ['ledger'], participants: false },
+  ])
+})
+
+// ⭐ 锚（M3x）：第二个实参取的不是当前段，同样违规。
+test('锚：participantsOf 的第二个实参不是 ctx.state?.stage 时，判据报 false', () => {
+  assert.equal(passesParticipants("{ stage: ctx.state?.stage, roster: participantsOf(ctx.state, 'S5') }"), false)
+  assert.equal(passesParticipants('{ stage: ctx.state?.stage, roster: participantsOf(ctx.state, ctx.state?.stage) }'), true)
 })
 
 // ⭐ 锚：**CRLF 与 LF 两种行尾必须给出同一个答案。**
@@ -233,6 +265,7 @@ test('锚：真实 gate.mjs 只换行尾，抽取器给出同一个答案（docs
 // 的 gate.mjs 里，那次 isStageDone 调用后面紧跟的就是一次带 roster 的
 // buildLedgerNotices/compareArtifacts 实参。**这是这条判据唯一的真正难点所在。**
 test('锚：紧跟在调用后面的另一次 roster 传参，不算这一处传了', () => {
+  // M3x：紧跟着的那次传的是合格的按段参与者也不算——它不在这一处的括号里。
   const sample = [
     'function main() {',
     "  if (CHECK === 'ledger') {",
@@ -241,26 +274,28 @@ test('锚：紧跟在调用后面的另一次 roster 传参，不算这一处传
     '      artifactExists: ctx.artifactExists,',
     '    })',
     '    const notices = buildLedgerNotices({',
-    '      roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,',
+    '      roster: participantsOf(ctx.state, ctx.state?.stage),',
     '    })',
     '  }',
     '}',
   ].join('\n')
-  assert.deepEqual(callSites([{ file: 'hooks/gate.mjs', text: sample }])[0].roster, false)
+  assert.deepEqual(callSites([{ file: 'hooks/gate.mjs', text: sample }])[0].participants, false)
 })
 
-// ⭐ 锚：`ctx.state.roster` 只出现在**值**里、没有 `roster` 这个键时，不算传了。
-// 这一条钉 `passesRoster` 的正则里「前面不能是 `.`」那一半。少了它，把
-// `roster: …` 改成 `artifactExists: (p) => f(ctx.state.roster, p)` 这种（参数没了、
+// ⭐ 锚：`participantsOf(...)` 只出现在**值**里、没有 `roster` 这个键时，不算传了。
+// 这一条钉 `passesParticipants` 的正则里「要有 `roster:` 这个键、前面不能是 `.`」那一半。少了它，把
+// `roster: …` 改成 `artifactExists: (p) => f(participantsOf(ctx.state, ctx.state?.stage), p)` 这种（参数没了、
 // 字样还在）会被判成传了。
-test('锚：roster 只出现在值里（ctx.state.roster）而没有这个键时，判据报 false', () => {
-  assert.equal(passesRoster('{ stage: s, artifactExists: (p) => g(ctx.state.roster, p) }'), false)
+test('锚：participantsOf 只出现在值里而没有 roster 这个键时，判据报 false', () => {
+  assert.equal(passesParticipants('{ stage: s, artifactExists: (p) => g(participantsOf(ctx.state, ctx.state?.stage), p) }'), false)
+  assert.equal(passesParticipants('{ stage: s, x: ctx.state.roster: participantsOf(ctx.state, ctx.state?.stage) }'), false)
 })
 
-// ⭐ 锚：简写 `{ roster }` 算传了 —— 判据不该因为一次无害的重构变红。
-test('锚：对象简写 { roster } 算按 roster 收窄', () => {
-  assert.equal(passesRoster('{ stage, stages, artifactExists, roster }'), true)
-  assert.equal(passesRoster('{ stage, roster, stages }'), true)
+// ⭐ 锚（M3x 改成反例）：简写 `{ roster }` 传的是一个叫 roster 的变量——看不出它是按段取的，不算。
+// M3x 之前这条是正例（「简写算传了」），那时判据只问键在不在。
+test('锚：对象简写 { roster } 不算按段取参与者', () => {
+  assert.equal(passesParticipants('{ stage, stages, artifactExists, roster }'), false)
+  assert.equal(passesParticipants('{ stage, roster, stages }'), false)
 })
 
 // ⭐ 抽取器锚：定义行、整行注释、import 行都不算调用点。

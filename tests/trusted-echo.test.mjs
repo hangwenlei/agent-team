@@ -226,6 +226,18 @@ const SCENARIOS = [
     calls: ({ run }) => [['ledger', posted('at-pm', join(run, 'state.json'))]],
   },
   {
+    // M3x（docs/32）：stage_roles 的四个入口——键不在阶段链里、值不是字符串数组、值里的角色不在 roster 里、
+    // roster 里的角色哪一段都没记。
+    name: 'validateState 的 stage_roles：键、值、值里的角色、roster 里没记段的角色',
+    disk: true,
+    state: (s, P) => ({
+      ...s,
+      roster: [...s.roster, P + 'R'],
+      stage_roles: { [P]: [], [P + 'K']: 'x', S3: ['at-architect', P + 'V'], S2: ['at-product'], S5: ['at-backend'] },
+    }),
+    calls: ({ run }) => [['ledger', posted('at-pm', join(run, 'state.json'))]],
+  },
+  {
     name: 'validateState：stage 本身是载荷、history 末条合法',
     disk: true,
     state: (s, P) => ({ ...s, stage: P }),
@@ -515,6 +527,23 @@ test('非字符串的值不让受信回传整条消失：state.stage、artifacts
     {
       name: 'state.stage 是 {"toString":1}（deliverable）',
       state: { ...baseState(), stage: { toString: 1 }, artifacts: { '01-prd.md': 'sha256:' + 'b'.repeat(64) } },
+      call: () => ['deliverable', returned('agent-team:at-product')],
+      want: '01-prd.md',
+    },
+    // M3x：带 stage_roles 时【阶段】与 H5a 经 participantsOf 取当前段的参与者——stage 拿去当 stage_roles 的键之前要先判类型。
+    // 不带 stage_roles 的两条走的是退回 roster 那一支，测不到这一处。
+    {
+      name: 'state.stage 是 {"toString":1}、带 stage_roles',
+      state: { ...baseState(), stage: { toString: 1 }, stage_roles: { S2: ['at-product'], S3: ['at-architect'], S5: ['at-backend'] } },
+      call: (run) => ['ledger', posted('at-pm', join(run, 'state.json'))],
+      want: 'stage 缺失或不是字符串',
+    },
+    {
+      name: 'state.stage 是 {"toString":1}、带 stage_roles（deliverable）',
+      state: {
+        ...baseState(), stage: { toString: 1 }, stage_roles: { S2: ['at-product'], S3: ['at-architect'], S5: ['at-backend'] },
+        artifacts: { '01-prd.md': 'sha256:' + 'b'.repeat(64) },
+      },
       call: () => ['deliverable', returned('agent-team:at-product')],
       want: '01-prd.md',
     },

@@ -21,8 +21,9 @@ skills: at-handoff-package
 
 ## 你开工前先自己确认 `S5` 交齐了
 
-**自己确认 `S5` 的实现记录都在**——`stages.json` 的 `S5` `producers` 里，这一趟
-`roster` 提到的每一个，都该在 `05-impl/` 下有一份。**H2 不会替你拦这一条**：它只查
+**自己确认 `S5` 的实现记录都在**——`stages.json` 的 `S5` `producers` 里，`state.json` 的
+`stage_roles` 在 `S5` 那一段记着的每一个，都该在 `05-impl/` 下有一份（没有 `stage_roles` 的旧 run 看整趟 `roster`）。
+别拿整趟 `roster` 对：`at-ui` 在 `S2` 干过活就会在里面，`S5` 却未必叫过它。**H2 不会替你拦这一条**：它只查
 `requires` 里静态列出的产物，而 `S6` 的 `requires` 里没有实现记录。**缺了就回报上级，
 不要在残缺的实现上跑测试**——在半份实现上跑出来的绿，比红更坏。
 

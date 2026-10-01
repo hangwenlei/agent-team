@@ -32,7 +32,7 @@ import { NO_PATHS_ROLES, validateProject } from './lib/project.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
 import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
-import { isPlainObject } from './lib/stages.mjs'
+import { isPlainObject, participantsOf } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
 import { GATE_CHECK_PATH, gateCheckReason, isGateCheck } from './lib/gate-check.mjs'
@@ -453,13 +453,15 @@ function buildDriftNotice(cmp, recipientCanWriteState) {
 // ⚠️ **报，不拦**（M3a 设计 §3.2 末尾），与 H5a 同一档。裁剪是合法动作，这条判据只
 // 负责把沉默变成一句话；做成 deny 会在「PM 还没来得及写 trimmed」时卡死整条链。
 //
-// ⚠️ 文案必须给**两条**出路，而且要把它们和各自的触发对上：这条提示有两个判据分辨
-// 不了、而读的人分辨得了的触发——真的裁了 / 真的漏了。只写一条出路就等于替读的人
-// 做了那个判断，而判据恰恰是做不了这个判断的那一方。
+// ⚠️ 文案必须按触发逐个给出路，而且要把它们和各自的触发对上：这条提示的触发判据分辨
+// 不了、而读的人分辨得了——真的裁了（→ trimmed）/ 真的漏了（→ 派出去）；带 stage_roles 的 run 还有第三种：那一段
+// 真被叫到过、只是 stage_roles 漏记了（→ 补记，M3x）。少给一条出路就等于替读的人做了那个判断，而判据恰恰是做不了
+// 这个判断的那一方。
 //
 // ⚠️ 这里要防的错误修法很具体：**把名字写进 roster 让提示消失**。roster 记的是「这一趟
-// 真的叫到过谁」，只写名字不派人，产物照样不存在——提示没了，洞还在，而且下一次账本
-// 比对会把它报成 missing，那时看起来像是产物丢了，不像是没派。本仓库为「失败文案把人
+// 真的叫到过谁」，只写名字不派人，产物照样不存在——提示没了，洞还在，而且门禁不会再报它。
+// （M3x 订正：这里原来写的是「下一次账本比对会把它报成 missing」——从 M3a 写下起就不成立：compareArtifacts 只比对
+// 记过账的产物，没记账的名字直接跳过。还看得见它的只剩 at-qa 对 S5 的自查与 /agent-team:at-status，文案照实说。）本仓库为「失败文案把人
 // 指向错误修法」栽过一次（ledger 的【阶段】那条：提示让一个做不到这件事的角色去做
 // 它），这条是同一族的第二种形状：能做到，但做的是错的那件事。
 // 同理，trimmed 那一条给的是**形状**、用当前第一条 gap 举例，不是一份可以整批粘贴的
@@ -554,7 +556,13 @@ function buildDriftNotice(cmp, recipientCanWriteState) {
 // 是否还重合；不重合就该在这里写一个独立的谓词，而不是继续借。
 const isDriverRole = (role) => isContractWriter(role)
 
-function buildCoverageNotice({ gaps, narrowed } = {}, recipientCanWriteState) {
+// ⚠️ M3x（docs/32）：带 stage_roles 的 run 按段判（decideCoverage 回 perStage: true）。那时点名的角色可能就在 roster 里
+// ——at-ui 在 S2 叫过、S5 没记——所以三处跟着变：头一句不说「这一趟既没叫到它们」（假话），改说 state.json 没记着它在
+// 那一段被叫到；多一条出路「它在那一段真干过活、只是 stage_roles 漏记了 → 补记」（这时「把它派出去」会让它重做一遍）；
+// 「不要为了让提示消失就写进 roster」那条护栏扩到 stage_roles——补记与「只写名字」长得一样，分界是它真被叫到过没有。
+// 旧 run（perStage 为假）的产者交代文案只有护栏那一句换了（PM 与非 PM 两支都换了，见上面那段 M3x 订正，与 perStage 无关），其余
+// 一个字不变：那里没有 stage_roles 可补，判据也还是整趟口径。
+function buildCoverageNotice({ gaps, narrowed, perStage } = {}, recipientCanWriteState) {
   if (!Array.isArray(gaps) || !gaps.length) return null
   const lines = gaps.map((g) => `  - ${g.stage} 的 ${g.role}`)
   const drivers = [...new Set(gaps.filter((g) => isDriverRole(g.role)).map((g) => g.role))]
@@ -575,21 +583,27 @@ function buildCoverageNotice({ gaps, narrowed } = {}, recipientCanWriteState) {
     : `⚠️ 这一批**没能按「这个项目用得上哪些角色」收窄**（读不到 .agent-team/project.json ` +
       `的 available_roles），所以口径比平时宽：这个项目根本用不上的角色、以及 PM 自己做的` +
       `那几段（S1/S4/S8 那一类），都会算进来。**先把 available_roles 补上再判这批名字**` +
-      `——它是 /agent-team:at-init 写的那一份；在补上之前不要照着下面两条出路动手。\n`
-  // 两条出路。**两支都要保留它们**：判据分辨不了「真裁了 / 真漏了」而读的人分辨得了，
-  // 这件事不随收件人变（那正是这两条出路存在的全部理由，见上面那段）。变的只是
+      `——它是 /agent-team:at-init 写的那一份；在补上之前不要照着下面${perStage ? '几' : '两'}条出路动手。\n`
+  // 出路按触发列举：①真裁了、②真漏了，带 stage_roles 的 run 再加 ③那一段真被叫到过、只是漏记。**两支都要保留它们**
+  // （③ 在两支里都有）：判据分辨不了这几种触发而读的人分辨得了，
+  // 这件事不随收件人变（那正是这几条出路存在的全部理由，见上面那段）。变的只是
   // **谁动手**——写不了的那一支把动作换成「带着事实往上冒泡」，不是把信息删掉。
+  const listed = perStage ? ' 或 stage_roles' : ''
   const outs = recipientCanWriteState
-    ? `两条出路，逐个按事实选一条：\n` +
+    ? `${perStage ? '三' : '两'}条出路，逐个按事实选一条：\n` +
       `  ① 本来就不打算用它（按需组队的主动裁剪）：把它写进 state.json 的 trimmed，` +
       `形状是 ${shape}——键是角色名，值是它在哪一段被裁掉的。` +
       `理由不用写在这里，它已经在 04-dispatch.md 里。` +
       `已经写过却还在报的话，先核字段名拼对了没有：state.json 的校验不拒未知键，` +
       `trimmed 拼错了不会有任何别的提示。\n` +
       `  ② 不是裁剪，是漏了：把它派出去，让它自己写出那一段的产物。\n` +
-      `⚠️ 不要为了让这条提示消失就把名字写进 roster：roster 记的是这一趟真的叫到过谁，` +
-      `只写名字不派人，产物照样不存在——提示没了，洞还在，而且下一次账本比对会把它报成 ` +
-      `missing，那时看起来像是产物丢了，不像是没派。同样，没真裁就别写进 trimmed。\n` +
+      (perStage
+        ? `  ③ 它在那一段真的被叫到过、只是 stage_roles 没记（去磁盘看那一段它的产物在不在，` +
+          `04-dispatch.md 里怎么分的工）：把它并进 state.json 的 stage_roles 那一段，roster 里没有就一起累加——不用重派。\n`
+        : '') +
+      `⚠️ 不要为了让这条提示消失就把名字写进 roster${listed}：${perStage ? '它们' : 'roster '}记的是这一趟真的叫到过谁，` +
+      `只写名字不派人，产物照样不存在——提示没了，洞还在，而且门禁不会再报它：账本比对只比对已经记过账的产物，` +
+      `还看得见它的只剩 at-qa 开工前对 S5 实现记录的自查（只管 S5）与 /agent-team:at-status 的 ✗。同样，没真裁就别写进 trimmed。\n` +
       `这条只报不拦：选哪条都不会卡住你往下走，不选也不会。`
     : `⚠️ **这一条你改不了**：trimmed 与 roster 都住在 state.json 里，它是编排层的控制` +
       `文件，H3 写路径门禁在 PreToolUse 上把非 PM 对它的 Edit/Write 拒掉。而这条回传只` +
@@ -602,15 +616,22 @@ function buildCoverageNotice({ gaps, narrowed } = {}, recipientCanWriteState) {
       `  ② 不是裁剪，是漏了：**派它出去这一半你可能真的做得到**（看花名册里你的 ` +
       `can_delegate_to 含不含它），做得到就派、让它自己写出那一段的产物；` +
       `**但记账那一半仍然在 PM 那边**——roster 记的是这一趟真的叫到过谁，同样住在 state.json。\n` +
-      `⚠️ 往上带的时候不要把它说成「把名字写进 roster 就行」：只写名字不派人，产物照样` +
-      `不存在——提示没了，洞还在，而且下一次账本比对会把它报成 missing，那时看起来像是` +
-      `产物丢了，不像是没派。同样，没真裁就别建议写进 trimmed。\n` +
+      (perStage
+        ? `  ③ 它在那一段真的被叫到过、只是 stage_roles 没记：说清是哪一段、它交了什么——补记是 PM 的动作，` +
+          `stage_roles 同样住在 state.json。\n`
+        : '') +
+      `⚠️ 往上带的时候不要把它说成「把名字写进 roster${listed} 就行」：只写名字不派人，产物照样` +
+      `不存在——提示没了，洞还在，而且门禁不会再报它：账本比对只比对已经记过账的产物，` +
+      `还看得见它的只剩 at-qa 开工前对 S5 实现记录的自查（只管 S5）与 /agent-team:at-status 的 ✗。同样，没真裁就别建议写进 trimmed。\n` +
       `**把上面这几行原样冒泡给派你的人**，让它继续往上带到 PM；` +
       `**不要自己把它咽掉**——咽掉之后没有任何人会再看见它。\n` +
       `这条只报不拦：它没有卡住你往下走。`
 
   return (
-    `【产者交代】下面这些角色是**已经走过的阶段**的产者，而这一趟既没叫到它们、` +
+    `【产者交代】下面这些角色是**已经走过的阶段**的产者，` +
+    (perStage
+      ? `而 state.json 既没记着这一趟在那一段叫到过它们（stage_roles）、`
+      : `而这一趟既没叫到它们、`) +
     `也没声明裁掉它们——它们的缺席今天不会被任何别的判据看见：\n${lines.join('\n')}\n` +
     widened +
     driverWarning +
@@ -701,8 +722,12 @@ function main() {
       targetRole: target,
       stages: ctx.stages,
       artifactExists: ctx.artifactExists,
-      // M2a：与 deliverable 分支同一个口径——undefined 而不是 []，state.json 坏掉时
+      // M2a：与 deliverable 分支那次 compareArtifacts 同一个口径——undefined 而不是 []，state.json 坏掉时
       // 退回「全部 producers」这个更宽的集合，宁可多判一次未完成，不要漏。
+      // ⚠️ M3x：这里**有意**仍传整趟 roster，不按段取（participantsOf）——H2 放行与否取决于「齐了没」，整趟口径是更严的一侧；
+      // 按段取在当前段记账之前只剩目标自己那一份，重派时它在就判齐、前置不查。整趟口径多等的只有别段叫到过、还没交的 S5 产者
+      // （有界面的项目里是 S2 的 at-ui），其余情形两种口径一样放行——那是 H2「齐了就跳过前置」的既有设计（docs/11 §5.33 的收口；
+      // 判据在 tests/gate-readiness.test.mjs 的「readiness（M3x）」）。
       roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
       caller,
       callerReach: Object.hasOwn(reach, caller) ? reach[caller].reachableRoles : null,
@@ -1170,9 +1195,19 @@ function main() {
       }
     }
 
-    // 【阶段】那条提示的判据。roster 传 ctx.state?.roster——不是数组时传 undefined 退回
-    // 全部 producers，写法与本文件另外三处一致（deliverable 分支里那次 isStageDone、
-    // 那次 compareArtifacts、readiness 分支里那次 decideReadiness）。
+    // 【阶段】那条提示的判据。roster 传**当前段的参与者** participantsOf(ctx.state, ctx.state?.stage)（M3x，docs/32）：
+    // state.json 的 stage_roles[当前段]——这一段叫到了谁；没有 stage_roles 的旧 run 退回 roster，roster 不是数组时
+    // 给 undefined、退回全部 producers。写法与 deliverable 分支里那次 isStageDone 一致；那次 compareArtifacts、readiness
+    // 分支里那次 decideReadiness **有意**仍传整趟 roster（理由在 docs/11 §5.33 的收口：按段取会让账本比对在当前段记账之前
+    // 漏报 S2 那几份的漂移；H2 那边整趟口径在别段叫到过的 S5 产者还没交时多查一次前置，按段取就把这一次也放过了）。
+    //
+    // ⚠️ M3x：此前这里传整趟 roster。roster 不分段：at-ui 在 S2 进过 roster，S5 就去等 05-impl/at-ui.md——S5 不派它时
+    // 永远不齐、这条提示永远不发；它先交又提前宣布齐（全量审查第 14 条）。当前段在 PM 记账之前，参与者是空集：产物每一条
+    // 都随参与者展开的段（今天的 stages.json 里是 S2、S5）展开为空、判不齐，正路上（先派、核实，再在推进的同一次 Write 里
+    // 记账）这条提示对它们只在「记了账没推进」时发——产者落盘那一刻判不出整段齐没齐，是登记的边界（docs/32 §4）。
+    // 产物固定的段与参与者无关，照磁盘判，记没记账都一样发（与基线相同）。基线在 S2 首轮同样不发；S5 上 at-ui 在 S2 进过
+    // roster 时，基线从它的实现记录落盘起每次写入都发——之后还有人没交时是提前宣布，最后一份落盘起碰巧是对的，这几条
+    // 现在一律不发。
     //
     // ⚠️ M3k：**这个参数此前不在这里**，而这一处正是 M2a §1.1 裁定（docs/11 §5.7：
     // 「让 isStageDone 与 compareArtifacts 按 roster ∩ producers 展开」）本来要落地的
@@ -1185,7 +1220,7 @@ function main() {
     // 对策之一（理由在 hooks/lib/deliverable.mjs 头部与 stages.README.md）。
     //
     // ⚠️ 判据在 tests/stage-done-call-site.test.mjs，它钉的是**本文件里每一处
-    // isStageDone 调用都按 roster 收窄**，不是「这一行长什么样」。上一轮守这件事的
+    // isStageDone 调用都按段取参与者**（M3x 之前是「按 roster 收窄」），不是「这一行长什么样」。上一轮守这件事的
     // 是 deliverable 分支那段注释末尾那句「两处都改，改一处的时候去看另一处」，
     // **而它点名的那一处正是没改的那一处**——一条注释不是一条判据，这件事现在有实物
     // 了（docs/11 §5.33）。
@@ -1193,7 +1228,7 @@ function main() {
       stage: ctx.state?.stage,
       stages: ctx.stages,
       artifactExists: ctx.artifactExists,
-      roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
+      roster: participantsOf(ctx.state, ctx.state?.stage),
     })
 
     const notices = buildLedgerNotices({
@@ -1400,6 +1435,9 @@ function main() {
               // M2a：undefined 而不是 []——expectedArtifacts 把 undefined 当"退回全部
               // producers"，把 [] 当"这一趟一个执行角色都没派"。state.json 的 roster
               // 字段坏掉（不是数组）时应当退回更宽的集合，多报几条不要漏报。
+              // ⚠️ M3x：这里**有意**仍传整趟 roster，不按段取（participantsOf）——当前段记账之前按段取是空集，
+              // S2/S5 的产物整体掉出 drifted/missing 的范围（docs/11 §5.33 的收口；判据在 tests/gate-deliverable.test.mjs
+              // 的「M3x 整趟口径」）。
               roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
             }),
             recipientCanWriteState,
@@ -1434,18 +1472,21 @@ function main() {
       // 但只要产物已经齐了、state.stage 却没跟着推进，就改判成「停在旧阶段」。
       //
       // ⚠️ 这是**新增**一处 isStageDone 调用，跟上面 ledger 分支里那处不是同一处（这里是
-      // deliverable 分支，两处互不共享调用点）。roster 传 ctx.state?.roster——不是数组时
-      // 传 undefined 退回全部 producers：state.json 的 roster 字段本身坏掉时，宁可多判
-      // 一次未推进，不要漏判。**传参的写法**与本文件这几处逐字相同（按 docs/16 §3.1
-      // 列举，不报总数）：ledger 分支里那次 isStageDone、deliverable 分支里那次
-      // compareArtifacts、readiness 分支里那次 decideReadiness。
+      // deliverable 分支，两处互不共享调用点）。roster 传当前段的参与者
+      // participantsOf(ctx.state, ctx.state?.stage)（M3x，docs/32）——与 ledger 分支里那次 isStageDone 逐字相同。
+      // M3x 之前这里传整趟 roster：at-ui 在 S2 进过 roster，S5 正常收尾、PM 还没记账时架构师一返回，S5 就只等
+      // 05-impl/at-ui.md、判成齐了，被报成「停在旧阶段」（全量审查第 14 条的 D4）。按段取，产物随参与者展开的段在 PM
+      // 记账之前不齐，那几段的「停在旧阶段」只在「记了账没推进」时报；产物固定的段照磁盘判，与基线相同（比如 S6 的
+      // 06-test.md 已在、stage 还停在 S6，非本段角色返回照报）。
+      // ⚠️ 上一版这里列着「传参的写法与本文件这几处逐字相同：……那次 compareArtifacts、readiness 分支里那次
+      // decideReadiness」——M3x 起不再相同：那两处有意仍传整趟 roster，理由在 docs/11 §5.33 的收口。
       //
       // ⚠️ **M3k：ledger 分支里那次 isStageDone 是这一轮才进这张清单的**——在那之前它
       // 是本文件里唯一**不**传这个参数的一处，后果是有产者被裁剪的阶段那条【阶段】提示
       // 结构上永远不发（实测 docs/20 §7.8、收口 docs/11 §5.33）。**下面那句「两处都改，
       // 改一处的时候去看另一处」当时就写在这里，而它点名的那一处正是没改的那一处**：
       // 从此这件事由 tests/stage-done-call-site.test.mjs 钉着——它按源码派生，
-      // 本文件里任何一处 isStageDone 调用不带 roster，它当场红。
+      // 本文件里任何一处 isStageDone 调用不按段取参与者（M3x 起整趟 roster 也算），它当场红。
       //
       // ⚠️ M3a Task 4 同时改掉了这句话里的**位置指代**：上一版写的是「与**下面**
       // compareArtifacts、**上面** readiness 分支」——**两个方位词里有一个是错的**，
@@ -1455,7 +1496,8 @@ function main() {
       //
       // ⚠️ M3a Task 4：上一版这里写的是「口径与下面 compareArtifacts、上面 readiness
       // **分支一致**」——M3a Task 3 之后那句只剩一半真，改成上面那样分两层说。
-      // **写法一致是真的**（上面列举的那几处都是 Array.isArray(...) ? ... : undefined）；
+      // **写法一致是真的**（上面列举的那几处当时都是 Array.isArray(...) ? ... : undefined；M3x 起两处 isStageDone
+      // 改传 participantsOf，见上）；
       // **假的是「传进去之后退回全部 producers」这个效果对 compareArtifacts 整体成立**：
       // 那个函数里三个清单已经不共用一个宇宙，drifted/missing 吃这个参数，
       // **unrecorded 根本不看它**（hooks/lib/artifact-drift.mjs 的 M3a 注释块）。
@@ -1471,7 +1513,7 @@ function main() {
         stage: ctx.state?.stage,
         stages: ctx.stages,
         artifactExists: ctx.artifactExists,
-        roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
+        roster: participantsOf(ctx.state, ctx.state?.stage),
       })
       // 'unknown-stage'：state.stage 缺失、不是字符串，或不在阶段链里——交付物核验这一次没做，在它改对之前每一次都不做。
       // M3v（docs/30）订正：上一版这里写的是「ledger 那条路径会给出细节」「SubagentStop 上没有 additionalContext 这条
