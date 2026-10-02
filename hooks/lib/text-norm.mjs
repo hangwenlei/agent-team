@@ -13,3 +13,9 @@ export function normalizeText(buf) {
   if (s.charCodeAt(0) === 0xfeff) s = s.slice(1)
   return s.replace(/\r\n/g, '\n')
 }
+
+// M4a 复核二（docs/35）：「空文件」——归一化之后去掉空白什么都不剩（0 字节、只有 BOM、只有换行或空格）。收口、交付快照与「交过」
+// 用同一个谓词：空文件不算交了，补交的出路要处处走得通。
+export function isBlankText(buf) {
+  return normalizeText(buf).trim() === ''
+}

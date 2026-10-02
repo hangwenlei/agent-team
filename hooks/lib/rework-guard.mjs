@@ -636,7 +636,9 @@ export function decideReworkBase({ before, after, stages, diskSha }) {
     // accepted：这样的写入永远过不了，照推进核的理由（「让产者重跑之后再推进」）照做是死循环。直接拒，叫它拆开。
     const ids = Object.keys(stages)
     const span = ids.slice(ids.indexOf(restart.stage), ids.indexOf(after.stage))
-    const crossed = span.filter((id) => isVerifyStage(stages[id]))
+    // 复核二（G4）：只算快照里真有产物的验证段——整段裁掉了 at-qa、at-acceptance 的，那一段没有产物，交给推进核查。
+    const snap = isPlainObject(after.rework_base) ? after.rework_base : {}
+    const crossed = span.filter((id) => isVerifyStage(stages[id]) && productsOfStage(stages[id]).some((n) => isSha(snap[n])))
     if (crossed.length) {
       return {
         ok: false,

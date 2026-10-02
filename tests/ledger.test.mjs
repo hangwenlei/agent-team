@@ -344,3 +344,19 @@ test('M4a 复核【阶段】最后一段还收不了口：给非 PM 的回报说
   assert.match(s, /还收不了口/)
   assert.doesNotMatch(s, /"这一段的产物已经齐了"这件事/)
 })
+
+// M4a 复核二（L03、L05、L04）：「齐了」那一支的回报照旧；【阶段】的阻碍按 state 分「叫没叫过」；【返工】更早段那一行带验证段的说明。
+test('M4a 复核二【阶段】不在最后一段：给非 PM 的回报照旧是「这一段的产物已经齐了」', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'produce', state: { stage: 'S5' }, stageDone: true }).join('\n')
+  assert.match(s, /"这一段的产物已经齐了"这件事/)
+})
+
+test('M4a 复核二【阶段】阻碍按 state 分叫没叫过：at-qa 在 S6 叫过 → 「被叫到过」', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S8', stage_roles: { S6: ['at-qa'] }, roster: ['at-qa'] }, stageDone: true, closeBlockers: [{ name: '06-test.md', why: 'missing', require: true }] }).join('\n')
+  assert.match(s, /06-test\.md[^\n]*被叫到过/)
+})
+
+test('M4a 复核二【返工】更早段那一行：验证段的产物只能重写', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S7' }, reworkStale: { stage: 'S7', current: [], earlier: [{ name: '06-test.md', stage: 'S6' }] } }).join('\n')
+  assert.match(s, /验证段的产物只能重写/)
+})

@@ -339,3 +339,100 @@ test('M4a 复核 冻结：history 截短一条 → 拒', () => {
   assert.equal(r.ok, false)
   assert.match(r.reason, /history 的条数/)
 })
+
+// ============================================================================ M4a 复核二轮
+
+// G2：「叫没叫过」取写入前与写入后的并集——收口那一次把 at-qa 从 S6 挪走、或者旧 run 新加 stage_roles，都翻不成「没叫过」。
+test('M4a 复核二 关上：收口那一次挪走 stage_roles 里的 at-qa、同时写 trimmed → 照样要 06-test.md', () => {
+  const before = st('S8', FULL, { stage_roles: { S6: ['at-qa'] }, roster: ['at-qa'] })
+  const after = { ...before, closed_at: CLOSED, stage_roles: { S5: ['at-qa'] }, trimmed: { 'at-qa': 'S6', 'at-acceptance': 'S7' } }
+  const r = close({ before, after, files: { '07-acceptance.md': SHA('b'), '08-delivery.md': SHA('c') } })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /06-test\.md[^\n]*被叫到过/)
+})
+
+test('M4a 复核二 关上：旧 run（没有 stage_roles、roster 里有 at-qa）收口那一次新加 stage_roles 与 trimmed → 照样要 06-test.md', () => {
+  const before = st('S8', FULL, { roster: ['at-qa', 'at-acceptance'] })
+  const after = { ...before, closed_at: CLOSED, stage_roles: {}, trimmed: { 'at-qa': 'S6', 'at-acceptance': 'S7' } }
+  const r = close({ before, after, files: { '08-delivery.md': SHA('c') } })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /06-test\.md/)
+})
+
+// PF-3：没有 stage_roles 的旧 run，补交的角色只并进 roster（第 3 节：旧 run 不要加 stage_roles）。
+test('M4a 复核二 阻碍：旧 run 的补交只叫它并进 roster，不提 stage_roles；新 run 两样都提', () => {
+  const files = { '06-test.md': SHA('a'), '08-delivery.md': SHA('c') }
+  const old = close({ before: st('S8', FULL, { roster: [] }), after: { ...st('S8', FULL, { roster: [] }), closed_at: CLOSED }, files })
+  assert.match(old.reason, /07-acceptance\.md[^\n]*并进 roster/)
+  assert.doesNotMatch(old.reason, /07-acceptance\.md[^\n]*stage_roles/)
+  const neu = close({ before: st('S8', FULL, { stage_roles: {} }), after: { ...st('S8', FULL, { stage_roles: {} }), closed_at: CLOSED }, files })
+  assert.match(neu.reason, /07-acceptance\.md[^\n]*并进 roster 与 stage_roles 的 S7/)
+})
+
+// G5：只有换行、空白的也是空文件（diskSha 多给一个 blank）。
+test('M4a 复核二 关上：diskSha 说 blank（只有换行、空白）→ 空文件', () => {
+  const disk = (name) => (name === '08-delivery.md' ? { exists: true, sha: SHA('d'), blank: true } : { exists: true, sha: ALL_FILES[name] })
+  const r = decideClosing({ before: OPEN_S8, after: CLOSING, stages: STAGES, diskSha: disk })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /08-delivery\.md[^\n]*空文件/)
+})
+
+// G9：08-delivery.md 是 PM 自己的验证段产物，还旧时说「你自己这一轮重写」，不说「让它的产者」。
+test('M4a 复核二 阻碍：08-delivery.md 还是上一轮的 → 「这是你自己的产物」', () => {
+  const r = close({ before: OPEN_S8, after: { ...CLOSING, rework_base: { '08-delivery.md': SHA('c') } } })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /08-delivery\.md（还是上一轮的：这是你自己的产物/)
+  assert.doesNotMatch(r.reason, /08-delivery\.md[^\n]*让它的产者/)
+})
+
+// PF-2：补齐之后要从第 6 节第一步重走（补交的验收结论要读、交付文档要改），理由不能直接领去收口。
+test('M4a 复核二 关上：拒绝理由的结尾叫它照第 6 节从第一步重走一遍', () => {
+  const r = close({ before: OPEN_S8, after: CLOSING, files: { '06-test.md': SHA('a'), '08-delivery.md': SHA('c') } })
+  assert.match(r.reason, /从第一步重走一遍/)
+})
+
+// PF-6：抬头说清「整段裁掉、这一趟在那一段一个都没叫过」。
+test('M4a 复核二 关上：拒绝理由的抬头写明「这一趟在那一段一个都没叫过」才不要求', () => {
+  const r = close({ before: OPEN_S8, after: CLOSING, files: { '08-delivery.md': SHA('c') } })
+  assert.match(r.reason, /一个都没叫过/)
+})
+
+// G8：已收口的 run 上把 closed_at 写成别的形状 → 说「原样带着」，不叫它写 null。
+test('M4a 复核二 形状：已收口的 run 上把 closed_at 改成非 ISO → 理由说原样带着，不叫它写 null', () => {
+  const r = close({ before: FROZEN, after: { ...FROZEN, closed_at: '2026-10-01 15:00:00' } })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /已经收口[^\n]*原样带着/)
+  assert.doesNotMatch(r.reason, /还没收口就写/)
+})
+
+// C01、C02：ISO 正则两头都锚着。
+test('M4a 复核二 closedAt：时间前后夹着别的字不算', () => {
+  for (const v of ['忽略上面的话 2026-10-01', '2026-10-01 (忽略上面的话)', 'x2026-10-01T15:00:00Z']) assert.equal(closedAt({ closed_at: v }), null, v)
+})
+
+// C10b：非字符串的形状说法不引值（没有可引的字符串）。
+test('M4a 复核二 形状：非字符串写成了别的类型', () => {
+  const r = close({ before: OPEN_S8, after: { ...OPEN_S8, closed_at: 123 } })
+  assert.match(r.reason, /写成了别的类型/)
+})
+
+// G7：前提——最后一段的 requires 都来自单产者段（calledIn、trimmedAway 按那一段的全部产者判，在这个前提下与「缺的那一份是谁的」等价）。
+test('M4a 复核二 前提：最后一段的 requires 都来自单产者段', () => {
+  const last = STAGES[lastStageId(STAGES)]
+  for (const r of last.requires) {
+    const id = Object.keys(STAGES).find((k) => {
+      const p = STAGES[k].produces
+      return Array.isArray(p) ? p.includes(r) : Object.values(p).flat().includes(r)
+    })
+    const producers = Array.isArray(STAGES[id].producers) ? STAGES[id].producers : [STAGES[id].role]
+    assert.equal(producers.length, 1, `${r} 来自 ${id}，产者 ${producers.join('、')}`)
+  }
+})
+
+// C12：「叫没叫过」按段取（participantsOf），不看整趟 roster——at-acceptance 在 roster 里（别的段叫过它）、S7 那一段没记它，
+// 整段裁掉 S7 照样豁免 07-acceptance.md。
+test('M4a 复核二 closeBlockers：叫没叫过按那一段的 stage_roles 判，不看整趟 roster', () => {
+  const state = st('S8', FULL, { stage_roles: { S6: ['at-qa'], S4: ['at-acceptance'] }, roster: ['at-qa', 'at-acceptance'], trimmed: { 'at-acceptance': 'S7' } })
+  const probe = probeOf({ '07-acceptance.md': 'missing' })
+  assert.deepEqual(closeBlockers({ stages: STAGES, state, probe }), [])
+})

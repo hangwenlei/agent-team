@@ -591,3 +591,38 @@ test('M4a 复核 补记放行：离开的段里有读不出来的产物 → note
   assert.equal(r.ok, true, r.reason)
   assert.ok(r.notes.some((n) => /推进时不核/.test(n)), JSON.stringify(r.notes))
 })
+
+// ------------------------------------- M4a 复核二
+
+// G4：跨过的验证段在快照里没有产物（整段裁掉了 at-qa、at-acceptance，磁盘上没有 06、07）→ 不算「跨过验证段」，照推进核。
+test('M4a 复核二 补记：跨过的验证段没有产物 → 不按「跨过验证段」拒，照推进核（05 标了就放行）', () => {
+  const files = { ...ROUND1 }
+  delete files['06-test.md']
+  const hist = [...FIRST_ROUND, ...H('S7')]
+  const snap = { '05-impl/at-backend.md': 'accepted', '05-impl/at-frontend.md': 'accepted' }
+  const r = decide({ before: state('S7', hist), after: state('S7', [...hist, ...H('S5', 'S6', 'S7')], { rework_base: snap }), files })
+  assert.equal(r.ok, true, r.reason)
+})
+
+// R06：回到 S6 又补记到 S7——跨过的就是回到的那一段（S6）本身。
+test('M4a 复核二 补记：回到 S6 又记到 S7 → 按跨过验证段拒（区间含回到的那一段）', () => {
+  const r = decide({ before: state('S7', S7_ROUND), after: state('S7', [...S7_ROUND, ...H('S6', 'S7')], { rework_base: { '06-test.md': sha('test r1'), '07-acceptance.md': sha('acc r1') } }), files: S7_FILES })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /跨过了验证段 S6/)
+})
+
+// R03：写入前 history 末尾是链外的 DONE（v1.7.0 旧 run），一次追加两条回退照样拒——链外条目跳过、不清零前一条。
+test('M4a 复核二 一次两条回退：写入前末尾是 DONE 的旧 run 也拒', () => {
+  const hist = [...S7_ROUND, { stage: 'DONE', at: 't' }]
+  const r = decide({ before: state('S7', hist), after: state('S7', [...hist, ...H('S5', 'S7', 'S7')], { rework_base: { '07-acceptance.md': sha('acc r1') } }), files: S7_FILES })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /一次 Write 只记一次回退/)
+})
+
+// R10、R11：补记被推进核拒时补的那句、回退那一次补记提示里的那句。
+test('M4a 复核二 补记的两句提示', () => {
+  const adv = decide({ before: state('S6', FIRST_ROUND), after: state('S6', [...FIRST_ROUND, ...H('S5', 'S6')], { rework_base: EXPECTED_S5 }), files: ROUND1 })
+  assert.match(adv.reason, /回退之后重写过的也算上一轮的/)
+  const at = decide({ before: state('S6', FIRST_ROUND), after: state('S6', [...FIRST_ROUND, ...H('S5', 'S6')]) })
+  assert.match(at.reason, /补记跨过验证段的一律过不了——拆开写，先只记回退/)
+})

@@ -48,7 +48,8 @@ export function deliveredSnapshot({ stages, stageId, diskSha }) {
     for (const name of productsOfStage(stages[id])) {
       if (Object.hasOwn(out, name)) continue
       const d = diskSha(name)
-      if (d && d.exists && isSha(d.sha)) out[name] = d.sha
+      // M4a 复核二（G1）：空文件不算交过——快照不记它，补交的出路（H2 派、H3 写）走得通。
+      if (d && d.exists && isSha(d.sha) && !d.blank) out[name] = d.sha
     }
   }
   return out

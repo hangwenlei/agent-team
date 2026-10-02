@@ -49,21 +49,25 @@ function stageIdOf(stages, name) {
   return null
 }
 
-// 这一趟在 sid 那一段叫到过的产者（participantsOf：有 stage_roles 看那一段，旧 run 看整趟 roster）。
-function calledIn(stages, state, sid) {
-  const who = participantsOf(state, sid)
-  const set = new Set(Array.isArray(who) ? who : [])
+// 这一趟在 sid 那一段叫到过的产者（participantsOf：有 stage_roles 看那一段，旧 run 看整趟 roster）。复核二（G2）：prior（写入前那一份）
+// 读得出时取并集——收口那一次挪走 stage_roles 里的人、或者旧 run 新加 stage_roles，都翻不成「没叫过」。
+function calledIn(stages, state, sid, prior) {
+  const set = new Set()
+  for (const s of [state, prior]) {
+    const who = isPlainObject(s) ? participantsOf(s, sid) : undefined
+    for (const r of Array.isArray(who) ? who : []) set.add(r)
+  }
   return stageRoles(stages[sid]).filter((r) => set.has(r))
 }
 
 // 前置由整段裁掉的段产出：那一段的产者都在 trimmed 里、记的就是那一段（PM 照「班底裁剪自决」裁掉了 S6、S7 的人），而且这一趟在那一段
 // 一个都没叫过。复核（A-2）：原来只看 trimmed——叫过却没交的 at-qa，收口那一次补写 trimmed 就把一份没交的测试报告豁免了。
-function trimmedAway(stages, state, name) {
+function trimmedAway(stages, state, name, prior) {
   const sid = stageIdOf(stages, name)
   if (!sid) return false
   const roles = stageRoles(stages[sid])
   const trimmed = isPlainObject(state?.trimmed) ? state.trimmed : {}
-  return roles.length > 0 && roles.every((r) => Object.hasOwn(trimmed, r) && trimmed[r] === sid) && calledIn(stages, state, sid).length === 0
+  return roles.length > 0 && roles.every((r) => Object.hasOwn(trimmed, r) && trimmed[r] === sid) && calledIn(stages, state, sid, prior).length === 0
 }
 
 /**
@@ -71,7 +75,7 @@ function trimmedAway(stages, state, name) {
  * probe(name) → 'ok' | 'missing' | 'empty' | 'stale' | 'unreadable'。顺序：前置在前、产物在后，各自照 stages.json 的书写顺序。
  * @returns {{ name: string, why: 'missing'|'empty'|'stale'|'unreadable', require: boolean }[]}
  */
-export function closeBlockers({ stages, state, probe }) {
+export function closeBlockers({ stages, state, probe, prior }) {
   const last = lastStageId(stages)
   if (!last) return []
   const stage = stages[last]
@@ -79,7 +83,7 @@ export function closeBlockers({ stages, state, probe }) {
   const produces = expandProduces(stage, stageRolesInRun(stage, participantsOf(state, last)))
   const out = []
   const seen = new Set()
-  const reqs = requires.filter((r) => !trimmedAway(stages, state, r))
+  const reqs = requires.filter((r) => !trimmedAway(stages, state, r, prior))
   for (const name of [...reqs, ...produces]) {
     if (seen.has(name)) continue
     seen.add(name)
@@ -91,7 +95,7 @@ export function closeBlockers({ stages, state, probe }) {
 
 // 一条阻碍的出路。产物名、段名、角色名都是插件自己的名字（stages.json），原样。H6 的收口拒绝理由与 ledger 的【阶段】共用。
 // state 用来分「这一趟在那一段叫没叫过它的产者」（复核 A-2、F5）。
-export function blockerLine(stages, b, state) {
+export function blockerLine(stages, b, state, prior) {
   const sid = stageIdOf(stages, b.name)
   const roles = sid ? stageRoles(stages[sid]) : []
   const own = roles.includes('at-pm')
@@ -99,7 +103,7 @@ export function blockerLine(stages, b, state) {
   if (b.why === 'missing' || b.why === 'empty') {
     const what = b.why === 'empty' ? '是空文件' : '缺'
     if (own) return `${b.name}（${what}：这是你自己的产物，你自己写）`
-    const called = sid ? calledIn(stages, state, sid) : []
+    const called = sid ? calledIn(stages, state, sid, prior) : []
     if (b.require && called.length) {
       return `${b.name}（${what}：${called.join('、')} 在 ${sid} 被叫到过、却没交——派它补交（不用记回退），trimmed 不是出路；` +
         '要放弃这一段，照 /agent-team:at 第 4 节问用户）'
@@ -108,10 +112,13 @@ export function blockerLine(stages, b, state) {
       ? `；这一趟本来就不叫 ${who}（项目不用它，或者你裁掉了它）：把这个决定补记进 trimmed` +
         `（${roles.map((r) => `"${r}": "${sid}"`).join('、')}），这条前置就不要求`
       : ''
-    return `${b.name}（${what}：派它的产者 ${who} 补交——这一段它还没交过，不用记回退；补交的角色在收口那一次并进 roster 与 ` +
-      `stage_roles 的 ${sid}${trim}）`
+    // 复核二（PF-3）：没有 stage_roles 的旧 run 只并进 roster（/at 第 3 节：旧 run 不要加 stage_roles）。
+    const book = isPlainObject(state?.stage_roles) ? `并进 roster 与 stage_roles 的 ${sid}` : '并进 roster'
+    return `${b.name}（${what}：派它的产者 ${who} 补交——这一段它还没交过，不用记回退；补交的角色在收口那一次${book}${trim}）`
   }
   if (b.why === 'stale') {
+    // 复核二（G9）：08-delivery.md 是 PM 自己的验证段产物——不说「让它的产者」。
+    if (own) return `${b.name}（还是上一轮的：这是你自己的产物，这一轮重写）`
     return mayAcceptProduct(stages, b.name)
       ? `${b.name}（还是上一轮的：让它的产者这一轮重写，或者在 rework_base 里把它标 "accepted"）`
       : `${b.name}（还是上一轮的：${VERIFY_REDO}）`
@@ -140,6 +147,11 @@ export function decideClosing({ before, after, stages, diskSha, atPath }) {
   if (Object.hasOwn(after, 'closed_at') && after.closed_at !== null && closedAt(after) === null) {
     const v = after.closed_at
     const got = typeof v === 'string' ? `写成了 ${quote(v)}` : '写成了别的类型'
+    // 复核二（G8）：已收口的 run 上改坏了它——说「原样带着」，不叫它写 null（照做又被冻结拒）。
+    const was0 = closedAt(before)
+    if (was0 !== null) {
+      return { ok: false, reason: `这一趟已经收口：closed_at 原样带着 ${quote(was0)}，这次${got}。${newRun(atPath)}` }
+    }
     return {
       ok: false,
       reason:
@@ -199,17 +211,18 @@ export function decideClosing({ before, after, stages, diskSha, atPath }) {
     const d = diskSha(name)
     if (!d || !d.exists) return 'missing'
     if (!isSha(d.sha)) return 'unreadable'
-    if (d.sha === EMPTY_SHA) return 'empty'
+    if (d.blank || d.sha === EMPTY_SHA) return 'empty'
     return isSha(rb[name]) && rb[name] === d.sha ? 'stale' : 'ok'
   }
-  const blockers = closeBlockers({ stages, state: after, probe })
+  const blockers = closeBlockers({ stages, state: after, probe, prior: isPlainObject(before) ? before : undefined })
   if (!blockers.length) return { ok: true }
   return {
     ok: false,
     reason:
-      `收口要最后一段（${last}）的前置与产物都在、而且是这一轮的（整段裁掉的段产出的前置不要求）。还不行的：\n` +
-      blockers.map((b) => `  - ${blockerLine(stages, b, after)}`).join('\n') +
-      '\n补齐之后再收口。',
+      `收口要最后一段（${last}）的前置与产物都在、不是空文件、而且是这一轮的（整段裁掉、这一趟在那一段一个都没叫过的段产出的` +
+      `前置不要求）。还不行的：\n` +
+      blockers.map((b) => `  - ${blockerLine(stages, b, after, isPlainObject(before) ? before : undefined)}`).join('\n') +
+      '\n补齐之后照 /agent-team:at 第 6 节从第一步重走一遍再收口（补交的验收结论要读，交付文档要照它改）。',
   }
 }
 

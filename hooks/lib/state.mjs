@@ -212,7 +212,8 @@ export function validateState(state, { stages, grants } = {}) {
   if (Object.hasOwn(state, 'closed_at') && state.closed_at !== null) {
     const last = lastStageId(stages)
     if (closedAt(state) === null) {
-      p('closed_at 既不是 null（还没收口）也不是收口那一刻的 ISO 时间字符串（空串或者别的类型）——收口照 /agent-team:at 第 6 节')
+      const got = typeof state.closed_at === 'string' ? `是 ${quote(state.closed_at)}` : '是别的类型'
+      p(`closed_at ${got}：它要么是 null（还没收口），要么是收口那一刻的 ISO 时间（例："2026-10-01T15:00:00Z"）——收口照 /agent-team:at 第 6 节`)
     } else if (last && state.stage !== last) {
       p(`closed_at 在，但 stage 不是阶段链最后一段（${last}）——收口只在最后一段`)
     }

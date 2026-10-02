@@ -22,6 +22,7 @@ import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideRework, decideReworkBase, parseStateText, replayEdit } from './lib/rework-guard.mjs'
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
+import { isBlankText } from './lib/text-norm.mjs'
 import { normalizeText } from './lib/text-norm.mjs'
 import { decideDeliverable } from './lib/deliverable.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
@@ -29,7 +30,7 @@ import { APPROVALS_FILE, DELIVERED_FILE, isControlFile, isGateFile, leafName, ma
 import { readGrants } from './lib/budget.mjs'
 import { askAnswers, promptAnswer, planApprovals, approvalLine, approvalNotices } from './lib/approvals.mjs'
 import { deliveredSnapshot, readSnapshot, makeDelivered, decideRedispatch, decideRedoWrite } from './lib/redo.mjs'
-import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispatch, EMPTY_SHA } from './lib/closing.mjs'
+import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispatch } from './lib/closing.mjs'
 import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
 import { sha256OfContract, shaOrNote } from './lib/contract-hash.mjs'
@@ -614,12 +615,17 @@ function buildCoverageNotice({ gaps, narrowed, perStage } = {}, recipientCanWrit
       `trimmed 拼错了不会有任何别的提示。\n` +
       (closed
         ? `  ② 不是裁剪，是漏了：这一趟已经收口，补不了派——照实告诉用户那一段漏了谁。\n`
-        : `  ② 不是裁剪，是漏了：把它派出去，让它自己写出那一段的产物。` +
-          (viaCoordinator.length
-            ? `${viaCoordinator.join('、')} 只能经协调者派，而最后一段不再派协调者：真漏了，就记一次回退、回到那一段补派` +
-              `（照 /agent-team:at 第 3 节「回退」），或者照实告诉用户。`
-            : '') +
-          '\n') +
+        : viaCoordinator.length
+          ? (() => {
+              const direct = [...new Set(gaps.map((g) => g.role))].filter((r) => !viaCoordinator.includes(r) && !isDriverRole(r))
+              return (
+                `  ② 不是裁剪，是漏了：` +
+                (direct.length ? `把它派出去（${direct.join('、')}），让它自己写出那一段的产物；` : '') +
+                `${viaCoordinator.join('、')} 在最后一段派不出去（协调者不再派，它又是协调者、或者只能经协调者派）：真漏了，` +
+                `就记一次回退、回到那一段补派（照 /agent-team:at 第 3 节「回退」），或者照实告诉用户。\n`
+              )
+            })()
+          : `  ② 不是裁剪，是漏了：把它派出去，让它自己写出那一段的产物。\n`) +
       (perStage
         ? `  ③ 它在那一段真的被叫到过、只是 stage_roles 没记（去磁盘看那一段它的产物在不在，` +
           `04-dispatch.md 里怎么分的工）：把它并进 state.json 的 stage_roles 那一段，roster 里没有就一起累加——不用重派。\n`
@@ -666,9 +672,10 @@ function buildCoverageNotice({ gaps, narrowed, perStage } = {}, recipientCanWrit
 function deliveredOf(ctx, fresh) {
   return makeDelivered({
     snapshot: readSnapshot(ctx.artifactBytes(DELIVERED_FILE)).products,
+    // M4a 复核二（G1）：空文件不算交过（旧快照里记着它的空内容也一样）。
     artifactSha: (name) => {
       const bytes = ctx.artifactBytes(name)
-      return bytes ? sha256OfContract(bytes) : null
+      return bytes && !isBlankText(bytes) ? sha256OfContract(bytes) : null
     },
     isStale: fresh.isStale,
   })
@@ -686,7 +693,7 @@ function writeDeliveredSnapshot(ctx) {
       stageId: ctx.state?.stage,
       diskSha: (name) => {
         const bytes = ctx.artifactBytes(name)
-        return bytes ? { exists: true, sha: sha256OfContract(bytes) } : { exists: ctx.artifactExists(name), sha: null }
+        return bytes ? { exists: true, sha: sha256OfContract(bytes), blank: isBlankText(bytes) } : { exists: ctx.artifactExists(name), sha: null }
       },
     })
     if (!snapshot) return
@@ -1197,7 +1204,8 @@ function main() {
         }
         if (!st.isFile()) return { exists: false, sha: null }
         try {
-          return { exists: true, sha: sha256OfContract(readFileSync(join(runDir, name))) }
+          const bytes = readFileSync(join(runDir, name))
+          return { exists: true, sha: sha256OfContract(bytes), blank: isBlankText(bytes) }
         } catch {
           return { exists: true, sha: null }
         }
@@ -1500,7 +1508,7 @@ function main() {
               if (!ctx.artifactExists(name)) return 'missing'
               const bytes = ctx.artifactBytes(name)
               if (!bytes) return 'unreadable'
-              if (sha256OfContract(bytes) === EMPTY_SHA) return 'empty'
+              if (isBlankText(bytes)) return 'empty'
               return fresh.isStale(name) ? 'stale' : 'ok'
             },
           })
@@ -1569,10 +1577,19 @@ function main() {
       const recipient = callerOf(input)
       const recipientCanWriteState = isContractWriter(recipient)
       // M4a 复核（P7）：最后一段、没收口时，PM 派不到（只能经协调者派）的缺口角色——H2 在最后一段拒派协调者，② 要说清这一点。
+      // 复核二（G3、G6）：「派不出去」= PM 派不到它（只能经协调者派），或者 PM 派它被 decideClosedDispatch 拒（它自己就是协调者）——
+      // 与 H2 同一个判定，不另写一份。驱动者本人不算；花名册读不出来时不说（那时 H2 也不判）。
       const covRoster = loadRoster()
-      const pmCan = isPlainObject(covRoster?.['at-pm']) && Array.isArray(covRoster['at-pm'].can_delegate_to) ? covRoster['at-pm'].can_delegate_to : []
-      const atLastOpen = closedAt(ctx.state) === null && ctx.state?.stage === lastStageId(ctx.stages)
-      const viaCoordinator = atLastOpen ? [...new Set((cov.gaps ?? []).map((g) => g.role).filter((r) => !pmCan.includes(r)))] : []
+      const pmCan = isPlainObject(covRoster?.['at-pm']) && Array.isArray(covRoster['at-pm'].can_delegate_to) ? covRoster['at-pm'].can_delegate_to : null
+      const atLastOpen = pmCan !== null && closedAt(ctx.state) === null && ctx.state?.stage === lastStageId(ctx.stages)
+      const viaCoordinator = atLastOpen
+        ? [...new Set((cov.gaps ?? []).map((g) => g.role))].filter(
+            (r) =>
+              !isDriverRole(r) &&
+              (!pmCan.includes(r) ||
+                decideClosedDispatch({ stages: ctx.stages, state: ctx.state, target: r, roster: covRoster, callerCanWriteState: true }).decision === 'deny'),
+          )
+        : []
       const coverage = buildCoverageNotice(cov, recipientCanWriteState, closedAt(ctx.state) !== null, viaCoordinator)
       if (coverage) {
         notices.push(coverage)
@@ -1913,7 +1930,8 @@ function main() {
             // M4a（docs/35）：最后一段、没收口时，这一格多半是 PM 照收口拒绝理由去补交缺的前置（at-acceptance 补 07）——那不是返工，
             // 不用记回退；交付之后的新改动也先收口再另起一趟。只说给改得了 state.json 的人。
             (recipientCanWriteState && ctx.state?.stage === lastStageId(ctx.stages) && closedAt(ctx.state) === null
-              ? `state.stage 是阶段链最后一段：这次若是在补收口缺的前置（收口时 H6 点过名的），不是返工，等它交完再收口、不用记回退；` +
+              ? `state.stage 是阶段链最后一段：这次若是在补收口缺的前置（收口时 H6 点过名的），不是返工、不用记回退——等它交完，` +
+                `照 /agent-team:at 第 6 节从第一步重走一遍再收口（补交的验收结论要读，交付文档要照它改）；` +
                 `交付之后的新改动先照 /agent-team:at 第 6 节收口、再另起一趟。`
               : '') +
             (recipientCanWriteState

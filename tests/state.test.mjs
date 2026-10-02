@@ -597,3 +597,9 @@ test('M4a 复核 closed_at：阶段链读不出来时不报「最后一段」那
   const r = validateState(good({ closed_at: '2026-10-01T15:00:00Z' }), { stages: null })
   assert.deepEqual(r.problems.filter((m) => /最后一段/.test(m)), [])
 })
+
+// M4a 复核二（G8）：validateState 引出 closed_at 的原值，不说「空串或者别的类型」。
+test('M4a 复核二 closed_at：形状不对时引出原值', () => {
+  const r = validateState(good({ closed_at: '2026-10-01 15:00:00' }), { stages: STAGES })
+  assert.ok(r.problems.some((m) => m.includes('"2026-10-01 15:00:00"')), r.problems.join('\n'))
+})

@@ -359,7 +359,7 @@ test('M4a 复核 P7、G09：【产者交代】在最后一段——只能经协�
   using(AT_S8, (fx) => {
     const c = contextOf(run('ledger', postedState(fx), GATE, fx.p))
     assert.match(c, /【产者交代】/)
-    assert.match(c, /at-ui 只能经协调者派[^\n]*记一次回退/)
+    assert.match(c, /at-ui[^\n]*在最后一段派不出去[^\n]*记一次回退/)
   })
   using(AT_S8_CLOSED, (fx) => {
     const c = contextOf(run('ledger', postedState(fx), GATE, fx.p))
@@ -373,7 +373,7 @@ test('M4a 复核 F9：at-qa 不重测就停下——H5b 对它本人说「你这
     const r = run('stop-gate', stopped('agent-team:at-qa'), GATE, fx.p)
     assert.match(r.stderr, /你这一轮重跑之后重写/)
     assert.doesNotMatch(r.stderr, /让它的产者/)
-    assert.match(r.stderr, /结果与上一轮相同/)
+    assert.match(r.stderr, /结论与上一轮相同/)
   })
 })
 
@@ -400,5 +400,70 @@ test('M4a 复核 G08：最后一段、没收口、前置还是上一轮的 → �
     const c = contextOf(run('ledger', postedState(fx), GATE, fx.p))
     assert.match(c, /07-acceptance\.md（还是上一轮的/)
     assert.doesNotMatch(c, /该收口了/)
+  })
+})
+
+// ============================================================================ M4a 复核二
+
+// G1：空文件全系统同一个口径——交付快照不把它记成交过，H2 放行补派、H3 放行重写；收口照样拦。
+test('M4a 复核二 G1：06-test.md 是空文件（快照里记着空内容的 sha）→ PM 派 at-qa 补交放行、at-qa 写它放行', () => {
+  using({ ...AT_S8, files: { ...DONE_FILES, '06-test.md': '' } }, (fx) => {
+    writeFileSync(join(fx.runDir, 'delivered.json'), JSON.stringify({ stage: 'S8', products: { '06-test.md': sha('') } }))
+    assert.ok(!denied(run('readiness', dispatch('agent-team:at-qa'), GATE, fx.p)))
+    const w = { hook_event_name: 'PreToolUse', tool_name: 'Write', agent_type: 'agent-team:at-qa', tool_input: { file_path: join(fx.runDir, '06-test.md'), content: 'x' } }
+    assert.ok(!denied(run('writepath', w, GATE, fx.p)))
+  })
+})
+
+test('M4a 复核二 G5：只有换行与空白的 08-delivery.md → 收口拒、【阶段】不说该收口了', () => {
+  using({ ...AT_S8, files: { ...DONE_FILES, '08-delivery.md': '\r\n  \n' } }, (fx) => {
+    const r = run('rework', writeState(fx, { ...fx.state, closed_at: CLOSED_AT }), GATE, fx.p)
+    assert.ok(denied(r))
+    assert.match(reasonOf(r), /08-delivery\.md[^\n]*空文件/)
+    const c = contextOf(run('ledger', postedState(fx), GATE, fx.p))
+    assert.doesNotMatch(c, /该收口了/)
+    assert.match(c, /空文件/)
+  })
+})
+
+test('M4a 复核二 G9：门禁层冻结的拒绝理由带 at.md 的路径', () => {
+  using(AT_S8_CLOSED, (fx) => {
+    const r = run('rework', writeState(fx, { ...fx.state, stage: 'S5' }), GATE, fx.p)
+    assert.match(reasonOf(r), /commands[\\/]at\.md/)
+  })
+})
+
+// G3、G6、PF-8：【产者交代】在最后一段，PM 实际派不出去的缺口角色（只能经协调者派的，以及协调者本身）不叫它「派出去」；
+// PM 派得到的叶子照旧；驱动者本人不算；不在最后一段时不说这一句。
+test('M4a 复核二 P7：最后一段的【产者交代】——at-architect 与 at-ui 派不出去、at-acceptance 照旧派出去', () => {
+  using({ ...AT_S8, roster: ['at-product', 'at-backend', 'at-qa'], extra: { stage_roles: { S2: ['at-product'], S5: ['at-backend'], S6: ['at-qa'] } } }, (fx) => {
+    const c = contextOf(run('ledger', postedState(fx), GATE, fx.p))
+    const two = c.split('\n').find((l) => l.includes('② 不是裁剪'))
+    assert.ok(two, c)
+    assert.match(two, /at-architect/)
+    assert.match(two, /在最后一段派不出去/)
+    assert.match(two, /把它派出去（at-acceptance）/)
+    assert.doesNotMatch(two, /at-pm/)
+  })
+  using({ ...B, roster: ['at-product', 'at-backend'], extra: { stage_roles: { S2: ['at-product'], S5: ['at-backend'] } } }, (fx) => {
+    assert.doesNotMatch(contextOf(run('ledger', postedState(fx), GATE, fx.p)), /最后一段派不出去/)
+  })
+})
+
+test('M4a 复核二 PF-2：最后一段补交 at-acceptance 返回 → 回传叫它从第 6 节第一步重走一遍再收口', () => {
+  const { ['07-acceptance.md']: _gone, ...files } = DONE_FILES
+  using({ ...AT_S8, files }, (fx) => {
+    assert.match(contextOf(run('deliverable', returned('agent-team:at-acceptance'), GATE, fx.p)), /从第一步重走一遍/)
+  })
+})
+
+test('M4a 复核二 D02、F03：已收口 H3 拒绝理由给出路；H5b 对产者本人说只追加一句不算', () => {
+  using(AT_S8_CLOSED, (fx) => {
+    writeFileSync(join(fx.runDir, 'delivered.json'), JSON.stringify({ stage: 'S8', products: { '07-acceptance.md': sha(DONE_FILES['07-acceptance.md']) } }))
+    const w = { hook_event_name: 'PreToolUse', tool_name: 'Write', agent_type: 'agent-team:at-acceptance', tool_input: { file_path: join(fx.runDir, '07-acceptance.md'), content: 'x' } }
+    assert.match(reasonOf(run('writepath', w, GATE, fx.p)), /写进你的回报，由项目经理另起一趟/)
+  })
+  using(B, (fx) => {
+    assert.match(run('stop-gate', stopped('agent-team:at-qa'), GATE, fx.p).stderr, /只在末尾追加一句「核过」不算/)
   })
 })
