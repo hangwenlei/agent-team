@@ -569,3 +569,25 @@ test('复核：history 里不在阶段链上的条目单列在 legacy，不进 p
   assert.match(r.legacy[0], /history\[2\]/)
   assert.match(r.legacy[0], /"DONE"/)
 })
+
+// M4a（docs/35）：收口标记 closed_at——形状与「只在最后一段」。H6 写时就拒（hooks/lib/closing.mjs）；这里是事后那一道，
+// 经修复路（写入前读不出来）或 Bash 落盘的才走得到。
+test('M4a closed_at：空串、空白、不是字符串 → 报形状；null（模板的初值）不报', () => {
+  assert.deepEqual(validateState(good({ closed_at: null }), { stages: STAGES }).problems.filter((m) => /closed_at/.test(m)), [])
+  for (const v of ['', '  ', true, 1, []]) {
+    const r = validateState(good({ closed_at: v }), { stages: STAGES })
+    assert.ok(r.problems.some((m) => /closed_at/.test(m) && /ISO 时间/.test(m)), JSON.stringify(v))
+  }
+})
+
+test('M4a closed_at：写了、stage 却不是阶段链最后一段 → 报', () => {
+  const r = validateState(good({ closed_at: '2026-10-01T15:00:00Z' }), { stages: STAGES })
+  assert.ok(r.problems.some((m) => /closed_at/.test(m) && /最后一段（S3）/.test(m)), r.problems.join('\n'))
+})
+
+test('M4a closed_at：在最后一段、形状对 → 不报；没写 → 不报', () => {
+  const hist = [...good().history, { stage: 'S3', at: '2026-09-17T15:00:00Z' }]
+  const closed = validateState(good({ stage: 'S3', history: hist, closed_at: '2026-10-01T15:00:00Z' }), { stages: STAGES })
+  assert.deepEqual(closed.problems.filter((m) => /closed_at/.test(m)), [])
+  assert.deepEqual(validateState(good(), { stages: STAGES }).problems.filter((m) => /closed_at/.test(m)), [])
+})

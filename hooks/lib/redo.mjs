@@ -120,8 +120,15 @@ export function decideRedispatch({ stages, stageId, target, roster, candidates, 
   const where = ids.join('、')
   const files = own.join('、')
   const head = `${inline(target)} 在 ${where} 的产物（${files}）这一轮已经交过，而 state.stage 是 ${cur}：再派它，就是不记回退重做 ${where}。`
+  // M4a（docs/35）：stage 是阶段链最后一段时，这次派发多半是交付之后的新改动（问题 A）——只给「记回退」会把新需求塞进旧契约、
+  // 吃旧 run 的返工额度。先给「收口、另起一趟」，记回退只留给这一趟的产物真有问题。
+  const chainLength = Object.keys(stages).length
+  const atEnd = c === chainLength - 1
+    ? `state.stage 是阶段链最后一段：要是交付之后的新改动，先照 /agent-team:at 第 6 节收口、再另起一趟——不要记回退把新需求塞进这一趟；` +
+      `要是这一趟的产物有问题要返工，才照下面记回退。`
+    : ''
   const out = callerCanWriteState
-    ? `要它返工：照 /agent-team:at 第 3 节的「回退」先记一次回退（回到 ${where}），再派它——返工计数照记，到上限会被要求先问用户。` +
+    ? `${atEnd}要它返工：照 /agent-team:at 第 3 节的「回退」先记一次回退（回到 ${where}），再派它——返工计数照记，到上限会被要求先问用户。` +
       `只是要问它点什么：不要派它，自己读它的产物（run 目录里的 ${files}）与代码，或者问用户。`
     : `只是要问它点什么：不要派它，自己 Read/Glob 它的产物与代码。真要它重做，那是一次回退，记回退是项目经理的事：` +
       `把这一条冒泡给派你的人。`

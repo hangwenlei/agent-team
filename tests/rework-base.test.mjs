@@ -127,8 +127,10 @@ test('M3y 回退写入：还没走到的段（S6）标 "accepted"、磁盘上没
 })
 
 // 补记（回退之后同一次写入又往前记了几段）：写入后的 stage 晚于回到的那一段，那几段的产物（已经重写过的）这一次就能标。
+// M4a（docs/35）：原来这一格标的是 05-impl/at-backend.md 与 06-test.md；06-test.md 是验证段的产物，不许标了。补记也照推进核
+// 离开的 S5，前端那份还旧、要一起标（验证段那一格在下面 M4a 的补记格里）。
 test('M3y 回退写入：补记时，写入后 stage 及更早段的产物这一次就能标 "accepted"', () => {
-  const r = decide({ before: state('S6', FIRST_ROUND), after: state('S6', [...FIRST_ROUND, ...H('S5', 'S6')], { rework_base: { ...EXPECTED_S5, '05-impl/at-backend.md': 'accepted', '06-test.md': 'accepted' } }) })
+  const r = decide({ before: state('S6', FIRST_ROUND), after: state('S6', [...FIRST_ROUND, ...H('S5', 'S6')], { rework_base: { ...EXPECTED_S5, '05-impl/at-backend.md': 'accepted', '05-impl/at-frontend.md': 'accepted' } }) })
   assert.equal(r.ok, true, r.reason)
 })
 
@@ -224,7 +226,8 @@ test('M3y 回退之后：当前段及更早段的产物可以从 sha 改成 "acc
   const r = decide({ before: IN_REWORK, after: state('S5', keepHistory, { rework_base: later }) })
   assert.equal(r.ok, false)
   assert.match(r.reason, /06-test\.md/)
-  const at6 = state('S6', [...keepHistory, ...H('S6')], { rework_base: { ...EXPECTED_S5, '05-impl/at-backend.md': 'accepted', '05-impl/at-frontend.md': 'accepted', '06-test.md': 'accepted' } })
+  // M4a（docs/35）：06-test.md 是验证段的产物，推进到 S6 之后也不许标（M4a 那几格）；这里只标 S5 的两份。
+  const at6 = state('S6', [...keepHistory, ...H('S6')], { rework_base: { ...EXPECTED_S5, '05-impl/at-backend.md': 'accepted', '05-impl/at-frontend.md': 'accepted' } })
   assert.equal(decide({ before: IN_REWORK, after: at6, files: { ...ROUND1, '05-impl/at-backend.md': 'b2', '05-impl/at-frontend.md': 'f2' } }).ok, true)
 })
 
@@ -363,9 +366,14 @@ test('M3y 回退之后：写入前不合法的值、不是任何阶段产物的�
   }
 })
 
+// M4a（docs/35）：真实阶段链里 S5 之后的产物都在验证段，「不在当前段」要拿回到 S4、标 S5 的产物来测（原来标的是 06-test.md，
+// 现在它先撞上验证段那一条）。
+const EXPECTED_S4 = { '04-dispatch.md': sha('dispatch'), ...EXPECTED_S5 }
+const IN_REWORK_S4 = state('S4', [...FIRST_ROUND, ...H('S4')], { rework_base: EXPECTED_S4 })
+
 test('M3y 回退之后：合法的 sha 照旧只许改成当前段及更早段的 "accepted"（坏值那条放开不连带它）', () => {
-  const before = { ...IN_REWORK, rework_base: { ...EXPECTED_S5, '05-impl/at-legacy.md': 'garbage' } }
-  const r = decide({ before, after: state('S5', keepHistory, { rework_base: { ...EXPECTED_S5, '06-test.md': 'accepted' } }) })
+  const before = { ...IN_REWORK_S4, rework_base: { ...EXPECTED_S4, '05-impl/at-legacy.md': 'garbage' } }
+  const r = decide({ before, after: state('S4', IN_REWORK_S4.history, { rework_base: { ...EXPECTED_S4, '05-impl/at-frontend.md': 'accepted' } }) })
   assert.equal(r.ok, false)
   assert.match(r.reason, /不在当前段/)
 })
@@ -383,8 +391,8 @@ test('M3y 回退写入：读不出来的那份，拒绝理由说清不核；没�
 test('M3y 回退之后：拒绝理由按少了、不在当前段分开说', () => {
   const { ['06-test.md']: _d, ...less } = EXPECTED_S5
   assert.match(decide({ before: IN_REWORK, after: state('S5', keepHistory, { rework_base: less }) }).reason, /少了 "06-test\.md"/)
-  const later = { ...EXPECTED_S5, '06-test.md': 'accepted' }
-  assert.match(decide({ before: IN_REWORK, after: state('S5', keepHistory, { rework_base: later }) }).reason, /不在当前段/)
+  const later = { ...EXPECTED_S4, '05-impl/at-frontend.md': 'accepted' }
+  assert.match(decide({ before: IN_REWORK_S4, after: state('S4', IN_REWORK_S4.history, { rework_base: later }) }).reason, /不在当前段/)
 })
 
 test('M3y 留痕：推进时旧的那份已经不在磁盘上 → 不留「读不出来」的痕；写入前不是对象 → 留痕说跳过', () => {
@@ -435,4 +443,87 @@ test('M3y 回退写入：读不出来的那份不核——不晚于写入后 sta
   const { ['06-test.md']: _t, ...rest2 } = EXPECTED_S5
   const no = decide({ before: S6_TO_S5.before, after: state('S5', S6_TO_S5.afterHistory, { rework_base: { ...rest2, '06-test.md': 'accepted' } }), unreadable: ['06-test.md'] })
   assert.equal(no.ok, false)
+})
+
+// ------------------------------------- M4a（docs/35）：验证段的产物在返工轮里不许标 "accepted"
+//
+// 问题 B（2026-10-01 核验）：S6 测试不过回到 S5，后端重写，推进到 S6；门禁自己把「06-test.md 标 accepted」列成出路，标了之后
+// at-qa 不重测就停下、S6→S7 放行——没测过的改动进了验收。验证段（stages.json 的 "verifies": true：S6、S7、S8）的产物是对上游
+// 当时那一版的结论，返工轮里一律重新出。回退那一次写入（decideAtRestart）与之后的写入（decideCarry）同一条。
+
+// 问题 B 的原样状态：回到过 S5，后端这一轮重写过（磁盘 r2），前端标了 accepted，推进到 S6，06-test.md 还是上一轮的。
+const B_HISTORY = [...FIRST_ROUND, ...H('S5', 'S6')]
+const B_FILES = { ...ROUND1, '05-impl/at-backend.md': 'backend r2' }
+const B_BASE = { ...EXPECTED_S5, '05-impl/at-frontend.md': 'accepted' }
+const B_BEFORE = state('S6', B_HISTORY, { rework_base: B_BASE })
+
+test('M4a 回退之后：验证段的产物（06-test.md）从 sha 改成 "accepted" → 拒，理由说要重新出、不给 accepted 这条路', () => {
+  const r = decide({ before: B_BEFORE, after: state('S6', B_HISTORY, { rework_base: { ...B_BASE, '06-test.md': 'accepted' } }), files: B_FILES })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /06-test\.md/)
+  assert.match(r.reason, /验证段/)
+  assert.match(r.reason, /重跑之后重写/)
+})
+
+test('M4a 锚：同一状态下标非验证段的产物（前端那份已标；改标后端那份）照样放行——拒的是验证段，不是这一格的形状', () => {
+  const r = decide({ before: B_BEFORE, after: state('S6', B_HISTORY, { rework_base: { ...B_BASE, '05-impl/at-backend.md': 'accepted' } }), files: B_FILES })
+  assert.equal(r.ok, true, r.reason)
+})
+
+test('M4a 跳段：S5→S7 同一次写入把 06-test.md 标 accepted → 拒（推进把关之外，验证段这一条单独拦）', () => {
+  const before = state('S5', [...FIRST_ROUND, ...H('S5')], { rework_base: B_BASE })
+  const after = state('S7', [...FIRST_ROUND, ...H('S5', 'S7')], { rework_base: { ...B_BASE, '06-test.md': 'accepted' } })
+  const r = decide({ before, after, files: B_FILES })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /06-test\.md/)
+  assert.match(r.reason, /验证段/)
+})
+
+test('M4a 回退写入：回到 S6（补跑测试）那一次就把 06-test.md 标 accepted → 拒；07-acceptance.md 同理', () => {
+  const files = { ...ROUND1, '07-acceptance.md': 'acc r1' }
+  const hist = [...FIRST_ROUND, ...H('S7')]
+  const snap = { '06-test.md': sha('test r1'), '07-acceptance.md': sha('acc r1') }
+  const ok = decide({ before: state('S7', hist), after: state('S6', [...hist, ...H('S6')], { rework_base: snap }), files })
+  assert.equal(ok.ok, true, ok.reason)
+  const r = decide({ before: state('S7', hist), after: state('S6', [...hist, ...H('S6')], { rework_base: { ...snap, '06-test.md': 'accepted' } }), files })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /06-test\.md/)
+  assert.match(r.reason, /验证段/)
+})
+
+test('M4a 已经落盘的 accepted（1.8.0 留下的）原样带着、只改别的字段 → 放行（只判这一次的改动，不追溯）', () => {
+  const before = state('S6', B_HISTORY, { rework_base: { ...B_BASE, '06-test.md': 'accepted' } })
+  const after = state('S6', B_HISTORY, { rework_base: { ...B_BASE, '06-test.md': 'accepted' }, roster: ['at-qa'] })
+  assert.equal(decide({ before, after, files: B_FILES }).ok, true)
+})
+
+test('M4a 补记（同一次写入回到 S5 又记到 S6）：照推进核离开的 S5——还旧、没标的拦；标了放行；06-test.md 标 accepted 拦', () => {
+  const before = state('S6', FIRST_ROUND)
+  const after = (rb) => state('S6', [...FIRST_ROUND, ...H('S5', 'S6')], { rework_base: rb })
+  const left = decide({ before, after: after(EXPECTED_S5), files: ROUND1 })
+  assert.equal(left.ok, false)
+  assert.match(left.reason, /05-impl\/at-backend\.md/)
+  const marked = { ...EXPECTED_S5, '05-impl/at-backend.md': 'accepted', '05-impl/at-frontend.md': 'accepted' }
+  const ok = decide({ before, after: after(marked), files: ROUND1 })
+  assert.equal(ok.ok, true, ok.reason)
+  const verify = decide({ before, after: after({ ...marked, '06-test.md': 'accepted' }), files: ROUND1 })
+  assert.equal(verify.ok, false)
+  assert.match(verify.reason, /验证段/)
+})
+
+test('M4a 推进：离开的段里还旧的是验证段的产物 → 拒绝理由只给「重跑之后重写」，不给标 accepted', () => {
+  const before = state('S6', B_HISTORY, { rework_base: B_BASE })
+  const r = decide({ before, after: state('S7', [...B_HISTORY, ...H('S7')], { rework_base: B_BASE }), files: B_FILES })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /06-test\.md/)
+  assert.match(r.reason, /重跑之后重写/)
+  assert.doesNotMatch(r.reason, /改成 "accepted"/)
+})
+
+test('M4a 推进：还旧的有验证段的也有别的 → 两样分开说，别的那份照旧给 accepted 这条路', () => {
+  const before = state('S5', [...FIRST_ROUND, ...H('S5')], { rework_base: EXPECTED_S5 })
+  const r = decide({ before, after: state('S7', [...FIRST_ROUND, ...H('S5', 'S7')], { rework_base: EXPECTED_S5 }), files: B_FILES })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /05-impl\/at-frontend\.md[^\n]*改成 "accepted"/)
+  assert.match(r.reason, /06-test\.md[^\n]*重跑之后重写/)
 })

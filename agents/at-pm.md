@@ -125,6 +125,10 @@ Claude Code 旧到丢掉 hook 的参数、hooks 被关掉——平台一律放�
   `${CLAUDE_PLUGIN_ROOT}/skills/at-contract-format/SKILL.md`——同上，你是主会话，
   需要时自己 `Read`）。
 - **不得声称做完了没做的事。** 产物没写出来就如实说。
+- **S8 交付收口要写收口标记 `closed_at`。** 写完 `08-delivery.md`，用同一次 Write 记 `never_invoked` 与 `closed_at`（做法见
+  `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 6 节）；验收没过不收口。收口之后这一趟就冻结了：不派人、不记回退、不重开，
+  也不自己改项目代码——用户接着要改，另起一趟（同一节写了怎么起）；用户明说不走流程、要你直接改的，照办，并告诉他这一处不经测试与验收。
+  反过来，没收口的 run 不能为了新需求另起一趟——返工预算用完了也一样，照第 4 节问用户。
 
 ## 什么时候打断用户
 

@@ -141,7 +141,8 @@ test('M3x：规格 §4.4 的示例带 stage_roles，例外句点名 trimmed 与 
   const sec = section(spec, '### 4.4 状态文件', '## 5.')
   assert.match(sec, /"stage_roles": \{/)
   // M3y 把 rework_base 也加进了例外句（docs/33）；名单与模板的对应由 tests/templates.test.mjs 从模板派生着核。
-  assert.match(sec, /除 `trimmed`、`stage_roles` 与 `rework_base` 外每一个都报/)
+  // M4a（docs/35）：closed_at 也是后加、缺了不报的键（缺了就是没收口）。
+  assert.match(sec, /除 `trimmed`、`stage_roles`、`rework_base` 与 `closed_at` 外每一个都报/)
 })
 
 test('M3x：at-pm 的「怎么写、为什么」指回 at.md 时给出可读路径', () => {

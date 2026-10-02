@@ -17,6 +17,8 @@ import { inline, quote, safeJson } from './trusted.mjs'
 import { nextStage } from './state.mjs'
 import { approvalTargetFor, askUserText, limitOf } from './budget.mjs'
 import { isPlainObject, isStageChain } from './stages.mjs'
+import { VERIFY_REDO, splitByAccept } from './freshness.mjs'
+import { closedAt, blockerLine } from './closing.mjs'
 
 // 「这个动作只能由 PM 执行、非 PM 请回报上级」——stageDone 与 produce 两个分支都要
 // 说这句话：推进/收口 state.stage 与把哈希写进 artifacts，改的都是同一份控制文件
@@ -135,6 +137,7 @@ export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 =
 
 export function buildLedgerNotices({
   kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha, projectReport, reworkStale, budget, grants,
+  closeBlockers,
 } = {}) {
   const out = []
   const st = state && typeof state === 'object' ? state : {}
@@ -222,15 +225,18 @@ export function buildLedgerNotices({
   // M3y（docs/33，全量审查第 15 条）：返工轮里写 state.json 时，列出当前段与更早段还是上一轮的产物（磁盘内容与 rework_base
   // 记的 sha 相同；gate.mjs 经 freshness.mjs 的 staleByStage 算好传进来）。写 state.json 的只有 PM，出路直接说给它。
   // 产物名与段 id 都是插件自己的名字（stages.json），原样。只在写 state.json 时发：每写一份产物都刷一遍会把真正要看的东西淹掉。
-  if (kind === 'state' && reworkStale && (reworkStale.current?.length || reworkStale.earlier?.length)) {
+  // M4a（docs/35）：已收口的 run 不发【返工】——收口时 H6 已经核过最后一段，之后不再推进、回退。
+  if (kind === 'state' && reworkStale && (reworkStale.current?.length || reworkStale.earlier?.length) && closedAt(st) === null) {
     const lines = []
     if (reworkStale.current.length) {
-      // 链尾那一段没有「推进出去」这次写入，收口不经 H6（第 24 条：链尾没有收口标记）——不能对它许诺 H6 会拦。
+      // M4a（docs/35）：链尾那一段的产物在收口那一次写入（closed_at）里由 H6 核——原来「收口不经 H6」，这一行只能说「收口之前让它重写」。
       const last = nextStage(stages, reworkStale.stage) === null
+      const lastAccept = splitByAccept(stages, reworkStale.current).accept.length > 0
       lines.push(
         `  - 当前段 ${reworkStale.stage}：${reworkStale.current.join('、')}——交没交、齐没齐的判据（H5、H2、【阶段】）不把它们` +
           (last
-            ? `算成这一轮的。这是阶段链最后一段，收口不经 H6：收口之前让它重写，或者标 "accepted"。`
+            ? `算成这一轮的。这是阶段链最后一段：收口那一次写入（closed_at）H6 会拦还是上一轮的产物，收口之前让它重写` +
+              `${lastAccept ? '，或者标 "accepted"' : ''}。`
             : `算成这一轮的，推进出这一段时 H6 会拦。`),
       )
     }
@@ -241,11 +247,19 @@ export function buildLedgerNotices({
           `记成了上一轮的），或者文件被改回了旧内容。`,
       )
     }
+    // M4a（docs/35）：验证段的产物不给「标 accepted」——出路按 splitByAccept 分开说；全是验证段的，那一句整句不出现。
+    const listed = [...reworkStale.current, ...reworkStale.earlier.map((e) => e.name)]
+    const { accept, redo } = splitByAccept(stages, listed)
+    const both = accept.length && redo.length
+    const acceptOut = accept.length
+      ? `；这一轮接受它原样${both ? `（${accept.join('、')}）` : ''}，就在 state.json 的 rework_base 里把它的值改成 "accepted"` +
+        `（只许当前段及更早段的；用 Write 整份重写 state.json）`
+      : ''
+    const redoOut = redo.length ? `\n${redo.join('、')}：${VERIFY_REDO}。` : ''
     out.push(
       `【返工】这是返工轮：state.json 的 rework_base 记着回退那一刻各份产物的 sha，下面这些磁盘内容与它记的一样，` +
         `还是上一轮的——\n${lines.join('\n')}\n` +
-        `出路：这一轮重写它（你自己那几段的产物自己写，别的派它的产者）；这一轮接受它原样，就在 state.json 的 rework_base 里把它的值改成 "accepted"` +
-        `（只许当前段及更早段的；用 Write 整份重写 state.json）。`,
+        `出路：这一轮重写它（你自己那几段的产物自己写，别的派它的产者）${acceptOut}。${redoOut}`,
     )
   }
 
@@ -269,7 +283,8 @@ export function buildLedgerNotices({
     }
   }
 
-  if (stageDone && typeof st.stage === 'string') {
+  // M4a（docs/35）：已收口的 run 不发【阶段】——原来对走完的 run 每写一次都说「该收口了」（审查第 24 条）。
+  if (stageDone && typeof st.stage === 'string' && closedAt(st) === null) {
     const nxt = nextStage(stages, st.stage)
     // 为什么这条必须有：H5 交付物校验按 state.stage 判定（见 hooks/lib/deliverable.mjs）。
     // state.stage 停在旧阶段时，H5 对新阶段的角色无话可说——ok、零输出、看起来一切
@@ -311,7 +326,13 @@ export function buildLedgerNotices({
           `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "<ISO 时间>" }${again}——用同一次 Write 把这一段的账一起记掉：` +
           `叫到的人累加进 roster（state.json 里有 stage_roles 的，同一批人并进它的这一段），决定不叫的产出角色写进 trimmed。` +
           `分两次写，推进那一次会被产者交代当成漏派。${who}${tail}${over}`
-        : `【阶段】${st.stage} 的产物已经齐了，而它是阶段链的最后一段——该收口了。${who}${tail}`,
+        : Array.isArray(closeBlockers) && closeBlockers.length
+          ? `【阶段】${st.stage} 的产物已经写了，它是阶段链的最后一段，但还收不了口——收口要最后一段的前置与产物都在、而且是这一轮的：\n` +
+            closeBlockers.map((b) => `  - ${blockerLine(stages, b)}`).join('\n') +
+            `\n补齐之后照 /agent-team:at 第 6 节收口。${who}${tail}`
+          : `【阶段】${st.stage} 的产物已经齐了，而它是阶段链的最后一段——该收口了：照 /agent-team:at 第 6 节，用同一次 Write ` +
+            `记 never_invoked 与 closed_at（收口那一次 H6 核最后一段的前置与产物），收到回传之后再向用户汇报。` +
+            `收口之后，交付之后的新改动另起一趟。${who}${tail}`,
     )
   }
 

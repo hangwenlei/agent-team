@@ -135,11 +135,18 @@ test('M3y：「原样带着」写明到下一次回退为止、再次回退照�
 })
 
 // 阶段链最后一段没有「推进出去」这次写入，收口不经 H6——正文不能把兜底交给 H6。
-test('M3y：最后一段收口不经 H6——/at「回退」、第 6 节收尾、/at-resume 都写明先重写或标 accepted 再收口', () => {
-  assert.match(REWIND, /最后一段没有「推进出去」这次写入，收口不经 H6/)
-  // 按行首定位：第 3 节正文里有一句「见「## 6. 收尾」」。
-  assert.match(section(AT, '\n## 6. 收尾', '## '), /不经 H6 的推进把关，没有门禁会因为它还是上一轮的而拦它/)
-  assert.match(read('commands/at-resume.md'), /最后一段没有「推进出去」这次写入，收口不经 H6/)
+// M4a（docs/35）订正：收口那一次写入（closed_at）现在经 H6（hooks/lib/closing.mjs）。三处都改说「把关在收口那一次」，
+// 最后一段的产物是验证段的、只能重写。反向：commands/ 与 hooks/lib/ 下不再出现「收口不经 H6」。
+test('M3y→M4a：最后一段的把关在收口那一次——/at「回退」、第 6 节收尾、/at-resume 都写明，且不再说「收口不经 H6」', () => {
+  assert.match(REWIND, /最后一段没有「推进出去」这次写入，把关在收口那一次/)
+  assert.match(section(AT, '\n## 6. 收尾', '## '), /收口那一次 H6 核：最后一段的前置与产物都在、读得出、不是上一轮的/)
+  assert.match(read('commands/at-resume.md'), /最后一段没有「推进出去」这次写入，把关在收口那一次/)
+  for (const f of ['commands/at.md', 'commands/at-resume.md', 'commands/at-status.md', 'agents/at-pm.md']) {
+    assert.doesNotMatch(read(f), /收口不经 H6/, f)
+  }
+  for (const f of ['ledger.mjs', 'closing.mjs', 'rework-guard.mjs', 'freshness.mjs']) {
+    assert.doesNotMatch(read(`hooks/lib/${f}`).replace(/^\s*\/\/.*$/gm, ''), /收口不经 H6/, f)
+  }
 })
 
 // 一段没走完就回退：那一段还没派到的产者不写 trimmed（产者交代对链上晚于当前段的段不查，coverage.mjs）。
@@ -218,4 +225,63 @@ test('M3z：规格 §4.2 ③ 写到用户经规范标签批准、门禁记下；
   const h6 = spec.split('\n').find((l) => l.startsWith('| H6 |'))
   assert.ok(h6 && !h6.includes('只拦**减少**'), h6)
   assert.match(h6, /比写入前大才拒/)
+})
+
+// ============================================================================ M4a（docs/35）
+
+const S6 = section(AT, '\n## 6. 收尾', '## ')
+const S1 = section(AT, '\n## 1. 建 run', '## ')
+const RESUME = read('commands/at-resume.md')
+const STATUS = read('commands/at-status.md')
+const PM = read('agents/at-pm.md')
+
+test('M4a 回退：验证段的产物不能标 accepted、只追加一句「核过」不算——/at「回退」写明，并指向 stages.json 的 verifies', () => {
+  assert.match(REWIND, /验证段（`\$\{CLAUDE_PLUGIN_ROOT\}\/stages\.json` 里写着 `"verifies": true` 的段/)
+  assert.match(REWIND, /验证段的产物不在此列[^。]*H6 拒标[^。]*重跑之后重写/)
+  assert.match(REWIND, /只追加一句「核过」不算重跑/)
+})
+
+test('M4a 收尾：验收没过不收口；写 08-delivery.md；同一次 Write 记 never_invoked 与 closed_at；收到回传再汇报', () => {
+  assert.match(S6, /验收没过不收口/)
+  assert.match(S6, /`08-delivery\.md`/)
+  assert.match(S6, /用同一次 Write 记 `never_invoked` 与 `closed_at`/)
+  assert.match(S6, /收到回传之后再告诉用户/)
+  assert.ok(S6.indexOf('验收没过不收口') < S6.indexOf('用同一次 Write 记') && S6.indexOf('用同一次 Write 记') < S6.indexOf('收到回传之后再告诉用户'), '顺序')
+})
+
+test('M4a 收尾：收口之后冻结、不再派人；新改动另起一趟（两条路），契约第 1 节逐字照抄这次的那几条消息；用户明说直接改照办并告知', () => {
+  assert.match(S6, /收口之后[^。]*冻结[^。]*不再推进、回退或重开/)
+  assert.match(S6, /请用户用 `\/agent-team:at <改动>`/)
+  assert.match(S6, /照本文第 0–2 节自己建新 run[^。]*契约第 1 节逐字照抄用户提出这次改动的那几条消息/)
+  assert.match(S6, /用户明说不走流程[^。]*照用户说的办[^。]*不经测试与验收/)
+})
+
+test('M4a 建 run：先看 current-run 那一趟——已收口或停在最后一段不问；停在更早段先问续跑还是另起；问不了就另起并告知；不算五类', () => {
+  assert.match(S1, /有 `closed_at`[^。]*或者 `stage` 是阶段链最后一段[^。]*不用问/)
+  assert.match(S1, /停在更早的段、没收口[^。]*`AskUserQuestion`[^。]*续跑那一趟[^。]*另起这一趟/)
+  assert.match(S1, /不属于第 4 节那五类：不记 escalation/)
+  assert.match(S1, /问不了用户[^。]*另起这一趟[^。]*接回它的办法/)
+})
+
+test('M4a at-resume：已收口不续跑、新改动另起；停在最后一段、齐了没收口就照第 6 节收口', () => {
+  assert.match(RESUME, /有 `closed_at`[^。]*已经收口[^。]*不续跑/)
+  assert.match(RESUME, /`stage` 是阶段链最后一段[^。]*照\s[^。]*第 6 节收口/)
+  assert.match(RESUME, /验证段（[^）]*）的产物不能标/)
+})
+
+test('M4a at-status：已收口的 run 当前阶段那一行标「已收口」，没被叫过为空写「无」', () => {
+  assert.match(STATUS, /已收口（closed_at/)
+  assert.match(STATUS, /已收口的 run[^。]*写「无」/)
+})
+
+test('M4a at-pm：S8 收口写收口标记；收口之后不派人、不记回退、不自己改项目代码；没收口的 run 不为新需求另起', () => {
+  assert.match(PM, /S8[^。]*收口[^。]*`closed_at`/)
+  assert.match(PM, /收口之后[^。]*不派人、不记回退[^。]*不自己改项目代码/)
+  assert.match(PM, /没收口的 run[^。]*不能为了新需求另起一趟/)
+})
+
+test('M4a at-qa / at-acceptance：返工轮重跑，只追加一句「核过」不算', () => {
+  assert.match(read('agents/at-qa.md'), /只追加一句「核过」不算重跑/)
+  const acc = read('agents/at-acceptance.md').split(/\n\s*\n/).find((b) => b.includes('返工轮里要重新验'))
+  assert.ok(acc && acc.includes('只追加一句「核过」不算'), 'at-acceptance 的「返工轮里要重新验」那一段没写只追加一句不算')
 })

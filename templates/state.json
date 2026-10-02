@@ -10,6 +10,7 @@
   "rework_base": {},
   "never_invoked": [],
   "escalations": [],
+  "closed_at": null,
   "history": [
     { "stage": "S1", "at": "2026-09-17T14:30:00Z" }
   ]

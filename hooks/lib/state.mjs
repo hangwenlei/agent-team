@@ -22,6 +22,7 @@ import { SHA_RE } from './contract-hash.mjs'
 import { quote } from './trusted.mjs'
 // M3z（docs/34）：上限的单一真源挪到 budget.mjs（limitOf 要它，留在这里就成了环）；这里原样再导出，既有的 import 不用改。
 import { REWORK_LIMIT, limitOf } from './budget.mjs'
+import { closedAt, lastStageId } from './closing.mjs'
 
 // validateState 的问题文案会进受信回传【state.json】；state.json 是写得进它的任何人都能写的，
 // 键名与值一律过 quote（M3s，docs/27）——阶段名也一样：它在这里是 state.json 里写着的那个值，
@@ -206,6 +207,15 @@ export function validateState(state, { stages, grants } = {}) {
   }
   if (state.contract_sha !== 'PENDING' && !(typeof state.contract_sha === 'string' && SHA_RE.test(state.contract_sha))) {
     p(`contract_sha 既不是 "PENDING" 也不是 sha256:<64 位十六进制>（拿到 ${quote(state.contract_sha)}）`)
+  }
+  // M4a（docs/35）：收口标记 closed_at（hooks/lib/closing.mjs 的 closedAt 是单一谓词）。H6 写时就拒这两样，这里是事后那一道。
+  if (Object.hasOwn(state, 'closed_at') && state.closed_at !== null) {
+    const last = lastStageId(stages)
+    if (closedAt(state) === null) {
+      p('closed_at 既不是 null（还没收口）也不是收口那一刻的 ISO 时间字符串（空串或者别的类型）——收口照 /agent-team:at 第 6 节')
+    } else if (last && state.stage !== last) {
+      p(`closed_at 在，但 stage 不是阶段链最后一段（${last}）——收口只在最后一段`)
+    }
   }
   if (!isStringArray(state.roster)) p('roster 不是字符串数组')
   if (!isStringArray(state.never_invoked)) p('never_invoked 不是字符串数组')

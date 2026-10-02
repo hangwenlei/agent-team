@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { stageRoles, expandProduces, producedNames, expectedArtifacts, isPlainObject, participantsOf, isStageChain, productsOfStage } from '../hooks/lib/stages.mjs'
+import { stageRoles, expandProduces, producedNames, expectedArtifacts, isPlainObject, participantsOf, isStageChain, productsOfStage, isVerifyStage, mayAcceptProduct } from '../hooks/lib/stages.mjs'
 
 const S5 = { role: 'at-backend', producers: ['at-backend', 'at-frontend', 'at-ui'], produces: ['05-impl/<role>.md'] }
 const S1 = { role: 'at-pm', produces: ['00-contract.md'] }
@@ -270,4 +270,39 @@ test('M3y productsOfStage：数组形式按全部 producers 展开，对象形�
   const S2 = { role: 'at-product', producers: ['at-product', 'at-ui'], produces: { 'at-product': ['01-prd.md'], 'at-ui': ['02-ui-spec.md'] } }
   assert.deepEqual(productsOfStage(S2), ['01-prd.md', '02-ui-spec.md'])
   assert.deepEqual(productsOfStage(null), [])
+})
+
+// M4a（docs/35）：验证段——这一段的产物是对上游当时那一版的结论（测试报告、验收报告、交付报告），返工轮里一律重新出，
+// rework_base 里不许标 "accepted"。stages.json 的 "verifies": true 是唯一的真源；判据在 H6（hooks/lib/rework-guard.mjs）
+// 与每一处给出「标 accepted」这条出路的回传。
+test('M4a isVerifyStage：只认 verifies === true', () => {
+  assert.equal(isVerifyStage({ role: 'at-qa', verifies: true }), true)
+  for (const v of [{ role: 'at-qa' }, { verifies: 'true' }, { verifies: 1 }, { verifies: false }, null, [], 'S6']) {
+    assert.equal(isVerifyStage(v), false, JSON.stringify(v))
+  }
+})
+
+test('M4a stages.json：S6、S7、S8 是验证段，S1–S5 不是', () => {
+  const real = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
+  const verify = Object.keys(real).filter((id) => isVerifyStage(real[id]))
+  assert.deepEqual(verify, ['S6', 'S7', 'S8'])
+})
+
+test('M4a mayAcceptProduct：验证段的产物不能标，别的能；不是任何段的产物不受这一条限制', () => {
+  const real = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
+  for (const n of ['06-test.md', '07-acceptance.md', '08-delivery.md']) assert.equal(mayAcceptProduct(real, n), false, n)
+  for (const n of ['01-prd.md', '02-ui-spec.md', '03-arch.md', '04-dispatch.md', '05-impl/at-frontend.md', '05-impl/at-ios.md']) {
+    assert.equal(mayAcceptProduct(real, n), true, n)
+  }
+  assert.equal(mayAcceptProduct(real, 'notes.md'), true)
+  assert.equal(mayAcceptProduct(null, '06-test.md'), true)
+})
+
+test('M4a mayAcceptProduct：按链上最早产出它的那一段判（合成阶段链）', () => {
+  const chain = {
+    A: { role: 'r1', produces: ['x.md'] },
+    B: { role: 'r2', produces: ['x.md', 'y.md'], verifies: true },
+  }
+  assert.equal(mayAcceptProduct(chain, 'x.md'), true)
+  assert.equal(mayAcceptProduct(chain, 'y.md'), false)
 })

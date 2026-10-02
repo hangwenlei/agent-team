@@ -485,11 +485,12 @@ test('M3z stage 不变量：只改 stage、不追加 history → 拒（推进与
   assert.equal(decideRework({ before: sv(FIRST6), after: sv(FIRST6, { stage: 'S5' }), stages: CHAIN, grants: [] }).ok, false)
 })
 
-test('M3z stage 不变量：收口往 history 里写 DONE → 拒，理由说链尾就是终点', () => {
+// M4a（docs/35）：收口有了自己的标记（closed_at），理由指过去，不再只说「链尾就是终点」。
+test('M3z stage 不变量：收口往 history 里写 DONE → 拒，理由说收口是在最后一段记 closed_at', () => {
   const ids = [...FIRST6, 'S7', 'S8']
   const r = decide(ids, [...ids, 'DONE'])
   assert.equal(r.ok, false)
-  assert.match(r.reason, /最后一段（S8）就是终点/)
+  assert.match(r.reason, /在最后一段（S8）用同一次 Write 记 never_invoked 与 closed_at（\/agent-team:at 第 6 节）/)
 })
 
 test('M3z stage 不变量：写入前读不出来（修坏文件）时只核 stage 在链上，原样保留的旧链外条目不核', () => {

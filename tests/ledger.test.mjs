@@ -204,11 +204,17 @@ test('M3y【返工】：两样都空、或者写的不是 state.json → 不发'
 })
 
 // M3y 复核：链尾那一段没有「推进出去」这次写入，收口不经 H6——【返工】不能对它说「推进出这一段时 H6 会拦」。
+// M4a（docs/35）订正：收口那一次写入（closed_at）现在经 H6（hooks/lib/closing.mjs）——【返工】改说「收口那一次 H6 会拦」；
+// 08-delivery.md 是验证段的产物，不给「标 accepted」。仍然不说「推进出这一段时 H6 会拦」（链尾没有推进）。
 const REAL_STAGES = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
-test('M3y【返工】：当前段是阶段链最后一段时，说收口不经 H6，不说推进时会拦', () => {
+test('M3y【返工】：当前段是阶段链最后一段时，说收口那一次 H6 会拦（M4a），不说推进时会拦', () => {
   const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S8' }, reworkStale: { stage: 'S8', current: ['08-delivery.md'], earlier: [] } }).join('\n')
   assert.match(s, /当前段 S8：08-delivery\.md/)
-  assert.match(s, /最后一段，收口不经 H6/)
+  assert.match(s, /最后一段：收口那一次写入（closed_at）H6 会拦还是上一轮的产物，收口之前让它重写。/)
+  assert.doesNotMatch(s, /收口不经 H6/)
+  // 收口已经收了：不发【返工】。
+  const closed = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S8', closed_at: '2026-10-01T15:00:00Z' }, reworkStale: { stage: 'S8', current: ['08-delivery.md'], earlier: [] } }).join('\n')
+  assert.doesNotMatch(closed, /【返工】/)
   assert.doesNotMatch(s, /推进出这一段时 H6 会拦/)
   const mid = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S5' }, reworkStale: { stage: 'S5', current: ['05-impl/at-backend.md'], earlier: [] } }).join('\n')
   assert.match(mid, /推进出这一段时 H6 会拦/)

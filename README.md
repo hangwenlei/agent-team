@@ -97,6 +97,8 @@ flowchart TB
 
 实现阶段的角色由架构师分发，项目经理不越级派发；同一阶段的角色并行干活。谁能派谁以 `roster.json` 为准，每一段谁来做、交什么以 `stages.json` 为准。
 
+交付之后这一趟就收口了：不再回退，也不再派人。接着要改动或修复，用 `/agent-team:at <改动>` 另起一趟（新的契约、新的返工预算）。返工时，测试、验收与交付报告一律重新出，不沿用上一轮的。
+
 ### 什么时候会问你
 
 项目经理是唯一会跟你说话的角色，只在下面五类事上停下来问你：
@@ -277,6 +279,8 @@ flowchart TB
 ```
 
 Implementation roles are dispatched by the architect — the project manager does not skip levels — and roles in the same stage work in parallel. Who may dispatch whom is defined in `roster.json`; which role does each stage and what it hands over, in `stages.json`.
+
+Once delivered, the run is closed: no more rollbacks and no more dispatches. For further changes or fixes, start a new run with `/agent-team:at <change>` (a new contract and a fresh rework budget). During rework, the test, acceptance and delivery reports are always produced anew rather than carried over from the previous round.
 
 ### When it asks you
 

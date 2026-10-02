@@ -366,3 +366,9 @@ test('selfCheckAppendix：unreadable 按原因给修法（命令开头的口径�
   assert.match(c, /重装/)
   assert.doesNotMatch(c, /写回一份合法的/)
 })
+
+// M4a（docs/35）：修坏的 state.json 时，收口标记照原样保留——丢了它就是悄悄重开一趟已经交付的 run（不留痕）。写回之后
+// H6 的收口判据会对写入后的那一份重核一遍（写入前读不出来也核）。
+test('M4a 修法（state）：照原样保留的清单里有 closed_at', () => {
+  assert.match(runContextFix('state'), /history、rework、artifacts、rework_base、closed_at 照原样保留/)
+})

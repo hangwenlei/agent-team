@@ -21,7 +21,7 @@ import { candidateStages, decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideRework, decideReworkBase, parseStateText, replayEdit } from './lib/rework-guard.mjs'
-import { makeFreshness, staleByStage } from './lib/freshness.mjs'
+import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { normalizeText } from './lib/text-norm.mjs'
 import { decideDeliverable } from './lib/deliverable.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
@@ -29,6 +29,7 @@ import { APPROVALS_FILE, DELIVERED_FILE, isControlFile, isGateFile, leafName, ma
 import { readGrants } from './lib/budget.mjs'
 import { askAnswers, promptAnswer, planApprovals, approvalLine, approvalNotices } from './lib/approvals.mjs'
 import { deliveredSnapshot, readSnapshot, makeDelivered, decideRedispatch, decideRedoWrite } from './lib/redo.mjs'
+import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispatch } from './lib/closing.mjs'
 import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
 import { sha256OfContract, shaOrNote } from './lib/contract-hash.mjs'
@@ -575,7 +576,8 @@ const isDriverRole = (role) => isContractWriter(role)
 // 「不要为了让提示消失就写进 roster」那条护栏扩到 stage_roles——补记与「只写名字」长得一样，分界是它真被叫到过没有。
 // 旧 run（perStage 为假）的产者交代文案只有护栏那一句换了（PM 与非 PM 两支都换了，见上面那段 M3x 订正，与 perStage 无关），其余
 // 一个字不变：那里没有 stage_roles 可补，判据也还是整趟口径。
-function buildCoverageNotice({ gaps, narrowed, perStage } = {}, recipientCanWriteState) {
+// M4a（docs/35）：closed 为真（这一趟已经收口）时，② 不再叫 PM 派人——H2 收口之后拒派一切团队角色（评审 F9）。
+function buildCoverageNotice({ gaps, narrowed, perStage } = {}, recipientCanWriteState, closed = false) {
   if (!Array.isArray(gaps) || !gaps.length) return null
   const lines = gaps.map((g) => `  - ${g.stage} 的 ${g.role}`)
   const drivers = [...new Set(gaps.filter((g) => isDriverRole(g.role)).map((g) => g.role))]
@@ -609,7 +611,9 @@ function buildCoverageNotice({ gaps, narrowed, perStage } = {}, recipientCanWrit
       `理由不用写在这里，它已经在 04-dispatch.md 里。` +
       `已经写过却还在报的话，先核字段名拼对了没有：state.json 的校验不拒未知键，` +
       `trimmed 拼错了不会有任何别的提示。\n` +
-      `  ② 不是裁剪，是漏了：把它派出去，让它自己写出那一段的产物。\n` +
+      (closed
+        ? `  ② 不是裁剪，是漏了：这一趟已经收口，补不了派——照实告诉用户那一段漏了谁。\n`
+        : `  ② 不是裁剪，是漏了：把它派出去，让它自己写出那一段的产物。\n`) +
       (perStage
         ? `  ③ 它在那一段真的被叫到过、只是 stage_roles 没记（去磁盘看那一段它的产物在不在，` +
           `04-dispatch.md 里怎么分的工）：把它并进 state.json 的 stage_roles 那一段，roster 里没有就一起累加——不用重派。\n`
@@ -832,6 +836,18 @@ function main() {
     // M3w（docs/31，全量审查第 13 条）：多段角色（at-ui 在 S2 与 S5）此刻做哪一段由派发者决定——at-product 派的是 S2 的活，
     // at-architect 派的是 S5 的活。把派发者与它沿花名册派得到的角色传进去，判定在 decideReadiness 里（口径与理由在那里）。
     // 派发者不在花名册里时 reach 里没有它，传 null，decideReadiness 退回不剪。
+    // M4a（docs/35）：收口之后派花名册里的任何角色、最后一段没收口时派协调者 → 拒（hooks/lib/closing.mjs）。排在就绪判据之前：
+    // 已收口的 run 上，「前置还缺」「记一次回退」都是走不通的出路。
+    const closedRd = decideClosedDispatch({
+      stages: ctx.stages,
+      state: ctx.state,
+      target,
+      roster: loadRoster(),
+      callerCanWriteState: isContractWriter(input?.agent_type),
+      runId: ctx.runId,
+      atPath: join(ROOT, 'commands', 'at.md'),
+    })
+    if (closedRd.decision === 'deny') denyAndExit(closedRd.reason, spec.event)
     const caller = callerOf(input)
     const reach = computeReach({ roster: loadRoster(), paths: {} })
     // M3y（docs/33，全量审查第 15 条）：「齐了没」与「前置在不在」按 freshness 判——返工轮里磁盘内容与 rework_base 记的 sha
@@ -1162,15 +1178,7 @@ function main() {
       } catch {
         approvalsText = null
       }
-      const r = decideRework({ before, after, stages: stagesForRework, grants: readGrants(approvalsText, stagesForRework) })
-      if (!r.ok) denyAndExit(r.reason + (r.budget ? approvalDiagnostic(filePath) : ''), spec.event)
-
-      // M3y（docs/33，全量审查第 15 条）：rework_base——回退那一次写入照磁盘记下各份产物的 sha，之后原样带着，推进离开一段时
-      // 那一段里不许还有上一轮的产物。规则在 decideReworkBase（hooks/lib/rework-guard.mjs 的 M3y 一节），这里只做 I/O：
-      //   - 阶段链读插件自己那份 stages.json，读不出来给 null，由判定那边跳过、留痕（不走 readRunContext，理由同上）；
-      //   - 产物逐份读：run 目录就是 state.json 所在的目录。stat 不到（ENOENT、ENOTDIR）算不在，别的错与读、算 sha 出错都算
-      //     「在、但读不出来」——判定那边对它不核。逐份 try，一份读不出来不让整次判定 fail closed；
-      //   - 判定本身不包 try：它抛异常时照旧落进最外层 catch，H6 fail closed。
+      // M3y（docs/33）读产物的 I/O（见下面 decideReworkBase 那一段的说明）。M4a 起收口判据也要它，提到这里。
       const runDir = dirname(filePath)
       const diskSha = (name) => {
         let st
@@ -1187,6 +1195,22 @@ function main() {
           return { exists: true, sha: null }
         }
       }
+
+      // M4a（docs/35）：收口标记 closed_at——形状、已收口之后的冻结、关上那一次的条件（hooks/lib/closing.mjs）。排在返工预算与回退
+      // 快照之前：已收口的 run 上记回退，先拿到的要是「已经收口、另起一趟」，不是「先问用户批准」「补快照」（评审 CF-3）。
+      const closing = decideClosing({ before, after, stages: stagesForRework, diskSha })
+      if (!closing.ok) denyAndExit(closing.reason, spec.event)
+
+      const r = decideRework({ before, after, stages: stagesForRework, grants: readGrants(approvalsText, stagesForRework) })
+      if (!r.ok) denyAndExit(r.reason + (r.budget ? approvalDiagnostic(filePath) : ''), spec.event)
+
+      // M3y（docs/33，全量审查第 15 条）：rework_base——回退那一次写入照磁盘记下各份产物的 sha，之后原样带着，推进离开一段时
+      // 那一段里不许还有上一轮的产物。规则在 decideReworkBase（hooks/lib/rework-guard.mjs 的 M3y 一节），这里只做 I/O：
+      //   - 阶段链读插件自己那份 stages.json，读不出来给 null，由判定那边跳过、留痕（不走 readRunContext，理由同上）；
+      //   - 产物逐份读：run 目录就是 state.json 所在的目录。stat 不到（ENOENT、ENOTDIR）算不在，别的错与读、算 sha 出错都算
+      //     「在、但读不出来」——判定那边对它不核。逐份 try，一份读不出来不让整次判定 fail closed；
+      //   - 判定本身不包 try：它抛异常时照旧落进最外层 catch，H6 fail closed。
+      // diskSha 在上面（M4a 起收口判据也用它）。
       const rb = decideReworkBase({ before, after, stages: stagesForRework, diskSha })
       if (!rb.ok) denyAndExit(rb.reason, spec.event)
       for (const note of rb.notes) process.stderr.write(`agent-team H6 返工预算：${note}\n`)
@@ -1459,6 +1483,19 @@ function main() {
     })
     // 【返工】：写 state.json 时，当前段与更早段还是上一轮的产物（hooks/lib/ledger.mjs 那一段）。
     const reworkStale = kind === 'state' ? staleByStage({ stages: ctx.stages, stageId: ctx.state?.stage, isStale: fresh.isStale }) : null
+    // M4a（docs/35）：最后一段齐了、还没收口时，【阶段】要说收不收得了口——与 H6 的收口判据同一份 closeBlockers（还旧按 freshness）。
+    const blockers =
+      stageDone && closedAt(ctx.state) === null && ctx.state?.stage === lastStageId(ctx.stages)
+        ? closeBlockers({
+            stages: ctx.stages,
+            state: ctx.state,
+            probe: (name) => {
+              if (!ctx.artifactExists(name)) return 'missing'
+              if (!ctx.artifactBytes(name)) return 'unreadable'
+              return fresh.isStale(name) ? 'stale' : 'ok'
+            },
+          })
+        : null
 
     const notices = buildLedgerNotices({
       kind,
@@ -1472,6 +1509,7 @@ function main() {
       produceSha: produceBytes ? sha256OfContract(produceBytes) : null,
       projectReport,
       reworkStale,
+      closeBlockers: blockers,
       budget: validation ? validation.budget : [],
       grants,
     })
@@ -1521,7 +1559,7 @@ function main() {
       // 完整机制写在 buildCoverageNotice 上方，不在这里重复第二遍。
       const recipient = callerOf(input)
       const recipientCanWriteState = isContractWriter(recipient)
-      const coverage = buildCoverageNotice(cov, recipientCanWriteState)
+      const coverage = buildCoverageNotice(cov, recipientCanWriteState, closedAt(ctx.state) !== null)
       if (coverage) {
         notices.push(coverage)
         // 痕迹这一半，与账本比对那一条共用 misroutedNotice。⚠️ 它与上面那条
@@ -1857,10 +1895,17 @@ function main() {
             `⚠️ **不要靠把 state.stage 改回旧阶段来消掉这条**——那正好制造前一种失效。` +
             // M3y（docs/33）：驳回之后的返工也会落进这一格（回退没记就重派）。记回退不是「把 stage 改回去」：history 追加、
             // rework 与 rework_base 同一次 Write 记上。按收件人分：改得了 state.json 的照「回退」一节记，改不了的冒泡。
+            // M4a（docs/35）：最后一段、没收口时，这一格多半是 PM 照收口拒绝理由去补交缺的前置（at-acceptance 补 07）——那不是返工，
+            // 不用记回退；交付之后的新改动也先收口再另起一趟。只说给改得了 state.json 的人。
+            (recipientCanWriteState && ctx.state?.stage === lastStageId(ctx.stages) && closedAt(ctx.state) === null
+              ? `state.stage 是阶段链最后一段：这次若是在补收口缺的前置（收口时 H6 点过名的），不是返工，等它交完再收口、不用记回退；` +
+                `交付之后的新改动先照 /agent-team:at 第 6 节收口、再另起一趟。`
+              : '') +
             (recipientCanWriteState
               ? `这次派发若是驳回之后的返工，那不是把 stage 改回去，是记一次回退：照 /agent-team:at 的「回退」一节，` +
                 `同一次 Write 追加 history、记 rework 与 rework_base。这一次已经重写过的产物会被快照记成上一轮的，` +
-                `记完之后把它们标 "accepted"，不必再派一遍；被门禁拦下、没写成的，记完回退之后照常再派。`
+                `记完之后把它们标 "accepted"，不必再派一遍（验证段的产物除外：测试、验收、交付报告要再出一次）；` +
+                `被门禁拦下、没写成的，记完回退之后照常再派。`
               : `这次派发若是驳回之后的返工，记回退是项目经理的事：把这一条原样冒泡给派你的人。`)
         notices.push(notice)
       }
@@ -1900,6 +1945,22 @@ function main() {
       //
       // M3y（docs/33）：r.stale 是返工轮里还是上一轮的产物（在磁盘上，内容与回退那一刻一样）。没有它时文案与 v1.6.0 逐字
       // 相同；有它时与「没有」分开说，出路按收件人分——改得了 state.json 的给「标 accepted」，改不了的冒泡。
+      // M4a（docs/35）：还旧的按「能不能标 accepted」分开说——验证段的产物（问题 B 里异步派 at-qa 那一刻的 06-test.md）只给
+      // 「重跑之后重写」，不给标 accepted。
+      const { accept: staleAccept, redo: staleRedo } = splitByAccept(ctx.stages, r.stale)
+      const bothKinds = staleAccept.length && staleRedo.length
+      const acceptPart = !staleAccept.length
+        ? ''
+        : recipientCanWriteState
+          ? `${bothKinds ? `${staleAccept.join('、')}：` : ''}这一轮接受上一轮那份原样，就在 state.json 的 rework_base 里把它的值改成 "accepted"；` +
+            `否则等 ${role} 写完（异步派发时），或者重派它这一轮重写。`
+          : `rework_base 只有项目经理改得了：它这一轮还没重写，就等它写完（异步派发时），或者重派 ${role} 让它这一轮重写；` +
+            `你判断上一轮那份${bothKinds ? `（${staleAccept.join('、')}）` : ''}这一轮不用改，就把这一点冒泡给派你的人，由项目经理标 "accepted"。`
+      const redoPart = !staleRedo.length
+        ? ''
+        : `${staleRedo.join('、')}：${VERIFY_REDO}——等 ${role} 重跑写完（异步派发时），或者重派它。`
+      const staleOut =
+        acceptPart + redoPart + (recipientCanWriteState ? '推进出这一段时，H6 会拦住还是上一轮的产物。' : '')
       const staleText = r.stale.length
         ? `${r.stale.join('、')} 还是上一轮的（返工轮：磁盘内容与回退那一刻 rework_base 记的 sha 相同，这一轮还没有重写）`
         : ''
@@ -1911,11 +1972,7 @@ function main() {
             ? `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，但磁盘上还没有；${staleText}。`
             : `⚠️ 交付物校验：${role} 在 ${r.stageId} 的 ${staleText}。`) +
           `${SUBAGENT_STOP_RETRY_NOTE}。不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实。` +
-          (recipientCanWriteState
-            ? `这一轮接受上一轮那份原样，就在 state.json 的 rework_base 里把它的值改成 "accepted"；否则等 ${role} 写完` +
-              `（异步派发时），或者重派它这一轮重写。推进出这一段时，H6 会拦住还是上一轮的产物。`
-            : `rework_base 只有项目经理改得了：它这一轮还没重写，就等它写完（异步派发时），或者重派 ${role} 让它这一轮重写；` +
-              `你判断上一轮那份这一轮不用改，就把这一点冒泡给派你的人，由项目经理标 "accepted"。`)
+          staleOut
       const notices = [notice]
       // 交付物本身还缺产物时，账本比对一样并进同一条——它审计的是全部阶段的
       // produces，不只是刚被判定缺失的这一段（比如更早的阶段被 Bash 绕过写过）。

@@ -13,10 +13,25 @@
 //    sha256OfContract(null) 去比——normalizeText 把 null 当成字符串 "null"，算出来的 sha 形状合法。
 // ⚠️ 只在 rework_base 里有这一条时才读字节：首轮（没有快照）与快照外的产物一个字节都不多读。
 // ⚠️ sha 的口径与 artifacts 同一个（sha256OfContract：归一化 BOM 与 CRLF），只改行尾不算重写。
-import { isPlainObject, isStageChain, productsOfStage } from './stages.mjs'
+import { isPlainObject, isStageChain, productsOfStage, mayAcceptProduct } from './stages.mjs'
 import { SHA_RE, sha256OfContract } from './contract-hash.mjs'
 
 export const ACCEPTED = 'accepted'
+
+// M4a（docs/35）：验证段（stages.json 的 "verifies": true）的产物在返工轮里的出路——不许标 "accepted"（H6 拒），也不能只追加一句。
+// H6 与每一处给出「标 accepted」这条出路的回传（H5a、H5b、H2 前置、【返工】、补记提示）共用这一句；能不能标，问 stages.mjs 的
+// mayAcceptProduct。
+export const VERIFY_REDO =
+  '验证段（stages.json 里 "verifies": true）的产物记的是对上游当时那一版的结论，返工轮里一律重新出：让它的产者这一轮重跑之后重写——' +
+  '不能标 "accepted"，也不能只在末尾追加一句「核过」'
+
+/** 把一组还是上一轮的产物按「能不能标 accepted」分成两组（mayAcceptProduct）。顺序照原样。 */
+export function splitByAccept(stages, list) {
+  const accept = []
+  const redo = []
+  for (const n of list) (mayAcceptProduct(stages, n) ? accept : redo).push(n)
+  return { accept, redo }
+}
 
 export function makeFreshness({ artifactExists, artifactBytes, reworkBase } = {}) {
   const base = isPlainObject(reworkBase) ? reworkBase : null
