@@ -63,6 +63,11 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 先重写或者标 `"accepted"` 再收口。回退怎么记、之后每次写入怎么原样带着 `rework_base`，见
 `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 3 节的「回退」。
 
+**返工到了上限**（H6 拒了回退或推进、理由里给了规范标签「再返工一轮：回到 <段>」，或者写 `state.json` 之后收到【返工预算】）：
+照 `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 4 节「返工预算耗尽」那一段问用户。上一个会话里用户已经批过、门禁回传说记下了的，
+批准还在（门禁记在 run 目录里，`/agent-team:at-status` 的「返工批准」一行列得出），不用再问；被拒的那次写入照第 4 节重写
+（连同那条 escalation 与新的 `contract_sha`，上一个会话里记过的就带着）。
+
 契约那一段（`00-contract.md`）**不要重写**。它是这趟 run 的需求基线，S1 之后就冻结了；
 要改只能走升级流程（见 `/agent-team:at` 的第 4 节，`${CLAUDE_PLUGIN_ROOT}/commands/at.md`）。
 
@@ -70,6 +75,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 写 `state.json` 之后你会收到账本回传。如果它报了问题（返工计数与 `history` 对不上、
 `history` 最后一条与 `stage` 分叉、`contract_sha` 漂移、【project.json】里的阻断之类），**先修它再往下跑**。
+【返工预算】是例外：它不是改 `state.json` 修得好的（把计数改小会被 H6 拒），照上面「返工到了上限」那一段问用户。
 带着一份不自洽的状态继续，后面每一步的判断都建立在它上面。收到【插件】（roster.json 读不出来）是例外：改
 `project.json` 修不好它——停下，告诉用户重装或更新 agent-team 插件。
 

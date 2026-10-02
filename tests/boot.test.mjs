@@ -55,6 +55,14 @@ const INPUTS = {
   deliverable: { hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-product' } },
   'stop-gate': { hook_event_name: 'SubagentStop', agent_type: 'agent-team:at-product' },
   ledger: { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: '/p/x', content: '' } },
+  'approval-ask': {
+    hook_event_name: 'PostToolUse',
+    tool_name: 'AskUserQuestion',
+    agent_type: 'at-pm',
+    tool_input: { questions: [] },
+    tool_response: { questions: [], answers: {} },
+  },
+  'approval-prompt': { hook_event_name: 'UserPromptSubmit', prompt: 'x' },
 }
 
 test('前置：INPUTS 覆盖 checks.mjs 里的每一个检查项——否则下面的逐项断言在空转', () => {
@@ -93,7 +101,9 @@ for (const [label, damage] of [
         assert.match(stderr, /加载失败/, `${check} 的 stderr 要说明是加载失败`)
         // M3v（docs/30）：界面只显示 stderr 的第一个非空行（docs/28）——那一行就要说出放行了、为什么。
         const head = stderr.split('\n').find((l) => l.trim()) ?? ''
-        assert.ok(head.includes('放行') && head.includes('加载失败'), `${check} 的首行：${head}`)
+        // M3z：返工批准的记录器不放行任何东西，首行说「记不下」（下面「复核」那一条另钉不说放行）。
+        const outcome = CHECKS[check].recorder === true ? '记不下' : '放行'
+        assert.ok(head.includes(outcome) && head.includes('加载失败'), `${check} 的首行：${head}`)
       }
     })
   })
@@ -253,7 +263,8 @@ for (const v of TOO_OLD) {
         assert.equal(status, 1, check)
         assert.ok(stderr.includes(MIN_NODE) && stderr.includes(`v${v}`), `${check}：${stderr}`)
         const head = stderr.split('\n').find((l) => l.trim()) ?? ''
-        assert.ok(head.includes('放行') && head.includes('Node 太旧'), `${check} 的首行：${head}`)
+        const outcome = CHECKS[check].recorder === true ? '记不下' : '放行'
+        assert.ok(head.includes(outcome) && head.includes('Node 太旧'), `${check} 的首行：${head}`)
       }
     })
   })
@@ -322,4 +333,30 @@ test('Node 太旧时，版本号或路径里的换行字符都不会让理由另
       }, execPath)
     }
   }
+})
+
+// 复核（docs/34 §3，platform-5）：记录器不放行任何东西——加载失败时首行要说「这次的回答记不下」，不说「放行」。UPS 上 exit 1 的那一行
+// 是用户每条消息都看得到的。
+test('复核：lib 加载失败时，两个返工批准记录器的首行说记不下，不说放行', () => {
+  withBrokenPlugin(missingLib, (gate) => {
+    for (const check of ['approval-ask', 'approval-prompt']) {
+      const { stdout, stderr, status } = gate(check, INPUTS[check])
+      assert.equal(stdout, '', check)
+      assert.equal(status, 1, check)
+      const head = stderr.split('\n').find((l) => l.trim()) ?? ''
+      assert.match(head, /记不下/, check)
+      assert.doesNotMatch(head, /放行/, check)
+    }
+  })
+})
+
+// platform-4：失败策略表读不到、输入里也没有 hook_event_name 时，按 PreToolUse 取安全方向——可输入里没有 tool_name 的一定不是
+// 工具事件（PreToolUse 的输入总带 tool_name）。UserPromptSubmit 上写一份 PreToolUse 形状的拒绝 JSON，会原样进模型上下文。
+test('复核：checks.mjs 读不到、输入没有 hook_event_name 也没有 tool_name → 不按 PreToolUse 拒，stdout 为空', () => {
+  withBrokenPlugin(missingChecks, (gate) => {
+    const { hook_event_name, ...input } = INPUTS['approval-prompt']
+    const { stdout, status } = gate('approval-prompt', input)
+    assert.equal(stdout, '')
+    assert.equal(status, 1)
+  })
 })

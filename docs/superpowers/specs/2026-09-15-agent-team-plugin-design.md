@@ -278,6 +278,13 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
 写路径 matcher 上：触发时磁盘上还是旧版、`tool_input` 里是新版，两边都在手上。
 `validateState` 的同名校验降为第二道。
 
+**第 3 轮之后（M3z 补，`docs/34`，全量审查第 16 条）**：「不过则升级」的去向是用户。用户经规范标签「再返工一轮：回到 <段>」
+批准（`AskUserQuestion` 里单选它，或者在对话里单独发一条整条只写它的消息），门禁自己记下这条批准（`runs/<id>/approvals.jsonl`，
+门禁专属文件，PM 用 Edit/Write 写不进；`Bash` 写得进，与 §6.2 同一条边界），PM 不为它多写任何字段。一条批准只盖记下那一刻「回到那一段、这一轮走完」会越限的段，各多一轮上限
+（某段的上限 = 3 + 覆盖它的批准条数）；上限内问的、重复问的都不记。H6 在回退那一次写入就按「这一轮走完」预判，越限就拒、理由给
+标签；用户叫停时不回退也不推进，记 `escalations`、把现状告诉用户，停下等用户。不记回退就派人重做，门禁在派发与写入两帧拦
+（§6 的 H2、H3）——否则预算与回退快照（§4.4 的 `rework_base`）都挂在「回退被记下」这个前提上，被一次不记账的派发整条绕过。
+
 **④ never_invoked 追踪**
 
 `state.json` 记录本趟未被调用的角色，`/at-status` 与 `08-delivery.md` 均列出。
@@ -292,6 +299,9 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
 | 实现错 | 对应执行角色 | S5 → S8 |
 
 唯一升级情形：驳回暴露 `00-contract.md` 自身存在内在矛盾——非执行错误，只有用户能裁。
+
+**另有两条回退不是驳回类型**（M3z 补，`docs/34`）：S6 测试没过回 S5（§4.2 ③）；S7 验收判不了、要人补跑测试，回 S6
+（S6、S7 各记一轮返工，与前一条共用 S6 的额度）。`rejectTo` 不管这两条，`commands/at.md` 的「回退」写着它们。
 
 **本表的单一真源是 `hooks/lib/state.mjs` 的 `rejectTo(kind)`（M2a 补）。**
 `REJECTION_KINDS` 四类：`requirement` / `design` / `implementation` / `contract-conflict`，
@@ -412,12 +422,12 @@ sha 相同的产物就是上一轮的，H5a/H5b、H2、【阶段】与 H5a「停
 2. **契约冲突**：角色产出与契约某条相抵，或满足 A 条必须违反 B 条
 3. **取舍**：两方案均满足契约但不能兼得，且差异用户可感知（范围/时间/体验/技术债）
 4. **契约有洞**：原始需求自相矛盾或缺关键信息，任一猜测都可能导致白做
-5. **预算耗尽**：返工至第 3 轮仍不通过
+5. **预算耗尽**：返工至第 3 轮仍不通过（再来一轮要用户经规范标签批准、由门禁记下，§4.2 ③）
 
 ### 5.2 明确不升级（PM 自决）
 
 技术选型（契约不关心的范围内）、班底裁剪、驳回路由、代码风格与目录命名、
-上限内的单角色重试。
+同一段里重派一个角色（不计返工）。
 
 ### 5.3 升级的形状
 
@@ -434,11 +444,21 @@ sha 相同的产物就是上一轮的，H5a/H5b、H2、【阶段】与 H5a「停
 | # | Hook | 职责 | 检查不通过时 | 门禁无法做出有依据的判定时 |
 |---|---|---|---|---|
 | H1 | PreToolUse / Agent | 派发白名单（全部层级，含主线程） | deny | deny（fail closed） |
-| H2 | PreToolUse / Agent | 就绪门禁：前置产物缺失 | **deny**，并指明该先跑哪一阶段 | allow + warning（fail open） |
-| H3 | PreToolUse / Edit\|Write | per-role 写路径隔离（**只管阶段产物与项目路径；控制文件不走这套判据，见 §6.2.1**） | deny | deny（fail closed） |
+| H2 | PreToolUse / Agent | 就绪门禁：前置产物缺失；**M3z 起**另拦不记回退的重派：叶子角色（花名册里派不出任何人）按派发者选出的段全都早于 `state.stage`、它在那些段的产物这一轮已经交过（交付快照，见表下「门禁专属文件」） | **deny**，并指明该先跑哪一阶段 / 先记回退 | allow + warning（fail open） |
+| H3 | PreToolUse / Edit\|Write | per-role 写路径隔离（**只管阶段产物与项目路径；控制文件不走这套判据，见 §6.2.1**）；**M3z 起**门禁专属文件（`runs/*/approvals.jsonl`、`runs/*/delivered.json`）任何人都拒、主线程也拒；非 PM 改自己在更早一段已经交过的产物、而它在当前段没有活，拒（不记回退的重做） | deny | deny（fail closed） |
 | H4 | PreToolUse / Edit\|Write | 契约保护：subagent 写契约 | deny | deny（fail closed） |
 | H5 | `SubagentStop`（真拦截）+ `PostToolUse` / Agent（权威记录） | 交付物校验：声明产出却未写文件 | `SubagentStop`：deny（exit 2 附理由，约 8 次补救机会）；`PostToolUse`：记 warning，不 block | `SubagentStop`：allow（fail open，流程辅助）；`PostToolUse`：记 warning |
-| H6 | PreToolUse / Edit\|Write | 返工预算写时强制：只对 `runs/*/state.json` 生效，返工计数那四条只拦**减少**（`history` 变短、某阶段出现次数变少、`rework` 低于派生值、`rework` 超 `REWORK_LIMIT`），不碰增加——PM 每推进一个阶段都要正常重写这个文件；**M3y 起**另核 `rework_base`（§4.4）：回退那一次写入照磁盘记快照（不晚于写入后 stage 的可以直接标 `"accepted"`）、之后原样带着（只许当前段及更早段改成 `"accepted"`，坏条目可删），推进离开一段时那一段里不许还有上一轮的产物 | deny | deny（fail closed）；只有旧的一侧 parse 不出 JSON 时放行（M3r 起新内容必须是合法 JSON），见 §4.2 ③；阶段链读不出来或形状不对时 `rework_base` 几条跳过、往 stderr 留痕，读不出来的产物不核 |
+| H6 | PreToolUse / Edit\|Write | 返工预算写时强制：只对 `runs/*/state.json` 生效。返工计数：`history` 只许追加、某阶段出现次数不许变少、`rework` 不许低于派生值；`rework` 超上限（3 + 覆盖它的返工批准条数，§4.2 ③）而且比写入前大才拒，回退那一次写入先按「这一轮走完」预判、越限就拒并给规范标签（**M3z 起**；此前这一条拦的是一切超过 `REWORK_LIMIT` 的值，第 4 轮没有诚实的写法）；**M3z 起**另核 stage 不变量（`stage` 与新追加的 `history` 条目都在阶段链上、`stage` 等于 `history` 末条）。上限内的推进与回退照常放行——PM 每推进一个阶段都要正常重写这个文件；**M3y 起**另核 `rework_base`（§4.4）：回退那一次写入照磁盘记快照（不晚于写入后 stage 的可以直接标 `"accepted"`）、之后原样带着（只许当前段及更早段改成 `"accepted"`，坏条目可删），推进离开一段时那一段里不许还有上一轮的产物 | deny | deny（fail closed）；只有旧的一侧 parse 不出 JSON 时放行（M3r 起新内容必须是合法 JSON），见 §4.2 ③；阶段链读不出来或形状不对时 `rework_base` 几条跳过、往 stderr 留痕（**M3z 起**回退预判与 stage 不变量也一起跳过，stderr 只留 `rework_base` 那一句；判据④照 3 轮上限拒、理由叫用户重装插件），读不出来的产物不核 |
+
+另有两个记录器（M3z 补，`docs/34`），不是门禁、不拒任何东西：`approval-ask`（`PostToolUse` / `AskUserQuestion`）与 `approval-prompt`
+（`UserPromptSubmit`）。用户选了（或单独发了）规范标签、而这一轮确实需要批准时，往当前 run 的 `approvals.jsonl` 追加一条；记不下时
+fail open（后果只是「没有批准」，H6 照样拒那次回退）。前者在回传里说记没记下、为什么；后者 stdout 一个字都不写（那里的 stdout 进模型
+上下文），只往 stderr 留痕。
+
+**门禁专属文件**（M3z 补）：`runs/*/approvals.jsonl`（上面两个记录器写的返工批准）与 `runs/*/delivered.json`（交付快照：PM 写
+`state.json`、而 `stage` 变了（推进、回退）之后，由 ledger 照磁盘拍下早于当前段的各段产物的 sha，H2、H3 拿它判「这一轮交过」——
+快照之后才落盘、或者快照之后改过的，补派与【返工】的出口写几次都放行，直到下一次推进或回退；只记账、不动 `stage` 的写入不重拍）。它们不是控制文件：控制文件是 PM 记的账，这两份是门禁记的账，H3 对任何人的
+Edit/Write 都拒，排在主线程豁免之前。`Bash` 照样写得进（与 §6.2 同一条边界）。
 
 **表里的 warning 发给谁**（M3v 补，`docs/30`，全量审查第 12 条）：fail open 那几格的 warning 一律先往 stderr 写一行，
 那只进转录，模型与用户都看不到。另外按检查项：

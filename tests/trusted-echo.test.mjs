@@ -322,6 +322,65 @@ const SCENARIOS = [
     },
   },
   {
+    // M3z（docs/34）：stage 不变量的三条拒绝理由各带一个 state.json 里的值——新写的 stage、新追加的条目、history 末条。
+    name: 'state.stage 与 history 条目（H6：stage 不变量）',
+    disk: true,
+    state: (s, P) => ({ ...s, history: [...s.history, { stage: P, at: 't' }] }),
+    calls: ({ run }, P) => {
+      const s = baseState()
+      return [
+        ['rework', stateWrite(run, { ...s, stage: P, history: [...s.history, { stage: P, at: 't' }, { stage: P, at: 't' }], rework: { [P]: 1 } })],
+        ['rework', stateWrite(run, { ...s, history: [...s.history, { stage: P, at: 't' }, { stage: P, at: 't' }, { stage: 'S5', at: 't' }], rework: { S5: 1, [P]: 1 } })],
+        ['rework', stateWrite(run, { ...s, stage: 'S4', history: [...s.history, { stage: P, at: 't' }] })],
+      ]
+    },
+  },
+  {
+    // M3z：判据④的上限那一半（rework 的键不在阶段链上，理由点名它）。
+    name: 'rework 的键（H6：超过返工上限）',
+    disk: true,
+    calls: ({ run }, P) => [['rework', stateWrite(run, { ...baseState(), rework: { [P]: 9 } })]],
+  },
+  {
+    // M3z：approvals.jsonl（门禁专属，但 Bash 写得进）里的 rework_to 不回显——拒绝理由只列核过在链上的段与条数。
+    // 锚点改认「记下的返工批准：1 条」：那一行确实被读到了。
+    name: 'approvals.jsonl 的 rework_to（H6 拒绝理由里的批准条数）',
+    disk: true,
+    state: (s) => ({
+      ...s,
+      stage: 'S6',
+      history: [...s.history, ...['S6', 'S5', 'S6', 'S5', 'S6', 'S5', 'S6', 'S5', 'S6'].map((stage) => ({ stage, at: 't' }))],
+      rework: { S5: 4, S6: 4 },
+    }),
+    approvals: (P) => [{ at: P, source: P, rework_to: P, covers: ['S5', 'S6'] }],
+    calls: ({ run }) => {
+      const h = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S5', 'S6', 'S5', 'S6', 'S5', 'S6', 'S5', 'S6', 'S5'].map((stage) => ({ stage, at: 't' }))
+      return [['rework', stateWrite(run, { ...baseState(), stage: 'S5', history: h, rework: { S5: 5, S6: 4 } })]]
+    },
+    anchor: (all) => all.includes('记下的返工批准：1 条（覆盖 S5、S6）'),
+  },
+  {
+    // M3z：按 history 派生值越限的段名（【返工预算】）——不在阶段链上的加引号、不给标签。
+    name: 'history 的阶段名（【返工预算】）',
+    disk: true,
+    state: (s, P) => ({ ...s, history: [...s.history, ...Array.from({ length: 5 }, () => ({ stage: P, at: 't' }))], rework: { [P]: 4 } }),
+    calls: ({ run }) => [['ledger', posted('at-pm', join(run, 'state.json'))]],
+  },
+  {
+    // M3z：AskUserQuestion 的问题原文与回答都不回显（回传只说记没记下、为什么）。锚点改认回传确实出了。
+    name: 'AskUserQuestion 的问题原文与回答（返工批准的回传）',
+    calls: (_, P) => [
+      ['approval-ask', {
+        hook_event_name: 'PostToolUse',
+        tool_name: 'AskUserQuestion',
+        agent_type: 'at-pm',
+        tool_input: { questions: [] },
+        tool_response: { questions: [{ question: P, multiSelect: false }], answers: { [P]: '再返工一轮：回到 S5' + P, q2: '再返工一轮：回到 S5' } },
+      }],
+    ],
+    anchor: (all) => all.includes('这次的回答没有记成返工批准'),
+  },
+  {
     name: 'project.paths 的键（H3 的拒绝理由）与元素（触达表）',
     disk: true,
     project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, [P]: ['nowhere/'], 'at-backend': ['src/server/', P] } }),
@@ -443,6 +502,8 @@ const SCENARIOS = [
       ['writepath', write('agent-team:at-backend', `${BS}??${BS}C:${BS}x${P}`)],
       ['writepath', write('agent-team:at-backend', `${BS}${BS}.${BS}pipe${BS}${P}`)],
       ['contract', write('agent-team:at-backend', `${BS}${BS}srv${BS}share${BS}${P}`)],
+      // M3z：门禁专属文件的拒绝理由带着这次写的路径（任何项目的 .agent-team/runs/<id>/ 下都认）。
+      ['writepath', write('at-pm', join(run, P, '.agent-team', 'runs', 'r1', 'approvals.jsonl'))],
     ],
   },
 ]
@@ -463,6 +524,7 @@ async function runScenario(sc, pname, P) {
       writeFileSync(f === 'state.json' ? join(run, f) : join(p, '.agent-team', f), make(P))
     }
     if (sc.pointer) writeFileSync(join(p, '.agent-team', 'current-run'), sc.pointer(P))
+    if (sc.approvals) writeFileSync(join(run, 'approvals.jsonl'), sc.approvals(P).map((a) => JSON.stringify(a)).join('\n') + '\n')
     const results = await Promise.all(sc.calls({ p, run }, P).map(([check, input]) => gate(check, input, p)))
     const bad = results.flatMap((r) => violations(r, sc).map((v) => `${pname} · ${r.check}：${v}`))
     const all = results.flatMap((r) => channels(r).map((c) => c.text)).join('\n')

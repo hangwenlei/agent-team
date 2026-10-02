@@ -201,7 +201,8 @@ const OTHER_TOOLS = [
   'AskUserQuestion', 'SendMessage', 'ListAgents', 'Task', 'MultiEdit', 'NotebookRead',
 ]
 const NEAR_MISS = ['Agents', 'SubAgent', 'AgentX', 'XEdit', 'EditX', 'Writer', 'NotebookEditX', 'xWrite']
-const TOOL_UNIVERSE = [...DECLARED_TOOLS, ...OTHER_TOOLS, ...NEAR_MISS]
+// 去重（M3z）：AskUserQuestion 既是 approval-ask 声明的工具、又在 OTHER_TOOLS 里，不去重时同一个名字会被数两遍。
+const TOOL_UNIVERSE = [...new Set([...DECLARED_TOOLS, ...OTHER_TOOLS, ...NEAR_MISS])]
 
 // 每一条注册展开成 { event, matcher, check, entry }。
 function registrations() {
@@ -287,11 +288,15 @@ test('接线：每一道门禁都经 hooks/boot.mjs 进门，不直接跑 gate.m
 // Claude Code 太旧（丢掉 args）时照样出现，所以是 shell 形式的一行 echo：纯 ASCII（Windows 没有 Git Bash
 // 时退到 PowerShell 5.1，中文会乱码），整句单引号（bash 与 PowerShell 里都是字面量）。
 
+// M3z（docs/34）：UserPromptSubmit 上多了一道门禁（approval-prompt，经 boot.mjs 进门，由上面的接线判据管）。提醒按「不走 node」
+// 认——它要恰好一条、逐字等于 REMINDER_COMMAND；混进第二条不走 node 的，这里当场红。
 function reminderEntries() {
-  return (hooksConfig.hooks?.[REMINDER_EVENT] ?? []).flatMap((g) => (g.hooks ?? []).map((hook) => ({ group: g, hook })))
+  return (hooksConfig.hooks?.[REMINDER_EVENT] ?? [])
+    .flatMap((g) => (g.hooks ?? []).map((hook) => ({ group: g, hook })))
+    .filter(({ hook }) => hook.command !== 'node')
 }
 
-test('自检提醒：UserPromptSubmit 上恰好这一条，逐字等于 gate-check.mjs 的 REMINDER_COMMAND', () => {
+test('自检提醒：UserPromptSubmit 上不走 node 的恰好这一条，逐字等于 gate-check.mjs 的 REMINDER_COMMAND', () => {
   // 事件名钉成字面量，不经常量自证：提醒要每轮紧挨着用户消息出现。SessionStart 只在会话开头注入一次，
   // 续会话时同样的文本不再注入——恰好丢掉要补的那条路（docs/28 §2.2）。
   assert.equal(REMINDER_EVENT, 'UserPromptSubmit')

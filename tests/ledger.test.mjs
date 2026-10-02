@@ -237,3 +237,91 @@ test('M3y【阶段】：history 里混着 null、字符串、数字条目时不�
     assert.match(s, /S6 在 history 里已经出现过/, JSON.stringify(bad))
   }
 })
+
+// ============================================================================
+// M3z（docs/34，全量审查第 16 条）：越限单列成【返工预算】，【阶段】在推进会越限时先叫 PM 问用户。
+//
+// validateState 的越限（按 history 的派生值、上限 = 3 + 覆盖它的返工批准条数）此前混在【state.json】那一块里，抬头是「改完再继续」
+// ——可越限的唯一出路是问用户，把计数改小会被 H6 以「不可重置」拒（O6）。【阶段】原来只说「rework 那一段加 1」，推进会越限时
+// 照它写会被 H6 拒。两处给的规范标签取同一段（budget.mjs 的 approvalTargetFor），一次批准两处都消掉。
+import { approvalLabel } from '../hooks/lib/budget.mjs'
+
+const hh = (...ids) => ids.map((stage) => ({ stage, at: 't' }))
+// S6 → S5 回退 3 轮之后又回到 S5（第 4 轮已经记下）。
+const FOURTH = hh('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S5', 'S6', 'S5', 'S6', 'S5', 'S6', 'S5')
+
+test('M3z【返工预算】：写 state.json、越限 → 单列一块，给规范标签，说不要改计数，不说「改完再继续」', () => {
+  const s = buildLedgerNotices({
+    ...base, kind: 'state', stages: REAL_STAGES, state: { stage: 'S5', history: FOURTH },
+    budget: [{ stage: 'S5', rounds: 4, limit: 3 }],
+  }).join('\n')
+  assert.match(s, /^【返工预算】/m)
+  assert.match(s, /S5 已经返工 4 轮，上限 3/)
+  assert.ok(s.includes(approvalLabel('S5')), s)
+  assert.match(s, /不要改计数/)
+  assert.doesNotMatch(s, /改完再继续/)
+  assert.match(s, /0 条/)
+})
+
+test('M3z【返工预算】：越限的是 S6、最后一次回退回到 S5 → 标签写回到 S5（照它记下的批准盖得住 S6）', () => {
+  const s = buildLedgerNotices({
+    ...base, kind: 'state', stages: REAL_STAGES, state: { stage: 'S6', history: [...FOURTH, ...hh('S6')] },
+    budget: [{ stage: 'S6', rounds: 4, limit: 3 }],
+  }).join('\n')
+  assert.ok(s.includes(approvalLabel('S5')), s)
+})
+
+test('M3z【返工预算】：没越限、写的不是 state.json → 不发', () => {
+  assert.doesNotMatch(joined({ kind: 'state', budget: [] }), /【返工预算】/)
+  assert.doesNotMatch(joined({ kind: 'state' }), /【返工预算】/)
+  assert.doesNotMatch(joined({ kind: 'produce', budget: [{ stage: 'S5', rounds: 4, limit: 3 }] }), /【返工预算】/)
+})
+
+test('M3z【返工预算】：段名不在阶段链上（history 被别处写坏）→ 加引号点名，不给标签', () => {
+  const s = joined({ kind: 'state', stages: REAL_STAGES, state: { stage: 'S5', history: FOURTH }, budget: [{ stage: 'S5b', rounds: 4, limit: 3 }] })
+  assert.match(s, /"S5b"/)
+  assert.ok(!s.includes(approvalLabel('S5b')), s)
+})
+
+test('M3z【阶段】：推进进下一段会越限 → 说会超过上限、先问用户，标签回到最后一次回退回到的那一段', () => {
+  // 第 4 轮回到 S5 时只批了 S5；S6 已经出现 4 次，再进是第 4 轮。写 state.json（写者是 PM）时给全问用户的做法。
+  const s = buildLedgerNotices({
+    ...base, kind: 'state', stages: REAL_STAGES, stageDone: true, state: { stage: 'S5', history: FOURTH },
+    grants: [{ reworkTo: 'S5', covers: ['S5'] }],
+  }).join('\n')
+  assert.match(s, /推进到 S6 会让它到第 4 轮返工，超过上限 3/)
+  assert.ok(s.includes(approvalLabel('S5')), s)
+  assert.match(s, /1 条/)
+})
+
+test('M3z【阶段】：批准覆盖了下一段 → 照旧只说 rework 那一段加 1', () => {
+  const s = buildLedgerNotices({
+    ...base, stages: REAL_STAGES, stageDone: true, state: { stage: 'S5', history: FOURTH },
+    grants: [{ reworkTo: 'S5', covers: ['S5', 'S6'] }],
+  }).join('\n')
+  assert.match(s, /S6 在 history 里已经出现过[^。]*rework/)
+  assert.doesNotMatch(s, /超过上限/)
+})
+
+// 复核（docs/34 §3，prose-3）：写产物触发的【阶段】会发给执行角色，它没有 AskUserQuestion、也改不了 state.json——越限那一句
+// 不对它下「问用户」的命令，只说推进之前 PM 要先问用户（前面的 pmOnlyNotice 已经叫非 PM 回报上级）。
+test('复核【阶段】：写产物时（不是写 state.json）越限那一句不带问用户的做法', () => {
+  const s = buildLedgerNotices({
+    ...base, kind: 'produce', stages: REAL_STAGES, stageDone: true, state: { stage: 'S5', history: FOURTH },
+    grants: [{ reworkTo: 'S5', covers: ['S5'] }],
+  }).join('\n')
+  assert.match(s, /推进到 S6 会让它到第 4 轮返工，超过上限 3/)
+  assert.match(s, /PM 推进之前要先问用户/)
+  assert.doesNotMatch(s, /AskUserQuestion/)
+})
+
+// 变异 L06：【返工预算】不按链序取最早越限的段时全绿——上面几条只有一段越限。
+test('变异 L06：几段同时越限、budget 不按链序给 → 标签取链上最早那一段之前最后一次回退回到的段', () => {
+  const s = buildLedgerNotices({
+    // 最后一次回退回到 S5：越限的若取 S5，标签是「回到 S5」；取链上最早的 S2，标签是「回到 S2」（approvalTargetFor 不越过越限的段）。
+    ...base, kind: 'state', stages: REAL_STAGES, state: { stage: 'S5', history: hh('S1', 'S2', 'S3', 'S2', 'S3', 'S2', 'S3', 'S2', 'S3', 'S4', 'S5', 'S6', 'S5') },
+    budget: [{ stage: 'S5', rounds: 4, limit: 3 }, { stage: 'S2', rounds: 4, limit: 3 }],
+  }).join('\n')
+  assert.ok(s.includes(approvalLabel('S2')), s)
+  assert.ok(!s.includes(approvalLabel('S5')), s)
+})

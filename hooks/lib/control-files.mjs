@@ -56,13 +56,53 @@ export function isControlFile(filePath, agentTeamDir) {
 
 
 /**
+ * 路径最后一段规范化之后的名字：剥掉流后缀（冒号之后的部分）与结尾的点、空格，转小写——Windows 上这些写法落盘时指向的
+ * 是同一个文件。mayBeStateFile 与 mayBeGateFile、isGateFile 共用这一份（M3z，docs/34 的 P5：门禁专属文件还不存在时，
+ * `approvals.jsonl::$DATA` 的字面末段与 norm() 给的末段都认不出它，Node 往这个路径写建出来的正是 approvals.jsonl）。
+ */
+export function leafName(filePath) {
+  if (typeof filePath !== 'string' || !filePath) return ''
+  return filePath.split(/[\\/]/).pop().split(':')[0].replace(/[. ]+$/, '').toLowerCase()
+}
+
+/**
  * 这条路径的最后一段可能就是某个 run 的 state.json 吗——按名字判，不管在哪个目录下。
  * 给 H6 用（M3q，docs/25）：门禁认不出的写法（网络路径、流后缀、结尾带点……）拿 norm() 比不出
  * 是不是 state.json，只能看名字。先剥掉流后缀与结尾的点、空格，再看是 state.json，或者像它的
  * 8.3 短名（带 ~ 且扩展名是 .JSO）。宁可多认：多认只是多拦一次认不出的写法。
  */
 export function mayBeStateFile(filePath) {
-  if (typeof filePath !== 'string' || !filePath) return false
-  const leaf = filePath.split(/[\\/]/).pop().split(':')[0].replace(/[. ]+$/, '').toLowerCase()
+  const leaf = leafName(filePath)
   return leaf === 'state.json' || (leaf.includes('~') && leaf.endsWith('.jso'))
+}
+
+// ——— 门禁专属文件（M3z，docs/34，全量审查第 16 条）———
+//
+// 门禁自己写、任何人的 Edit/Write/NotebookEdit 都拒，PM 与主线程也拒（hooks/gate.mjs 的 writepath 分支，排在主线程豁免之前，
+// 与门禁自检同一个位置）。它们不是控制文件：控制文件是 PM 记的账，这两份是门禁记的账——
+//   - runs/*/approvals.jsonl：用户批准的返工轮（hooks/lib/budget.mjs）。PM 写得进它，就能给自己批第 4 轮；
+//   - runs/*/delivered.json：交付快照（hooks/lib/redo.mjs）。改得了它，不记回退的重做就拦不住。
+// Bash 照样写得进（与 state.json 同一档：那是一次需要刻意去做的伪造，不是顺手绕过）。
+export const GATE_FILES = ['runs/*/approvals.jsonl', 'runs/*/delivered.json']
+export const APPROVALS_FILE = 'approvals.jsonl'
+export const DELIVERED_FILE = 'delivered.json'
+
+/** 按规范化之后的字面末段认：门禁认不出的写法（流后缀、结尾带点）也认——gate.mjs 拿它决定要不要先查 exoticPath。不认 8.3 短名：
+ * 短名只在文件已经存在时才有，那时 isGateFile 经 norm() 的 realpath 认得出，而 gate.mjs 对每一次写入都调 isGateFile（复核 platform-1：
+ * 上一版只在这里命中时才调它，短名、末段是 `.` 的写法都从这一筛漏过去）。照抄 mayBeStateFile 的 `~` 规则会把 state.json 的短名
+ * 也当成它。 */
+export function mayBeGateFile(filePath) {
+  const leaf = leafName(filePath)
+  return leaf === APPROVALS_FILE || leaf === DELIVERED_FILE
+}
+
+/** 任何项目的 .agent-team/runs/<id>/ 下的门禁专属文件——按路径形状认，不只认门禁这一刻认的项目根：写别的项目的批准记录
+ * 同样是伪造。路径先过 norm()（解析 ..、软链接，Windows 上折小写），末段再过 leafName。 */
+export function isGateFile(filePath) {
+  if (typeof filePath !== 'string' || !filePath) return false
+  const segs = norm(filePath).split('/')
+  if (segs.length < 4) return false
+  const [dot, runs, id, leaf] = segs.slice(-4)
+  if (dot.toLowerCase() !== '.agent-team' || runs.toLowerCase() !== 'runs' || !id) return false
+  return GATE_FILES.some((p) => matchesPattern(['runs', id, leafName(leaf)], p))
 }

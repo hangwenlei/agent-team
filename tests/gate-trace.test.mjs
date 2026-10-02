@@ -351,6 +351,32 @@ const SCENARIOS = [
     setup: () => ({ ...cleanDir(), input: { tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: 'x.txt', content: 'a' } } }),
     shape: { status: 0, stdout: 'empty', stderr: 'nonempty' },
   },
+  // M3z（docs/34）：返工批准的两个记录器。只取不写文件的几格——记下批准会往 run 目录追加一行，那是记录器的本分，
+  // 不是留痕写的（下面「不写文件」那条判据比的是留痕开关前后）。
+  {
+    name: 'approval-ask：回答里没有返工批准，静默',
+    check: 'approval-ask',
+    setup: () => ({
+      ...fromRun({ runId: 'r1', stage: 'S2' }),
+      input: { tool_name: 'AskUserQuestion', agent_type: 'at-pm', tool_input: { questions: [] }, tool_response: { questions: [{ question: 'q', multiSelect: false, options: [] }], answers: { q: '停在这里' } } },
+    }),
+    shape: { status: 0, stdout: 'empty', stderr: 'empty' },
+  },
+  {
+    name: 'approval-ask：选了规范标签、这一轮却不需要批准——不记，stdout 上的回传说原因',
+    check: 'approval-ask',
+    setup: () => ({
+      ...fromRun({ runId: 'r1', stage: 'S2' }),
+      input: { tool_name: 'AskUserQuestion', agent_type: 'at-pm', tool_input: { questions: [] }, tool_response: { questions: [{ question: 'q', multiSelect: false, options: [] }], answers: { q: '再返工一轮：回到 S2' } } },
+    }),
+    shape: { status: 0, stdout: 'nonempty', stderr: 'nonempty' },
+  },
+  {
+    name: 'approval-prompt：用户的话不是规范标签，静默',
+    check: 'approval-prompt',
+    setup: () => ({ ...fromRun({ runId: 'r1', stage: 'S2' }), input: { hook_event_name: 'UserPromptSubmit', prompt: '继续' } }),
+    shape: { status: 0, stdout: 'empty', stderr: 'empty' },
+  },
 ]
 
 function runBoth(sc) {

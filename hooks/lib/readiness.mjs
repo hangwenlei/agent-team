@@ -39,6 +39,10 @@ function producerOf(stages, artifact) {
  * 不看 state.stage：那会让 H2 也依赖 stage 准不准（stage 没推进时，架构师为 S5 派 at-ui 会按 S2 放行，docs/31 §2 有两种方案的
  * 对照）。派发者由平台随调用给出；CLI 自己起的分叉带的是主线程的身份或空串（docs/22），那时候选段或者是主线程的、或者剪空，
  * 都退回老规则，是安全的一侧。
+ * ⚠️ M3z（docs/34，全量审查第 16 条）：选段仍不看 state.stage，但 H2 多了一条看它的判据——叶子角色的候选段全都早于 state.stage、
+ * 它在这些段的产物都交过，就是不记回退的重做（hooks/lib/redo.mjs 的 decideRedispatch，gate.mjs 在本函数放行之后调）。那条判据
+ * 只拿这里选出的段与 stage 比先后：stage 落后只会少拦，超前（第 17 条的提前推进）会多拦，出口是记回退。（H3 的同名判据还看写者在
+ * 当前段有没有活，stage 落后时也会多拦，见 redo.mjs 头部。）
  *
  * 失效条件（docs/31 §4）：某个角色 R 的 can_delegate_to 里直接有一个多段角色 X，而 X 的各段中「role 是 R、或 R 传递派得到它」
  * 的段不恰好一段——多于一段时仍按「第一个没齐」猜，零段时剪空、退回老规则。tests/readiness.test.mjs 的「M3w 前提」遍历真实

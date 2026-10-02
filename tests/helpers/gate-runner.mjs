@@ -104,6 +104,7 @@ function assertRan({ stderr, status }, gate, error, node) {
 //   - 顶层 decision / continue、permissionDecision 不是 deny：allow 绕过权限确认，continue:false 停整轮；
 //   - hookEventName 与这次事件不符：整份输出作废；
 //   - SubagentStop 上 stdout 非空：additionalContext 在那里等于拦截（拒绝走 exit 2 + stderr，stdout 永远是空的）；
+//   - UserPromptSubmit 上 stdout 非空（M3z）：那里的 stdout 会原样进模型上下文（approval-prompt 一个字都不写）；
 //   - PreToolUse 上的 additionalContext：本插件在那里不发受信块（hooks/lib/fail-open.mjs 头部）；
 //   - 有 JSON 却不是 exit 0：exit 1 时平台照样处理它，与文档相反，别依赖；
 //   - stderr 里的 BUG 行与「已经写过一份」那句：兜底触发了——它们只该在注入用例里出现，那种用例传 contract: false。
@@ -113,7 +114,7 @@ export function outputContractViolations(check, { stdout, stderr, status }) {
   const event = spec ? spec.event : 'PreToolUse'
   const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
   if (stdout.trim() !== '') {
-    if (event === 'SubagentStop') out.push('SubagentStop 上 stdout 非空')
+    if (event !== 'PreToolUse' && event !== 'PostToolUse') out.push(`${event} 上 stdout 非空`)
     if (status !== 0) out.push(`stdout 上有输出，退出码却是 ${status}`)
     let v
     try {
