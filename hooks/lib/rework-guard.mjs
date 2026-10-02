@@ -30,7 +30,7 @@
 // isNonNegativeInteger 与 validateState 共用同一份（M2b 终审 A5）。
 import { reworkFromHistory, REWORK_LIMIT, isNonNegativeInteger } from './state.mjs'
 // isPlainObject 走 stages.mjs 同一份（M2b 终审 A2），原先是这里的私有拷贝。
-import { isPlainObject, isStageChain, productsOfStage, mayAcceptProduct } from './stages.mjs'
+import { isPlainObject, isStageChain, productsOfStage, mayAcceptProduct, isVerifyStage } from './stages.mjs'
 import { VERIFY_REDO, splitByAccept } from './freshness.mjs'
 import { approvalTargetFor, askUserText, limitOf, overLimit } from './budget.mjs'
 import { normalizeText } from './text-norm.mjs'
@@ -380,6 +380,22 @@ function names(list) {
   return list.join('、')
 }
 
+// M4a 复核（B-1）：这次写入新追加的条目里有几条回退（在链上不晚于它前一条；链外条目跳过，与 restartInfo 同一个口径）。
+function appendedRestarts({ before, after, stages }) {
+  const { at } = stageIndexer(stages)
+  const hb = historyOf(before)
+  const ha = historyOf(after)
+  let prev = -1
+  let n = 0
+  for (let j = 0; j < ha.length; j++) {
+    const cur = isPlainObject(ha[j]) ? at(ha[j].stage) : -1
+    if (cur < 0) continue
+    if (j >= hb.length && prev >= 0 && cur <= prev) n++
+    prev = cur
+  }
+  return n
+}
+
 /** 回退那一刻 rework_base 应当是什么。unchecked：在、但读不出来的产物（不核）。 */
 function expectedAtRestart({ before, stages, stage, diskSha }) {
   const { ids, at } = stageIndexer(stages)
@@ -468,7 +484,8 @@ function decideAtRestart({ before, after, stages, diskSha, restart }) {
     lines.push(
       '这次写入在回退那一条之后还追加了前进的条目（补记）：上面的值照磁盘现在的内容算，回退之后已经重写过的产物也会被记成' +
         '上一轮的；它们确是这一轮写的，就把它们的值写成 "accepted"（不晚于这次写入后 stage 的，这一次就可以；验证段的产物除外，' +
-        '它们要再出一次）。这次写入还会照推进核回到的那一段到写入后 stage 之前的各段：那几段里还是上一轮的、没标的，同样会被拦。',
+        '它们要再出一次）。这次写入还会照推进核回到的那一段到写入后 stage 之前的各段：那几段里还是上一轮的、没标的，同样会被拦；' +
+        '补记跨过验证段的一律过不了——拆开写，先只记回退。',
     )
   }
   return { ok: false, reason: lines.join('\n') }
@@ -604,8 +621,32 @@ export function decideReworkBase({ before, after, stages, diskSha }) {
   if (!isStageChain(stages)) return { ok: true, notes: ['rework_base：阶段链读不出来或形状不对，回退快照的几条判据这次跳过'] }
   const restart = restartInfo({ before, after, stages })
   if (restart) {
+    // M4a 复核（B-1）：一次写入追加了不止一条回退（[S5, S7, S7]）：快照只拍最后那条，前面那截往前记的不经任何推进核查。
+    if (appendedRestarts({ before, after, stages }) > 1) {
+      return {
+        ok: false,
+        reason:
+          '一次 Write 只记一次回退：这次 history 新追加的条目里有不止一条在阶段链上不晚于它前一条。先单独记最早的那次回退' +
+          '（stage 写成回到的那一段，rework_base 照那一刻的磁盘拍），之后要推进再分开写，每一段推进各一次 Write。',
+      }
+    }
     const at = decideAtRestart({ before, after, stages, diskSha, restart })
     if (!at.ok || !restart.followedByForward) return at
+    // M4a 复核（B-2、P8）：补记跨过验证段——快照照写入那一刻的磁盘拍，区间里的产物按定义都是「上一轮的」，验证段的又不能标
+    // accepted：这样的写入永远过不了，照推进核的理由（「让产者重跑之后再推进」）照做是死循环。直接拒，叫它拆开。
+    const ids = Object.keys(stages)
+    const span = ids.slice(ids.indexOf(restart.stage), ids.indexOf(after.stage))
+    const crossed = span.filter((id) => isVerifyStage(stages[id]))
+    if (crossed.length) {
+      return {
+        ok: false,
+        reason:
+          `这次写入记了回退（回到 ${quote(restart.stage)}）又往前记到了 ${quote(after.stage)}（补记），跨过了验证段 ${crossed.join('、')}：` +
+          '快照照这一刻的磁盘拍，区间里的产物都算上一轮的，验证段的产物又不能标 "accepted"，这样的一次写入怎么写都过不了。' +
+          `把它拆开——先只记回退（stage 写成 ${quote(restart.stage)}，history 只追加回退那一条，rework_base 照磁盘），` +
+          '验证段的产者这一轮重跑、重写之后再逐段推进，每一段推进各一次 Write。',
+      }
+    }
     // M4a（docs/35）：补记（回退那一条之后同一次写入又往前记了几段）也是一次推进——离开回到的那一段到写入后 stage 之前的各段。
     // 原来这里不核，一次写入「回到 S3 再记到 S6」就把 S4、S5 这一轮整段跳过，推进把关再也不回头查它们（评审 restart-write-accepted）。
     const adv = decideAdvance({ before: { ...before, stage: restart.stage }, after, stages, diskSha })
@@ -613,7 +654,10 @@ export function decideReworkBase({ before, after, stages, diskSha }) {
       return {
         ok: false,
         reason:
-          `这次写入记了回退（回到 ${quote(restart.stage)}）又往前记到了 ${quote(after.stage)}（补记），照推进核离开的段：` + adv.reason,
+          `这次写入记了回退（回到 ${quote(restart.stage)}）又往前记到了 ${quote(after.stage)}（补记），照推进核离开的段：` +
+          adv.reason +
+          '补记这一次快照照磁盘拍，回退之后重写过的也算上一轮的：确是这一轮重写过的、或者这一轮接受原样的，同一次 Write 标 "accepted"；' +
+          '要它的产者真改的，这次只记到它所在段之前（或者只记回退），重写之后再推进。',
       }
     }
     return { ok: true, notes: [...at.notes, ...adv.notes] }

@@ -266,3 +266,14 @@ test('复核 H3：兄弟产物这一窗口刚补（在磁盘上、不在快照�
   assert.equal(decideRedoWrite({ ...base, isDelivered, artifactExists: (n) => n === '02-wireframe.html' || n === '02-ui-spec.md' }).decision, 'allow')
   assert.equal(decideRedoWrite({ ...base, isDelivered, artifactExists: (n) => n === '02-ui-spec.md' }).decision, 'deny')
 })
+
+// M4a 复核（RE03）：最后一段的重派拒绝理由先给「收口、另起一趟」——只说给改得了 state.json 的 PM；不在最后一段时不说。
+test('M4a 复核 H2：最后一段重派 at-qa——PM 收到「交付之后的新改动先收口再另起一趟」；非 PM 不收到；S7 上不说', () => {
+  const pm = redispatch({ target: 'at-qa', caller: 'at-pm', stageId: 'S8' })
+  assert.equal(pm.decision, 'deny')
+  assert.match(pm.reason, /交付之后的新改动/)
+  const other = redispatch({ target: 'at-qa', caller: 'at-pm', stageId: 'S8', callerCanWriteState: false })
+  assert.doesNotMatch(other.reason, /交付之后的新改动/)
+  const s7 = redispatch({ target: 'at-qa', caller: 'at-pm', stageId: 'S7' })
+  assert.doesNotMatch(s7.reason, /最后一段/)
+})

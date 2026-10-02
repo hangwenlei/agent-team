@@ -139,7 +139,7 @@ export function decideRedispatch({ stages, stageId, target, roster, candidates, 
  * H3：非 PM 写早段自己名下的产物。owner 是 writepath.mjs 的 stageOwnerOfRunPath 给的 { stageId, produces }（产物名是插件自己的
  * 名字）；filePath 是这次调用给的路径，过 inline。PM 不在这里判（调用方先排掉）。
  */
-export function decideRedoWrite({ stages, stageId, role, owner, filePath, isDelivered, reachableRoles, artifactExists }) {
+export function decideRedoWrite({ stages, stageId, role, owner, filePath, isDelivered, reachableRoles, artifactExists, closed = false }) {
   if (!isStageChain(stages) || !isPlainObject(owner)) return { decision: 'allow' }
   const c = indexIn(stages, stageId)
   const x = indexIn(stages, owner.stageId)
@@ -154,6 +154,15 @@ export function decideRedoWrite({ stages, stageId, role, owner, filePath, isDeli
   const ids = Object.keys(stages)
   const cur = ids[c]
   const was = ids[x]
+  // M4a 复核（REAL-1）：已收口的 run 上「先记一次回退」「推进 stage」都走不通（H6 冻结）——改说已经收口；拒照样拒。
+  if (closed) {
+    return {
+      decision: 'deny',
+      reason:
+        `${inline(role)} 不得改 ${inline(filePath)}——它是 ${was} 的产物 ${owner.produces}，这一轮已经交过，而这一趟已经收口，` +
+        '不再改它的产物：有问题写进你的回报，由项目经理另起一趟。',
+    }
+  }
   return {
     decision: 'deny',
     reason:

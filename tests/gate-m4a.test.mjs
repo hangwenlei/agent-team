@@ -292,3 +292,113 @@ test('M4a A H5a：最后一段、没收口，补派 at-acceptance 补交缺的�
     assert.doesNotMatch(contextOf(run('deliverable', returned('agent-team:at-acceptance'), GATE, fx.p)), /补收口缺的前置/)
   })
 })
+
+// ============================================================================ M4a 复核
+
+// 三轮返工用满（S5–S8 各 3 轮），没有批准记录——【返工预算】与回退预判都会出声的形状。
+const ROUNDS3 = [...FULL, ...H('S5', 'S6', 'S7', 'S8'), ...H('S5', 'S6', 'S7', 'S8'), ...H('S5', 'S6', 'S7', 'S8')]
+
+test('M4a 复核 P9：H6 的收口判据排在返工预算之前——已收口、三轮用满再记回退，拿到的是「已经收口」，不是「再返工一轮」', () => {
+  using({ ...AT_S8_CLOSED, history: ROUNDS3 }, (fx) => {
+    const hist = [...ROUNDS3, ...H('S5')]
+    const r = run('rework', writeState(fx, { ...fx.state, stage: 'S5', history: hist, rework: reworkFromHistory(hist) }), GATE, fx.p)
+    assert.ok(denied(r))
+    assert.match(reasonOf(r), /已经收口/)
+    assert.doesNotMatch(reasonOf(r), /再返工一轮/)
+  })
+})
+
+test('M4a 复核 P9：H2 的收口判据排在就绪与重派判据之前——已收口、前置缺、06 交过，派 at-qa 拿到的是「已经收口」', () => {
+  const { ['04-dispatch.md']: _gone, ...files } = DONE_FILES
+  using({ ...AT_S8_CLOSED, files }, (fx) => {
+    writeFileSync(join(fx.runDir, 'delivered.json'), JSON.stringify({ stage: 'S8', products: { '06-test.md': sha(R1['06-test.md']) } }))
+    const reason = reasonOf(run('readiness', dispatch('agent-team:at-qa'), GATE, fx.p))
+    assert.match(reason, /已经收口/)
+    assert.doesNotMatch(reason, /前置产物还缺|记一次回退/)
+  })
+})
+
+test('M4a 复核 G02：已收口时协调者再往下派 → 拒，收到的是「回报给派你的人」，不是 PM 那一版的另起一趟', () => {
+  using(AT_S8_CLOSED, (fx) => {
+    const reason = reasonOf(run('readiness', dispatch('agent-team:at-backend', 'agent-team:at-architect'), GATE, fx.p))
+    assert.match(reason, /回报给派你的人/)
+    assert.doesNotMatch(reason, /\/agent-team:at /)
+  })
+})
+
+test('M4a 复核 P2：已收口的 run 不发【返工预算】（问用户批准这条路收口之后走不通）', () => {
+  using({ ...AT_S8_CLOSED, history: [...ROUNDS3, ...H('S5', 'S6', 'S7', 'S8')] }, (fx) => {
+    const c = contextOf(run('ledger', postedState(fx), GATE, fx.p))
+    assert.doesNotMatch(c, /【返工预算】|再返工一轮/)
+  })
+  // 锚：没收口时同一份 history 照发。
+  using({ ...AT_S8, history: [...ROUNDS3, ...H('S5', 'S6', 'S7', 'S8')] }, (fx) => {
+    assert.match(contextOf(run('ledger', postedState(fx), GATE, fx.p)), /【返工预算】/)
+  })
+})
+
+test('M4a 复核 REAL-1：已收口的 run 上，at-acceptance 返回不再发「不是当前阶段的执行者」那条（停在旧阶段、记回退都不对）', () => {
+  using(AT_S8_CLOSED, (fx) => {
+    const c = contextOf(run('deliverable', returned('agent-team:at-acceptance'), GATE, fx.p))
+    assert.doesNotMatch(c, /停在旧阶段|记一次回退/)
+  })
+})
+
+test('M4a 复核 REAL-1：已收口的 run 上，at-acceptance 改它交过的 07 → 拒，理由说已经收口，不叫记回退或推进', () => {
+  using(AT_S8_CLOSED, (fx) => {
+    writeFileSync(join(fx.runDir, 'delivered.json'), JSON.stringify({ stage: 'S8', products: { '07-acceptance.md': sha(DONE_FILES['07-acceptance.md']) } }))
+    const w = { hook_event_name: 'PreToolUse', tool_name: 'Write', agent_type: 'agent-team:at-acceptance', tool_input: { file_path: join(fx.runDir, '07-acceptance.md'), content: 'x' } }
+    const r = run('writepath', w, GATE, fx.p)
+    assert.ok(denied(r))
+    assert.match(reasonOf(r), /已经收口/)
+    assert.doesNotMatch(reasonOf(r), /记一次回退|推进 stage/)
+  })
+})
+
+test('M4a 复核 P7、G09：【产者交代】在最后一段——只能经协调者派的 at-ui 不叫 PM 直接派；已收口时 ② 是补不了派', () => {
+  using(AT_S8, (fx) => {
+    const c = contextOf(run('ledger', postedState(fx), GATE, fx.p))
+    assert.match(c, /【产者交代】/)
+    assert.match(c, /at-ui 只能经协调者派[^\n]*记一次回退/)
+  })
+  using(AT_S8_CLOSED, (fx) => {
+    const c = contextOf(run('ledger', postedState(fx), GATE, fx.p))
+    assert.match(c, /补不了派/)
+    assert.doesNotMatch(c, /把它派出去/)
+  })
+})
+
+test('M4a 复核 F9：at-qa 不重测就停下——H5b 对它本人说「你这一轮重跑之后重写」，并说明结果相同时怎么写', () => {
+  using(B, (fx) => {
+    const r = run('stop-gate', stopped('agent-team:at-qa'), GATE, fx.p)
+    assert.match(r.stderr, /你这一轮重跑之后重写/)
+    assert.doesNotMatch(r.stderr, /让它的产者/)
+    assert.match(r.stderr, /结果与上一轮相同/)
+  })
+})
+
+test('M4a 复核 B-6：H2 前置还旧的理由里「重跑之后重写」只说一遍', () => {
+  using(B, (fx) => {
+    const reason = reasonOf(run('readiness', dispatch('agent-team:at-acceptance'), GATE, fx.p))
+    assert.equal(reason.split('重跑之后重写').length - 1, 1, reason)
+  })
+})
+
+test('M4a 复核 G12、G15：H5a「补收口缺的前置」只说给改得了 state.json 的人；不在最后一段时补记提示带「验证段的产物除外」', () => {
+  const { ['07-acceptance.md']: _gone, ...files } = DONE_FILES
+  using({ ...AT_S8, files }, (fx) => {
+    assert.doesNotMatch(contextOf(run('deliverable', returned('agent-team:at-acceptance', 'agent-team:at-architect'), GATE, fx.p)), /补收口缺的前置/)
+  })
+  using(B, (fx) => {
+    assert.match(contextOf(run('deliverable', returned('agent-team:at-backend'), GATE, fx.p)), /验证段的产物除外/)
+  })
+})
+
+test('M4a 复核 G08：最后一段、没收口、前置还是上一轮的 → 【阶段】列出它还旧，不催收口', () => {
+  const hist = [...FULL, ...H('S7', 'S8')]
+  using({ ...AT_S8, history: hist, reworkBase: { '07-acceptance.md': sha(DONE_FILES['07-acceptance.md']) } }, (fx) => {
+    const c = contextOf(run('ledger', postedState(fx), GATE, fx.p))
+    assert.match(c, /07-acceptance\.md（还是上一轮的/)
+    assert.doesNotMatch(c, /该收口了/)
+  })
+})

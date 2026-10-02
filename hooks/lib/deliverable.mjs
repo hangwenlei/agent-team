@@ -90,7 +90,7 @@
 // （tests/deliverable.test.mjs 现有各条据此必须仍然全绿，不改签名）。
 // 哪些阶段属于这一类，去 stages.json 看，不要在这里抄一份清单。
 import { expandProduces, stageRoles } from './stages.mjs'
-import { VERIFY_REDO, splitByAccept } from './freshness.mjs'
+import { VERIFY_REDO_SELF, splitByAccept } from './freshness.mjs'
 
 // 「这个阶段 id 在不在阶段链里」。M3v（docs/30）起门禁自检的追加句与 unknown-stage 的修法（hooks/lib/fail-open.mjs）也要
 // 问同一个问题，抽成一份：它们说「不在阶段链里」的时候，必须正是这里判 skipped:'unknown-stage' 的时候。
@@ -159,7 +159,7 @@ export function decideDeliverable({ role, stageId, stages, artifactExists, artif
   const appendOut = accept.length
     ? `${redo.length ? `${accept.join('、')} ` : ''}这一轮核过、确实不用改的，在它末尾追加一节，写明这一轮核过什么、为什么不用改${html}；`
     : ''
-  const redoOut = redo.length ? `${redo.join('、')}：${VERIFY_REDO}。` : ''
+  const redoOut = redo.length ? `${redo.join('、')}：${VERIFY_REDO_SELF}。` : ''
   return {
     ok: false,
     stageId,

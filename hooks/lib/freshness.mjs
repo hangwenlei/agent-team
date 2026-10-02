@@ -25,6 +25,12 @@ export const VERIFY_REDO =
   '验证段（stages.json 里 "verifies": true）的产物记的是对上游当时那一版的结论，返工轮里一律重新出：让它的产者这一轮重跑之后重写——' +
   '不能标 "accepted"，也不能只在末尾追加一句「核过」'
 
+// 复核（F9、B-5）：H5b 是对产者本人说的——不说「让它的产者」；重跑结果与上一轮相同时，报告要写明这一轮在哪一版上跑的、跑了哪些，
+// 否则内容逐字相同，门禁分不出跑没跑。
+export const VERIFY_REDO_SELF =
+  '验证段（stages.json 里 "verifies": true）的产物记的是对上游当时那一版的结论，返工轮里一律重新出：你这一轮重跑之后重写——' +
+  '只在末尾追加一句「核过」不算；结果与上一轮相同也要写明这一轮在哪一版实现上跑的、跑了哪些'
+
 /** 把一组还是上一轮的产物按「能不能标 accepted」分成两组（mayAcceptProduct）。顺序照原样。 */
 export function splitByAccept(stages, list) {
   const accept = []

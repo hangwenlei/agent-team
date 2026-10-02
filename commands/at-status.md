@@ -39,7 +39,7 @@ description: 显示当前 run 的阶段、产物、返工计数、主动裁掉�
 
 ```
 run:        <run_id>
-当前阶段:    <stage>（<该阶段的执行角色>）；有 closed_at 就写「<stage>，已收口（closed_at <值>）」
+当前阶段:    <stage>（<该阶段的执行角色>）；closed_at 是一个时间（不是 null）就写「<stage>，已收口（closed_at <值>）」
 契约:        <contract_sha 的前 12 位>，磁盘上<在/不在>
 产物:        逐阶段列，每个后面标 ✓ / ✗（按磁盘）
 返工:        <rework 逐阶段；全 0 就写「无」>

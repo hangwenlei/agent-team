@@ -25,7 +25,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 ## 2. 核实磁盘，不要相信状态文件说的一切
 
-**先看收没收口。** `state.json` 有 `closed_at`：这一趟已经收口，不续跑——告诉用户它已经交付（run id、收口时间），
+**先看收没收口。** `state.json` 的 `closed_at` 是一个时间（不是 null）：这一趟已经收口，不续跑——告诉用户它已经交付（run id、收口时间），
 交付之后的新改动用 `/agent-team:at <改动>` 另起一趟（或者照 `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 0–2 节自己建）。
 下面的都不用做。
 
@@ -59,7 +59,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
   然后从下一段继续。`state.json` 里没有 `stage_roles`（更早落盘的 run）就不要加，照旧只累加 `roster`。
 - **产物不齐** → 从这一段继续，先看缺哪个产物、该派谁。
 - **`stage` 是阶段链最后一段、它的产物齐了**（而且不是上一轮的）→ 这一趟走完了、只是没写收口标记：照
-  `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 6 节收口（同一次 Write 记 `never_invoked` 与 `closed_at`），收到回传之后告诉用户它已经交付；
+  `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 6 节收口（同一次 Write 记 `never_invoked` 与 `closed_at`），没被 H6 拒就是收好了，告诉用户它已经交付；
   新改动另起一趟。收口被 H6 拒，照拒绝理由补齐（缺的前置派它的产者补交）再收口。没有「下一段」可推进。
 
 **返工轮**（`state.json` 的 `rework_base` 不是空的，说明这趟 run 回退过）：产物在磁盘上不等于这一轮写过——门禁拿 `rework_base`

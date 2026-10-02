@@ -487,8 +487,8 @@ test('M4a 回退写入：回到 S6（补跑测试）那一次就把 06-test.md �
   assert.equal(ok.ok, true, ok.reason)
   const r = decide({ before: state('S7', hist), after: state('S6', [...hist, ...H('S6')], { rework_base: { ...snap, '06-test.md': 'accepted' } }), files })
   assert.equal(r.ok, false)
-  assert.match(r.reason, /06-test\.md/)
-  assert.match(r.reason, /验证段/)
+  // 复核（P10）：「验证段」三个字固定文案里也有——钉点名的那一行。
+  assert.match(r.reason, /"06-test\.md"：验证段/)
 })
 
 test('M4a 已经落盘的 accepted（1.8.0 留下的）原样带着、只改别的字段 → 放行（只判这一次的改动，不追溯）', () => {
@@ -526,4 +526,68 @@ test('M4a 推进：还旧的有验证段的也有别的 → 两样分开说，�
   assert.equal(r.ok, false)
   assert.match(r.reason, /05-impl\/at-frontend\.md[^\n]*改成 "accepted"/)
   assert.match(r.reason, /06-test\.md[^\n]*重跑之后重写/)
+})
+
+// ------------------------------------- M4a 复核：补记的两个口子
+//
+// B-1：一次写入追加了不止一条回退（[S5, S7, S7]）：restartInfo 只认最后那条，快照只拍它，前面那截往前记的不经任何推进核查——
+// 06-test.md 整段绕过。一次 Write 只许记一次回退。
+// B-2 / P8：补记跨过验证段（回到 S5 又记到 S7）：快照照写入那一刻的磁盘拍，区间里的产物按定义都是「上一轮的」，验证段的又不能标
+// accepted——这样的写入永远过不了，原来的理由却叫产者「重跑之后再推进」，照做是死循环。直接拒，叫它拆开写。
+const S7_ROUND = [...FIRST_ROUND, ...H('S7')]
+const S7_FILES = { ...ROUND1, '07-acceptance.md': 'acc r1' }
+
+test('M4a 复核 一次写入里有两条回退 → 拒，叫它分开写', () => {
+  for (const extra of [['S5', 'S7', 'S7'], ['S5', 'S6', 'S7', 'S7'], ['S3', 'S7', 'S7']]) {
+    const r = decide({ before: state('S7', S7_ROUND), after: state('S7', [...S7_ROUND, ...H(...extra)], { rework_base: { '07-acceptance.md': sha('acc r1') } }), files: S7_FILES })
+    assert.equal(r.ok, false, extra.join(','))
+    assert.match(r.reason, /一次 Write 只记一次回退/)
+  }
+})
+
+test('M4a 复核 补记跨过验证段（回到 S5 又记到 S7）→ 拒，理由叫它拆开写、不再说「之后再推进」', () => {
+  const snap = { '05-impl/at-backend.md': sha('backend r1'), '05-impl/at-frontend.md': sha('frontend r1'), '06-test.md': sha('test r1'), '07-acceptance.md': sha('acc r1') }
+  const marked = { ...snap, '05-impl/at-backend.md': 'accepted', '05-impl/at-frontend.md': 'accepted' }
+  const r = decide({ before: state('S7', S7_ROUND), after: state('S7', [...S7_ROUND, ...H('S5', 'S6', 'S7')], { rework_base: marked }), files: S7_FILES })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /拆开/)
+  assert.match(r.reason, /先只记回退/)
+  assert.doesNotMatch(r.reason, /之后再推进/)
+  // 照它说的拆开：这一次只记回退（stage 写回到的那一段）——放行。
+  const only = decide({ before: state('S7', S7_ROUND), after: state('S5', [...S7_ROUND, ...H('S5')], { rework_base: snap }), files: S7_FILES })
+  assert.equal(only.ok, true, only.reason)
+})
+
+test('M4a 复核 补记没跨过验证段、离开的段里有还旧没标的 → 拒，理由给「只记到它所在段之前（或者只记回退）」这条拆法', () => {
+  const r = decide({ before: state('S6', FIRST_ROUND), after: state('S6', [...FIRST_ROUND, ...H('S5', 'S6')], { rework_base: EXPECTED_S5 }), files: ROUND1 })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /只记回退/)
+})
+
+// M4a 复核（R02、R13、R04、R10）：拒绝理由逐份点名验证段的那一行只列验证段；S5 上标 06-test.md 先报验证段；补记放行时推进核查的留痕带上。
+test('M4a 复核 回退写入：标了验证段与非验证段 → 点名那一行只列验证段（"06-test.md"）', () => {
+  const r = decide({
+    before: S6_TO_S5.before,
+    after: state('S5', S6_TO_S5.afterHistory, { rework_base: { ...EXPECTED_S5, '05-impl/at-frontend.md': 'accepted', '06-test.md': 'accepted' } }),
+  })
+  assert.equal(r.ok, false)
+  const line = r.reason.split('\n').find((l) => l.includes('：验证段'))
+  assert.ok(line, r.reason)
+  assert.match(line, /"06-test\.md"/)
+  assert.doesNotMatch(line, /05-impl/)
+})
+
+test('M4a 复核 回退之后：S5 上把 06-test.md 标 accepted → 报验证段（先于「还没走到」）', () => {
+  const r = decide({ before: IN_REWORK, after: state('S5', keepHistory, { rework_base: { ...EXPECTED_S5, '06-test.md': 'accepted' } }) })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /验证段/)
+  assert.doesNotMatch(r.reason, /不在当前段/)
+})
+
+test('M4a 复核 补记放行：离开的段里有读不出来的产物 → notes 带上推进核查的留痕', () => {
+  // 前端那份读不出来：回退快照不核它（写一个 sha 也放行），推进时也不核它新旧——后一条留痕。
+  const marked = { ...EXPECTED_S5, '05-impl/at-backend.md': 'accepted' }
+  const r = decide({ before: state('S6', FIRST_ROUND), after: state('S6', [...FIRST_ROUND, ...H('S5', 'S6')], { rework_base: marked }), unreadable: ['05-impl/at-frontend.md'] })
+  assert.equal(r.ok, true, r.reason)
+  assert.ok(r.notes.some((n) => /推进时不核/.test(n)), JSON.stringify(r.notes))
 })

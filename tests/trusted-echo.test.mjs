@@ -335,6 +335,13 @@ const SCENARIOS = [
     ],
   },
   {
+    // M4a 复核（P11/M12）：收口那一次写入的 stage 不是最后一段——收口判据的理由引这次写的 stage（quote）。closed_at 是合法时间，
+    // 走的是「收口只在最后一段」那一支，不是形状那一支。
+    name: 'state.stage（H6：收口只在最后一段）',
+    disk: true,
+    calls: ({ run }, P) => [['rework', stateWrite(run, { ...baseState(), stage: P, closed_at: '2026-10-01T15:00:00Z' })]],
+  },
+  {
     // M3z（docs/34）：stage 不变量的三条拒绝理由各带一个 state.json 里的值——新写的 stage、新追加的条目、history 末条。
     name: 'state.stage 与 history 条目（H6：stage 不变量）',
     disk: true,

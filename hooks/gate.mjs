@@ -29,7 +29,7 @@ import { APPROVALS_FILE, DELIVERED_FILE, isControlFile, isGateFile, leafName, ma
 import { readGrants } from './lib/budget.mjs'
 import { askAnswers, promptAnswer, planApprovals, approvalLine, approvalNotices } from './lib/approvals.mjs'
 import { deliveredSnapshot, readSnapshot, makeDelivered, decideRedispatch, decideRedoWrite } from './lib/redo.mjs'
-import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispatch } from './lib/closing.mjs'
+import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispatch, EMPTY_SHA } from './lib/closing.mjs'
 import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
 import { sha256OfContract, shaOrNote } from './lib/contract-hash.mjs'
@@ -577,7 +577,8 @@ const isDriverRole = (role) => isContractWriter(role)
 // 旧 run（perStage 为假）的产者交代文案只有护栏那一句换了（PM 与非 PM 两支都换了，见上面那段 M3x 订正，与 perStage 无关），其余
 // 一个字不变：那里没有 stage_roles 可补，判据也还是整趟口径。
 // M4a（docs/35）：closed 为真（这一趟已经收口）时，② 不再叫 PM 派人——H2 收口之后拒派一切团队角色（评审 F9）。
-function buildCoverageNotice({ gaps, narrowed, perStage } = {}, recipientCanWriteState, closed = false) {
+// M4a 复核（P7）：viaCoordinator 是最后一段、没收口时 PM 派不到的缺口角色——② 补一句它只能经协调者派、最后一段不再派协调者。
+function buildCoverageNotice({ gaps, narrowed, perStage } = {}, recipientCanWriteState, closed = false, viaCoordinator = []) {
   if (!Array.isArray(gaps) || !gaps.length) return null
   const lines = gaps.map((g) => `  - ${g.stage} 的 ${g.role}`)
   const drivers = [...new Set(gaps.filter((g) => isDriverRole(g.role)).map((g) => g.role))]
@@ -613,7 +614,12 @@ function buildCoverageNotice({ gaps, narrowed, perStage } = {}, recipientCanWrit
       `trimmed 拼错了不会有任何别的提示。\n` +
       (closed
         ? `  ② 不是裁剪，是漏了：这一趟已经收口，补不了派——照实告诉用户那一段漏了谁。\n`
-        : `  ② 不是裁剪，是漏了：把它派出去，让它自己写出那一段的产物。\n`) +
+        : `  ② 不是裁剪，是漏了：把它派出去，让它自己写出那一段的产物。` +
+          (viaCoordinator.length
+            ? `${viaCoordinator.join('、')} 只能经协调者派，而最后一段不再派协调者：真漏了，就记一次回退、回到那一段补派` +
+              `（照 /agent-team:at 第 3 节「回退」），或者照实告诉用户。`
+            : '') +
+          '\n') +
       (perStage
         ? `  ③ 它在那一段真的被叫到过、只是 stage_roles 没记（去磁盘看那一段它的产物在不在，` +
           `04-dispatch.md 里怎么分的工）：把它并进 state.json 的 stage_roles 那一段，roster 里没有就一起累加——不用重派。\n`
@@ -1006,6 +1012,7 @@ function main() {
           isDelivered: deliveredOf(ctx, fresh),
           reachableRoles: Object.hasOwn(reach, role) ? reach[role].reachableRoles : null,
           artifactExists: ctx.artifactExists,
+          closed: closedAt(ctx.state) !== null,
         })
         if (rd.decision === 'deny') denyAndExit(rd.reason, spec.event)
       }
@@ -1198,7 +1205,7 @@ function main() {
 
       // M4a（docs/35）：收口标记 closed_at——形状、已收口之后的冻结、关上那一次的条件（hooks/lib/closing.mjs）。排在返工预算与回退
       // 快照之前：已收口的 run 上记回退，先拿到的要是「已经收口、另起一趟」，不是「先问用户批准」「补快照」（评审 CF-3）。
-      const closing = decideClosing({ before, after, stages: stagesForRework, diskSha })
+      const closing = decideClosing({ before, after, stages: stagesForRework, diskSha, atPath: join(ROOT, 'commands', 'at.md') })
       if (!closing.ok) denyAndExit(closing.reason, spec.event)
 
       const r = decideRework({ before, after, stages: stagesForRework, grants: readGrants(approvalsText, stagesForRework) })
@@ -1491,7 +1498,9 @@ function main() {
             state: ctx.state,
             probe: (name) => {
               if (!ctx.artifactExists(name)) return 'missing'
-              if (!ctx.artifactBytes(name)) return 'unreadable'
+              const bytes = ctx.artifactBytes(name)
+              if (!bytes) return 'unreadable'
+              if (sha256OfContract(bytes) === EMPTY_SHA) return 'empty'
               return fresh.isStale(name) ? 'stale' : 'ok'
             },
           })
@@ -1559,7 +1568,12 @@ function main() {
       // 完整机制写在 buildCoverageNotice 上方，不在这里重复第二遍。
       const recipient = callerOf(input)
       const recipientCanWriteState = isContractWriter(recipient)
-      const coverage = buildCoverageNotice(cov, recipientCanWriteState, closedAt(ctx.state) !== null)
+      // M4a 复核（P7）：最后一段、没收口时，PM 派不到（只能经协调者派）的缺口角色——H2 在最后一段拒派协调者，② 要说清这一点。
+      const covRoster = loadRoster()
+      const pmCan = isPlainObject(covRoster?.['at-pm']) && Array.isArray(covRoster['at-pm'].can_delegate_to) ? covRoster['at-pm'].can_delegate_to : []
+      const atLastOpen = closedAt(ctx.state) === null && ctx.state?.stage === lastStageId(ctx.stages)
+      const viaCoordinator = atLastOpen ? [...new Set((cov.gaps ?? []).map((g) => g.role).filter((r) => !pmCan.includes(r)))] : []
+      const coverage = buildCoverageNotice(cov, recipientCanWriteState, closedAt(ctx.state) !== null, viaCoordinator)
       if (coverage) {
         notices.push(coverage)
         // 痕迹这一半，与账本比对那一条共用 misroutedNotice。⚠️ 它与上面那条
@@ -1877,7 +1891,8 @@ function main() {
           if (recipientCanWriteState) message = systemMessage('unknown-stage')
         }
       }
-      if (CHECK === 'deliverable' && r.skipped === 'role-not-in-stage' && (!coordinator || stageDone)) {
+      // M4a 复核（REAL-1）：已收口的 run 上整格不发——H6 冻结了 stage，「停在旧阶段」不可能是成因，「记一次回退」也走不通。账本比对照发。
+      if (CHECK === 'deliverable' && r.skipped === 'role-not-in-stage' && (!coordinator || stageDone) && closedAt(ctx.state) === null) {
         const stageLabel = quote(ctx.state?.stage)
         // 两支措辞不能共用同一份文案："而且它也派不到那个执行者"在 coordinator 为真时
         // 是假话——它明明是合法的协调者，只是这一阶段的产物已经齐了、state.stage 没

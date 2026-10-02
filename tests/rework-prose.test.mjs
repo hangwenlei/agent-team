@@ -241,12 +241,20 @@ test('M4a 回退：验证段的产物不能标 accepted、只追加一句「核�
   assert.match(REWIND, /只追加一句「核过」不算重跑/)
 })
 
-test('M4a 收尾：验收没过不收口；写 08-delivery.md；同一次 Write 记 never_invoked 与 closed_at；收到回传再汇报', () => {
+// 复核（F3、F8）：收口成功不另发回传——「收到回传之后」改成「没被拒就是收好了」；never_invoked 先算、交付文档后写（文档里要写谁没被叫过）。
+test('M4a 收尾：验收没过不收口；先算 never_invoked、再写 08-delivery.md；同一次 Write 记 never_invoked 与 closed_at；没被拒就是收好了', () => {
   assert.match(S6, /验收没过不收口/)
   assert.match(S6, /`08-delivery\.md`/)
   assert.match(S6, /用同一次 Write 记 `never_invoked` 与 `closed_at`/)
-  assert.match(S6, /收到回传之后再告诉用户/)
-  assert.ok(S6.indexOf('验收没过不收口') < S6.indexOf('用同一次 Write 记') && S6.indexOf('用同一次 Write 记') < S6.indexOf('收到回传之后再告诉用户'), '顺序')
+  assert.match(S6, /没被 H6 拒，就是收好了（收口成功不另发回传）/)
+  const at = (s) => S6.indexOf(s)
+  assert.ok(at('验收没过不收口') < at('**算一次**') && at('**算一次**') < at('写交付文档**') && at('写交付文档**') < at('用同一次 Write 记') && at('用同一次 Write 记') < at('就是收好了'), '顺序')
+  assert.doesNotMatch(S6, /收到回传之后再告诉用户/)
+})
+
+test('M4a 复核 收尾：整段裁掉验收的没有 07，这一步跳过；补交的角色并进 roster 与 stage_roles、never_invoked 重算', () => {
+  assert.match(S6, /整段裁掉了 `at-acceptance`[^。]*没有验收结论/)
+  assert.match(S6, /补交的角色[^。]*并进 `roster` 与[^。]*`stage_roles`[^。]*`never_invoked` 重算/)
 })
 
 test('M4a 收尾：收口之后冻结、不再派人；新改动另起一趟（两条路），契约第 1 节逐字照抄这次的那几条消息；用户明说直接改照办并告知', () => {
@@ -256,15 +264,19 @@ test('M4a 收尾：收口之后冻结、不再派人；新改动另起一趟（�
   assert.match(S6, /用户明说不走流程[^。]*照用户说的办[^。]*不经测试与验收/)
 })
 
-test('M4a 建 run：先看 current-run 那一趟——已收口或停在最后一段不问；停在更早段先问续跑还是另起；问不了就另起并告知；不算五类', () => {
-  assert.match(S1, /有 `closed_at`[^。]*或者 `stage` 是阶段链最后一段[^。]*不用问/)
+// 复核（A-5、F1、P4）：停在最后一段、没收口的，先看收不收得了口——验收过了、交付文档写了，就替它收口再建；收不了口的照「停在更早的段」问。
+test('M4a 建 run：先看 current-run 那一趟——已收口不问；停在最后一段先看收不收得了口；停在更早段先问续跑还是另起；问不了就另起并告知；不算五类', () => {
+  assert.match(S1, /`closed_at` 是一个时间（不是 null）[^。]*不用问/)
+  assert.match(S1, /`stage` 是阶段链最后一段、没收口[^。]*验收结论[\s\S]{0,120}照第 6 节第四步替它收口/)
+  assert.match(S1, /收不了口[^。]*照下面「停在更早的段」那一条问用户/)
   assert.match(S1, /停在更早的段、没收口[^。]*`AskUserQuestion`[^。]*续跑那一趟[^。]*另起这一趟/)
   assert.match(S1, /不属于第 4 节那五类：不记 escalation/)
   assert.match(S1, /问不了用户[^。]*另起这一趟[^。]*接回它的办法/)
 })
 
 test('M4a at-resume：已收口不续跑、新改动另起；停在最后一段、齐了没收口就照第 6 节收口', () => {
-  assert.match(RESUME, /有 `closed_at`[^。]*已经收口[^。]*不续跑/)
+  assert.match(RESUME, /`closed_at` 是一个时间（不是 null）[^。]*已经收口[^。]*不续跑/)
+  assert.match(RESUME, /没被 H6 拒就是收好了/)
   assert.match(RESUME, /`stage` 是阶段链最后一段[^。]*照\s[^。]*第 6 节收口/)
   assert.match(RESUME, /验证段（[^）]*）的产物不能标/)
 })
@@ -278,6 +290,35 @@ test('M4a at-pm：S8 收口写收口标记；收口之后不派人、不记回�
   assert.match(PM, /S8[^。]*收口[^。]*`closed_at`/)
   assert.match(PM, /收口之后[^。]*不派人、不记回退[^。]*不自己改项目代码/)
   assert.match(PM, /没收口的 run[^。]*不能为了新需求另起一趟/)
+  // 复核（F1、P5）：用户自己跑 /agent-team:at 带来新需求时照它第 1 节办；第 1 节那一问不在五类里。
+  assert.match(PM, /用户跑 `\/agent-team:at` 带来新需求时[^。]*照它第 1 节办/)
+  assert.match(PM, /第 1 节那一问[^。]*另算/)
+})
+
+// 复核（A-4、P3）：模板里 closed_at 的初值是 null，正文判收口不能说「有 closed_at」——每一趟新 run 字面上都「有」。
+test('M4a 复核 正文不用「有 `closed_at`」判收口', () => {
+  for (const f of ['commands/at.md', 'commands/at-resume.md', 'commands/at-status.md', 'agents/at-pm.md']) {
+    assert.doesNotMatch(read(f), /有 `?closed_at`?/, f)
+  }
+})
+
+// 复核（B-3）：门禁按内容的 sha 判新旧，只追加一句就算这一轮的——正文不许说「追加一句会被拦」。
+test('M4a 复核 正文不说「只追加一句会被拦」', () => {
+  for (const f of ['agents/at-qa.md', 'agents/at-acceptance.md', 'agents/at-pm.md', 'commands/at.md', 'commands/at-resume.md']) {
+    assert.doesNotMatch(read(f), /追加一句[^。；\n]*会被拦/, f)
+  }
+  assert.match(read('agents/at-acceptance.md'), /门禁看不出你验没验/)
+})
+
+// 复核（B-2、P8、B-1）：补记跨过验证段的一律过不了，要拆开写；一次 Write 只记一次回退。
+test('M4a 复核 回退记晚了：补记不能跨过验证段、拆开写；一次 Write 只记一次回退', () => {
+  assert.match(REWIND, /补记跨过验证段[^。]*过不了[^。]*拆开/)
+  assert.match(REWIND, /一次 Write 只记一次回退/)
+})
+
+// 复核（B-5）：重跑结果与上一轮相同，报告也要写明这一轮在哪一版上跑的、跑了哪些。
+test('M4a 复核 at-qa：结果与上一轮相同也要写明这一轮在哪一版上跑的', () => {
+  assert.match(read('agents/at-qa.md'), /结果与上一轮相同也要写明这一轮在哪一版实现上跑的、跑了哪些/)
 })
 
 test('M4a at-qa / at-acceptance：返工轮重跑，只追加一句「核过」不算', () => {

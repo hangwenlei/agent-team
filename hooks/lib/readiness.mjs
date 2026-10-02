@@ -187,11 +187,11 @@ export function decideReadiness({
       ? ''
       : callerCanWriteState
         ? `${both ? `${named(accept)}：` : ''}这一轮接受上一轮那份原样，就在 state.json 的 rework_base 里把它的值改成 "accepted"（只许当前段及更早段的产物），再派发。`
-        : `rework_base 只有项目经理改得了：你判断上一轮那份${both ? `（${named(accept)}）` : ''}这一轮不用重写，就把这一点写进你的回报冒泡给派你的人，由项目经理裁定。`
+        : `rework_base 只有项目经理改得了：你判断上一轮那份${both ? `（${accept.join('、')}）` : ''}这一轮不用重写，就把这一点写进你的回报冒泡给派你的人，由项目经理裁定。`
     const redoOut = !redo.length
       ? ''
       : callerCanWriteState
-        ? `${named(redo)}：${VERIFY_REDO}——派它的产者这一轮重跑之后重写，再派发。`
+        ? `${named(redo)}：${VERIFY_REDO}；之后再派发。`
         : `${named(redo)}：${VERIFY_REDO}——把这一点写进你的回报冒泡给派你的人。`
     const out = acceptOut + redoOut
     return {

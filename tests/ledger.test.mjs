@@ -331,3 +331,16 @@ test('变异 L06：几段同时越限、budget 不按链序给 → 标签取链�
   assert.ok(s.includes(approvalLabel('S2')), s)
   assert.ok(!s.includes(approvalLabel('S5')), s)
 })
+
+// M4a 复核（L07、A-7）：【返工】两类都有时，标 accepted 那一句点名能标的那几份；最后一段还收不了口时，给非 PM 的那句回报说「还收不了口」。
+test('M4a 复核【返工】两类都有：「这一轮接受它原样」点名能标的那一份', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S6' }, reworkStale: { stage: 'S6', current: ['06-test.md'], earlier: [{ name: '05-impl/at-backend.md', stage: 'S5' }] } }).join('\n')
+  assert.match(s, /这一轮接受它原样（05-impl\/at-backend\.md）/)
+  assert.match(s, /06-test\.md：验证段/)
+})
+
+test('M4a 复核【阶段】最后一段还收不了口：给非 PM 的回报说「还收不了口」，不说「齐了」', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'produce', state: { stage: 'S8' }, stageDone: true, closeBlockers: [{ name: '07-acceptance.md', why: 'missing', require: true }] }).join('\n')
+  assert.match(s, /还收不了口/)
+  assert.doesNotMatch(s, /"这一段的产物已经齐了"这件事/)
+})

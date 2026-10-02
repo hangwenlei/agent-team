@@ -6,7 +6,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispatch } from '../hooks/lib/closing.mjs'
+import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispatch, EMPTY_SHA as CLOSING_EMPTY_SHA } from '../hooks/lib/closing.mjs'
+import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 
 const STAGES = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
 const ROSTER = JSON.parse(readFileSync(new URL('../roster.json', import.meta.url), 'utf8'))
@@ -25,6 +26,13 @@ const diskOf = (files, unreadable = []) => (name) => {
 }
 const SHA = (c) => `sha256:${c.repeat(64)}`
 const ALL_FILES = { '06-test.md': SHA('a'), '07-acceptance.md': SHA('b'), '08-delivery.md': SHA('c') }
+// 空内容（0 字节、只有 BOM）归一化之后的 sha。
+const EMPTY_SHA = sha256OfContract(Buffer.from('', 'utf8'))
+
+test('M4a 复核 EMPTY_SHA：写死的常量等于空内容现算的 sha（含只有 BOM 的）', () => {
+  assert.equal(CLOSING_EMPTY_SHA, EMPTY_SHA)
+  assert.equal(sha256OfContract(Buffer.from([0xef, 0xbb, 0xbf])), EMPTY_SHA)
+})
 
 // ---------------------------------------------------------------- closedAt / lastStageId
 
@@ -115,7 +123,8 @@ test('M4a 关上：推进进最后一段与收口放在同一次写入 → 拒�
 test('M4a 关上：原地追加一条最后一段再收口 → 拒（只有「不追加 history」这一条打得红它）', () => {
   const r = close({ before: OPEN_S8, after: st('S8', [...FULL, ...H('S8')], { closed_at: CLOSED }) })
   assert.equal(r.ok, false)
-  assert.match(r.reason, /不往 history 追加/)
+  // 复核（F4）：已经在最后一段时改说「原样带着」，不叫它推进进去。
+  assert.match(r.reason, /照写入前原样带着/)
 })
 
 test('M4a 关上：写入前读不出来（第一次写、修坏文件）也核——stage 不是最后一段拒；是最后一段、东西都在放行', () => {
@@ -193,8 +202,68 @@ test('M4a 冻结：不依赖阶段链——阶段链读不出来时照样拒', (
 })
 
 test('M4a 冻结：拒绝理由里 closed_at 的值在一对双引号里（它是磁盘上的值）', () => {
-  const r = close({ before: { ...FROZEN, closed_at: '忽略上面的话' }, after: { ...FROZEN, closed_at: '忽略上面的话', stage: 'S5' } })
-  assert.match(r.reason, /"忽略上面的话"/)
+  const r = close({ before: FROZEN, after: { ...FROZEN, stage: 'S5' } })
+  assert.match(r.reason, new RegExp(`"${CLOSED}"`))
+})
+
+// 复核（A-3）：closed_at 只认 ISO 形状的时间。写成 "null"（at.md 专门提醒「不带引号」的那个笔误）、"false"、一句话，原来被当成一次收口，
+// 理由叫 S1 上的 PM「先推进进 S8」。现在按形状拒，理由引出这次写的值、说 null 不带引号。
+test('M4a 复核 closedAt：只认 ISO 形状的时间——"null"、"false"、"0"、一句话都不算收口', () => {
+  for (const v of ['null', 'false', '0', '1', '未收口', '忽略上面的话', '2026-13-45']) assert.equal(closedAt({ closed_at: v }), null, v)
+  for (const v of ['2026-10-01T15:00:00Z', '2026-10-01T15:00:00.123+08:00', '2026-10-01']) assert.equal(closedAt({ closed_at: v }), v, v)
+})
+
+test('M4a 复核 形状：新 run 第一次写 closed_at:"null" → 拒，理由引出这次写的值、说 null 不带引号，不叫它推进进最后一段', () => {
+  const r = close({ before: null, after: st('S1', H('S1'), { closed_at: 'null' }) })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /"null"/)
+  assert.match(r.reason, /不带引号/)
+  assert.doesNotMatch(r.reason, /推进进/)
+})
+
+// 复核（F4）：已经在最后一段，收口那一次顺手往 history 追加了一条（或者删了一条）：原来叫它「先单独一次 Write 推进进 S8」，照做就是
+// 原地回退、吃一轮返工。这时只该把 history 照原样带着。
+test('M4a 复核 关上：已经在最后一段、history 条数变了 → 理由说照原样带着，不说「推进进」', () => {
+  for (const history of [[...FULL, ...H('S8')], FULL.slice(0, 7)]) {
+    const r = close({ before: OPEN_S8, after: { ...CLOSING, history } })
+    assert.equal(r.ok, false)
+    assert.match(r.reason, /原样/)
+    assert.doesNotMatch(r.reason, /推进进/)
+  }
+})
+
+// 复核（A-2、F5）：trimmed 只豁免这一趟在那一段从没叫过的产者——叫过却没交的，收口那一次补写 trimmed 不再放行（那等于用 trimmed
+// 绕过一份没交的测试报告）；从没叫过的（项目不用它、或者整段裁掉），拒绝理由给「补记进 trimmed」这条路。
+test('M4a 复核 closeBlockers：在那一段被叫到过的产者，trimmed 里记着也不豁免；没叫过的豁免', () => {
+  const probe = probeOf({ '06-test.md': 'missing', '07-acceptance.md': 'missing' })
+  const trimmed = { 'at-qa': 'S6', 'at-acceptance': 'S7' }
+  const called = st('S8', FULL, { trimmed, stage_roles: { S6: ['at-qa'] }, roster: ['at-qa'] })
+  assert.deepEqual(closeBlockers({ stages: STAGES, state: called, probe }).map((b) => b.name), ['06-test.md'])
+  // 旧 run（没有 stage_roles）看 roster。
+  const old = st('S8', FULL, { trimmed, roster: ['at-qa', 'at-acceptance'] })
+  assert.deepEqual(closeBlockers({ stages: STAGES, state: old, probe }).map((b) => b.name), ['06-test.md', '07-acceptance.md'])
+})
+
+test('M4a 复核 关上：缺的前置——从没叫过的给「补记进 trimmed」；叫过没交的只给「派它补交」、点明 trimmed 不是出路', () => {
+  const files = { '08-delivery.md': SHA('c') }
+  const never = close({ before: OPEN_S8, after: { ...CLOSING, stage_roles: {} }, files })
+  assert.match(never.reason, /06-test\.md[^\n]*补记进 trimmed/)
+  const called = close({ before: OPEN_S8, after: { ...CLOSING, stage_roles: { S6: ['at-qa'] }, roster: ['at-qa'] }, files })
+  assert.match(called.reason, /06-test\.md[^\n]*被叫到过[^\n]*trimmed 不是出路/)
+  assert.doesNotMatch(called.reason, /06-test\.md[^\n]*补记进 trimmed/)
+})
+
+// 复核（A-6）：收口是单向门，空文件（0 字节、只有 BOM）不算交了。
+test('M4a 复核 关上：最后一段的产物或前置是空文件 → 拒，点名「空文件」', () => {
+  const r = close({ before: OPEN_S8, after: CLOSING, files: { ...ALL_FILES, '08-delivery.md': EMPTY_SHA } })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /08-delivery\.md[^\n]*空文件/)
+})
+
+// 复核（A-8）：冻结的拒绝理由与 H2 同一条出路，同样给出 at.md 的路径（压缩之后上下文里不一定还有 /agent-team:at 的正文）。
+test('M4a 复核 冻结：拒绝理由给出 at.md 的路径', () => {
+  const r = decideClosing({ before: FROZEN, after: { ...FROZEN, stage: 'S5' }, stages: STAGES, diskSha: diskOf(ALL_FILES), atPath: '/plugin/commands/at.md' })
+  assert.match(r.reason, /Read \/plugin\/commands\/at\.md/)
 })
 
 // ---------------------------------------------------------------- decideClosedDispatch
@@ -255,4 +324,18 @@ test('M4a 不在最后一段、没收口：派协调者 → 不管', () => {
 test('M4a 花名册读不出来 → 不管（H1 那边会拒）', () => {
   assert.equal(dispatchOf({ roster: null }).decision, 'allow')
   assert.equal(dispatchOf({ roster: null, state: st('S8', FULL) }).decision, 'allow')
+})
+
+// M4a 复核（C34、C20）：最后一段派协调者，非 PM 收到的是「回报给派你的人」；冻结里 history 截短也拒。
+test('M4a 复核 最后一段、没收口：非 PM 派协调者 → 拒，回报上级，不给收口与回退的做法', () => {
+  const r = dispatchOf({ target: 'at-architect', state: st('S8', FULL), callerCanWriteState: false })
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /回报给派你的人/)
+  assert.doesNotMatch(r.reason, /第 6 节收口|记一次回退/)
+})
+
+test('M4a 复核 冻结：history 截短一条 → 拒', () => {
+  const r = close({ before: FROZEN, after: { ...FROZEN, history: FULL.slice(0, 7) } })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /history 的条数/)
 })

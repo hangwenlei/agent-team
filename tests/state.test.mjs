@@ -591,3 +591,9 @@ test('M4a closed_at：在最后一段、形状对 → 不报；没写 → 不报
   assert.deepEqual(closed.problems.filter((m) => /closed_at/.test(m)), [])
   assert.deepEqual(validateState(good(), { stages: STAGES }).problems.filter((m) => /closed_at/.test(m)), [])
 })
+
+// M4a 复核（ST03）：阶段链读不出来时，不报「收口只在最后一段（null）」。
+test('M4a 复核 closed_at：阶段链读不出来时不报「最后一段」那一条', () => {
+  const r = validateState(good({ closed_at: '2026-10-01T15:00:00Z' }), { stages: null })
+  assert.deepEqual(r.problems.filter((m) => /最后一段/.test(m)), [])
+})
