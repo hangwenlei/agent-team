@@ -73,6 +73,12 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   批准条数，`hooks/lib/budget.mjs` 是标签、上限与预判的单一真源。H6 在回退那一次写入就预判；写入前已有的 `history` 条目段名不许改。不记回退的重做
   按交付快照（`delivered.json`，推进或回退之后由门禁拍）判「交过」：H2 只管叶子角色的重派，H3 只管非 PM 改早段自己的产物，协调者派发时不判
   （`hooks/lib/redo.mjs`）。两份都是门禁专属文件，H3 对任何人的 Edit/Write 都拒、排在主线程豁免之前。理由在 `docs/34`。
+- **收口由门禁核、之后冻结；返工轮里验证段的产物一律重新出**：`state.json` 的 `closed_at`（模板初值 null）是收口标记，「收没收口」只问
+  `hooks/lib/closing.mjs` 的 `closedAt`（只认 ISO 时间）。收口那一次 H6 核最后一段的前置与产物，已收口之后 `closed_at`、`stage`、`history` 的条数
+  不许再改（排在返工预算之前、不依赖阶段链），H2 拒派一切团队角色；交付之后的新改动另起一趟。`stages.json` 里 `"verifies": true` 的段
+  （S6、S7、S8）的产物不许在 `rework_base` 里标 `"accepted"`——H6 与每一处给出「标 accepted」出路的回传都经 `stages.mjs` 的
+  `mayAcceptProduct`。不按「上游这一轮改过没有」判：标了 accepted 就抹掉了那份基线。空文件不算交了，收口、交付快照与「交过」共用
+  `text-norm.mjs` 的 `isBlankText`。理由在 `docs/35`。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。
