@@ -57,7 +57,7 @@ S5 是第一种（一个模式配 N 个角色），S2 是第二种（`at-product
 
 第一种形状（`produces` 是含 `<role>` 的模式）的段是**执行段**（M4b，`docs/36`）：`hooks/lib/stages.mjs` 的 `isRolePatternStage` 按形状认它，
 不写死段号。ledger 的【阶段】「齐了」与 H5a 的「全部齐备」在执行段末尾提醒先读实现记录里的「被写路径隔离拒绝」一节（`ledger.mjs` 的
-`IMPL_RECORD_NOTE`）。再加一段同形状的段，它也会收到这句。
+`IMPL_RECORD_NOTE`；写者不是 PM 时按是不是这一段的产者换成另两句，`docs/36` §2.4）。再加一段同形状的段，它也会收到这句。
 
 ⚠️ **两种形式的展开都收在 `hooks/lib/stages.mjs` 的 `expandProduces` 一处**——它是全部
 消费方的单一真源，**不要在任何调用点另写分支**，也不要在正文里复述展开规则（那会是

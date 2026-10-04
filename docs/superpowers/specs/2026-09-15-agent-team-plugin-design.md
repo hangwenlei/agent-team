@@ -310,6 +310,9 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
 **另有两条回退不是驳回类型**（M3z 补，`docs/34`）：S6 测试没过回 S5（§4.2 ③）；S7 验收判不了、要人补跑测试，回 S6
 （S6、S7 各记一轮返工，与前一条共用 S6 的额度）。`rejectTo` 不管这两条，`commands/at.md` 的「回退」写着它们。
 
+> **M4b 补（`docs/36`）**：还有第三条——`06-test.md` 首行写着没开跑、因为 S5 没交齐的（PM 逐份核过实现记录，确实没交齐），不论在 S6
+> 还是 S7 发现，都回 S5、不回 S6：拒绝还在，`at-qa` 回 S6 也开不了跑。上面「S7 验收判不了、要人补跑测试，回 S6」不管这一种。
+
 **本表的单一真源是 `hooks/lib/state.mjs` 的 `rejectTo(kind)`（M2a 补）。**
 `REJECTION_KINDS` 四类：`requirement` / `design` / `implementation` / `contract-conflict`，
 前三类分别回到 S2 / S3 / S5，`contract-conflict` 返回 `null`——它不由代码决定回哪，
