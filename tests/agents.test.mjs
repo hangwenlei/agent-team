@@ -242,7 +242,7 @@ test('前置条件：hasContractRedLine() 认得出「被改松」的几种样�
 // 三格里 H1 那一格写在 `tests/roster-sync.test.mjs`：它那边已经有 ROLES_WITH_EDGES
 // 与 bodyOfAgent 那套机械，搬过来就是同一份知识的第二份（本仓库为这个形状开过好几轮）。
 
-// ── H3 写路径隔离的第一道：「划给你的那些目录前缀，**只有那些**」 ──────────────
+// ── H3 写路径隔离的第一道：「划给你的那些前缀（目录或单个文件），**只有那些**」 ──────────────
 //
 // H3 拒的是「写到不归你的地方去」。它在正文侧的第一道**不是**红线里那条
 // 「不得用 `Bash` 绕过写路径隔离」——那一条钉的是 H3 够不着的**旁路**（`Bash` 不经
@@ -320,7 +320,7 @@ test('每一份在 templates/project.json 里认领了 paths 的角色正文里�
 
 // 正向锚（`docs/11` §3.3 第 2 条）：拿已知违规样本证明 hasPathScopeLine() 认得出违规。
 test('前置条件：hasPathScopeLine() 认得出「被改松」的样本，也不被意思相反的一句 paths 提及喂饱', () => {
-  const real = '`.agent-team/project.json` 的 `paths` 里划给你的那些目录前缀，**只有那些**。'
+  const real = '`.agent-team/project.json` 的 `paths` 里划给你的那些前缀（目录或单个文件），**只有那些**。'
   assert.ok(hasPathScopeLine(real), '真实原文形状都认不出来，判据本身坏了')
 
   // ① 限定整条删掉，只留一句「这是你的主场」。

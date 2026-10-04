@@ -279,3 +279,57 @@ test('门禁子进程：roster.json 读坏时，执行角色写 run 目录外被
     rmSync(proj, { recursive: true, force: true })
   }
 })
+
+// ============================================================================ M4b（docs/36，审查第 21 条）
+
+// 几个角色共列的根级文件（package.json 同时在 at-backend、at-frontend 名下）：第三个角色写它被拒时，理由要把认领者列全——
+// 只点第一个，PM 会以为它只归一个角色，再补一轮「归 X」。只认 H3 会判人的键（at-pm、__main__、拼错的键不列）。
+const SHARED = withPaths({
+  ...TEMPLATE.paths,
+  'at-backend': ['src/server/', 'package.json'],
+  'at-frontend': ['src/web/', 'package.json'],
+  'at-pm': ['package.json'],
+  __main__: ['package.json'],
+  'at-fronted': ['package.json'],
+})
+
+test('M4b 归谁：几个角色共列的文件，拒绝理由把认领者列全、每个各带引号；不列 at-pm、__main__、拼错的键', () => {
+  const r = decide('at-ios', '/proj/package.json', SHARED)
+  assert.equal(r.decision, 'deny')
+  assert.ok(r.reason.includes('"at-backend"') && r.reason.includes('"at-frontend"'), r.reason)
+  for (const k of ['at-pm', '__main__', 'at-fronted']) assert.ok(!r.reason.includes(`"${k}"`), `${k}：${r.reason}`)
+})
+
+// 出路按调用者分：叶子执行角色（花名册里派不出任何人）要几个角色一起改的，由 PM 在 paths 里共列；协调者
+// （at-architect、at-product）不拿这句——它的正路是派给认领者，照「列到你名下」做，PM 会把代码路径划给设计类角色。
+test('M4b 归谁：叶子执行角色的出路是冒泡、由 PM 在 paths 里把它也列到你名下（你写不了 project.json）', () => {
+  for (const role of ['at-ios', 'at-ui']) {
+    const r = decide(role, '/proj/package.json', SHARED)
+    assert.equal(r.decision, 'deny')
+    assert.match(r.reason, /冒泡/)
+    assert.ok(r.reason.includes('列到你名下'), `${role}：${r.reason}`)
+    assert.ok(r.reason.includes('你写不了 project.json'), `${role}：${r.reason}`)
+  }
+})
+
+test('M4b 归谁：协调者（at-architect、at-product）不拿「列到你名下」，拿「这是认领者的活」', () => {
+  for (const role of ['at-architect', 'at-product']) {
+    const r = decide(role, '/proj/package.json', SHARED)
+    assert.equal(r.decision, 'deny')
+    assert.ok(!r.reason.includes('列到你名下'), `${role}：${r.reason}`)
+    assert.ok(r.reason.includes('认领者的活'), `${role}：${r.reason}`)
+  }
+})
+
+// 没人认领时，调用者自己的认领清单逐条引：整份数组只过一次 quote 会被截在 80 个字符，排在末尾的（正好是之后补进来的）
+// 被截掉。空数组照说「只写 run 目录」。
+test('M4b 没人认领：自己的认领清单逐条引，排在末尾的前缀也看得见；[] 说只写 run 目录', () => {
+  const long = ['src/server/', 'src/shared/', 'package.json', 'package-lock.json', 'tsconfig.json', 'tests/']
+  const r = decide('at-backend', '/proj/vite.config.ts', withPaths({ ...TEMPLATE.paths, 'at-backend': long }))
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /没有被任何角色认领/)
+  for (const p of long) assert.ok(r.reason.includes(`"${p}"`), `${p}：${r.reason}`)
+  const e = decide('at-product', '/proj/x.md', withPaths({ ...TEMPLATE.paths, 'at-product': [] }))
+  assert.equal(e.decision, 'deny')
+  assert.match(e.reason, /只写 run 目录/)
+})

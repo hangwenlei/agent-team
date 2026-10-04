@@ -29,3 +29,8 @@
 
 <§5.1 的五类。每条对应 state.json 的 escalations[] 里一条，kind 用同一个取值：
 sensitive / contract-conflict / tradeoff / contract-hole / budget-exhausted。>
+
+## 5. 这一趟给 paths 补的前缀
+
+<照 03-arch.md 的「落盘清单」往 .agent-team/project.json 的 paths 里补了哪些前缀、补在谁名下；S5 里补的也追加在这里。
+收尾时告诉用户——它们留给以后各趟。没补就写「无」。>

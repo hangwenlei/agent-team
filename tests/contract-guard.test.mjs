@@ -49,6 +49,8 @@ test('runDir 为空时不表态——无法判定哪个是契约', () => {
 // （docs/05-M0-结论.md 第 193 行）：被钉住的主会话，自己的工具调用会带裸
 // 的 agent_type: 'at-pm'，不是 undefined。如果 H4 只认"没有 agent_type"，
 // 在这个仓库的真实配置下契约会永远写不出来——这不是要不要测的问题，是
+// ⚠️ 订正（M4b，docs/36）：settings.json 现在写全名 {"agent": "agent-team:at-pm"}；钉住的 PM 在 hook 输入里的原始
+// agent_type 一直是全名（docs/22），裸 'at-pm' 是剥前缀之后的值，也是用户显式 --agent at-pm 时的形状。两种都该放行。
 // 这个仓库能不能自举的问题。H3 已经认了同一个事实（tests/gate-writepath.
 // test.mjs「被 settings.json 钉成主线程的 at-pm...写...00-contract.md
 // 不受阻」），H4 不能不认。

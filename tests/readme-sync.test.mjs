@@ -33,6 +33,7 @@ import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 import { EXPECTED_AGENTS } from './helpers/expected-agents.mjs'
 import { ROLES_WITHOUT_PATHS } from './helpers/roles-without-paths.mjs'
 import { COMMAND_NAMES } from './helpers/command-names.mjs'
+import { stripPluginPrefix } from '../hooks/lib/decide.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const readFile = (p) => readFileSync(url(p), 'utf8')
@@ -212,7 +213,8 @@ test('交叉核：产品角色 = settings.json 的 agent + templates/project.jso
   const project = JSON.parse(read('templates/project.json'))
   assert.deepEqual(
     [...PRODUCT_ROLES].sort(),
-    [...new Set([settings.agent, ...project.available_roles])].sort(),
+    // M4b：settings.json 的 agent 写插件全名（docs/36），比之前剥掉前缀——与门禁共用同一份剥前缀规则。
+    [...new Set([stripPluginPrefix(settings.agent), ...project.available_roles])].sort(),
     'agents/ 减去测试替身，与「主会话角色 + 可用班底」两个真源算出来的对不上——' +
       '往 agents/ 里加了真角色却没写进 available_roles，或者反过来。先确认哪一侧漏了，' +
       '再决定对外那句角色数要不要跟着改。\n' +
@@ -349,6 +351,44 @@ test('前置条件：agents/at-pm.md 的 tools: 解得出非空的工具名清�
       '而真正该报的是这份声明本身读不出来',
   )
 })
+
+// M4b（docs/36，审查第 29 条）：at-pm 那一段还要写明主会话拿不到什么——插件把主会话钉成 at-pm，用户在普通会话里能用的
+// MCP 工具与网页搜索、抓取，装了插件的项目里主会话都没有（P2 实测：探针 MCP 服务器连上了，工具被白名单滤掉）。
+// 钉法是**双向**的：那句话在不在，要等于 at-pm 的 tools: 里有没有这些工具。只查「写没写」的话，哪天给 at-pm 加了 WebFetch、
+// README 工具清单也同步补上，「拿不到 WebFetch」就成了假话却照样绿——把风险说小的那一侧（上面那段注释说的同一族）。
+// 这几个名字不加反引号：加了会被 toolTokensIn 算进 at-pm 的工具面。按句判（中文按「。；」切，英文按句点、分号切），
+// 同一句里要有否定标记（中文「拿不到」，英文「does not get」）——写成「能用 WebSearch」不算。
+function sentencesOf(text) {
+  return text.split(/[。；]|(?<=[.;])\s+/)
+}
+function claimsNo(paragraph, names) {
+  return sentencesOf(paragraph).some(
+    (s) => (s.includes('拿不到') || s.includes('does not get')) && names.every((n) => new RegExp(`(^|[^\`A-Za-z_])${n}([^\`A-Za-z_]|$)`).test(s)),
+  )
+}
+
+test('自检：claimsNo() 认同一句里的否定与不加反引号的名字；分在两句、写成「能用」、加了反引号的都不算', () => {
+  assert.ok(claimsNo('> 它拿不到 MCP 工具与网页工具（WebSearch、WebFetch）；其余角色只拿自己的。', ['MCP', 'WebSearch', 'WebFetch']))
+  assert.ok(claimsNo('> It does not get the MCP tools or WebSearch and WebFetch; others differ.', ['MCP', 'WebSearch', 'WebFetch']))
+  assert.ok(!claimsNo('> 它拿不到 MCP 工具。它能用 WebSearch、WebFetch。', ['MCP', 'WebSearch', 'WebFetch']))
+  assert.ok(!claimsNo('> 它能用 MCP 工具与 WebSearch、WebFetch。', ['MCP', 'WebSearch', 'WebFetch']))
+  assert.ok(!claimsNo('> 它拿不到 `MCP` 与 `WebSearch`、`WebFetch`。', ['MCP', 'WebSearch', 'WebFetch']))
+})
+
+for (const f of [README_EN, README_ZH]) {
+  test(`M4b ${f} 的 at-pm 那一段写明主会话拿不到 MCP 与网页工具——与 agents/at-pm.md 的 tools: 双向一致`, () => {
+    const p = atPmParagraph(read(f))
+    const hasMcp = AT_PM_TOOLS.some((n) => n.startsWith('mcp__'))
+    const hasWeb = AT_PM_TOOLS.includes('WebSearch') || AT_PM_TOOLS.includes('WebFetch')
+    assert.equal(
+      claimsNo(p, ['MCP', 'WebSearch', 'WebFetch']),
+      !hasMcp && !hasWeb,
+      `${f}：at-pm 那一段「主会话拿不到 MCP 与网页工具（WebSearch、WebFetch）」那句与 agents/at-pm.md 的 tools: 对不上` +
+        `（at-pm 有 mcp__：${hasMcp}；有 WebSearch/WebFetch：${hasWeb}）。这句是用户判断「装上之后还能做什么」的那一句，` +
+        '两半都要写，名字不加反引号，同一句里写否定。',
+    )
+  })
+}
 
 for (const f of [README_EN, README_ZH]) {
   test(`${f} 的已知边界那一节把 at-pm 的工具面一个不漏地写出来了`, () => {

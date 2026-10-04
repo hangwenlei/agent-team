@@ -112,7 +112,7 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   //
   // 「谁算 PM」复用 isContractWriter，不另写一遍 role === 'at-pm'：M1a 评审在 H4
   // 那里已经因为同一个谓词写两份开过一轮循环，结论是抽成单一导出。它内部走
-  // callerOf，MAIN（'__main__'）与裸 'at-pm' 都返回 true；这条豁免的安全性依赖
+  // callerOf，MAIN（'__main__'）与 at-pm（带不带插件前缀）都返回 true；这条豁免的安全性依赖
   // 「没有角色能把 at-pm 当派发目标」这条花名册不变量，由
   // tests/roster-closure.test.mjs 钉住，完整论证在 contract-guard.mjs 头部。
   //
@@ -277,21 +277,31 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 协调。第 3 步已经保证走到这里时花名册有效。at-outsider 不排除：它是花名册里的真键、H3 照常判它；说「归
   // at-outsider」会把 PM 引到 project.json 里那个错键上（账本的要改档已经点名「不要给 at-outsider 建键」），排除它
   // 反倒会说成「没有被任何角色认领」，而配置里明明有人认领。
-  const claimant = Object.entries(paths).find(
-    ([other, value]) =>
-      other !== role &&
-      Object.hasOwn(roster, other) &&
-      other !== 'at-pm' &&
-      other !== '__main__' &&
-      underAny(target, usablePrefixes(value), base),
-  )
+  // M4b（docs/36，审查第 21 条）：认领者列全——根级清单、构建配置、测试目录常常共列在几个执行角色名下（模板的
+  // src/shared/ 就是这样写的），只点第一个，PM 会以为它只归一个角色。
+  const claimants = Object.entries(paths)
+    .filter(
+      ([other, value]) =>
+        other !== role &&
+        Object.hasOwn(roster, other) &&
+        other !== 'at-pm' &&
+        other !== '__main__' &&
+        underAny(target, usablePrefixes(value), base),
+    )
+    .map(([other]) => other)
 
-  if (claimant) {
+  if (claimants.length) {
+    // 出路按调用者分（M4b）。叶子执行角色（花名册里派不出任何人）：这份文件要是本来就该几个角色一起改，由 PM 在
+    // paths 里共列。协调者（at-architect、at-product）不拿这句——它的正路是派给认领者（docs/09 的层级协调），照
+    // 「列到你名下」做，PM 会把代码路径划给设计类角色，at-architect 的红线「不得替执行角色把代码写了」就只剩正文守着。
+    const delegates = Array.isArray(roster[role]?.can_delegate_to) ? roster[role].can_delegate_to : []
+    const way = delegates.length
+      ? '这是认领者的活：派给认领者去改（你派不到它的，冒泡给派你的上级），不要自己动它的文件。'
+      : '跨角色的改动要经上级协调，不要直接动别人的地盘。这份文件要是本来就该几个角色一起改（根级清单、构建配置、' +
+        '测试目录），冒泡给派你的上级，由 PM 在 .agent-team/project.json 的 paths 里把它也列到你名下（你写不了 project.json）。'
     return {
       decision: 'deny',
-      reason:
-        `${who} 不得写 ${fp}——这条路径归 ${quote(claimant[0])}。` +
-        `跨角色的改动要经上级协调，不要直接动别人的地盘。`,
+      reason: `${who} 不得写 ${fp}——这条路径归 ${claimants.map((c) => quote(c)).join('、')}。${way}`,
     }
   }
 
@@ -299,7 +309,9 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     decision: 'deny',
     reason:
       `${who} 不得写 ${fp}——这条路径在 .agent-team/project.json 里没有被任何角色认领` +
-      `（${who} 认领的是 ${quote(myPaths)}；前缀按字面比较，不是通配符）。` +
+      // M4b：逐条引——整份数组只过一次 quote 会被截在 80 个字符，排在末尾的（正好是之后补进来的）被截掉。
+      `（${who} 认领的是 ${myPaths.length ? myPaths.map((p) => quote(p)).join('、') : '[]（只写 run 目录）'}；` +
+      '前缀按字面比较，不是通配符）。' +
       // 落到这里的只可能是有键的执行角色，它写不了 project.json（控制文件）。不拼 fixIt：没人认领也可能是这次
       // 调用越界了，不一定是配置问题。
       '确实要写这里，冒泡给派你的上级，由 PM 决定要不要在 .agent-team/project.json 的 paths 里把它划给某个角色' +

@@ -80,6 +80,8 @@ test('writepath：run 存在但 project.json 坏了——仍然 fail closed，�
 // 全分支评审 I2：上一条（子代理）是 unreadable 继续 fail closed 的那一半，
 // 下面三条是另一半——被 settings.json 钉成主线程的 at-pm 必须能过去。
 //
+// ⚠️ 订正（M4b，docs/36）：settings.json 现在写全名 {"agent": "agent-team:at-pm"}；钉住的 PM 在 hook 输入里的原始
+// agent_type 一直是全名（docs/22），裸 'at-pm' 是剥前缀之后的值，也是用户显式 --agent at-pm 时的形状。两种都该放行。
 // 为什么：H4 在 Task 5 评审之后已经把 PM 的短路排到了读 ctx 之前，理由写在
 // hooks/gate.mjs 的 contract 分支里（「修复一个坏掉的 run 恰恰要 PM 动手，
 // 门禁会把自己需要的人也锁在门外」）。H3 当时没有跟着做，只豁免 role ===

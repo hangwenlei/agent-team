@@ -947,9 +947,10 @@ function main() {
       }
       // 全分支评审 I2：'unreadable' 对子代理继续 fail closed，但 PM 要放行。
       // 上面 role === MAIN 那条豁免盖不住这种情形——settings.json 的 agent 键
-      // 把 at-pm 钉成主线程时，主会话自己的调用带 agent_type: 'at-pm'，落不进
+      // 把 at-pm 钉成主线程时，主会话自己的调用带 agent_type（原始值是全名 "agent-team:at-pm"，docs/22），落不进
       // MAIN。而这里的 deny 发生在看路径之前，拒的是这个会话的**每一次**
-      // Edit/Write；agents/at-pm.md 现在有 Bash（M1c 设计 §1.1 的上界要求——这条
+      // Edit/Write；agents/at-pm.md 现在有 Bash（M1c 设计 §1.1 的上界要求——M4b 订正：那条「上界」的前提，主线程的
+      // tools: 封顶子代理的工具，P4 实测不成立，PM 持 Bash 的理由待裁定，docs/36。这条
       // 注释此前写的是「PM 的工具面没有 Bash」，commit 2d0147c 给 at-pm.md 加上
       // Bash 之后这句话就不成立了，评审发现 5 指出没人回来改），但逼 PM 用
       // `echo >` 去修一个坏掉的 run 不是可接受的运维路径；触发条件又很廉价

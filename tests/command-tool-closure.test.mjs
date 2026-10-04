@@ -70,10 +70,10 @@ const textOf = (f) => readFileSync(join(COMMANDS_DIR, f), 'utf8')
 // 那条测试防止分叉——改这里务必确认那条测试仍然通过。
 const FORBIDDEN_BY_SPEC = ['Skill', 'SendMessage', 'ListAgents']
 
-// 候选工具名——显式清单，不是自动收集的。前 9 个是这个插件当前用到的工具
-// 全集（见 agents/*.md 与 roster.json），多列的 Bash/Grep/NotebookEdit 是
-// 防御性占位：命令正文目前不提，一旦哪天真的提了，这里不用跟着改判定逻辑，
-// 只是它们此刻永远不会被命中。
+// 候选工具名——显式清单，不是自动收集的。前几个是这个插件的角色用到的工具（见 agents/*.md 的 tools: 行）；
+// 按本测试的口径（只扫 commands/ 正文），其中命令正文眼下不提的那几个（Bash、Grep、NotebookEdit）此刻不会被命中，
+// 哪天提了，这里不用跟着改判定逻辑。WebSearch、WebFetch 是 at-pm 没有的工具（M4b P2 实测：主会话拿不到网页工具）：
+// 列进来，命令正文哪天叫 PM 用它们，这条闭包当场红。
 //
 // 后 3 个（Skill/SendMessage/ListAgents）故意也写进这份"原始候选清单"，
 // 不是遗漏也不是矛盾——它们要先真的成为候选，才谈得上被下面的 .filter 摘掉；
@@ -93,6 +93,8 @@ const CANDIDATE_TOOLS = [
   'Bash',
   'Grep',
   'NotebookEdit',
+  'WebSearch',
+  'WebFetch',
   'Skill',
   'SendMessage',
   'ListAgents',
@@ -183,10 +185,10 @@ test('commands/ 每条命令正文里以工具身份提到的每个工具，都�
       assert.ok(
         grantedTools.has(tool),
         `commands/${file} 提到了工具 ${tool}，但 agents/at-pm.md 的 tools: 行` +
-          `（${JSON.stringify(atPmToolsText)}）里没有它。主线程 agent 的 tools: 行` +
-          '是整个会话的能力上界，被所有子孙代理继承——不在这一行里的工具，命令' +
-          '正文写的指令这辈子调不出来（错误形如 "X is disabled for this ' +
-          'session, in subagents as well as here"）。',
+          `（${JSON.stringify(atPmToolsText)}）里没有它。命令正文是 PM（主会话）照着做的，` +
+          '主会话只拿得到 at-pm 的 tools: 行里的工具——不在这一行里的，命令正文写的指令它调不出来' +
+          '（错误形如 "X is disabled for this session, in subagents as well as here"；这句是固定文案，' +
+          '不说明子代理也没有，M4b P4，docs/36）。',
       )
     }
   }

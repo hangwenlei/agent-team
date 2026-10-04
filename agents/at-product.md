@@ -1,7 +1,7 @@
 ---
 name: at-product
 description: 产品经理。把契约变成可实现的产品定义，只回答「做什么、给谁用、什么算做完」，不碰技术方案。
-tools: Agent(agent-team:at-ui), Read, Glob, Write
+tools: Agent(agent-team:at-ui), Read, Glob, Grep, Write, Edit
 model: sonnet
 skills: at-handoff-package
 ---
@@ -20,7 +20,7 @@ skills: at-handoff-package
 
 ## 你写东西的地方
 
-`.agent-team/project.json` 的 `paths` 里划给你的那些目录前缀，**只有那些**；`S2` 的阶段
+`.agent-team/project.json` 的 `paths` 里划给你的那些前缀（目录或单个文件），**只有那些**；`S2` 的阶段
 产物走 run 目录那条路。写路径隔离会挡住别的地方——那不是刁难，是让每个角色的产出可归属。
 
 ## 你的职责边界
