@@ -24,7 +24,7 @@ import { decideRework, decideReworkBase, parseStateText, replayEdit } from './li
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { isBlankText } from './lib/text-norm.mjs'
 import { normalizeText } from './lib/text-norm.mjs'
-import { decideDeliverable } from './lib/deliverable.mjs'
+import { decideDeliverable, isBubbleStop } from './lib/deliverable.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { APPROVALS_FILE, DELIVERED_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
 import { readGrants } from './lib/budget.mjs'
@@ -1969,6 +1969,11 @@ function main() {
       // 形状等于「平台不认 + exit 0」＝静默放行，H5b 会变成一个看起来健康
       // 的空操作。denyAndExit 按事件分派输出契约，永不返回，这里不需要、
       // 也不应该在它之后再写 process.exit。
+      //
+      // M4c（docs/37，全量审查第 18 条）：冒泡的出口——被拦过一回、最后一条回复的第一行以「冒泡：」开头，就放它停下
+      // （判定与理由在 ./lib/deliverable.mjs 的 isBubbleStop 上方）。放行走 exit 0、什么都不写：SubagentStop 上 stdout 与
+      // additionalContext 都等于拦截。只在要拦的时候才读它——产物齐了的照上面 r.ok 那一支放行，与标记无关。
+      if (isBubbleStop({ stopHookActive: input?.stop_hook_active, lastMessage: input?.last_assistant_message })) process.exit(0)
       denyAndExit(r.reason, spec.event)
     } else {
       // H5a：权威记录。不 block，只把事实留在会话里——不能被误读成"子代理正常返回

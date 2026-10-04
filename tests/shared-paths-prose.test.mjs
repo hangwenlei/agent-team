@@ -16,6 +16,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { stageRoles } from '../hooks/lib/stages.mjs'
+import { BUBBLE_MARK } from '../hooks/lib/deliverable.mjs'
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const flat = (s) => s.replace(/\n[ \t>]*/g, '')
@@ -180,18 +181,17 @@ test('M4b /at S5：有没解决的被拒条目就不推进；逐条看理由；�
   has(S5, `删改了什么也记进 \`04-dispatch.md\` 的「${SECTION5}」`)
   assert.ok(sentences(S5).some((x) => x.includes('不能由你定不做') && x.includes('`contract-conflict`') && x.includes('第 3 节')), S5)
   has(S5, '改写到别处的，把决定与理由写进')
-  // 测试因为 S5 没交齐而没开跑：回 S5，不回 S6。
-  assert.ok(sentences(S5).some((x) => x.includes('没开跑') && x.includes('回到 `S5`') && x.includes('不要回 `S6`')), S5)
-  // 文档核对：先核实现记录——续跑时读到的多半是 S5 补齐之前的旧结论，那时在 S6 里重派 at-qa，不再回退。
-  assert.ok(sentences(S5).some((x) => x.includes('没开跑') && x.includes('确实没交齐的') && x.includes('都交齐了的') && x.includes('在 `S6` 里重派 `at-qa`')), S5)
+  // 测试因为 S5 没交齐而没开跑（M4c 起 at-qa 冒泡、不写 06-test.md，docs/37）：先核实现记录，确实没交齐回 S5、不在 S6 里重派它。
+  assert.ok(sentences(S5).some((x) => x.includes('冒泡说没开跑') && x.includes('回到 `S5`') && x.includes('不要在 `S6` 里重派它')), S5)
+  assert.ok(sentences(S5).some((x) => x.includes('冒泡说没开跑') && x.includes('确实没交齐的') && x.includes('都交齐了的') && x.includes('在 `S6` 里重派 `at-qa`')), S5)
   // 收尾核对：两支的动作按小句钉——只查关键词在不在，两支对调照绿。
   const notDone = clauseWith(S5, '确实没交齐的')
   assert.ok(notDone.includes('回到 `S5` 的回退') && !notDone.includes('重派 `at-qa`'), notDone)
   const allDone = clauseWith(S5, '都交齐了的')
   assert.ok(allDone.includes('在 `S6` 里重派 `at-qa`') && !allDone.includes('回退'), allDone)
-  // 在 S7 才发现、实现记录没有缺的：照回退表回 S6（与 at-resume 同口径）。
-  const atS7 = clauseWith(S5, '在 `S7` 才发现')
-  assert.ok(atS7.includes('回到 `S6`') && !atS7.includes('回到 `S5`'), atS7)
+  // M4c：没开跑不再落盘，S7 碰不到它（没有 06-test.md，H2 不放行验收），S7 那一支随之删掉；也不再说「06-test.md 写着没开跑」。
+  assert.ok(!S5.includes('在 `S7` 才发现'), S5)
+  assert.ok(!S5.includes('`06-test.md` 写着没开跑'), S5)
   // 架构师并发派的例外。
   has(S5, '几个都要改同一份文件的除外')
 })
@@ -200,12 +200,16 @@ test('M4b /at 第 3 节「核实」：S5 的实现记录要读内容，有没解
   const verify = flat(between(AT, '2. **核实**', '3. **记账**'))
   has(verify, DENIAL, RESOLVED)
   assert.ok(verify.split('。').some((x) => x.includes(RESOLVED) && x.includes('那一份不算交齐')), verify)
-  assert.ok(sentences(verify).some((x) => x.includes('`06-test.md`') && x.includes('没开跑') && x.includes('回到 `S5`') && x.includes('确实没交齐')), verify)
+  // M4c（docs/37）：下级冒泡的通用读法——回报第一行是标记的，它没交这一段的产物；at-qa 的没开跑照 S5 那一条。
+  assert.ok(sentences(verify).some((x) => x.includes(`「${BUBBLE_MARK}`) && x.includes('没交') && x.includes('同一段里重派') && x.includes('第 4 节')), verify)
+  assert.ok(sentences(verify).some((x) => x.includes('冒泡说没开跑') && x.includes('`S5` 那一条')), verify)
+  assert.ok(!verify.includes('`06-test.md` 也要读结论'), verify)
 })
 
-test('M4b /at 回退：06-test.md 写着因为 S5 没交齐而没开跑的，回 S5、不回 S6', () => {
+test('M4b /at 回退：at-qa 冒泡说因为 S5 没交齐而没开跑的（核过实现记录确实没交齐），回 S5、不回 S6', () => {
   const back = flat(between(AT, '### 回退', '回退是一次 `state.json` 的写入'))
-  assert.ok(sentences(back).some((x) => x.includes('没开跑') && x.includes('回 S5、不回 S6') && x.includes('核过实现记录确实没交齐')), back)
+  assert.ok(sentences(back).some((x) => x.includes('冒泡说没开跑') && x.includes('回 S5、不回 S6') && x.includes('核过实现记录确实没交齐')), back)
+  assert.ok(!back.includes('不论在 S6 还是 S7 发现'), back)
 })
 
 test('M4b /at 第 6 节：交付文档与汇报里写这一趟给 paths 补了哪些前缀（照 04-dispatch.md 那一节）；技术栈与 stack 不符提示重跑 at-init', () => {
@@ -223,18 +227,10 @@ test('M4b /at-resume：S3/S4/S5 的核查不只挂在空集那一条——单列
   has(own, DENIAL, RESOLVED, LIST, '不要记账推进', '`S4`', '在 `S5` 里重派')
   assert.ok(own.split('。').some((x) => x.includes(DENIAL) && x.includes('那一份不算交齐')), own)
   has(own, '停在 `S3` 的', '停在 `S4` 的，推进之前照', '停在 `S5` 的')
-  assert.ok(sentences(own).some((x) => x.includes('没开跑') && x.includes('回到 `S5`')), own)
-  // 文档核对：返工轮里推进回 S6、at-qa 还没重跑时续跑，磁盘上那份「没开跑」是上一轮的——按内容判（先核实现记录），不按 history。
-  has(own, '停在 `S6` 或 `S7`', '先照同一节 `S5` 那一条逐份核实现记录', '核得过', '在 `S6` 里重派 `at-qa`', '回到 `S6` 的回退')
-  // 收尾核对：条件与动作的配对整段钉（两对各在同一个小句里，按小句切分不开）。停在 S7 的不是「旧结论」——H6 不让上一轮的
-  // 06-test.md 推进到 S7，那时只能是 at-qa 这一轮判错了。
-  has(
-    own,
-    '口径同 `at-qa` 开工前的自查',
-    '：核不过，记一次回到 `S5` 的回退',
-    '停在 `S6` 的，这份多半是 `S5` 补齐之前的旧结论，在 `S6` 里重派 `at-qa`',
-    '停在 `S7` 的，是 `at-qa` 这一轮的结论与实现记录对不上，照「回退」记一次回到 `S6` 的回退',
-  )
+  // M4c（docs/37）：at-qa 的没开跑改成冒泡、不落盘——停在 S6 而 06-test.md 不在的，照「产物不齐」那一条派 at-qa，它自查 S5
+  // 没交齐会再冒泡。续跑这一条不再读 06-test.md 的首行（M4b 那一支随之删掉，上一轮那份「没开跑」被当成新结论的洞也一起没了）。
+  assert.ok(!own.includes('没开跑'), own)
+  assert.ok(!own.includes('停在 `S6`'), own)
   // 空集那一条不再自己带这些核查（单列之后挂在两条上会分叉），结尾指向下一条的核、再指向「产物齐了」那一条。
   const empty = flat(between(r, '- **展开出来是空集 → 不算齐了。**', '\n- **'))
   assert.ok(!empty.includes(DENIAL), empty)
@@ -304,12 +300,14 @@ test('M4b at-qa：开工前自查把缺的、有没解决的被拒条目的实�
     '缺了，或者',
     '都算没交齐',
     '不要在残缺的实现上跑测试',
-    '没开跑和原因写进 `06-test.md`',
-    // 第二轮复核：固定首行，PM、续跑与验收一眼认得出；收到「S6 齐了」也要说清这不是测试结论。
-    '首行固定写「结论：没开跑——S5 没交齐」',
-    '不是测试结论',
+    // M4c（docs/37）：没开跑是冒泡，不写 06-test.md（写了门禁就当测试报告交了）；第一行是固定的标记与原因，第一回被拦之后原样再停。
+    `「${BUBBLE_MARK}没开跑——S5 没交齐」`,
+    '也不要写 `06-test.md`',
+    '原样再停一次',
   )
   assert.ok(!self.includes('不算没交齐'), self)
+  assert.ok(!self.includes('结论：没开跑'), self)
+  assert.ok(!self.includes('没开跑和原因写进'), self)
 })
 
 test('M4b at-pm：红线写明 run 进行中也不自己写项目代码与配置；S2 里被拒的不补 paths', () => {
@@ -386,13 +384,11 @@ test('M4b 持 Bash 的团队角色（主会话除外）：写文件用 Write、E
   }
 })
 
-// 第二轮复核（P1）：验收判不了、根因是测试因为 S5 没交齐没开跑的，写明根因在 S5——回 S6 重跑也开不了跑。
-test('M4b at-acceptance：06-test.md 写着没开跑的，回报里写明根因在 S5', () => {
+// M4c（docs/37）：没开跑不再落盘，at-acceptance 碰不到写着没开跑的 06-test.md（没有它 H2 不放行验收），M4b 给它补的那一句删掉。
+test('M4c at-acceptance：不再有「06-test.md 写着没开跑」那一格', () => {
   const f = flat(read('agents/at-acceptance.md'))
-  assert.ok(sentences(f).some((x) => x.includes('没开跑') && x.includes('根因在 `S5`') && x.includes('`07-acceptance.md`')), 'at-acceptance 没有把「没开跑」接到 S5、写进 07-acceptance.md')
-  // 收尾核对：回 S5 还是 S6 由 PM 核过实现记录定（at-qa 也会判错）；验收不替它断言。
-  has(f, '回 `S5` 还是 `S6` 由 PM 核实现记录定')
-  assert.ok(!f.includes('回 `S6` 重跑也开不了跑'), f)
+  assert.ok(!f.includes('没开跑'), f)
+  assert.ok(!f.includes('根因在 `S5`'), f)
 })
 
 // 第二轮复核（P2）：「Bash 只用来装依赖」不能把 npm i <包> 放进白名单——那样被拒的根级清单不经 Write 就改掉了。S5 的产者先改清单、

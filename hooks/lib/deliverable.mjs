@@ -101,6 +101,33 @@ export function isKnownStage(stages, stageId) {
   )
 }
 
+// M4c（docs/37，全量审查第 18 条）：冒泡的出口。各角色正文叫它们「契约有问题、缺输入、写入被拒就冒泡，不要自己改了继续写」，
+// 拒绝文案也许诺「把理由写进你的回报，由上级判断」——可 H5b 从不认这条出口，照做的子代理每次停下都被顶回去，顶到平台的
+// 续跑上限（真实会话 066acaaa）。现在门禁认一个固定的形状：已经被拦过一回（SubagentStop 输入的 stop_hook_active 为真），而且
+// 最后一条回复（last_assistant_message）的第一个非空行以 BUBBLE_MARK 开头，就放它停下。
+//   - 要 stop_hook_active：第一回停下一定先被拦、先看到缺的是什么——忘了写的会去写，真要冒泡的原样再停一回（拒绝文案这么教）。
+//     它不专属本插件（别家的 SubagentStop 拦过、CLI 自己的收尾强制也会把它置真），那时第一回就带着标记的也直接放行——标记是
+//     子代理自己写的，门禁核不了真假，放行它也造不出进度：产物照旧算没交。
+//   - 只认第一个非空行、容许行首的 Markdown 装饰（#、>、*、_、`、-）与半角冒号：模型常把结论加粗、写成标题。夹在正文里的不认。
+//   - 冒泡不改「交没交」：这里只决定 H5b 放不放它停下；H2、【阶段】、H6、收口对这一段照常判缺。父级那一侧不加机制——同步派发
+//     时工具结果、异步派发时完成通知里就是这条回复的原文（docs/37 §1），读它的是正文（/agent-team:at 第 3 节「核实」）。
+export const BUBBLE_MARK = '冒泡：'
+const BUBBLE_MARK_HALF = BUBBLE_MARK.replace('：', ':')
+
+// 拒绝文案里教这个出口的那一句（缺/空与还旧两支共用；单一真源，判据从这里取）。不写任何次数：重试上限的计数只准在
+// ./retry-budget.mjs 里（tests/retry-budget-single-source.test.mjs）。
+export const BUBBLE_EXIT =
+  `就不写：把你最后一条回复的第一行写成「${BUBBLE_MARK}<一句话理由>」，下面写清缺什么、要上级定什么，再停下` +
+  '（已经这样写了的，原样再停一次）——门禁认这一行、放你停下；这一段的产物照旧算没交，上级读你的回复来定。'
+
+export function isBubbleStop({ stopHookActive, lastMessage } = {}) {
+  if (stopHookActive !== true || typeof lastMessage !== 'string') return false
+  const first = lastMessage.split('\n').find((line) => line.trim() !== '')
+  if (first === undefined) return false
+  const head = first.replace(/^[\s#>*_`-]+/, '')
+  return head.startsWith(BUBBLE_MARK) || head.startsWith(BUBBLE_MARK_HALF)
+}
+
 // M3y（docs/33，全量审查第 15 条）：调用方把 artifactExists 换成 freshness 的 artifactCurrent（在、而且不是上一轮的），另传
 // artifactStale（返工轮里还是上一轮的：磁盘内容与回退那一刻记的 sha 相同）。「缺」与「还是上一轮的」分开报——出口不一样：
 // 上一轮那份这一轮核过、不用改，可以在末尾追加一节写明，内容一变就算这一轮的。没有上一轮的产物时，文案与 v1.6.0 逐字相同。
@@ -153,7 +180,7 @@ export function decideDeliverable({ role, stageId, stages, artifactExists, artif
       stale,
       reason:
         `${role} 在 ${stageId} 应当产出 ${produces.join('、')}，但 ${gone}。` +
-        `在结束之前把它写出来；如果这一段确实不需要产出，把理由写进你的回报，由上级判断。`,
+        `在结束之前把它写出来。确实交不出来、要上级定的（契约有问题、缺输入、写入被拒），${BUBBLE_EXIT}`,
     }
   }
 
@@ -175,6 +202,6 @@ export function decideDeliverable({ role, stageId, stages, artifactExists, artif
     reason:
       `${role} 在 ${stageId} 应当产出 ${produces.join('、')}，但 ${notWritten}${stale.join('、')} 还是上一轮的——这是返工轮，` +
       `它的内容与回退那一刻磁盘上的一样。在结束之前把这一轮的写出来。${redoOut}${appendOut}` +
-      `如果这一段确实不需要产出、或者不该由你改，就不要写，把理由写进你的回报，由上级判断。`,
+      `这一段确实不需要产出、或者不该由你改的，${BUBBLE_EXIT}`,
   }
 }

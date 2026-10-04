@@ -9,7 +9,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { decideDeliverable } from '../hooks/lib/deliverable.mjs'
+import { decideDeliverable, isBubbleStop, BUBBLE_MARK, BUBBLE_EXIT } from '../hooks/lib/deliverable.mjs'
+import { SUBAGENT_STOP_RETRY_NOTE } from '../hooks/lib/retry-budget.mjs'
 
 const STAGES = {
   S2: { role: 'at-product', requires: ['00-contract.md'], produces: ['01-prd.md'] },
@@ -256,11 +257,13 @@ const fresh = ({ current = [], stale = [] }) => ({
   artifactStale: (n) => stale.includes(n),
 })
 
-test('M3y：没有上一轮的产物时，理由与 v1.6.0 逐字相同', () => {
+// M4c（docs/37，审查第 18 条）：出口那半句从「把理由写进你的回报，由上级判断」（门禁从来不认）换成教冒泡的那一句。
+test('M3y：没有上一轮的产物时，理由是固定的那一句（M4c 起末尾教冒泡的出口）', () => {
   const r = decideDeliverable({ role: 'at-product', stageId: 'S2', stages: REAL, ...fresh({}) })
   assert.equal(
     r.reason,
-    'at-product 在 S2 应当产出 01-prd.md，但 01-prd.md 还没有写到磁盘上。在结束之前把它写出来；如果这一段确实不需要产出，把理由写进你的回报，由上级判断。',
+    'at-product 在 S2 应当产出 01-prd.md，但 01-prd.md 还没有写到磁盘上。在结束之前把它写出来。' +
+      `确实交不出来、要上级定的（契约有问题、缺输入、写入被拒），${BUBBLE_EXIT}`,
   )
   assert.deepEqual(r.stale, [])
   const old = decideDeliverable({ role: 'at-product', stageId: 'S2', stages: REAL, artifactExists: have() })
@@ -278,7 +281,8 @@ test('M3y：上一轮的产物，理由说清是上一轮的、给两条出口�
   const r = decideDeliverable({ role: 'at-backend', stageId: 'S5', stages: REAL, ...fresh({ stale: ['05-impl/at-backend.md'] }) })
   assert.match(r.reason, /05-impl\/at-backend\.md 还是上一轮的/)
   assert.match(r.reason, /末尾追加一节/)
-  assert.match(r.reason, /不要写，把理由写进你的回报/)
+  assert.ok(r.reason.includes(BUBBLE_EXIT), r.reason)
+  assert.ok(!r.reason.includes('把理由写进你的回报'), r.reason)
   assert.doesNotMatch(r.reason, /还没有写到磁盘上/, '在磁盘上的不能说成没写')
   assert.doesNotMatch(r.reason, /<!--/, '.md 不提 HTML 注释')
 })
@@ -321,4 +325,67 @@ test('M4a 核对 H5b：产物是空文件 → 拒，理由说是空文件', () =
   assert.equal(r.ok, false)
   assert.match(r.reason, /06-test\.md 是空文件/)
   assert.doesNotMatch(r.reason, /还没有写到磁盘上/)
+})
+
+// ---------------------------------------------------------------------------
+// M4c（docs/37，审查第 18 条）：冒泡的出口
+// ---------------------------------------------------------------------------
+//
+// 门禁认的形状：已经被拦过一回（stop_hook_active 为真），最后一条回复的第一个非空行以「冒泡：」开头（容许行首的 Markdown
+// 装饰与半角冒号）。只认第一行、只认 true：标记夹在正文里、或者第一回停下就带着标记，都照拦——第一回先让它看到缺的是什么。
+test('M4c isBubbleStop：只在 stop_hook_active 为真、第一个非空行以标记开头时为真', () => {
+  const half = BUBBLE_MARK.slice(0, -1) + ':'
+  const yes = [
+    `${BUBBLE_MARK}契约冲突`,
+    `**${BUBBLE_MARK}**契约冲突`,
+    `# ${BUBBLE_MARK}契约冲突`,
+    `## ${BUBBLE_MARK}契约冲突`,
+    `> ${BUBBLE_MARK}契约冲突`,
+    `- ${BUBBLE_MARK}契约冲突`,
+    `* ${BUBBLE_MARK}契约冲突`,
+    `\`${BUBBLE_MARK}\`契约冲突`,
+    `\n\n   ${BUBBLE_MARK}契约冲突\n细节`,
+    `${half}契约冲突`,
+  ]
+  for (const lastMessage of yes) assert.equal(isBubbleStop({ stopHookActive: true, lastMessage }), true, JSON.stringify(lastMessage))
+  const no = [
+    [false, `${BUBBLE_MARK}契约冲突`],
+    [undefined, `${BUBBLE_MARK}契约冲突`],
+    ['true', `${BUBBLE_MARK}契约冲突`],
+    [true, `我看了契约。\n${BUBBLE_MARK}契约冲突`],
+    [true, `${BUBBLE_MARK.slice(0, -1)}排序写完了`],
+    [true, ''],
+    [true, '   \n  '],
+    [true, undefined],
+    [true, 42],
+    [true, null],
+  ]
+  for (const [stopHookActive, lastMessage] of no) {
+    assert.equal(isBubbleStop({ stopHookActive, lastMessage }), false, JSON.stringify([stopHookActive, lastMessage]))
+  }
+  assert.equal(isBubbleStop(), false, '缺参数不抛')
+})
+
+test('M4c：缺/空与还旧两支的拒绝文案都教同一个出口（标记原样写出、说清原样再停一次），不再许诺门禁不认的「写进回报」', () => {
+  const missing = decideDeliverable({ role: 'at-architect', stageId: 'S3', stages: REAL, ...fresh({}) })
+  const blank = decideDeliverable({ role: 'at-architect', stageId: 'S3', stages: REAL, artifactExists: () => false, artifactBlank: (n) => n === '03-arch.md' })
+  const stale = decideDeliverable({ role: 'at-qa', stageId: 'S6', stages: REAL, ...fresh({ stale: ['06-test.md'] }) })
+  for (const r of [missing, blank, stale]) {
+    assert.equal(r.ok, false)
+    assert.ok(r.reason.includes(BUBBLE_MARK), r.reason)
+    assert.ok(r.reason.includes(BUBBLE_EXIT), r.reason)
+    assert.ok(!r.reason.includes('把理由写进你的回报'), r.reason)
+  }
+  assert.ok(BUBBLE_EXIT.includes('原样再停一次'), BUBBLE_EXIT)
+  assert.ok(BUBBLE_EXIT.includes('产物照旧算没交'), '要说清冒泡不等于交了')
+})
+
+// M4c：平台续跑上限那句改成 CLI 2.1.286 源码与实测核过的事实（docs/37 §1）：默认连续拦截有上限、到点静默覆盖，环境变量改得了、
+// 设为 0 不设上限，两次停下之间调过工具计数清零；产物不在的另一种可能是冒泡。计数只在这个常量里（单一真源判据钉着）。
+test('M4c SUBAGENT_STOP_RETRY_NOTE：说出冒泡这一种可能、点名环境变量与清零，不再说「不是一个固定值」', () => {
+  assert.ok(SUBAGENT_STOP_RETRY_NOTE.includes(BUBBLE_MARK), SUBAGENT_STOP_RETRY_NOTE)
+  assert.ok(SUBAGENT_STOP_RETRY_NOTE.includes('CLAUDE_CODE_STOP_HOOK_BLOCK_CAP'), SUBAGENT_STOP_RETRY_NOTE)
+  assert.ok(SUBAGENT_STOP_RETRY_NOTE.includes('设为 0'), SUBAGENT_STOP_RETRY_NOTE)
+  assert.ok(SUBAGENT_STOP_RETRY_NOTE.includes('清零'), SUBAGENT_STOP_RETRY_NOTE)
+  assert.ok(!SUBAGENT_STOP_RETRY_NOTE.includes('不是一个固定值'), SUBAGENT_STOP_RETRY_NOTE)
 })
