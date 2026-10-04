@@ -424,3 +424,16 @@ test('M3y H6：stat 报 ENOTDIR（注入）→ 算不在，给它写 sha 是多�
     assert.match(reasonOf(r), /多出/)
   })
 })
+
+// M4b（docs/36）：钉住的 PM 在 hook 输入里的原始 agent_type 是插件全名（docs/22），用户显式 --agent at-pm 时是裸名。H2 给 PM 的
+// 「标 accepted」出路经 isContractWriter 认 PM，两种都要拿到——把调用点改成只认某一种写法，这条就红。
+for (const caller of ['at-pm', 'agent-team:at-pm']) {
+  test(`M4b H2：回退到 S4、04-dispatch.md 还是上一轮的，PM（agent_type ${caller}）派 at-backend → 拒，出路给「标 accepted」`, () => {
+    const reworkBase = baseOf('04-dispatch.md', '05-impl/at-backend.md', '06-test.md')
+    using({ stage: 'S4', history: [...FIRST, ...H('S4')], reworkBase }, (fx) => {
+      const r = run('readiness', dispatch('agent-team:at-backend', caller), GATE, fx.p)
+      assert.ok(denied(r), r.stdout)
+      assert.match(reasonOf(r), /改成 "accepted"/)
+    })
+  })
+}

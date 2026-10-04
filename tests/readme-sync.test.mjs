@@ -33,6 +33,7 @@ import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 import { EXPECTED_AGENTS } from './helpers/expected-agents.mjs'
 import { ROLES_WITHOUT_PATHS } from './helpers/roles-without-paths.mjs'
 import { COMMAND_NAMES } from './helpers/command-names.mjs'
+import { stripPluginPrefix } from '../hooks/lib/decide.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
 const readFile = (p) => readFileSync(url(p), 'utf8')
@@ -212,7 +213,8 @@ test('交叉核：产品角色 = settings.json 的 agent + templates/project.jso
   const project = JSON.parse(read('templates/project.json'))
   assert.deepEqual(
     [...PRODUCT_ROLES].sort(),
-    [...new Set([settings.agent, ...project.available_roles])].sort(),
+    // M4b：settings.json 的 agent 写插件全名（docs/36），比之前剥掉前缀——与门禁共用同一份剥前缀规则。
+    [...new Set([stripPluginPrefix(settings.agent), ...project.available_roles])].sort(),
     'agents/ 减去测试替身，与「主会话角色 + 可用班底」两个真源算出来的对不上——' +
       '往 agents/ 里加了真角色却没写进 available_roles，或者反过来。先确认哪一侧漏了，' +
       '再决定对外那句角色数要不要跟着改。\n' +
@@ -348,6 +350,110 @@ test('前置条件：agents/at-pm.md 的 tools: 解得出非空的工具名清�
     'agents/at-pm.md 的 tools: 声明解出来是空的——下面那条集合相等会拿一个空集合去比，' +
       '而真正该报的是这份声明本身读不出来',
   )
+})
+
+// M4b（docs/36，审查第 29 条）：at-pm 那一段还要写明主会话拿不到什么——插件把主会话钉成 at-pm，用户在普通会话里能用的
+// MCP 工具与网页搜索、抓取，装了插件的项目里主会话都没有（P2 实测：探针 MCP 服务器连上了，工具被白名单滤掉）。
+// 钉法是**双向**的：那句话在不在，要等于 at-pm 的 tools: 里有没有这些工具。只查「写没写」的话，哪天给 at-pm 加了 WebFetch、
+// README 工具清单也同步补上，「拿不到 WebFetch」就成了假话却照样绿——把风险说小的那一侧（上面那段注释说的同一族）。
+// 这几个名字不加反引号：加了会被 toolTokensIn 算进 at-pm 的工具面。按句判（中文按「。；」切，英文按句点、分号切），
+// 同一句里要有否定标记（中文「拿不到」，英文「does not get」）——写成「能用 WebSearch」不算。
+function sentencesOf(text) {
+  return text.split(/[。；]|(?<=[.;])\s+/)
+}
+// 第一轮复核（docs/36）：再按括号外的中英逗号切小句，否定标记要在名字之前、同一小句里——否则「拿不到 MCP，网页工具照样能用」
+// 「does not get the MCP tools, but it keeps … (WebSearch, WebFetch)」这种否定只管一半的写法也会被认成「三样都拿不到」。
+// 括号里的「WebSearch, WebFetch」不切。残余：没有逗号的「does not get MCP and keeps WebSearch」仍认不出。
+function clausesOf(sentence) {
+  const out = []
+  let depth = 0
+  let cur = ''
+  for (const ch of sentence) {
+    if (ch === '（' || ch === '(') depth++
+    if (ch === '）' || ch === ')') depth = Math.max(0, depth - 1)
+    if (depth === 0 && (ch === '，' || ch === ',')) {
+      out.push(cur)
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  out.push(cur)
+  return out
+}
+// skip：含这些字样的小句不算（收尾核对：「团队里其余角色也拿不到 MCP 与 WebSearch」会替 at-pm 那半满足判据）。
+function claimsNo(paragraph, names, skip = []) {
+  return sentencesOf(paragraph)
+    .flatMap(clausesOf)
+    .filter((c) => !skip.some((s) => c.includes(s)))
+    .some((c) => {
+      const at = Math.max(c.indexOf('拿不到'), c.indexOf('does not get'))
+      if (at < 0) return false
+      const rest = c.slice(at)
+      return names.every((n) => new RegExp(`(^|[^\`A-Za-z_])${n}([^\`A-Za-z_]|$)`).test(rest))
+    })
+}
+
+const MCP = ['MCP']
+const WEB = ['WebSearch', 'WebFetch']
+
+test('自检：claimsNo() 只认否定管得到的名字——同一小句、否定在前、不加反引号；否定只管一半、写成「能用」、加了反引号的都不算', () => {
+  const zh = '> 它拿不到你在普通会话里能用的 MCP 工具与网页搜索、抓取（WebSearch、WebFetch）；其余角色只拿自己的。'
+  const en = '> It does not get the MCP tools or the web search and fetch tools (WebSearch, WebFetch) that an ordinary session has; others differ.'
+  for (const t of [zh, en]) assert.ok(claimsNo(t, MCP) && claimsNo(t, WEB), t)
+  const halfZh = '> 它拿不到 MCP 工具，网页搜索、抓取（WebSearch、WebFetch）照样能用。'
+  const halfEn = '> It does not get the MCP tools, but it keeps the web search and fetch tools (WebSearch, WebFetch).'
+  for (const t of [halfZh, halfEn]) assert.ok(claimsNo(t, MCP) && !claimsNo(t, WEB), t)
+  const inverted = '> 它能用你在普通会话里能用的 MCP 工具与网页搜索、抓取（WebSearch、WebFetch），只是拿不到 Skill；'
+  assert.ok(!claimsNo(inverted, MCP) && !claimsNo(inverted, WEB), inverted)
+  const split = '> 它拿不到 MCP 工具。它能用 WebSearch、WebFetch。'
+  assert.ok(claimsNo(split, MCP) && !claimsNo(split, WEB), split)
+  const ticked = '> 它拿不到 `MCP` 与 `WebSearch`、`WebFetch`。'
+  assert.ok(!claimsNo(ticked, MCP) && !claimsNo(ticked, WEB), ticked)
+  // 第二轮复核：名字在否定之前、同一小句（「能用 X 而拿不到 Y」）；括号里用全角逗号；英文里不配对的「1)」。
+  const before = '> 它能用 WebSearch、WebFetch 而拿不到 MCP 工具。'
+  assert.ok(claimsNo(before, MCP) && !claimsNo(before, WEB), before)
+  const fullComma = '> 它拿不到 MCP 工具与网页工具（WebSearch，WebFetch）。'
+  assert.ok(claimsNo(fullComma, WEB), fullComma)
+  const listMark = '> 1) It does not get the MCP tools, but it keeps WebSearch and WebFetch.'
+  assert.ok(claimsNo(listMark, MCP) && !claimsNo(listMark, WEB), listMark)
+  // 收尾核对：skip 掉「其余角色」那一小句之后，at-pm 那半只看它自己的小句。
+  const othersOnly = '> 它能用 MCP 工具与网页搜索（WebSearch、WebFetch），团队里其余角色也拿不到 MCP 与 WebSearch、WebFetch。'
+  assert.ok(claimsNo(othersOnly, MCP) && !claimsNo(othersOnly, MCP, ['其余角色']), othersOnly)
+})
+
+for (const f of [README_EN, README_ZH]) {
+  test(`M4b ${f} 的 at-pm 那一段写明主会话拿不到 MCP 与网页工具——与 agents/at-pm.md 的 tools: 双向一致（两组分开判）`, () => {
+    const p = atPmParagraph(read(f))
+    // 文档核对（docs/36 §3.2）：两小句分开判。「它拿不到」对 at-pm 自己的 tools:；「团队里其余角色也拿不到」对其余团队角色（agents/ 减去
+    // 测试替身与 at-pm）。原来两样都按全体的并集判：给某个叶子角色加网页工具时，失败文案把它说成 at-pm，而且要转绿只能删掉 at-pm 那句真话。
+    const isMcp = (n) => n.startsWith('mcp__')
+    const isWeb = (n) => n === 'WebSearch' || n === 'WebFetch'
+    const toolsOf = (r) => toolsDeclarationOf(read(`agents/${r}.md`)).names
+    const pm = toolsOf('at-pm')
+    const hasMcp = pm.some(isMcp)
+    const hasWeb = pm.some(isWeb)
+    const why = `（at-pm 有 mcp__：${hasMcp}；有 WebSearch/WebFetch：${hasWeb}）。这句是用户判断「装上之后还能做什么」的那一句，` +
+      '两半都要写，名字不加反引号，否定写在名字前面、同一小句里。'
+    const OTHERS = ['其余角色', 'no other role']
+    assert.equal(claimsNo(p, MCP, OTHERS), !hasMcp, `${f}：「主会话拿不到 MCP 工具」那句与 agents/at-pm.md 的 tools: 对不上${why}`)
+    assert.equal(claimsNo(p, WEB, OTHERS), !hasWeb, `${f}：「主会话拿不到 WebSearch、WebFetch」那句与 agents/at-pm.md 的 tools: 对不上${why}`)
+    const holders = PRODUCT_ROLES.filter((r) => r !== 'at-pm' && toolsOf(r).some((n) => isMcp(n) || isWeb(n)))
+    const others = f === README_ZH ? '团队里其余角色也拿不到' : 'no other role on the team gets them either'
+    assert.equal(p.includes(others), holders.length === 0, `${f}：「${others}」与其余角色的 tools: 对不上（持 MCP 或网页工具的：${holders.join('、') || '没有'}）`)
+  })
+}
+
+// 第一轮复核：README 两半这条分支新加的两句用户看得见的后果，按两半成对钉住——run 会往 project.json 里补前缀；
+// 自己设置里的 agent 键也会把主会话换掉（P8）。
+test('M4b README 两半都写了：项目经理会往 paths 里补前缀；自己设置里的 agent 键也会换掉主会话', () => {
+  const zh = read(README_ZH)
+  const en = read(README_EN)
+  assert.ok(zh.includes('补前缀') && en.includes('adds prefixes'), '「补前缀」那句两半不齐')
+  // 第二轮复核：同一句里后加的两个半句也成对钉——实现中被拒时也会补；敏感位置先问用户。
+  assert.ok(zh.includes('实现中有角色被拒时也会') && en.includes('when a role is refused'), '「实现中被拒时也会补」两半不齐')
+  assert.ok(zh.includes('的先问你') && en.includes('it asks you first'), '「敏感位置先问你」两半不齐')
+  assert.ok(zh.includes('`agent` 键') && en.includes('`agent` key'), '「agent 键」那句两半不齐')
 })
 
 for (const f of [README_EN, README_ZH]) {

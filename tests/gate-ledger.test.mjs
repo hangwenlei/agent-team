@@ -1352,3 +1352,38 @@ test('坏指针时写 project.json：fail-open 留痕本轮开始出现——这
     rmSync(pluginDir, { recursive: true, force: true })
   }
 })
+
+// M4b 第一轮复核（docs/36）：执行段（produces 是 <role> 模式的那一段，插件自带的链里是 S5）的【阶段】「齐了」末尾固定提醒先读
+// 实现记录里的「被写路径隔离拒绝」一节——门禁分不出那一节写了什么，只看在不在；被拒还没解决的那一份在门禁看来就是交了。
+// 别的段不带这一句（不是每段都写实现记录）。
+test('M4b【阶段】执行段齐了：末尾提醒先读「被写路径隔离拒绝」一节；别的段不带', () => {
+  const pm = m3xLedger(M3X_S5_ACCOUNTED)
+  assert.match(pm, /【阶段】S5 的产物已经齐了/)
+  assert.match(pm, /被写路径隔离拒绝[^。]*已解决[^。]*那一份不算交齐/)
+  assert.ok(pm.includes('/agent-team:at 第 3 节「各段的具体做法」'), pm)
+  assert.doesNotMatch(m3xLedger({ ...M3X_S2, stage_roles: { S2: ['at-product'] } }), /被写路径隔离拒绝/)
+})
+
+// M4b 第二轮复核：执行段里最后一个写实现记录的执行角色也会收到【阶段】。给它的不是 PM 那句（「推进之前逐份读」「做法见 /agent-team:at」
+// 它都做不了），而是「你自己的实现记录里还有没解决的被拒条目，回报时照实说，不要只报齐了」；回报给上级的也不是「齐了」。
+test('M4b【阶段】执行段齐了、写的是执行角色：给它自己的那句，不叫它去做 PM 的事，也不叫它报「齐了」', () => {
+  const role = m3xLedger({ ...M3X_S5_ACCOUNTED, write: '05-impl/at-backend.md', agent: 'agent-team:at-backend' })
+  assert.match(role, /【阶段】S5/)
+  assert.ok(role.includes('你自己的实现记录'), role)
+  assert.ok(!role.includes('推进之前逐份读') && !role.includes('/agent-team:at 第 3 节'), role)
+  assert.ok(!role.includes('"这一段的产物已经齐了"这件事'), role)
+})
+
+// 文档核对（docs/36 §3.2）：「你自己的实现记录」那句只给当段的产者。S5 里改 03-arch.md 的架构师、提前被派来写 06-test.md 的 at-qa 也是
+// 非 PM 写者，它们没有实现记录——给它们的是不预设「你自己的」那一句。回报口径（都在磁盘上了）对任何非 PM 写者都成立，照旧。
+test('M4b【阶段】执行段齐了、写者是非产者（架构师改 03-arch.md、at-qa 写 06-test.md）：不说「你自己的实现记录」，说这一段的实现记录', () => {
+  for (const [write, agent] of [['03-arch.md', 'agent-team:at-architect'], ['06-test.md', 'agent-team:at-qa']]) {
+    const out = m3xLedger({ ...M3X_S5_ACCOUNTED, artifacts: [...M3X_S5_ACCOUNTED.artifacts, write], write, agent })
+    assert.match(out, /【阶段】S5/, agent)
+    assert.ok(!out.includes('你自己的实现记录'), `${agent}：${out}`)
+    assert.ok(out.includes('这一段的产物是各执行角色的实现记录'), `${agent}：${out}`)
+    assert.ok(!out.includes('推进之前逐份读'), `${agent}：${out}`)
+    assert.ok(out.includes('都在磁盘上了'), `${agent}：${out}`)
+    assert.match(out, /被写路径隔离拒绝[^。]*已解决[^。]*那一份不算交齐/, agent)
+  }
+})

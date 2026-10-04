@@ -46,6 +46,10 @@ const CONTRACT = '00-contract.md'
 // 这种钉住配置下契约会永远写不出来——规格 §5.3 连用户的升级答复都要"作为
 // 带日期的修订块追加进 00-contract.md"，那也是 PM 转写的动作，同样会被
 // 堵死。这是真的功能断裂，不是更保守的选择。
+// ⚠️ 订正（M4b，docs/36）：上面「本仓库自己的 settings.json 就是 {"agent": "at-pm"}，钉住时……会带裸的
+// agent_type: 'at-pm'」两处事实都要改：settings.json 现在写插件全名 "agent-team:at-pm"（裸名时，项目或用户层
+// 同名的 at-pm.md 会抢先当上主会话，P8）；钉住的 PM 在 hook 输入里的原始 agent_type 一直是全名（docs/22），
+// 裸 'at-pm' 是剥掉前缀之后的值。callerOf 两种都认，结论不变。
 //
 // 为什么可以把 at-pm 和 MAIN 同等对待（规格依据）：§5.3 原话是"契约唯一
 // 写者是用户（经 PM 转写）"——PM 就是那个被授权写契约的人，钉住配置下
@@ -53,13 +57,14 @@ const CONTRACT = '00-contract.md'
 //
 // 这条豁免的安全性依赖什么（评审 Task 5 顾虑 1）：hook 输入本身分不清
 // "被钉成主线程的 at-pm"和"被别人派发出来的 at-pm 子代理"——两者的
-// agent_type 都是裸的 'at-pm'，这个函数拿到的只是一个字符串，看不出
+// agent_type 剥掉插件前缀之后都是 'at-pm'（M4b 订正：原来写「都是裸的」），这个函数拿到的只是一个字符串，看不出
 // 背后的调用形态。这条豁免因此不是自己成立的，靠的是花名册闭包这个
 // 结构性不变量：当前 roster.json 里没有任何角色的 can_delegate_to 包含
 // at-pm（tests/roster-closure.test.mjs「没有任何角色能把 at-pm 当作
 // 派发目标」钉住这条），所以"at-pm 作为被派发出来的子代理出现"这条
 // 路径在当前花名册下根本不存在——能带着 agent_type: 'at-pm' 走到这里的，
-// 只可能是被钉住的主线程。**如果将来有人往某个角色的 can_delegate_to
+// 只可能是被钉住的主线程（M4b 补：还有一种是非插件、名叫 at-pm 的 agent——用户经 --agent at-pm 或自己设置里的
+// agent 键让项目或用户层的同名 at-pm.md 当上主会话，它带裸名；剥前缀认 PM 这一层为什么不收紧，见 docs/36）。**如果将来有人往某个角色的 can_delegate_to
 // 里加了 at-pm，这条豁免就会同时放行一个真正的子代理，必须回来重新
 // 评估**，不能继续假设 at-pm 只可能是 PM。
 //

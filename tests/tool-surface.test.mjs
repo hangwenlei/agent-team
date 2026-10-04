@@ -16,6 +16,8 @@ import { fileURLToPath } from 'node:url'
 import { join, relative } from 'node:path'
 import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 import { EXPECTED_AGENTS } from './helpers/expected-agents.mjs'
+import { stripPluginPrefix } from '../hooks/lib/decide.mjs'
+import { isVerifyStage, stageRoles } from '../hooks/lib/stages.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const AGENTS_DIR = join(ROOT, 'agents')
@@ -129,7 +131,8 @@ test('前置条件：agents/ 下每个 .md 都解得出至少一个工具名—�
         `${JSON.stringify(text)}）。要么这个角色真的没有 tools: 声明，要么它用了一种 ` +
         'tests/helpers/agent-tools.mjs 还不认识的 YAML 写法——两种情况下，下面那条' +
         '「不得出现 Skill / SendMessage / ListAgents」的否定断言都是在对着空文本做，' +
-        '恒真、什么都不证明（M1b 终审 C2 的成因）。',
+        '恒真、什么都不证明（M1b 终审 C2 的成因）。而且一份没有 tools: 行的正文会继承全部工具，' +
+        '包括禁授的那三样（官方文档：省略 tools 即继承全部工具）——主线程的 tools: 不替它兜着（M4b P4，docs/36）。',
     )
   }
 })
@@ -149,10 +152,15 @@ test('前置条件：agents/ 下每个 .md 都解得出至少一个工具名—�
 // 以及**任何一个上面四行都没点到名的工具**。往任意一份 `tools:` 里加一个 `Grep`、
 // `WebFetch`、`NotebookEdit`，整套测试零红。
 //
-// ⚠️ **为什么 `at-pm` 那一行尤其要紧**：主线程 agent 的 `tools:` 是**整个会话的能力
-// 天花板**，被所有子代理、孙代理继承（主规格 §3.3 U2 实测；下面那条禁授工具的失败
-// 文案引的 `Skill is disabled for this session, in subagents as well as here` 就是
-// 同一件事的记录级证据）。**给 `at-pm` 悄悄加一个工具，等于给整棵子树加。**
+// ⚠️ **为什么 `at-pm` 那一行要紧**：它是主会话的工具面——插件把主会话钉成 at-pm，用户在普通会话里能用的 MCP 与
+// 网页工具，装了插件的项目里主会话都拿不到（M4b P2 实测）；它的 `Agent(...)` 类型表是整个会话的派发宇宙
+// （主规格 §3.3 U2/U4）。
+// ⚠️ **订正（M4b，docs/36）**：这里原来写「主线程的 tools: 是整个会话的能力天花板，被子代理继承；给 at-pm 加一个
+// 工具等于给整棵子树加」——工具这一维不成立。P4 实测：主线程白名单只有 Read 与 Agent 时，子代理照样调通了自己 tools:
+// 里列的 MCP、Grep、WebSearch、WebFetch。只封顶派发宇宙；每个角色拿的是自己清单里的工具。原来引作证据的
+// `... is disabled for this session, in subagents as well as here` 是一句固定文案（调用方清单里没有、内建目录里有的工具
+// 一律报它），docs/15 早有反证。所以禁授（Skill / SendMessage / ListAgents）靠的是**每一份**自己的 tools: 行——
+// 下面那条逐份的禁授判据、上面那条「每份都解得出至少一个工具名」的前置（缺 tools: 行＝继承全部工具），加这份期望值。
 //
 // ⚠️ **这条缺口不是读出来的，是一次为别的目的做的变异顺带照出来的。** M2c 给两份
 // README 补「`at-pm` 工具面」判据时，变异「往 `agents/at-pm.md` 的 `tools:` 里加一个
@@ -183,18 +191,20 @@ test('前置条件：agents/ 下每个 .md 都解得出至少一个工具名—�
 // 不是冗余：那一条驱动的是「持有 `Bash` 的正文必须写哪几条红线」，这一条钉的是整条
 // 声明。两者从相反方向夹着同一个事实——`HAS_BASH` 停在旧值时这条红，这份期望值停在
 // 旧值时那条红。
+// M4b（docs/36，审查第 29 条）：十个团队角色加 Grep（只读、不经任何门禁；at-outsider 是派不起来的测试替身，保持最小）；
+// 写文档、不在验证段的 at-product、at-architect 加 Edit。at-qa、at-acceptance 不给 Edit，理由见下面那条判据。
 const EXPECTED_TOOLS = {
-  'at-acceptance.md': ['Glob', 'Read', 'Write'],
-  'at-android.md': ['Bash', 'Edit', 'Glob', 'Read', 'Write'],
-  'at-architect.md': ['Agent', 'Glob', 'Read', 'Write'],
-  'at-backend.md': ['Bash', 'Edit', 'Glob', 'Read', 'Write'],
-  'at-frontend.md': ['Bash', 'Edit', 'Glob', 'Read', 'Write'],
-  'at-ios.md': ['Bash', 'Edit', 'Glob', 'Read', 'Write'],
+  'at-acceptance.md': ['Glob', 'Grep', 'Read', 'Write'],
+  'at-android.md': ['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write'],
+  'at-architect.md': ['Agent', 'Edit', 'Glob', 'Grep', 'Read', 'Write'],
+  'at-backend.md': ['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write'],
+  'at-frontend.md': ['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write'],
+  'at-ios.md': ['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write'],
   'at-outsider.md': ['Read'],
-  'at-pm.md': ['Agent', 'AskUserQuestion', 'Bash', 'Edit', 'Glob', 'Read', 'Write'],
-  'at-product.md': ['Agent', 'Glob', 'Read', 'Write'],
-  'at-qa.md': ['Bash', 'Glob', 'Read', 'Write'],
-  'at-ui.md': ['Bash', 'Edit', 'Glob', 'Read', 'Write'],
+  'at-pm.md': ['Agent', 'AskUserQuestion', 'Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write'],
+  'at-product.md': ['Agent', 'Edit', 'Glob', 'Grep', 'Read', 'Write'],
+  'at-qa.md': ['Bash', 'Glob', 'Grep', 'Read', 'Write'],
+  'at-ui.md': ['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write'],
 }
 
 test('十一份 agent 的 tools: 声明与预期逐份一致——加一个工具、少一个工具都红', () => {
@@ -207,11 +217,10 @@ test('十一份 agent 的 tools: 声明与预期逐份一致——加一个工�
     EXPECTED_TOOLS,
     '某个角色的 tools: 声明变了，而这份期望值没跟着变。**不要先改这份期望值**——先回答：' +
       '这个工具为什么要授予（或为什么要收回）？规格 §6.1 把角色工具面定为**按需白名单**，' +
-      '多一个就是多一份触达面。⚠️ 如果动的是 at-pm.md，代价还要乘一层：主线程 agent 的 ' +
-      'tools: 是**整个会话的能力天花板**，被所有子代理、孙代理继承（主规格 §3.3 U2 实测）' +
-      '——给 at-pm 加一个工具，等于给整棵子树加。改对了再回来同步这份清单，并确认 ' +
+      '多一个就是多一份触达面。动的是 at-pm.md 时，它是主会话的工具面，README 两半的已知边界照着它写；' +
+      '每个角色只拿自己清单里的工具（主线程的 tools: 不封顶子代理的工具，M4b P4 实测，docs/36）。改对了再回来同步这份清单，并确认 ' +
       'tests/agents.test.mjs 的 HAS_BASH、tests/roster-sync.test.mjs 的 Agent(...) 那一组、' +
-      '以及两份 README 已知边界里 at-pm 的工具面（tests/readme-sync.test.mjs）是不是也要一起动。',
+      '以及 README 两半已知边界里 at-pm 的工具面（tests/readme-sync.test.mjs）是不是也要一起动。',
   )
 })
 
@@ -226,10 +235,8 @@ test('没有任何角色的 tools: 包含 Skill / SendMessage / ListAgents', () 
         !names.includes(name) && !new RegExp(`\\b${name}\\b`).test(text),
         `agents/${file} 的 tools: 声明里出现了 ${name}（原文 ${JSON.stringify(text)}）。` +
           reason +
-          '而且主线程 agent 的 tools: 会把整个工具面传导给整棵子树（U7 实测里 ' +
-          '"Skill is disabled for this session, in subagents as well as ' +
-          'here" 就是证据）——给任何一个角色开这个口子，等于给它派生出的整棵 ' +
-          '子树都开了口子。规格 §6.1：角色工具面是按需白名单，这三个工具一律 ' +
+          '禁授靠的是每一份自己的 tools: 行：主线程的 tools: 不封顶子代理的工具（M4b P4 实测，docs/36），' +
+          '任何一个角色写了它，那个角色就真拿到了。规格 §6.1：角色工具面是按需白名单，这三个工具一律 ' +
           '不授予。',
       )
     }
@@ -253,4 +260,52 @@ test('本插件自带的 skills/**/SKILL.md 不声明 context: fork（当前 0 �
         '的 skill 一律不得使用 context: fork。',
     )
   }
+})
+
+// ============================================================================ M4b（docs/36，审查第 29 条）
+
+// 验证段（stages.json 里 "verifies": true 的段）的产者，除主会话角色外不持 Edit。验证段的产物在返工轮里要整份重新出，
+// 门禁只按 sha 判新旧、认不出「在上一轮那份末尾补一句」（hooks/lib/freshness.mjs 的 VERIFY_REDO）。不给 Edit 让这一招
+// 从一次小编辑变回整份重写——这是**摩擦，不是屏障**：Write 读一遍再整份写回照样做得到，持 Bash 的 at-qa 一行 >> 也
+// 做得到；主会话角色（at-pm，S8 的产者）要用 Edit 追加契约修订块、改 state.json，豁免。所以它对 at-acceptance 是一层摩擦
+// （只能整份写回），对 at-qa 更弱（一行 >>）；「只补一句」门禁认不出，只靠正文的要求。主会话角色从 settings.json 剥前缀取，
+// 不写字面量。
+const STAGES = JSON.parse(readFileSync(join(ROOT, 'stages.json'), 'utf8'))
+const SETTINGS = JSON.parse(readFileSync(join(ROOT, 'settings.json'), 'utf8'))
+const MAIN_ROLE = stripPluginPrefix(SETTINGS.agent)
+const VERIFY_PRODUCERS = [
+  ...new Set(Object.values(STAGES).filter((s) => isVerifyStage(s)).flatMap((s) => stageRoles(s))),
+].filter((r) => r !== MAIN_ROLE)
+
+test('M4b 前置：验证段里除主会话角色外的产者不为空，每个都有一份 agents/*.md', () => {
+  assert.ok(MAIN_ROLE && AGENT_FILES.includes(`${MAIN_ROLE}.md`), `settings.json 的 agent 剥前缀后是 ${JSON.stringify(MAIN_ROLE)}`)
+  assert.ok(VERIFY_PRODUCERS.length > 0, '验证段的产者算出来是空集——下面那条判据在空转')
+  for (const r of VERIFY_PRODUCERS) assert.ok(AGENT_FILES.includes(`${r}.md`), r)
+})
+
+test('M4b 验证段的产者（主会话角色除外）不持 Edit——返工轮里它们的产物整份重出', () => {
+  for (const r of VERIFY_PRODUCERS) {
+    assert.ok(
+      !declarationOf(`${r}.md`).names.includes('Edit'),
+      `${r} 是验证段的产者，tools: 里却有 Edit。它的产物返工时要整份重新出，门禁只按 sha 判、认不出「末尾补一句」；` +
+        '不给 Edit 是摩擦，不是屏障（Write 照样能整份写回、持 Bash 的还能 >>），别把它写成「挡住了」。真要给，先改 docs/36 的裁定。',
+    )
+  }
+})
+
+// 正文的理由跟着工具清单走：验证段的产者（主会话除外）正文里要有一句把「没有 Edit」与「整份重写」连在一起；at-qa 原来那句
+// 「你也没有 Edit，是同一个理由」（同一个理由＝不新增代码文件）的前提不成立——Write 能整份覆盖已有文件，H3 对两者同一个
+// matcher（docs/11 §5.14 的收口）。「不新增代码文件」本身照旧，钉住它。
+test('M4b 验证段的产者（主会话除外）正文写明没有 Edit 是因为整份重写；at-qa 不再说「是同一个理由」，「不新增代码文件」照旧', () => {
+  for (const r of VERIFY_PRODUCERS) {
+    const body = readFileSync(join(AGENTS_DIR, `${r}.md`), 'utf8').replace(/\r\n/g, '\n')
+    const paras = body.split(/\n\s*\n/)
+    assert.ok(
+      paras.some((p) => /没有 `Edit`/.test(p) && p.includes('整份')),
+      `agents/${r}.md 里没有一段同时写着「没有 \`Edit\`」与「整份」`,
+    )
+  }
+  const qa = readFileSync(join(AGENTS_DIR, 'at-qa.md'), 'utf8')
+  assert.ok(!qa.includes('是同一个理由'), 'at-qa.md 还在说「你也没有 Edit，是同一个理由」')
+  assert.ok(qa.includes('不新增代码文件'), 'at-qa.md 的「不新增代码文件」不见了')
 })

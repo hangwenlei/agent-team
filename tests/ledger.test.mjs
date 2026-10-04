@@ -373,3 +373,17 @@ test('M4a 核对【返工】08-delivery.md 还旧：说「这是你自己的产�
   assert.match(s, /08-delivery\.md：这是你自己的产物/)
   assert.doesNotMatch(s, /08-delivery\.md：验证段/)
 })
+
+// M4b 第二轮复核：执行段按形状认——段号不叫 S5 的自定义链里，「齐了」那句照样带提醒；别的段不带。
+test('M4b 执行段的提醒按形状认：自定义链里叫 IMPL 的执行段齐了也带它', () => {
+  const stages = {
+    DESIGN: { role: 'at-pm', requires: [], produces: ['d.md'] },
+    IMPL: { role: 'at-backend', producers: ['at-backend'], requires: ['d.md'], produces: ['impl/<role>.md'] },
+    CHECK: { role: 'at-qa', requires: [], produces: ['c.md'] },
+  }
+  const st = (stage) => ({ ...base.state, stage, history: [{ stage, at: 'x' }], closed_at: null })
+  const impl = buildLedgerNotices({ ...base, kind: 'state', stages, state: st('IMPL'), stageDone: true }).join('\n')
+  assert.match(impl, /被写路径隔离拒绝/)
+  const design = buildLedgerNotices({ ...base, kind: 'state', stages, state: st('DESIGN'), stageDone: true }).join('\n')
+  assert.doesNotMatch(design, /被写路径隔离拒绝/)
+})

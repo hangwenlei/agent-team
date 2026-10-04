@@ -129,6 +129,9 @@ test('H2 L7：S7 里 PM 派 at-qa 补测、06-test.md 交过 → 拒；PM 的出
   assert.match(r.reason, /「回退」/)
   assert.match(r.reason, /问用户/)
   assert.doesNotMatch(r.reason, /冒泡/)
+  // 文档核对：上一份写的根因在更早一段的（06-test.md 首行写着没开跑），照回退表回到更早那一段——不是门禁算出来的这一段。
+  assert.match(r.reason, /根因在更早一段[^。]*回到更早那一段/)
+  assert.match(r.reason, /没开跑[^。]*核过实现记录/)
 })
 
 test('H2 P10：S5 里 at-product 派 at-ui 重做 S2、at-ui 的 S2 产物交过 → 拒（不因为 at-ui 在 S5 有活就放过）', () => {

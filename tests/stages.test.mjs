@@ -306,3 +306,12 @@ test('M4a mayAcceptProduct：按链上最早产出它的那一段判（合成阶
   assert.equal(mayAcceptProduct(chain, 'x.md'), true)
   assert.equal(mayAcceptProduct(chain, 'y.md'), false)
 })
+
+// M4b（docs/36）：执行段按形状认，不写死段号。
+test('M4b isRolePatternStage：produces 是数组、有一项含 <role> 才算；对象形式、没有 <role>、null 都不算', async () => {
+  const { isRolePatternStage } = await import('../hooks/lib/stages.mjs')
+  assert.equal(isRolePatternStage({ produces: ['notes.md', 'impl/<role>.md'] }), true)
+  assert.equal(isRolePatternStage({ produces: { a: ['x.md'] } }), false)
+  assert.equal(isRolePatternStage({ produces: ['a.md'] }), false)
+  assert.equal(isRolePatternStage(null), false)
+})

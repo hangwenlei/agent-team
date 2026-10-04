@@ -52,6 +52,10 @@ test('runDir 为空时不表态——无法判定哪个是契约', () => {
 // 这个仓库能不能自举的问题。H3 已经认了同一个事实（tests/gate-writepath.
 // test.mjs「被 settings.json 钉成主线程的 at-pm...写...00-contract.md
 // 不受阻」），H4 不能不认。
+// ⚠️ 订正（M4b，docs/36）：settings.json 现在写全名 {"agent": "agent-team:at-pm"}；钉住的 PM 在 hook 输入里的原始
+// agent_type 一直是全名（docs/22），裸 'at-pm' 是剥前缀之后的值。原始值是裸名的只有一种：项目或用户层另有一份非插件的
+// at-pm.md，用户经 --agent at-pm 或自己设置里的 agent 键选中了它（只有插件的 at-pm 时，--agent at-pm 按后缀解析成全名）。
+// 两种都按 PM 放行。
 
 test('agent_type 是空字符串——不当作主线程，按 subagent 处理（口径与 callerOf 一致）', () => {
   const r = decideContractGuard({ agentType: '', filePath: CONTRACT, runDir: RUN })

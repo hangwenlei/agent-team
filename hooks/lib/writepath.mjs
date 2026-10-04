@@ -112,7 +112,7 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   //
   // 「谁算 PM」复用 isContractWriter，不另写一遍 role === 'at-pm'：M1a 评审在 H4
   // 那里已经因为同一个谓词写两份开过一轮循环，结论是抽成单一导出。它内部走
-  // callerOf，MAIN（'__main__'）与裸 'at-pm' 都返回 true；这条豁免的安全性依赖
+  // callerOf，MAIN（'__main__'）与 at-pm（带不带插件前缀）都返回 true；这条豁免的安全性依赖
   // 「没有角色能把 at-pm 当派发目标」这条花名册不变量，由
   // tests/roster-closure.test.mjs 钉住，完整论证在 contract-guard.mjs 头部。
   //
@@ -252,11 +252,30 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     }
   }
 
+  // project.paths 的值是相对项目根的前缀；项目根由 runDir 往上推三级得到
+  // （.agent-team/runs/<id> → 项目根），没有 runDir 时退回用 filePath 的根。
+  const base = runDir ? norm(`${runDir}/../../..`) : '/'
+  // 问题按 audience: 'role' 取：只说问题本身，不带「删掉这一条……收尾时告诉用户」这类说给 PM 的改法——执行角色
+  // 改不了 project.json、也见不到用户，它的出路是冒泡。
+  const own = entryProblems(role, paths[role], { audience: 'role' })
+
+  // 7b. 建了键的 at-qa、at-acceptance（M4b 第二轮复核，docs/36）：写在自己合法的前缀下照旧放行（判据钉着这一格）；别的
+  //     一律说同一句——它不写 run 目录之外的文件，这次写入不是它的活，键本不该有、由 PM 删掉。原来这一格分三路说：第 8 步
+  //     叫 PM「改 project.json」，「没人认领」那一支叫 PM「划给某个角色」，只有「归 X」那一支说键不该有——前两路都会把
+  //     PM 引去往一个账本说「不要建」的键上加前缀。不说「删了之后就能写」：删键之后它确实整段放行（第 2 步），对正想写
+  //     别人代码的 at-qa 说这句，等于告诉它怎么绕过去。
+  if (NO_PATHS_ROLES.includes(role)) {
+    if (!own.block.length && underAny(target, paths[role], base)) return { decision: 'allow' }
+    return {
+      decision: 'deny',
+      reason:
+        `${who} 不得写 ${fp}——你不写 run 目录之外的文件（只写自己那份 run 产物），这次写入不是你的活；` +
+        '另外 .agent-team/project.json 的 paths 里不该有你的键（按设计不认领路径）：回报时提一句，由 PM 删掉它。',
+    }
+  }
+
   // 8. 调用者自己的条目有阻断问题（不是数组、元素不是字符串、前缀出根、认领整个根、带冒号）：只拒它——整条条目
   //    作废，连它其余合法的前缀也写不了。理由里说出来：实测只点一条前缀时，PM 会读成「只有这条前缀失效」而留着它。
-  //    问题按 audience: 'role' 取：只说问题本身，不带「删掉这一条……收尾时告诉用户」这类说给 PM 的改法——执行角色
-  //    改不了 project.json、也见不到用户，它的出路是 fixIt 那句冒泡。
-  const own = entryProblems(role, paths[role], { audience: 'role' })
   if (own.block.length) {
     return {
       decision: 'deny',
@@ -266,9 +285,6 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     }
   }
 
-  // project.paths 的值是相对项目根的前缀；项目根由 runDir 往上推三级得到
-  // （.agent-team/runs/<id> → 项目根），没有 runDir 时退回用 filePath 的根。
-  const base = runDir ? norm(`${runDir}/../../..`) : '/'
   const myPaths = paths[role]
   if (underAny(target, myPaths, base)) return { decision: 'allow' }
 
@@ -277,21 +293,60 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 协调。第 3 步已经保证走到这里时花名册有效。at-outsider 不排除：它是花名册里的真键、H3 照常判它；说「归
   // at-outsider」会把 PM 引到 project.json 里那个错键上（账本的要改档已经点名「不要给 at-outsider 建键」），排除它
   // 反倒会说成「没有被任何角色认领」，而配置里明明有人认领。
-  const claimant = Object.entries(paths).find(
-    ([other, value]) =>
-      other !== role &&
-      Object.hasOwn(roster, other) &&
-      other !== 'at-pm' &&
-      other !== '__main__' &&
-      underAny(target, usablePrefixes(value), base),
-  )
+  // M4b（docs/36，审查第 21 条）：认领者列全——根级清单、构建配置、测试目录常常共列在几个执行角色名下（模板的
+  // src/shared/ 就是这样写的），只点第一个，PM 会以为它只归一个角色。
+  const claimants = Object.entries(paths)
+    .filter(
+      ([other, value]) =>
+        other !== role &&
+        Object.hasOwn(roster, other) &&
+        other !== 'at-pm' &&
+        other !== '__main__' &&
+        underAny(target, usablePrefixes(value), base),
+    )
+    .map(([other]) => other)
 
-  if (claimant) {
+  if (claimants.length) {
+    // 出路按调用者分（M4b）。叶子执行角色（花名册里派不出任何人）：这份文件要是本来就该几个角色一起改，由 PM 在
+    // paths 里共列。协调者（at-architect、at-product）不拿这句——它的正路是派给认领者（docs/09 的层级协调），照
+    // 「列到你名下」做，PM 会把代码路径划给设计类角色，at-architect 的红线「不得替执行角色把代码写了」就只剩正文守着。
+    // 第一轮复核（docs/36）补的几种边角：
+    //   - 认领者按设计不该有键（NO_PATHS_ROLES、at-outsider：没有谁派得到它），或者它的条目整条作废（派它去写，它在第 8 步
+    //     又被拒）——点明，出路是 PM 改配置，不叫协调者去派它；
+    //   - 调用者自己是建了键的 at-qa、at-acceptance：第二轮复核挪到第 7b 步统一说，走不到这里；
+    //   - 花名册里调用者那一条坏了：判不出它是叶子还是协调者，不给「列到你名下」；
+    //   - 协调者那句不看阶段：架构师在 S3 出方案时派不了 S5 的产者（H2 拒），正路是写进落盘清单。
+  // 第二轮复核：协调者那句只点名没被排除的认领者（不该有键、条目作废的不点——混着它们时「派给它」会被读成那一个；调用者
+  // 自己派不到的，靠紧跟着的「派不到的，冒泡」兜住，不按 can_delegate_to 再筛）；调用者自己条目里
+  // 「要改」档的前缀这一支也说出来（目标正好归别人时，PM 打开 project.json 会以为调用者已经列过了）。
+    const entry = roster[role]
+    const rosterOk = isPlainObject(entry) && Array.isArray(entry.can_delegate_to)
+    const off = claimants.filter((c) => NO_PATHS_ROLES.includes(c) || c === 'at-outsider')
+    const voided = claimants.filter((c) => !off.includes(c) && entryProblems(c, paths[c], { audience: 'role' }).block.length)
+    const usable = claimants.filter((c) => !off.includes(c) && !voided.includes(c))
+    const notes = []
+    if (off.length) notes.push(`${off.map((c) => quote(c)).join('、')} 按设计不该有 paths 键——冒泡给派你的上级，由 PM 改 .agent-team/project.json`)
+    if (voided.length) notes.push(`${voided.map((c) => quote(c)).join('、')} 的条目眼下整条作废——冒泡给派你的上级，由 PM 先修 .agent-team/project.json`)
+    let way
+    if (!rosterOk) {
+      way = 'roster.json 里你这一条读不出来，门禁判不出该给你哪条出路：冒泡给派你的上级，由 PM 告诉用户重装或更新 agent-team 插件。'
+    } else if (entry.can_delegate_to.length) {
+      way = usable.length
+        ? `这是认领者的活：到你分发它的那一段再派给 ${usable.map((c) => quote(c)).join(' 或 ')}（还在出方案的，把这件事写进你这一段的` +
+          '产物交上去——架构师写进 03-arch.md 的「落盘清单」）；派不到的，冒泡给派你的上级。不要自己动它的文件。'
+        : '不要自己动它的文件，冒泡给派你的上级。'
+    } else {
+      way =
+        '跨角色的改动要经上级协调，不要直接动别人的地盘。这份文件要是本来就该几个角色一起改（根级清单、构建配置、' +
+        '测试目录），冒泡给派你的上级，由 PM 在 .agent-team/project.json 的 paths 里把它也列到你名下（你写不了 project.json）。'
+    }
     return {
       decision: 'deny',
       reason:
-        `${who} 不得写 ${fp}——这条路径归 ${quote(claimant[0])}。` +
-        `跨角色的改动要经上级协调，不要直接动别人的地盘。`,
+        `${who} 不得写 ${fp}——这条路径归 ${claimants.map((c) => quote(c)).join('、')}。` +
+        `${notes.length ? `${notes.join('；')}。` : ''}` +
+        (own.fix.length ? `你的条目里还有要改的：${own.fix.slice(0, 3).join('；')}。` : '') +
+        way,
     }
   }
 
@@ -299,7 +354,11 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     decision: 'deny',
     reason:
       `${who} 不得写 ${fp}——这条路径在 .agent-team/project.json 里没有被任何角色认领` +
-      `（${who} 认领的是 ${quote(myPaths)}；前缀按字面比较，不是通配符）。` +
+      // M4b：逐条引——整份数组只过一次 quote 会被截在 80 个字符，排在末尾的（正好是之后补进来的）被截掉。
+      `（${who} 认领的是 ${myPaths.length ? myPaths.map((p) => quote(p)).join('、') : '[]（只写 run 目录）'}；` +
+      '前缀按字面比较，不是通配符）。' +
+      // 第一轮复核：自己条目里「要改」档的前缀（不可见格式字符、首尾空白、反斜杠）原样引出来，读着像「认领了却说没人认领」。
+      (own.fix.length ? `你的条目里还有要改的：${own.fix.slice(0, 3).join('；')}。` : '') +
       // 落到这里的只可能是有键的执行角色，它写不了 project.json（控制文件）。不拼 fixIt：没人认领也可能是这次
       // 调用越界了，不一定是配置问题。
       '确实要写这里，冒泡给派你的上级，由 PM 决定要不要在 .agent-team/project.json 的 paths 里把它划给某个角色' +

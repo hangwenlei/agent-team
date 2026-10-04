@@ -220,3 +220,18 @@ test('最低版本作业的配置：装的就是 MIN_NODE，并把它交给 AGEN
   // 最后一次 setup-node 决定 PATH 上的 node，也就是测试框架用的那个：它必须是新版本。
   assert.equal(Number(versions[versions.length - 1].split('.')[0]) >= 22, true, `最后装的是 ${versions[versions.length - 1]}`)
 })
+
+// M4b 第二轮复核：入口不读 stdin、input 又大时，写 stdin 报 EPIPE——spawnSync 把它放进 result.error，run() 原来一律报成「没起来」，
+// 负载高时 CI 会偶发假红。退出码与输出照常判：两种出口都该报「退出码 3」。
+test('M4b 入口不读 stdin、input 很大：run 与 runAsync 都照退出码判，不把 EPIPE 当成没起来', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'agent-team-runner-'))
+  try {
+    const gate = join(dir, 'exit3.mjs')
+    writeFileSync(gate, 'process.exit(3)\n')
+    const big = 'x'.repeat(200 * 1024)
+    for (let i = 0; i < 5; i++) assert.throws(() => run('writepath', big, gate, dir), /退出码 3/)
+    await assert.rejects(runAsync('writepath', big, { gate, cwd: dir }), /退出码 3/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

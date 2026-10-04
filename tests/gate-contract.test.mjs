@@ -86,12 +86,16 @@ test('contract：主线程（无 agent_type）写契约放行，stdout 为空', 
 // M0 实测「次要事实」），不是真正的"无 agent_type"，但语义上仍是 PM 转写，
 // 不是 subagent 执行链上的一环。本仓库自己的 settings.json 就是
 // {"agent": "at-pm"}——这不是假设性的配置，是这个仓库的真实运行状态。
-test('contract：被 settings.json 钉成主线程的 at-pm（带 agent_type）写契约不受阻', () => {
+// ⚠️ 订正（M4b，docs/36）：settings.json 现在写全名 {"agent": "agent-team:at-pm"}；钉住的 PM 在 hook 输入里的原始
+// agent_type 一直是全名（docs/22），裸 'at-pm' 是剥前缀之后的值。原始值是裸名的只有一种：项目或用户层另有一份非插件的
+// at-pm.md，用户经 --agent at-pm 或自己设置里的 agent 键选中了它（只有插件的 at-pm 时，--agent at-pm 按后缀解析成全名）。
+// 两种都按 PM 放行。
+for (const agentType of ['at-pm', 'agent-team:at-pm']) test(`contract：被 settings.json 钉成主线程的 at-pm（agent_type ${agentType}）写契约不受阻`, () => {
   const dirs = makeRun({ runId: 'r1' })
   try {
     const input = {
       tool_name: 'Write',
-      agent_type: 'at-pm',
+      agent_type: agentType,
       tool_input: { file_path: join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md') },
     }
     const { stdout, status } = run('contract', input, undefined, dirs.projectDir)

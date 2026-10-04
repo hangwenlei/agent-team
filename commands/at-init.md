@@ -1,8 +1,9 @@
 ---
-description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json（阶段 S0，一次性）
+description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json（阶段 S0；之后 /agent-team:at 在 S4、S5 往 paths 里补前缀，配置问题照第 2、3 节修）
 ---
 
-你是 AT-PM。这条命令做规格 §4 的 S0 勘察，一次性，结果给后面每一趟 run 复用。
+你是 AT-PM。这条命令做规格 §4 的 S0 勘察，一次性，结果给后面每一趟 run 复用；之后 `/agent-team:at` 在 S4
+照架构方案的落盘清单、在 S5 照执行角色被拒的路径往 `paths` 里补前缀（只加不删）；门禁报出的配置问题照第 2、3 节修；都不重跑这条命令。
 
 带 `${CLAUDE_PLUGIN_ROOT}` 前缀的路径在**插件目录**里，连着前缀一起读；以 `.agent-team/` 开头的
 路径才在用户项目里。插件装在用户项目之外，去掉前缀的裸相对路径按会话工作目录
@@ -30,7 +31,7 @@ description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json
 **四件事**（规格 §7.1：路径归属、可用班底、技术栈、构建与测试命令）：
 
 - `stack`：语言、框架、包管理器。
-- `paths`：**每个角色能写哪些目录前缀**。这是写路径隔离（H3）唯一的判据来源。
+- `paths`：**每个角色能写哪些前缀（目录或单个文件）**。这是写路径隔离（H3）唯一的判据来源。
   - 键只能是花名册里的角色名。
   - **不要给 `at-pm` 建键**：PM 不认领业务路径，它写的是控制文件与自己阶段的产物。
   - **也不要给 `at-qa` 与 `at-acceptance` 建键**：它们不写实现代码，只写自己那份 run
@@ -55,6 +56,13 @@ description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json
   - 共享目录（例如 `src/shared/`）可以同时出现在多个角色下，那是有意的。前缀嵌套时（`docs/`
     包含 `docs/ui/`）外层角色也能写内层——认领按「列了谁、谁能写」，不按最具体的前缀独占；
     要独占，就别让外层前缀盖住它。
+  - **根级清单、构建配置与顶层测试目录**：磁盘上已有的（`package.json`、`package-lock.json`、`tsconfig.json`、
+    `vite.config.ts` 这类；iOS 的 `Package.swift`、`Podfile` 与工程目录；Android 的 `build.gradle.kts`、`settings.gradle.kts`、
+    `gradle/libs.versions.toml`；Python 的 `pyproject.toml`），以及顶层的测试目录，逐个列给每个会改它们的 `S5` 产者
+    （`${CLAUDE_PLUGIN_ROOT}/stages.json` 里 `S5` 的 `producers` 中这个项目用得上的）。同一条前缀列给几个产者是有意的，与上面共享目录同一种写法；
+    按磁盘上的实际文件名逐个列，不写通配。不列给 `at-architect`、`at-product`（它们定方案，不写实现）。空目录里看不到这些：
+    照模板骨架写的根级文件、`stack`、`build`、`test` 都只是占位，收尾时告诉用户哪些是占位；不是 Node 项目的，模板里 `package.json`、`package-lock.json`、
+    `tsconfig.json` 这几条不要带过去。实现要新建的根级文件，由 `/agent-team:at` 在 S4 照架构方案的落盘清单补。
 - `available_roles`：**这个项目用得上哪些执行角色**（规格 §7.1 的「可用班底」）。
   值是角色名数组，名字只能取自花名册。
   - **不要写 `at-pm`**：它是每一趟的驱动者，不参与「有没有被叫到」的统计。
