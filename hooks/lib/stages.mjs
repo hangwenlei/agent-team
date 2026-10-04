@@ -178,3 +178,20 @@ export function isStageChain(v) {
 export function productsOfStage(stage) {
   return expandProduces(stage, stageRoles(stage))
 }
+
+// M4a（docs/35）：验证段——stages.json 里写着 "verifies": true 的段。它的产物是对上游当时那一版的结论（测试报告、验收报告、
+// 交付报告）：返工轮里上游可能已经变了，上一轮那份不再对应现在的东西，所以一律重新出，rework_base 里不许标 "accepted"。
+// 只认布尔 true——这是 H6 的判据，写成 "true" 或 1 的不算（stages.json 是插件自己的文件，判据钉着它的取值）。
+export function isVerifyStage(stage) {
+  return isPlainObject(stage) && stage.verifies === true
+}
+
+/** 返工轮里这份产物能不能在 rework_base 里标 "accepted"：链上最早产出它的那一段不是验证段。不是任何一段的产物、阶段链读不出来：
+ * 能（这一条不管它——坏条目怎么处理由 H6 的别的判据定）。H6 与每一处给出「标 accepted」出路的回传都问它，口径只此一份。 */
+export function mayAcceptProduct(stages, name) {
+  if (!isStageChain(stages) || typeof name !== 'string') return true
+  for (const id of Object.keys(stages)) {
+    if (productsOfStage(stages[id]).includes(name)) return !isVerifyStage(stages[id])
+  }
+  return true
+}

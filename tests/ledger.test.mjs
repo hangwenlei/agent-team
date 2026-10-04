@@ -204,11 +204,17 @@ test('M3y【返工】：两样都空、或者写的不是 state.json → 不发'
 })
 
 // M3y 复核：链尾那一段没有「推进出去」这次写入，收口不经 H6——【返工】不能对它说「推进出这一段时 H6 会拦」。
+// M4a（docs/35）订正：收口那一次写入（closed_at）现在经 H6（hooks/lib/closing.mjs）——【返工】改说「收口那一次 H6 会拦」；
+// 08-delivery.md 是验证段的产物，不给「标 accepted」。仍然不说「推进出这一段时 H6 会拦」（链尾没有推进）。
 const REAL_STAGES = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
-test('M3y【返工】：当前段是阶段链最后一段时，说收口不经 H6，不说推进时会拦', () => {
+test('M3y【返工】：当前段是阶段链最后一段时，说收口那一次 H6 会拦（M4a），不说推进时会拦', () => {
   const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S8' }, reworkStale: { stage: 'S8', current: ['08-delivery.md'], earlier: [] } }).join('\n')
   assert.match(s, /当前段 S8：08-delivery\.md/)
-  assert.match(s, /最后一段，收口不经 H6/)
+  assert.match(s, /最后一段：收口那一次写入（closed_at）H6 会拦还是上一轮的产物，收口之前让它重写。/)
+  assert.doesNotMatch(s, /收口不经 H6/)
+  // 收口已经收了：不发【返工】。
+  const closed = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S8', closed_at: '2026-10-01T15:00:00Z' }, reworkStale: { stage: 'S8', current: ['08-delivery.md'], earlier: [] } }).join('\n')
+  assert.doesNotMatch(closed, /【返工】/)
   assert.doesNotMatch(s, /推进出这一段时 H6 会拦/)
   const mid = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S5' }, reworkStale: { stage: 'S5', current: ['05-impl/at-backend.md'], earlier: [] } }).join('\n')
   assert.match(mid, /推进出这一段时 H6 会拦/)
@@ -324,4 +330,46 @@ test('变异 L06：几段同时越限、budget 不按链序给 → 标签取链�
   }).join('\n')
   assert.ok(s.includes(approvalLabel('S2')), s)
   assert.ok(!s.includes(approvalLabel('S5')), s)
+})
+
+// M4a 复核（L07、A-7）：【返工】两类都有时，标 accepted 那一句点名能标的那几份；最后一段还收不了口时，给非 PM 的那句回报说「还收不了口」。
+test('M4a 复核【返工】两类都有：「这一轮接受它原样」点名能标的那一份', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S6' }, reworkStale: { stage: 'S6', current: ['06-test.md'], earlier: [{ name: '05-impl/at-backend.md', stage: 'S5' }] } }).join('\n')
+  assert.match(s, /这一轮接受它原样（05-impl\/at-backend\.md）/)
+  assert.match(s, /06-test\.md：验证段/)
+})
+
+test('M4a 复核【阶段】最后一段还收不了口：给非 PM 的回报说「还收不了口」，不说「齐了」', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'produce', state: { stage: 'S8' }, stageDone: true, closeBlockers: [{ name: '07-acceptance.md', why: 'missing', require: true }] }).join('\n')
+  assert.match(s, /还收不了口/)
+  assert.doesNotMatch(s, /"这一段的产物已经齐了"这件事/)
+})
+
+// M4a 复核二（L03、L05、L04）：「齐了」那一支的回报照旧；【阶段】的阻碍按 state 分「叫没叫过」；【返工】更早段那一行带验证段的说明。
+test('M4a 复核二【阶段】不在最后一段：给非 PM 的回报照旧是「这一段的产物已经齐了」', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'produce', state: { stage: 'S5' }, stageDone: true }).join('\n')
+  assert.match(s, /"这一段的产物已经齐了"这件事/)
+})
+
+test('M4a 复核二【阶段】阻碍按 state 分叫没叫过：at-qa 在 S6 叫过 → 「被叫到过」', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S8', stage_roles: { S6: ['at-qa'] }, roster: ['at-qa'] }, stageDone: true, closeBlockers: [{ name: '06-test.md', why: 'missing', require: true }] }).join('\n')
+  assert.match(s, /06-test\.md[^\n]*被叫到过/)
+})
+
+test('M4a 复核二【返工】更早段那一行：验证段的产物只能重写', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S7' }, reworkStale: { stage: 'S7', current: [], earlier: [{ name: '06-test.md', stage: 'S6' }] } }).join('\n')
+  assert.match(s, /验证段的产物只能重写/)
+})
+
+// M4a 文档核对（PG-4、PG-5）：【阶段】还收不了口那一句与 H6 同一个说法；【返工】对 PM 自己的验证段产物（08-delivery.md）不说「让它的产者」。
+test('M4a 核对【阶段】还收不了口：抬头带「不是空文件」，结尾说从第一步重走一遍', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S8' }, stageDone: true, closeBlockers: [{ name: '07-acceptance.md', why: 'missing', require: true }] }).join('\n')
+  assert.match(s, /不是空文件/)
+  assert.match(s, /从第一步重走一遍/)
+})
+
+test('M4a 核对【返工】08-delivery.md 还旧：说「这是你自己的产物」，不说「让它的产者」', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S8' }, reworkStale: { stage: 'S8', current: ['08-delivery.md'], earlier: [] } }).join('\n')
+  assert.match(s, /08-delivery\.md：这是你自己的产物/)
+  assert.doesNotMatch(s, /08-delivery\.md：验证段/)
 })

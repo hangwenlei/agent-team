@@ -14,6 +14,7 @@
 // 两处，并建议「回头看还有没有第三处没被穷举到」——有，就是这里。设计文档 §1.1
 // 那张「四个消费方」的表**数少了**，真实数目是六。
 import { stageRoles, stageRolesInRun, expandProduces } from './stages.mjs'
+import { VERIFY_REDO, splitByAccept } from './freshness.mjs'
 
 function producerOf(stages, artifact) {
   for (const [id, s] of Object.entries(stages)) {
@@ -178,9 +179,21 @@ export function decideReadiness({
     const gap = staleNames.endsWith('）') ? '' : ' '
     const stalePart = `${staleNames}${gap}还是上一轮的（返工轮里回退之后还没有重写，内容与回退那一刻一样）`
     const what = missing.length ? `还缺：${named(missing)}；${stalePart}` : ` ${stalePart}`
-    const out = callerCanWriteState
-      ? `这一轮接受上一轮那份原样，就在 state.json 的 rework_base 里把它的值改成 "accepted"（只许当前段及更早段的产物），再派发。`
-      : `rework_base 只有项目经理改得了：你判断上一轮那份这一轮不用重写，就把这一点写进你的回报冒泡给派你的人，由项目经理裁定。`
+    // M4a（docs/35）：还旧的前置按「能不能标 accepted」分开说——验证段的产物（例：at-acceptance 的前置 06-test.md）只给「派它的产者
+    // 重跑之后重写」，不给标 accepted（H6 会拒）。
+    const { accept, redo } = splitByAccept(stages, stale)
+    const both = accept.length && redo.length
+    const acceptOut = !accept.length
+      ? ''
+      : callerCanWriteState
+        ? `${both ? `${named(accept)}：` : ''}这一轮接受上一轮那份原样，就在 state.json 的 rework_base 里把它的值改成 "accepted"（只许当前段及更早段的产物），再派发。`
+        : `rework_base 只有项目经理改得了：你判断上一轮那份${both ? `（${accept.join('、')}）` : ''}这一轮不用重写，就把这一点写进你的回报冒泡给派你的人，由项目经理裁定。`
+    const redoOut = !redo.length
+      ? ''
+      : callerCanWriteState
+        ? `${named(redo)}：${VERIFY_REDO}；之后再派发。`
+        : `${named(redo)}：${VERIFY_REDO}——把这一点写进你的回报冒泡给派你的人。`
+    const out = acceptOut + redoOut
     return {
       decision: 'deny',
       reason: `${targetRole} 现在要做的是 ${stageId}，但它的前置产物${what}。先把产出这些产物的阶段跑完再回来，不要跳过。${out}`,

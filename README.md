@@ -97,6 +97,8 @@ flowchart TB
 
 实现阶段的角色由架构师分发，项目经理不越级派发；同一阶段的角色并行干活。谁能派谁以 `roster.json` 为准，每一段谁来做、交什么以 `stages.json` 为准。
 
+交付之后这一趟就收口了：不再回退，也不再派人。接着要改动或修复，用 `/agent-team:at <改动>` 另起一趟（新的契约、新的返工预算）。返工时，测试、验收与交付报告一律重新出，不沿用上一轮的。
+
 ### 什么时候会问你
 
 项目经理是唯一会跟你说话的角色，只在下面五类事上停下来问你：
@@ -110,6 +112,8 @@ flowchart TB
 | 返工用尽 | 返工次数用完了还不通过 |
 
 每次提问都会引用契约原文，给出 2–4 个具体选项、各自的后果和它的推荐；你的回答会作为修订写进契约。技术选型、裁掉哪些角色、代码风格这类事，它自己决定。
+
+另外，上一趟还没走完你又起了一趟新的，它会先问你接着跑哪一趟。
 
 返工用尽时，只有选项「再返工一轮：回到 <段>」会被门禁记成再来一轮的批准；在对话里单独发一条只写这一句的消息也算——会话问不了你时（后台会话、不带权限提示的 `-p`），这是唯一的路。
 
@@ -278,6 +282,8 @@ flowchart TB
 
 Implementation roles are dispatched by the architect — the project manager does not skip levels — and roles in the same stage work in parallel. Who may dispatch whom is defined in `roster.json`; which role does each stage and what it hands over, in `stages.json`.
 
+Once delivered, the run is closed: no more rollbacks and no more dispatches. For further changes or fixes, start a new run with `/agent-team:at <change>` (a new contract and a fresh rework budget). During rework, the test, acceptance and delivery reports are always produced anew rather than carried over from the previous round.
+
 ### When it asks you
 
 The project manager is the only role that talks to you, and it stops to ask about five kinds of things only:
@@ -291,6 +297,8 @@ The project manager is the only role that talks to you, and it stops to ask abou
 | Rework | Rework still fails after its budget is used up |
 
 Each question quotes the contract and offers two to four concrete options with their consequences and a recommendation; your answer is added to the contract as a revision. Technology choices, which roles to leave out and code style are decided without asking you.
+
+Also, if you start a new run while the previous one is unfinished, it first asks which one to continue.
 
 When rework runs out, only the option 「再返工一轮：回到 <stage>」 is recorded by the gates as approval for another round; a message containing just that line counts too — in a session that cannot ask you (a background session, `-p` without a permission prompt), it is the only way.
 

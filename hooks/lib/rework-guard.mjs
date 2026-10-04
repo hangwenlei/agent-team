@@ -30,7 +30,8 @@
 // isNonNegativeInteger 与 validateState 共用同一份（M2b 终审 A5）。
 import { reworkFromHistory, REWORK_LIMIT, isNonNegativeInteger } from './state.mjs'
 // isPlainObject 走 stages.mjs 同一份（M2b 终审 A2），原先是这里的私有拷贝。
-import { isPlainObject, isStageChain, productsOfStage } from './stages.mjs'
+import { isPlainObject, isStageChain, productsOfStage, mayAcceptProduct, isVerifyStage } from './stages.mjs'
+import { VERIFY_REDO, splitByAccept } from './freshness.mjs'
 import { approvalTargetFor, askUserText, limitOf, overLimit } from './budget.mjs'
 import { normalizeText } from './text-norm.mjs'
 // 拒绝理由会被模型读到；阶段名与计数值来自 state.json（磁盘或这次写入的内容），一律过 quote（M3s，docs/27）。
@@ -214,7 +215,9 @@ function decideCounts({ before, after, stages, grants }) {
 function decideChainInvariant({ before, after, stages }) {
   const ids = Object.keys(stages)
   const tail =
-    `收口不往 stage 或 history 里写「DONE」之类的标记——阶段链最后一段（${ids[ids.length - 1]}）就是终点；` +
+    // M4a（docs/35）：收口有了自己的标记，理由指过去（原来只说「最后一段就是终点」，PM 不知道收口该怎么记）。
+    `收口不往 stage 或 history 里写「DONE」之类的标记：在最后一段（${ids[ids.length - 1]}）用同一次 Write 记 never_invoked 与 ` +
+    'closed_at（/agent-team:at 第 6 节）；' +
     '返工是回到链上的某一段（照 /agent-team:at 第 3 节的「回退」）。'
   if (typeof after.stage !== 'string' || !Object.hasOwn(stages, after.stage)) {
     return { ok: false, reason: `state.json 的 stage 写成 ${quote(after.stage)}，它不是阶段链上的段（${ids.join('、')}）。${tail}` }
@@ -377,6 +380,22 @@ function names(list) {
   return list.join('、')
 }
 
+// M4a 复核（B-1）：这次写入新追加的条目里有几条回退（在链上不晚于它前一条；链外条目跳过，与 restartInfo 同一个口径）。
+function appendedRestarts({ before, after, stages }) {
+  const { at } = stageIndexer(stages)
+  const hb = historyOf(before)
+  const ha = historyOf(after)
+  let prev = -1
+  let n = 0
+  for (let j = 0; j < ha.length; j++) {
+    const cur = isPlainObject(ha[j]) ? at(ha[j].stage) : -1
+    if (cur < 0) continue
+    if (j >= hb.length && prev >= 0 && cur <= prev) n++
+    prev = cur
+  }
+  return n
+}
+
 /** 回退那一刻 rework_base 应当是什么。unchecked：在、但读不出来的产物（不核）。 */
 function expectedAtRestart({ before, stages, stage, diskSha }) {
   const { ids, at } = stageIndexer(stages)
@@ -415,9 +434,10 @@ function decideAtRestart({ before, after, stages, diskSha, restart }) {
   // 只让「用户回退时就说了不用改」的那一次写入多被拒一次。口径与 decideCarry 的 accepted 同一个（写入后的 stage），补记也覆盖。
   const stageOf = stageOfProduct(stages)
   const cur = stageIndexer(stages).at(after.stage)
+  // M4a（docs/35）：验证段的产物不论在哪一段都不许标——回退那一次写入与之后的写入同一条（mayAcceptProduct）。
   const mayAccept = (n) => {
     const i = stageOf.has(n) ? stageOf.get(n) : -1
-    return i >= 0 && cur >= 0 && i <= cur
+    return i >= 0 && cur >= 0 && i <= cur && mayAcceptProduct(stages, n)
   }
 
   const missing = []
@@ -447,12 +467,15 @@ function decideAtRestart({ before, after, stages, diskSha, restart }) {
     `这次写入记了一次回退（history 新追加的 ${quote(restart.stage)} 在阶段链上不晚于它前一条），同一次写入要在 rework_base ` +
       `里记下回退那一刻磁盘上各份产物的 sha——之后交没交、齐没齐，门禁靠它分辨哪些产物还是上一轮的。` +
       `${quote(restart.stage)} 及之后各段在磁盘上的产物按现在的内容算，更早各段的条目从写入前原样带过来；` +
-      `这一轮接受原样的，回到的那一段及更早段（不晚于这次写入后的 stage）的产物这一次就可以写成 "accepted"，还没走到的段的不行。`,
+      `这一轮接受原样的，回到的那一段及更早段（不晚于这次写入后的 stage）的产物这一次就可以写成 "accepted"，还没走到的段的不行，` +
+      `验证段的产物也不行。`,
     diff.join(''),
     'rework_base 应当整份写成：',
     safeJson(expected),
   ]
   if (unchecked.length) lines.push(`${names(unchecked)} 在磁盘上但读不出来，不核：不写、或写成一个 sha 都行。`)
+  const verifyMarked = isPlainObject(ab) ? Object.keys(ab).filter((k) => ab[k] === ACCEPTED && !mayAcceptProduct(stages, k)) : []
+  if (verifyMarked.length) lines.push(`${names(verifyMarked.map((k) => quote(k)))}：${VERIFY_REDO}。`)
   if (typeof before.stage === 'string' && restart.stage === before.stage) {
     // 同一段再追加一条：原地重来，或者 PM 把同段重派误记成了回退。H6 分不出这两样，判定不变，只提醒一句（/at「回退」末尾）。
     lines.push(SAME_STAGE_HINT)
@@ -460,7 +483,9 @@ function decideAtRestart({ before, after, stages, diskSha, restart }) {
   if (restart.followedByForward) {
     lines.push(
       '这次写入在回退那一条之后还追加了前进的条目（补记）：上面的值照磁盘现在的内容算，回退之后已经重写过的产物也会被记成' +
-        '上一轮的；它们确是这一轮写的，就把它们的值写成 "accepted"（不晚于这次写入后 stage 的，这一次就可以）。',
+        '上一轮的；它们确是这一轮写的，就把它们的值写成 "accepted"（不晚于这次写入后 stage 的，这一次就可以；验证段的产物除外，' +
+        '它们要再出一次）。这次写入还会照推进核回到的那一段到写入后 stage 之前的各段：那几段里还是上一轮的、没标的，同样会被拦；' +
+        '补记跨过验证段的一律过不了——拆开写，先只记回退。',
     )
   }
   return { ok: false, reason: lines.join('\n') }
@@ -491,7 +516,8 @@ function decideCarry({ before, after, stages }) {
   const anyBroken = Object.keys(bb).some(broken)
   const head =
     'rework_base 记着回退快照里各份产物的 sha（最近一次回退回到的那一段及之后各段按那一刻的磁盘记，更早各段沿用更早那次快照），' +
-    '回退之后、下一次回退之前的每一次写入都要原样带着它；只许把当前段及更早段的某一条从 sha 改成 "accepted"（这一轮接受它原样）。' +
+    '回退之后、下一次回退之前的每一次写入都要原样带着它；只许把当前段及更早段的某一条从 sha 改成 "accepted"（这一轮接受它原样），' +
+    '验证段的产物除外。' +
     (anyBroken ? '写入前就坏了的条目（值不合法、或不是任何阶段的产物）可以删掉或标 "accepted"。' : '')
   if (!isPlainObject(ab)) {
     if (ab === undefined && Object.keys(bb).every(broken)) return { ok: true, notes: [] }
@@ -508,6 +534,7 @@ function decideCarry({ before, after, stages }) {
   const { at } = stageIndexer(stages)
   const cur = at(after.stage)
   const tooLate = []
+  const verify = []
   const bad = []
   for (const k of Object.keys(bb)) {
     // 删掉的只剩坏条目（合法条目少了，上面已经拒了）。
@@ -518,6 +545,12 @@ function decideCarry({ before, after, stages }) {
       continue
     }
     if (isSha(bb[k]) && ab[k] === ACCEPTED) {
+      // M4a（docs/35）：验证段的产物不许标——问题 B：回到 S5 修了后端，门禁自己把「06-test.md 标 accepted」列成出路，标了之后
+      // at-qa 不重测就停下，没测过的改动进了验收。
+      if (!mayAcceptProduct(stages, k)) {
+        verify.push(quote(k))
+        continue
+      }
       const i = stageOf.has(k) ? stageOf.get(k) : -1
       if (i >= 0 && cur >= 0 && i <= cur) continue
       tooLate.push(quote(k))
@@ -525,6 +558,7 @@ function decideCarry({ before, after, stages }) {
     }
     bad.push(quote(k))
   }
+  if (verify.length) return { ok: false, reason: `${head}${names(verify)}：${VERIFY_REDO}。${show()}` }
   if (tooLate.length) {
     return {
       ok: false,
@@ -559,12 +593,21 @@ function decideAdvance({ before, after, stages, diskSha }) {
   }
   const notes = unreadable.length ? [`rework_base：${names(unreadable)} 在磁盘上但读不出来，推进时不核它们新旧`] : []
   if (!stale.length) return { ok: true, notes }
+  // M4a（docs/35）：验证段的产物不给「标 accepted」这条路（splitByAccept / mayAcceptProduct，与 decideCarry 同一个口径）。
+  const { accept, redo } = splitByAccept(stages, stale)
+  const outs = []
+  if (accept.length) {
+    outs.push(
+      `${names(accept)}：两条出路——让它的产者这一轮重写之后再推进；这一轮接受它原样，就在推进的同一次 Write 里把它在 ` +
+        `rework_base 里的值改成 "accepted"。`,
+    )
+  }
+  if (redo.length) outs.push(`${names(redo)}：${VERIFY_REDO}，之后再推进。`)
   return {
     ok: false,
     reason:
       `从 ${quote(before.stage)} 推进到 ${quote(after.stage)}，但离开的段里还有上一轮的产物（磁盘内容与 rework_base 记的 sha ` +
-      `相同）：${names(stale)}。两条出路：让它的产者这一轮重写之后再推进；这一轮接受它原样，就在推进的同一次 Write 里把它在 ` +
-      `rework_base 里的值改成 "accepted"。`,
+      `相同）：${names(stale)}。${outs.join('')}`,
   }
 }
 
@@ -577,7 +620,50 @@ export function decideReworkBase({ before, after, stages, diskSha }) {
   if (!isPlainObject(before) || !isPlainObject(after)) return { ok: true, notes: [] }
   if (!isStageChain(stages)) return { ok: true, notes: ['rework_base：阶段链读不出来或形状不对，回退快照的几条判据这次跳过'] }
   const restart = restartInfo({ before, after, stages })
-  if (restart) return decideAtRestart({ before, after, stages, diskSha, restart })
+  if (restart) {
+    // M4a 复核（B-1）：一次写入追加了不止一条回退（[S5, S7, S7]）：快照只拍最后那条，前面那截往前记的不经任何推进核查。
+    if (appendedRestarts({ before, after, stages }) > 1) {
+      return {
+        ok: false,
+        reason:
+          '一次 Write 只记一次回退：这次 history 新追加的条目里有不止一条在阶段链上不晚于它前一条。先单独记最早的那次回退' +
+          '（stage 写成回到的那一段，rework_base 照那一刻的磁盘拍），之后要推进再分开写，每一段推进各一次 Write。',
+      }
+    }
+    const at = decideAtRestart({ before, after, stages, diskSha, restart })
+    if (!at.ok || !restart.followedByForward) return at
+    // M4a 复核（B-2、P8）：补记跨过验证段——快照照写入那一刻的磁盘拍，区间里的产物按定义都是「上一轮的」，验证段的又不能标
+    // accepted：这样的写入永远过不了，照推进核的理由（「让产者重跑之后再推进」）照做是死循环。直接拒，叫它拆开。
+    const ids = Object.keys(stages)
+    const span = ids.slice(ids.indexOf(restart.stage), ids.indexOf(after.stage))
+    // 复核二（G4）：只算快照里真有产物的验证段——整段裁掉了 at-qa、at-acceptance 的，那一段没有产物，交给推进核查。
+    const snap = isPlainObject(after.rework_base) ? after.rework_base : {}
+    const crossed = span.filter((id) => isVerifyStage(stages[id]) && productsOfStage(stages[id]).some((n) => isSha(snap[n])))
+    if (crossed.length) {
+      return {
+        ok: false,
+        reason:
+          `这次写入记了回退（回到 ${quote(restart.stage)}）又往前记到了 ${quote(after.stage)}（补记），跨过了验证段 ${crossed.join('、')}：` +
+          '快照照这一刻的磁盘拍，区间里的产物都算上一轮的，验证段的产物又不能标 "accepted"，这样的一次写入怎么写都过不了。' +
+          `把它拆开——先只记回退（stage 写成 ${quote(restart.stage)}，history 只追加回退那一条，rework_base 照磁盘），` +
+          '验证段的产者这一轮重跑、重写之后再逐段推进，每一段推进各一次 Write。',
+      }
+    }
+    // M4a（docs/35）：补记（回退那一条之后同一次写入又往前记了几段）也是一次推进——离开回到的那一段到写入后 stage 之前的各段。
+    // 原来这里不核，一次写入「回到 S3 再记到 S6」就把 S4、S5 这一轮整段跳过，推进把关再也不回头查它们（评审 restart-write-accepted）。
+    const adv = decideAdvance({ before: { ...before, stage: restart.stage }, after, stages, diskSha })
+    if (!adv.ok) {
+      return {
+        ok: false,
+        reason:
+          `这次写入记了回退（回到 ${quote(restart.stage)}）又往前记到了 ${quote(after.stage)}（补记），照推进核离开的段：` +
+          adv.reason +
+          '补记这一次快照照磁盘拍，回退之后重写过的也算上一轮的：确是这一轮重写过的、或者这一轮接受原样的，同一次 Write 标 "accepted"；' +
+          '要它的产者真改的，这次只记到它所在段之前（或者只记回退），重写之后再推进。',
+      }
+    }
+    return { ok: true, notes: [...at.notes, ...adv.notes] }
+  }
   const carry = decideCarry({ before, after, stages })
   if (!carry.ok) return carry
   const advance = decideAdvance({ before, after, stages, diskSha })

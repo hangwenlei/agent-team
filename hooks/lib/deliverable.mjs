@@ -90,6 +90,7 @@
 // （tests/deliverable.test.mjs 现有各条据此必须仍然全绿，不改签名）。
 // 哪些阶段属于这一类，去 stages.json 看，不要在这里抄一份清单。
 import { expandProduces, stageRoles } from './stages.mjs'
+import { VERIFY_REDO_SELF, splitByAccept } from './freshness.mjs'
 
 // 「这个阶段 id 在不在阶段链里」。M3v（docs/30）起门禁自检的追加句与 unknown-stage 的修法（hooks/lib/fail-open.mjs）也要
 // 问同一个问题，抽成一份：它们说「不在阶段链里」的时候，必须正是这里判 skipped:'unknown-stage' 的时候。
@@ -103,7 +104,8 @@ export function isKnownStage(stages, stageId) {
 // M3y（docs/33，全量审查第 15 条）：调用方把 artifactExists 换成 freshness 的 artifactCurrent（在、而且不是上一轮的），另传
 // artifactStale（返工轮里还是上一轮的：磁盘内容与回退那一刻记的 sha 相同）。「缺」与「还是上一轮的」分开报——出口不一样：
 // 上一轮那份这一轮核过、不用改，可以在末尾追加一节写明，内容一变就算这一轮的。没有上一轮的产物时，文案与 v1.6.0 逐字相同。
-export function decideDeliverable({ role, stageId, stages, artifactExists, artifactStale = () => false }) {
+// M4a 文档核对（docs/35）：artifactBlank（空文件：归一化之后去掉空白什么都不剩）单列成 blank，说「是空文件」，不混进「还没有写到磁盘上」。
+export function decideDeliverable({ role, stageId, stages, artifactExists, artifactStale = () => false, artifactBlank = () => false }) {
   if (!stages || typeof stages !== 'object') return { ok: true, skipped: 'unknown-stage' }
 
   const stage = isKnownStage(stages, stageId) ? stages[stageId] : null
@@ -131,36 +133,48 @@ export function decideDeliverable({ role, stageId, stages, artifactExists, artif
 
   const produces = expandProduces(stage, [role])
   const stale = produces.filter((p) => artifactStale(p))
-  const missing = produces.filter((p) => !artifactExists(p) && !stale.includes(p))
+  const blank = produces.filter((p) => !stale.includes(p) && artifactBlank(p))
+  const missing = produces.filter((p) => !artifactExists(p) && !stale.includes(p) && !blank.includes(p))
   // produces 为空时 missing 必然也是空数组（filter 空数组恒得空数组），这一条顺带
   // 覆盖了「这个阶段没有产物义务」，不需要单独判 produces.length === 0——那样会多出
   // 一层两条分支永远同时成立或同时不成立的判断，删掉任何一层都测不出行为差异
   // （Task 5 的教训：变异测试要能证明每一层都必要）。
-  if (missing.length === 0 && stale.length === 0) return { ok: true }
+  if (missing.length === 0 && stale.length === 0 && blank.length === 0) return { ok: true }
+  const gone = [missing.length ? `${missing.join('、')} 还没有写到磁盘上` : '', blank.length ? `${blank.join('、')} 是空文件` : '']
+    .filter(Boolean)
+    .join('，')
 
   if (stale.length === 0) {
     return {
       ok: false,
       stageId,
       missing,
+      blank,
       stale,
       reason:
-        `${role} 在 ${stageId} 应当产出 ${produces.join('、')}，但 ${missing.join('、')} 还没有写到磁盘上。` +
+        `${role} 在 ${stageId} 应当产出 ${produces.join('、')}，但 ${gone}。` +
         `在结束之前把它写出来；如果这一段确实不需要产出，把理由写进你的回报，由上级判断。`,
     }
   }
 
-  const notWritten = missing.length ? `${missing.join('、')} 还没有写到磁盘上，` : ''
-  const html = stale.some((p) => p.endsWith('.html')) ? '（.html 文件用 <!-- --> 注释写这一节）' : ''
+  const notWritten = gone ? `${gone}，` : ''
+  // M4a（docs/35）：验证段的产物（测试报告、验收报告、交付报告）不给「核过、不用改就追加一节」这条路——问题 B 里那正是
+  // 「at-qa 不重测、追加一句就过」。它们只给「重跑之后重写」（freshness.mjs 的 VERIFY_REDO）。
+  const { accept, redo } = splitByAccept(stages, stale)
+  const html = accept.some((p) => p.endsWith('.html')) ? '（.html 文件用 <!-- --> 注释写这一节）' : ''
+  const appendOut = accept.length
+    ? `${redo.length ? `${accept.join('、')} ` : ''}这一轮核过、确实不用改的，在它末尾追加一节，写明这一轮核过什么、为什么不用改${html}；`
+    : ''
+  const redoOut = redo.length ? `${redo.join('、')}：${VERIFY_REDO_SELF}。` : ''
   return {
     ok: false,
     stageId,
     missing,
+    blank,
     stale,
     reason:
       `${role} 在 ${stageId} 应当产出 ${produces.join('、')}，但 ${notWritten}${stale.join('、')} 还是上一轮的——这是返工轮，` +
-      `它的内容与回退那一刻磁盘上的一样。在结束之前把这一轮的写出来。这一轮核过、确实不用改的，在它末尾追加一节，` +
-      `写明这一轮核过什么、为什么不用改${html}；如果这一段确实不需要产出、或者不该由你改，就不要写，把理由写进你的回报，` +
-      `由上级判断。`,
+      `它的内容与回退那一刻磁盘上的一样。在结束之前把这一轮的写出来。${redoOut}${appendOut}` +
+      `如果这一段确实不需要产出、或者不该由你改，就不要写，把理由写进你的回报，由上级判断。`,
   }
 }

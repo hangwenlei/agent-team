@@ -48,7 +48,8 @@ export function deliveredSnapshot({ stages, stageId, diskSha }) {
     for (const name of productsOfStage(stages[id])) {
       if (Object.hasOwn(out, name)) continue
       const d = diskSha(name)
-      if (d && d.exists && isSha(d.sha)) out[name] = d.sha
+      // M4a 复核二（G1）：空文件不算交过——快照不记它，补交的出路（H2 派、H3 写）走得通。
+      if (d && d.exists && isSha(d.sha) && !d.blank) out[name] = d.sha
     }
   }
   return out
@@ -120,8 +121,15 @@ export function decideRedispatch({ stages, stageId, target, roster, candidates, 
   const where = ids.join('、')
   const files = own.join('、')
   const head = `${inline(target)} 在 ${where} 的产物（${files}）这一轮已经交过，而 state.stage 是 ${cur}：再派它，就是不记回退重做 ${where}。`
+  // M4a（docs/35）：stage 是阶段链最后一段时，这次派发多半是交付之后的新改动（问题 A）——只给「记回退」会把新需求塞进旧契约、
+  // 吃旧 run 的返工额度。先给「收口、另起一趟」，记回退只留给这一趟的产物真有问题。
+  const chainLength = Object.keys(stages).length
+  const atEnd = c === chainLength - 1
+    ? `state.stage 是阶段链最后一段：要是交付之后的新改动，先照 /agent-team:at 第 6 节收口、再另起一趟——不要记回退把新需求塞进这一趟；` +
+      `要是这一趟的产物有问题要返工，才照下面记回退。`
+    : ''
   const out = callerCanWriteState
-    ? `要它返工：照 /agent-team:at 第 3 节的「回退」先记一次回退（回到 ${where}），再派它——返工计数照记，到上限会被要求先问用户。` +
+    ? `${atEnd}要它返工：照 /agent-team:at 第 3 节的「回退」先记一次回退（回到 ${where}），再派它——返工计数照记，到上限会被要求先问用户。` +
       `只是要问它点什么：不要派它，自己读它的产物（run 目录里的 ${files}）与代码，或者问用户。`
     : `只是要问它点什么：不要派它，自己 Read/Glob 它的产物与代码。真要它重做，那是一次回退，记回退是项目经理的事：` +
       `把这一条冒泡给派你的人。`
@@ -132,7 +140,7 @@ export function decideRedispatch({ stages, stageId, target, roster, candidates, 
  * H3：非 PM 写早段自己名下的产物。owner 是 writepath.mjs 的 stageOwnerOfRunPath 给的 { stageId, produces }（产物名是插件自己的
  * 名字）；filePath 是这次调用给的路径，过 inline。PM 不在这里判（调用方先排掉）。
  */
-export function decideRedoWrite({ stages, stageId, role, owner, filePath, isDelivered, reachableRoles, artifactExists }) {
+export function decideRedoWrite({ stages, stageId, role, owner, filePath, isDelivered, reachableRoles, artifactExists, closed = false }) {
   if (!isStageChain(stages) || !isPlainObject(owner)) return { decision: 'allow' }
   const c = indexIn(stages, stageId)
   const x = indexIn(stages, owner.stageId)
@@ -147,6 +155,15 @@ export function decideRedoWrite({ stages, stageId, role, owner, filePath, isDeli
   const ids = Object.keys(stages)
   const cur = ids[c]
   const was = ids[x]
+  // M4a 复核（REAL-1）：已收口的 run 上「先记一次回退」「推进 stage」都走不通（H6 冻结）——改说已经收口；拒照样拒。
+  if (closed) {
+    return {
+      decision: 'deny',
+      reason:
+        `${inline(role)} 不得改 ${inline(filePath)}——它是 ${was} 的产物 ${owner.produces}，这一轮已经交过，而这一趟已经收口，` +
+        '不再改它的产物：有问题写进你的回报，由项目经理另起一趟。',
+    }
+  }
   return {
     decision: 'deny',
     reason:

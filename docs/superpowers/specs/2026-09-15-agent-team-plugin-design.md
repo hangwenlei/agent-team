@@ -333,7 +333,8 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
   "never_invoked": ["at-ui", "at-ios", "at-android"],
   "escalations": [
     { "stage": "S4", "kind": "tradeoff", "question": "...", "answer": "...", "at": "..." }
-  ]
+  ],
+  "closed_at": null
 }
 ```
 
@@ -396,12 +397,23 @@ S5 重做，所以 S5 在 `history` 里出现两次、`rework.S5` 是 1，而 S6
 于是全被它们满足——零改动停下也放行，回退那一刻【阶段】就催推进，就绪门禁被旧产物满足、连前置都不查。磁盘内容与它记的
 sha 相同的产物就是上一轮的，H5a/H5b、H2、【阶段】与 H5a「停在旧阶段」都不把它算成这一轮交的（`hooks/lib/freshness.mjs`）。
 示例是 S6 驳回 S5 的那一刻：S5 及之后在磁盘上的产物都进了快照。
+**M4a 起**（`docs/35`）验证段（`stages.json` 里 `"verifies": true` 的 S6、S7、S8）的产物不许标 `"accepted"`：它们是对上游当时那一版的
+结论，返工轮里一律重新出——回到 S5 修了后端，`06-test.md` 不能原样接受。回退那一次同一次写入又往前记了几段的（补记），照推进核离开的那几段；
+补记跨过快照里有产物的验证段的直接拒、要拆开写；一次 Write 只许记一次回退。只有空白的产物（`hooks/lib/text-norm.mjs` 的 `isBlankText`）
+在上面这几处与收口、交付快照里都不算交了。
 
-⚠️ **`trimmed`、`stage_roles` 与 `rework_base` 缺失不报错**，这是向后兼容：这三个字段是后加的，更早落盘的 `state.json`
+`closed_at` 是收口标记（**M4a 补**，`docs/35`；审查第 24 条修法 2）：模板初值 null，PM 在最后一段写完交付文档之后，用同一次 Write
+记 `never_invoked` 与 `closed_at`（收口那一刻的 ISO 时间）。H6 核关上那一次：`stage` 是最后一段、不往 `history` 追加、最后一段的
+`requires` 与 `produces` 都在、不是空文件（归一化之后去掉空白什么都不剩）、读得出、不是上一轮的（整段裁掉、而且这一趟在那一段一个都没叫过的段
+产出的前置不要求；叫没叫过取写入前后的并集）；已收口之后 `closed_at`、`stage`、`history` 的
+条数都不许再改，派发门禁也不再派人——交付之后的新改动另起一趟。为什么需要它：没有它，门禁把交付之后的改动当成旧 run 的重做，
+只给「记回退」；【阶段】对走完的 run 反复说「该收口了」；收口本身不经任何门禁。
+
+⚠️ **`trimmed`、`stage_roles`、`rework_base` 与 `closed_at` 缺失不报错**，这是向后兼容：这四个字段是后加的，更早落盘的 `state.json`
 没有它们，而 `/agent-team:at-resume` 要去读那些 run（没有 `stage_roles` 的 run，按段的消费方退回 `roster`；没有 `rework_base`
-的 run 当作没回退过，回退时照样要写）。
+的 run 当作没回退过，回退时照样要写；没有 `closed_at` 的 run 当作没收口）。
 **其余每一个顶层键都是必须的**
-（判据：拿 `templates/state.json` 逐个删键跑 `validateState`，除 `trimmed`、`stage_roles` 与 `rework_base` 外每一个都报
+（判据：拿 `templates/state.json` 逐个删键跑 `validateState`，除 `trimmed`、`stage_roles`、`rework_base` 与 `closed_at` 外每一个都报
 ——`tests/templates.test.mjs` 里那条从模板派生的测试钉着这件事，不在测试里另抄一份键名清单）。
 
 `artifacts` 由 `ledger` 的 `produce` 回传填写：某个阶段的 `produces` 被写到磁盘上时，
@@ -444,11 +456,11 @@ sha 相同的产物就是上一轮的，H5a/H5b、H2、【阶段】与 H5a「停
 | # | Hook | 职责 | 检查不通过时 | 门禁无法做出有依据的判定时 |
 |---|---|---|---|---|
 | H1 | PreToolUse / Agent | 派发白名单（全部层级，含主线程） | deny | deny（fail closed） |
-| H2 | PreToolUse / Agent | 就绪门禁：前置产物缺失；**M3z 起**另拦不记回退的重派：叶子角色（花名册里派不出任何人）按派发者选出的段全都早于 `state.stage`、它在那些段的产物这一轮已经交过（交付快照，见表下「门禁专属文件」） | **deny**，并指明该先跑哪一阶段 / 先记回退 | allow + warning（fail open） |
+| H2 | PreToolUse / Agent | 就绪门禁：前置产物缺失；**M3z 起**另拦不记回退的重派：叶子角色（花名册里派不出任何人）按派发者选出的段全都早于 `state.stage`、它在那些段的产物这一轮已经交过（交付快照，见表下「门禁专属文件」）；**M4a 起**收口之后（`closed_at`）派花名册里的任何角色、最后一段没收口时派协调者，都拒——交付之后的新改动另起一趟 | **deny**，并指明该先跑哪一阶段 / 先记回退；收口之后与最后一段拒派协调者时，指明收口、另起一趟 | allow + warning（fail open） |
 | H3 | PreToolUse / Edit\|Write | per-role 写路径隔离（**只管阶段产物与项目路径；控制文件不走这套判据，见 §6.2.1**）；**M3z 起**门禁专属文件（`runs/*/approvals.jsonl`、`runs/*/delivered.json`）任何人都拒、主线程也拒；非 PM 改自己在更早一段已经交过的产物、而它在当前段没有活，拒（不记回退的重做） | deny | deny（fail closed） |
 | H4 | PreToolUse / Edit\|Write | 契约保护：subagent 写契约 | deny | deny（fail closed） |
 | H5 | `SubagentStop`（真拦截）+ `PostToolUse` / Agent（权威记录） | 交付物校验：声明产出却未写文件 | `SubagentStop`：deny（exit 2 附理由，约 8 次补救机会）；`PostToolUse`：记 warning，不 block | `SubagentStop`：allow（fail open，流程辅助）；`PostToolUse`：记 warning |
-| H6 | PreToolUse / Edit\|Write | 返工预算写时强制：只对 `runs/*/state.json` 生效。返工计数：`history` 只许追加、某阶段出现次数不许变少、`rework` 不许低于派生值；`rework` 超上限（3 + 覆盖它的返工批准条数，§4.2 ③）而且比写入前大才拒，回退那一次写入先按「这一轮走完」预判、越限就拒并给规范标签（**M3z 起**；此前这一条拦的是一切超过 `REWORK_LIMIT` 的值，第 4 轮没有诚实的写法）；**M3z 起**另核 stage 不变量（`stage` 与新追加的 `history` 条目都在阶段链上、`stage` 等于 `history` 末条）。上限内的推进与回退照常放行——PM 每推进一个阶段都要正常重写这个文件；**M3y 起**另核 `rework_base`（§4.4）：回退那一次写入照磁盘记快照（不晚于写入后 stage 的可以直接标 `"accepted"`）、之后原样带着（只许当前段及更早段改成 `"accepted"`，坏条目可删），推进离开一段时那一段里不许还有上一轮的产物 | deny | deny（fail closed）；只有旧的一侧 parse 不出 JSON 时放行（M3r 起新内容必须是合法 JSON），见 §4.2 ③；阶段链读不出来或形状不对时 `rework_base` 几条跳过、往 stderr 留痕（**M3z 起**回退预判与 stage 不变量也一起跳过，stderr 只留 `rework_base` 那一句；判据④照 3 轮上限拒、理由叫用户重装插件），读不出来的产物不核 |
+| H6 | PreToolUse / Edit\|Write | 返工预算写时强制：只对 `runs/*/state.json` 生效。返工计数：`history` 只许追加、某阶段出现次数不许变少、`rework` 不许低于派生值；`rework` 超上限（3 + 覆盖它的返工批准条数，§4.2 ③）而且比写入前大才拒，回退那一次写入先按「这一轮走完」预判、越限就拒并给规范标签（**M3z 起**；此前这一条拦的是一切超过 `REWORK_LIMIT` 的值，第 4 轮没有诚实的写法）；**M3z 起**另核 stage 不变量（`stage` 与新追加的 `history` 条目都在阶段链上、`stage` 等于 `history` 末条）。上限内的推进与回退照常放行——PM 每推进一个阶段都要正常重写这个文件；**M3y 起**另核 `rework_base`（§4.4）：回退那一次写入照磁盘记快照（不晚于写入后 stage 的可以直接标 `"accepted"`）、之后原样带着（只许当前段及更早段改成 `"accepted"`，坏条目可删），推进离开一段时那一段里不许还有上一轮的产物（**M4a 起**补记照推进核，跨过快照里有产物的验证段的补记直接拒；一次写入只许记一次回退）；**M4a 起**验证段的产物不许标 `"accepted"`，并核收口标记 `closed_at`（形状、已收口之后冻结、关上那一次最后一段齐没齐），排在返工计数之前 | deny | deny（fail closed）；只有旧的一侧 parse 不出 JSON 时放行（M3r 起新内容必须是合法 JSON），见 §4.2 ③；阶段链读不出来或形状不对时 `rework_base` 几条跳过、往 stderr 留痕（**M3z 起**回退预判与 stage 不变量也一起跳过，stderr 只留 `rework_base` 那一句；判据④照 3 轮上限拒、理由叫用户重装插件），读不出来的产物不核；**M4a 起**收口那一次（写入后带 `closed_at`、写入前没收口）是单向门：阶段链读不出来就拒，写入前读不出来照样核收口条件；已收口之后的冻结不依赖阶段链 |
 
 另有两个记录器（M3z 补，`docs/34`），不是门禁、不拒任何东西：`approval-ask`（`PostToolUse` / `AskUserQuestion`）与 `approval-prompt`
 （`UserPromptSubmit`）。用户选了（或单独发了）规范标签、而这一轮确实需要批准时，往当前 run 的 `approvals.jsonl` 追加一条；记不下时

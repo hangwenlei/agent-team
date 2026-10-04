@@ -11,12 +11,35 @@
 // ⚠️ 值是 "accepted" 的不旧：PM 声明这一轮接受它原样（H6 只许当前段及更早段这样标）。
 // ⚠️ 读不出来（artifactBytes 给 null、或读与算 sha 任一步抛异常）一律不旧：与 H2、H5 的 fail open 一致。不能拿
 //    sha256OfContract(null) 去比——normalizeText 把 null 当成字符串 "null"，算出来的 sha 形状合法。
-// ⚠️ 只在 rework_base 里有这一条时才读字节：首轮（没有快照）与快照外的产物一个字节都不多读。
+// ⚠️ 判旧只在 rework_base 里有这一条时才读字节：首轮（没有快照）与快照外的产物，判旧一个字节都不多读。M4a（docs/35）起 artifactCurrent
+//    还要看是不是空文件（isBlank），在的那份要读一次。
 // ⚠️ sha 的口径与 artifacts 同一个（sha256OfContract：归一化 BOM 与 CRLF），只改行尾不算重写。
-import { isPlainObject, isStageChain, productsOfStage } from './stages.mjs'
+import { isPlainObject, isStageChain, productsOfStage, mayAcceptProduct } from './stages.mjs'
 import { SHA_RE, sha256OfContract } from './contract-hash.mjs'
+import { isBlankText } from './text-norm.mjs'
 
 export const ACCEPTED = 'accepted'
+
+// M4a（docs/35）：验证段（stages.json 的 "verifies": true）的产物在返工轮里的出路——不许标 "accepted"（H6 拒），也不能只追加一句。
+// H6 与每一处给出「标 accepted」这条出路的回传（H5a、H5b、H2 前置、【返工】、补记提示）共用这一句；能不能标，问 stages.mjs 的
+// mayAcceptProduct。
+export const VERIFY_REDO =
+  '验证段（stages.json 里 "verifies": true）的产物记的是对上游当时那一版的结论，返工轮里一律重新出：让它的产者这一轮重跑之后重写——' +
+  '不能标 "accepted"，也不能只在末尾追加一句「核过」'
+
+// 复核（F9、B-5）：H5b 是对产者本人说的——不说「让它的产者」；重跑结果与上一轮相同时，报告要写明这一轮在哪一版上跑的、跑了哪些，
+// 否则内容逐字相同，门禁分不出跑没跑。
+export const VERIFY_REDO_SELF =
+  '验证段（stages.json 里 "verifies": true）的产物记的是对上游当时那一版的结论，返工轮里一律重新出：你这一轮重跑之后重写' +
+  '（测试重跑、验收重验）——只在末尾追加一句「核过」不算；结论与上一轮相同也要写明这一轮依据的是哪一版、做了哪些'
+
+/** 把一组还是上一轮的产物按「能不能标 accepted」分成两组（mayAcceptProduct）。顺序照原样。 */
+export function splitByAccept(stages, list) {
+  const accept = []
+  const redo = []
+  for (const n of list) (mayAcceptProduct(stages, n) ? accept : redo).push(n)
+  return { accept, redo }
+}
 
 export function makeFreshness({ artifactExists, artifactBytes, reworkBase } = {}) {
   const base = isPlainObject(reworkBase) ? reworkBase : null
@@ -32,8 +55,20 @@ export function makeFreshness({ artifactExists, artifactBytes, reworkBase } = {}
       return false
     }
   }
-  const artifactCurrent = (name) => !!artifactExists(name) && !isStale(name)
-  return { isStale, artifactCurrent }
+  // M4a 文档核对（docs/35 §3.2）：空文件（归一化之后去掉空白什么都不剩）不算交了——H5b、H2 的前置、【阶段】的「齐了」都经 artifactCurrent，
+  // 与收口、交付快照、「交过」同一个口径（isBlankText）。原来只有后三处认它：空的 06-test.md 过得了 S6，at-acceptance 对着它写出验收结论，
+  // 收口时补交了 06，07 却重出不了。读不出来的不算空（与 isStale 一样 fail open）。在才读字节。
+  const isBlank = (name) => {
+    if (typeof name !== 'string' || !artifactExists(name)) return false
+    try {
+      const bytes = artifactBytes(name)
+      return bytes !== null && bytes !== undefined && isBlankText(bytes)
+    } catch {
+      return false
+    }
+  }
+  const artifactCurrent = (name) => !!artifactExists(name) && !isBlank(name) && !isStale(name)
+  return { isStale, isBlank, artifactCurrent }
 }
 
 /** 【返工】回传列的那两样（M3y）：当前段还是上一轮的产物，与更早各段还是上一轮的（带所在段）。更晚的段还旧是返工轮的常态

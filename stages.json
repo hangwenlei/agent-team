@@ -13,7 +13,7 @@
           "producers": ["at-backend", "at-frontend", "at-ui", "at-ios", "at-android"],
           "requires": ["03-arch.md", "04-dispatch.md"],
           "produces": ["05-impl/<role>.md"] },
-  "S6": { "role": "at-qa",         "requires": ["03-arch.md", "04-dispatch.md"],  "produces": ["06-test.md"] },
-  "S7": { "role": "at-acceptance", "requires": ["01-prd.md", "06-test.md"],       "produces": ["07-acceptance.md"] },
-  "S8": { "role": "at-pm",         "requires": ["06-test.md", "07-acceptance.md"], "produces": ["08-delivery.md"] }
+  "S6": { "role": "at-qa",         "requires": ["03-arch.md", "04-dispatch.md"],  "produces": ["06-test.md"], "verifies": true },
+  "S7": { "role": "at-acceptance", "requires": ["01-prd.md", "06-test.md"],       "produces": ["07-acceptance.md"], "verifies": true },
+  "S8": { "role": "at-pm",         "requires": ["06-test.md", "07-acceptance.md"], "produces": ["08-delivery.md"], "verifies": true }
 }

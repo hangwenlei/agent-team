@@ -39,14 +39,14 @@ description: 显示当前 run 的阶段、产物、返工计数、主动裁掉�
 
 ```
 run:        <run_id>
-当前阶段:    <stage>（<该阶段的执行角色>）
+当前阶段:    <stage>（<该阶段的执行角色>）；closed_at 是一个时间（不是 null）就写「<stage>，已收口（closed_at <值>）」
 契约:        <contract_sha 的前 12 位>，磁盘上<在/不在>
 产物:        逐阶段列，每个后面标 ✓ / ✗（按磁盘）
 返工:        <rework 逐阶段；全 0 就写「无」>
 返工基线:    <rework_base 逐条「<产物>：<sha 前 12 位> 或 accepted」；没有这个字段或为空就写「无」>
 返工批准:    <.agent-team/runs/<run_id>/approvals.jsonl 逐行「回到 <rework_to>，覆盖 <covers>（<at>）」；文件不在或为空就写「无」>
 主动裁掉:    <trimmed 逐条「<角色> @ <它被裁掉的那一段>」；空就写「无」>
-没被叫过:    <never_invoked；在「主动裁掉」里出现过的，后面标「（已声明裁剪）」；空就写「暂无，本趟还没走完」>
+没被叫过:    <never_invoked；在「主动裁掉」里出现过的，后面标「（已声明裁剪）」；空就写「暂无，本趟还没走完」，已收口的 run 写「无」>
 待办升级:    <escalations 里 answer 为空的；没有就写「无」>
 ```
 

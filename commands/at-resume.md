@@ -25,6 +25,10 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 ## 2. 核实磁盘，不要相信状态文件说的一切
 
+**先看收没收口。** `state.json` 的 `closed_at` 是一个时间（不是 null）：这一趟已经收口，不续跑——告诉用户它已经交付（run id、收口时间），
+交付之后的新改动用 `/agent-team:at <改动>` 另起一趟（或者照 `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 0–2 节自己建）。
+下面的都不用做。
+
 `state.json` 记的是**上一次有人记账时**的样子，磁盘才是现在的样子。两者会脱节。
 
 对照插件的 `${CLAUDE_PLUGIN_ROOT}/stages.json`，把 `state.json` 的 `stage` 那一段**这一趟
@@ -51,16 +55,21 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
   `trimmed`（不在 `available_roles` 里的不用写）。已经在磁盘上的不要重派，该有而没在的从这一段继续派；都齐了就照下一条记账。
   「全部都在磁盘上」对空集是真命题，照字面判会把整段跳过。判「齐了」的口径只在 `hooks/lib/state.mjs` 的 `isStageDone` 一处，
   它对空集答「没齐」。run 目录下的产物用 `.agent-team/runs/<run_id>/` 开头的路径去 `Glob`。
-- **产物齐了** → 这一段其实已经做完，只是没记账。先 `Read` `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 的「逐段推进」一节（第 3、4 条），照它用同一次 Write 记账（`stage`、`history`、`roster`、`stage_roles`、`trimmed`，下一段在 `history` 里已经出现过时还有 `rework`；两个字段方向相反：`stage_roles` 是 `{ 段: [角色] }`，`trimmed` 是 `{ 角色: 段 }`），
+- **产物齐了**（不是最后一段） → 这一段其实已经做完，只是没记账。先 `Read` `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 的「逐段推进」一节（第 3、4 条），照它用同一次 Write 记账（`stage`、`history`、`roster`、`stage_roles`、`trimmed`，下一段在 `history` 里已经出现过时还有 `rework`；两个字段方向相反：`stage_roles` 是 `{ 段: [角色] }`，`trimmed` 是 `{ 角色: 段 }`），
   然后从下一段继续。`state.json` 里没有 `stage_roles`（更早落盘的 run）就不要加，照旧只累加 `roster`。
 - **产物不齐** → 从这一段继续，先看缺哪个产物、该派谁。
+- **`stage` 是阶段链最后一段、它的产物齐了**（而且不是上一轮的）→ 这一趟走完了、只是没写收口标记：照
+  `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 6 节收口（同一次 Write 记 `never_invoked` 与 `closed_at`），没被 H6 拒就是收好了，告诉用户它已经交付；
+  新改动另起一趟。收口被 H6 拒，照拒绝理由补齐（缺的前置派它的产者补交，这一趟在那一段没叫过它的也可以补记进 `trimmed`；
+  还是上一轮的重写），补齐之后照第 6 节从第一步重走一遍再收口（补交的验收结论要读，交付文档要照它改）。没有「下一段」可推进。
 
 **返工轮**（`state.json` 的 `rework_base` 不是空的，说明这趟 run 回退过）：产物在磁盘上不等于这一轮写过——门禁拿 `rework_base`
 记的 sha 分辨上一轮的产物，比的是统一行尾之后的 sha，不要自己算。照上面判出「齐了」就照常记账推进：那一段里还是上一轮的产物
 （没重写、也没标 `"accepted"`）会让 H6 拒掉推进的那次写入，拒绝理由点名是哪几份——照它派产者重写，或者在推进的同一次 Write
-里把它标成 `"accepted"`（只许当前段及更早段的）。标之前先读驳回那一段的产物（`06-test.md`、`07-acceptance.md` 之类），确认这一份
-这一轮确实不用改；拿不准就派产者重写。阶段链最后一段没有「推进出去」这次写入，收口不经 H6：那一段的产物还是上一轮的，
-先重写或者标 `"accepted"` 再收口。回退怎么记、之后每次写入怎么原样带着 `rework_base`，见
+里把它标成 `"accepted"`（只许当前段及更早段的）。验证段（`${CLAUDE_PLUGIN_ROOT}/stages.json` 里写着 `"verifies": true`：测试、验收、
+交付）的产物不能标——H6 拒，只能让产者这一轮重跑之后重写。标之前先读驳回那一段的产物（`06-test.md`、`07-acceptance.md` 之类），
+确认这一份这一轮确实不用改；拿不准就派产者重写。阶段链最后一段没有「推进出去」这次写入，把关在收口那一次：那一段的产物
+还是上一轮的，收口会被 H6 拒——先重写再收口。回退怎么记、之后每次写入怎么原样带着 `rework_base`，见
 `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 3 节的「回退」。
 
 **返工到了上限**（H6 拒了回退或推进、理由里给了规范标签「再返工一轮：回到 <段>」，或者写 `state.json` 之后收到【返工预算】）：

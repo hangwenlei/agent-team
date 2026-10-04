@@ -507,3 +507,19 @@ test('M3y H2：一份缺、一份是上一轮的 → 两样分开说', () => {
   assert.match(r.reason, /还缺：03-arch\.md（S3 的产物）/)
   assert.match(r.reason, /04-dispatch\.md（S4 的产物）还是上一轮的/)
 })
+
+// M4a 复核（RD02、RD04、RD03）：前置还旧、两类都有（回到 S2 之后派 at-acceptance：01-prd.md 能标、06-test.md 是验证段）——
+// 能标的那一句点名它自己；PM 那一侧给标 accepted，非 PM 那一侧叫它冒泡。
+test('M4a 复核 H2 前置还旧两类都有：accept 那一句点名 01-prd.md；验证段那一句点名 06-test.md；PM / 非 PM 各自的出路', () => {
+  const stale = (n) => ['01-prd.md', '06-test.md'].includes(n)
+  // 07-acceptance.md 不在：S7 没齐，才会去查前置。
+  const args = { targetRole: 'at-acceptance', stages: REAL_STAGES, artifactExists: (n) => !stale(n) && n !== '07-acceptance.md', artifactStale: stale, roster: [] }
+  const pm = decideReadiness({ ...args, callerCanWriteState: true })
+  assert.equal(pm.decision, 'deny')
+  assert.match(pm.reason, /01-prd\.md[^\n]*：这一轮接受上一轮那份原样/)
+  assert.match(pm.reason, /06-test\.md[^\n]*：验证段/)
+  assert.doesNotMatch(pm.reason, /冒泡给派你的人/)
+  const other = decideReadiness({ ...args, callerCanWriteState: false })
+  assert.match(other.reason, /（01-prd\.md[^）]*）这一轮不用重写/)
+  assert.match(other.reason, /冒泡给派你的人/)
+})

@@ -51,12 +51,15 @@ test('M3y freshness：值是 "accepted" → 不旧（PM 声明这一轮接受原
   assert.equal(f.artifactCurrent('05-impl/at-frontend.md'), true)
 })
 
-test('M3y freshness：rework_base 里没有这一条 → 只看在不在，而且一个字节都不读', () => {
+// M4a 文档核对（docs/35）订正：「一个字节都不读」改成「判旧不读、不在的不读」——artifactCurrent 现在还要看是不是空文件，在的那份要读一次。
+test('M3y freshness：rework_base 里没有这一条 → 判旧一个字节都不读；不在的产物不读，在的读一次看是不是空文件', () => {
   const d = disk({ '01-prd.md': OLD })
   const f = makeFreshness({ ...d, reworkBase: { '05-impl/at-backend.md': sha256OfContract(Buffer.from(OLD)) } })
+  assert.equal(f.isStale('01-prd.md'), false)
+  assert.deepEqual(d.reads, [], '快照外的产物判旧不该读文件')
   assert.equal(f.artifactCurrent('01-prd.md'), true)
   assert.equal(f.artifactCurrent('02-ui-spec.md'), false)
-  assert.deepEqual(d.reads, [], '首轮与快照外的产物不该多读文件')
+  assert.deepEqual(d.reads, ['01-prd.md'], '不在的不读；在的只为「是不是空文件」读一次')
 })
 
 test('M3y freshness：rework_base 缺失、null、数组、标量都当没有快照——行为与 v1.6.0 相同', () => {
@@ -133,4 +136,17 @@ test('M3y staleByStage：只问产物在不在 rework_base 里旧——每份产
 test('M3y staleByStage：只有上一段的产物还旧 → 进 earlier，不进 current', () => {
   const r = staleByStage({ stages: REAL, stageId: 'S5', isStale: staleSet('04-dispatch.md') })
   assert.deepEqual(r, { stage: 'S5', current: [], earlier: [{ name: '04-dispatch.md', stage: 'S4' }] })
+})
+
+// M4a 文档核对（F1、F2）：空文件（归一化之后去掉空白什么都不剩）不算交了——artifactCurrent 是 H5b、H2 的前置、【阶段】的「齐了」共用的
+// 那一个谓词。原来空的 06-test.md 过得了 S6，at-acceptance 对着它写出验收结论，收口时补交了 06、07 却重出不了。读不出来的不算空（fail open）。
+test('M4a 核对 artifactCurrent：空文件不算交了；有内容的算；读不出来的不算空', () => {
+  const bytes = { blank: Buffer.from('\r\n  \n'), bom: Buffer.from([0xef, 0xbb, 0xbf]), full: Buffer.from('x\n'), unreadable: null }
+  const f = makeFreshness({ artifactExists: () => true, artifactBytes: (n) => bytes[n], reworkBase: {} })
+  assert.equal(f.artifactCurrent('blank'), false)
+  assert.equal(f.artifactCurrent('bom'), false)
+  assert.equal(f.artifactCurrent('full'), true)
+  assert.equal(f.artifactCurrent('unreadable'), true)
+  assert.equal(f.isBlank('blank'), true)
+  assert.equal(f.isBlank('unreadable'), false)
 })

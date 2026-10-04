@@ -15,6 +15,7 @@ import { approvalIntent, parseApprovalLabel, needOf } from './budget.mjs'
 import { isPlainObject, isStageChain } from './stages.mjs'
 import { quote } from './trusted.mjs'
 import { runContextFix } from './fail-open.mjs'
+import { closedAt } from './closing.mjs'
 
 /**
  * PostToolUse:AskUserQuestion 的 tool_response 里有没有批准。items 里每一项是 { stage }（认出来的标签，还没核在不在链上）或
@@ -74,6 +75,11 @@ export function planApprovals({ items, state, stages, grants }) {
       out.push(item)
       continue
     }
+    // M4a（docs/35）：已收口的 run 不再回退、不再返工，批准记进去也用不上（H6 的冻结会拒那次回退）。
+    if (closedAt(state) !== null) {
+      out.push({ stage: item.stage, why: 'closed' })
+      continue
+    }
     if (!isStageChain(stages) || !Object.hasOwn(stages, item.stage)) {
       out.push({ stage: item.stage, why: 'off-chain' })
       continue
@@ -120,6 +126,8 @@ function whyText(why, name, cause) {
         `现在回到 ${name} 不需要批准：它不是一次回退，或者这一轮走完不超过返工上限（上限内问的不记）。照常记回退就行；` +
         '门禁拒了某次回退、说要先问用户时再问。'
       )
+    case 'closed':
+      return '这一趟已经收口，批准记不进去：收口之后不再回退、不再返工。交付之后的新改动或修复另起一趟（/agent-team:at）。'
     case 'no-run':
       return '当前没有进行中的 run，批准无处可记。'
     case 'unreadable':
