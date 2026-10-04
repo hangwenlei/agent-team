@@ -60,7 +60,10 @@ export function run(check, input, gate = GATE, cwd = undefined, env = hermeticEn
     env,
   })
   const out = { stdout: result.stdout ?? '', stderr: result.stderr ?? '', status: result.status }
-  assertRan(out, gate, result.error, node)
+  // M4b 第二轮复核：子进程在读完 stdin 之前退出时，写 stdin 报 EPIPE（Windows 上报 EOF），spawnSync 把它放进 result.error——
+  // 子进程是起来了的，退出码与输出照常判；只有退出码也没有时才算没起来。
+  const pipeClosed = result.error && (result.error.code === 'EPIPE' || result.error.code === 'EOF') && result.status !== null
+  assertRan(out, gate, pipeClosed ? undefined : result.error, node)
   if (contract) assertContract(check, out)
   return out
 }
@@ -84,9 +87,10 @@ export function runAsync(check, input, { gate = GATE, cwd, env = hermeticEnv(), 
         reject(e)
       }
     })
-    // M4b 第一轮复核：子进程在读完 stdin 之前退出时，写 stdin 会报 EPIPE——退出码与输出由上面的 close 处理器判，EPIPE 不算失败。
+    // M4b 第一轮复核：子进程在读完 stdin 之前退出时，写 stdin 会报 EPIPE（Windows 上报 EOF，第二轮复核实测）——退出码与输出
+    // 由上面的 close 处理器判，这两种不算失败。
     child.stdin.on('error', (e) => {
-      if (e && e.code !== 'EPIPE') reject(e)
+      if (e && e.code !== 'EPIPE' && e.code !== 'EOF') reject(e)
     })
     child.stdin.end(typeof input === 'string' ? input : JSON.stringify(input))
   })

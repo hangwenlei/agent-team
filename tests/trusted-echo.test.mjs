@@ -412,6 +412,17 @@ const SCENARIOS = [
     ],
   },
   {
+    // M4b 第二轮复核：「没人认领」与「归 X」两支会把调用者自己条目里「要改」档的前缀说出来（own.fix）。载荷末尾加一个空格，
+    // 落进「首尾有空白」那一档；同一份 project.json 写一次，【project.json】的要改档也喂到。
+    name: 'project.paths 的元素落在要改档（H3「没人认领」那一支的 own.fix 与【project.json】）',
+    disk: true,
+    project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, 'at-backend': ['src/server/', `${P} `] } }),
+    calls: ({ p }) => [
+      ['writepath', write('agent-team:at-backend', join(p, 'nowhere', 'b.md'))],
+      ['ledger', posted('at-pm', join(p, '.agent-team', 'project.json'))],
+    ],
+  },
+  {
     name: 'project.paths 里某个角色的值不是数组（H3 的配置错误）',
     disk: true,
     project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, 'at-backend': P } }),

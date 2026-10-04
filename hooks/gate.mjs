@@ -1531,6 +1531,8 @@ function main() {
       closeBlockers: blockers,
       budget: validation ? validation.budget : [],
       grants,
+      // M4b 第二轮复核：执行段「齐了」那句按写者分（谓词与 H3 同一个 isContractWriter）。
+      writerIsPm: isContractWriter(input.agent_type),
     })
 
     // M3a Task 2：产者交代判据的触发点是「state.stage 推进出去时」（设计 §3.2），
@@ -1937,6 +1939,8 @@ function main() {
             `执行者，**而且它也派不到那个执行者**（所以不是一次层级协调），所以这次校验` +
             `**没有意见**——不是它查过了没问题。两种可能：state.stage 停在旧阶段没推进，` +
             `那样 H5 会对整个新阶段全程哑火；或者这次派发本身不该发生。去 run 目录核实。` +
+            // M4b 第二轮复核：执行段已经齐了、PM 收件时同样带上「先读被拒那一节」（例：旧 run 的 S5 齐了，PM 先派了 at-qa）。
+            (recipientCanWriteState && stageDone && isRolePatternStage(ctx.stages?.[ctx.state?.stage]) ? IMPL_RECORD_NOTE : '') +
             `⚠️ **不要靠把 state.stage 改回旧阶段来消掉这条**——那正好制造前一种失效。` +
             // M3y（docs/33）：驳回之后的返工也会落进这一格（回退没记就重派）。记回退不是「把 stage 改回去」：history 追加、
             // rework 与 rework_base 同一次 Write 记上。按收件人分：改得了 state.json 的照「回退」一节记，改不了的冒泡。

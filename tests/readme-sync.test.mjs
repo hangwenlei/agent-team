@@ -408,6 +408,13 @@ test('自检：claimsNo() 只认否定管得到的名字——同一小句、否
   assert.ok(claimsNo(split, MCP) && !claimsNo(split, WEB), split)
   const ticked = '> 它拿不到 `MCP` 与 `WebSearch`、`WebFetch`。'
   assert.ok(!claimsNo(ticked, MCP) && !claimsNo(ticked, WEB), ticked)
+  // 第二轮复核：名字在否定之前、同一小句（「能用 X 而拿不到 Y」）；括号里用全角逗号；英文里不配对的「1)」。
+  const before = '> 它能用 WebSearch、WebFetch 而拿不到 MCP 工具。'
+  assert.ok(claimsNo(before, MCP) && !claimsNo(before, WEB), before)
+  const fullComma = '> 它拿不到 MCP 工具与网页工具（WebSearch，WebFetch）。'
+  assert.ok(claimsNo(fullComma, WEB), fullComma)
+  const listMark = '> 1) It does not get the MCP tools, but it keeps WebSearch and WebFetch.'
+  assert.ok(claimsNo(listMark, MCP) && !claimsNo(listMark, WEB), listMark)
 })
 
 for (const f of [README_EN, README_ZH]) {
@@ -430,6 +437,9 @@ test('M4b README 两半都写了：项目经理会往 paths 里补前缀；自�
   const zh = read(README_ZH)
   const en = read(README_EN)
   assert.ok(zh.includes('补前缀') && en.includes('adds prefixes'), '「补前缀」那句两半不齐')
+  // 第二轮复核：同一句里后加的两个半句也成对钉——实现中被拒时也会补；敏感位置先问用户。
+  assert.ok(zh.includes('实现中有角色被拒时也会') && en.includes('when a role is refused'), '「实现中被拒时也会补」两半不齐')
+  assert.ok(zh.includes('的先问你') && en.includes('it asks you first'), '「敏感位置先问你」两半不齐')
   assert.ok(zh.includes('`agent` 键') && en.includes('`agent` key'), '「agent 键」那句两半不齐')
 })
 

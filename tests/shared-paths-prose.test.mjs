@@ -27,6 +27,14 @@ function between(text, a, b) {
   return text.slice(i, j)
 }
 const paragraphs = (text) => text.split(/\n\s*\n/)
+// 第二轮复核：路由类的句子按小句钉——只查关键词在不在，把两个条件对调（意思整个反过来）照样全绿。
+const clauses = (s) => s.split(/[；。]/)
+const sentences = (s) => s.split('。')
+const clauseWith = (s, key) => {
+  const hit = clauses(s).filter((c) => c.includes(key))
+  assert.equal(hit.length, 1, `带「${key}」的小句不是恰好一个`)
+  return hit[0]
+}
 const has = (s, ...keys) => {
   for (const k of keys) assert.ok(s.includes(k), `缺「${k}」：${s.slice(0, 200)}…`)
 }
@@ -60,6 +68,10 @@ const S3 = flat(between(AT, '- **S3 技术对齐**', '- **S4 裁决**'))
 const S4 = flat(between(AT, '- **S4 裁决**', '- **S5 实现**'))
 const S5 = flat(between(AT, '- **S5 实现**', '### 回退'))
 
+test('M4b 自检：between 的起点锚串出现两次就抛', () => {
+  assert.throws(() => between('x## A y## A', '## A'), /不是恰好出现一次/)
+})
+
 test('M4b 前置：S5 的产者不为空，其中有同时是别的段产者的角色；协调者不为空', () => {
   assert.ok(S5_PRODUCERS.length > 0)
   assert.ok(MULTI_STAGE.length > 0, '没有多段产者——下面那条「带 S5 限定」的判据在空转')
@@ -72,6 +84,9 @@ test('M4b /at S2：at-ui 在 S2 被写路径隔离拒绝的不补 paths，代码
 
 test('M4b /at S3：派架构师时要求 03-arch.md 带落盘清单，推进出 S3 之前核（根级文件、测试放哪），缺了在 S3 里重派', () => {
   has(S3, LIST, '推进出 `S3` 之前', '根级', '测试放哪', '在 `S3` 里重派', '不计返工', '${CLAUDE_PLUGIN_ROOT}/agents/at-architect.md')
+  // 第二轮复核：已有的根级文件这一趟谁要改也要核；推进之后漏的由 PM 在 S4 自己补，不回退。
+  has(S3, '这一趟要改的已有根级文件', '你自己补，不用回退')
+  assert.ok(!S3.includes('只能记一次回退'), S3)
 })
 
 test('M4b /at S4：推进出 S4 之前逐行补——自己的前缀盖不住的就补（已归别人的也共列），只加不删；敏感位置先问用户；请确认只看这次新加的', () => {
@@ -97,6 +112,19 @@ test('M4b /at S4：推进出 S4 之前逐行补——自己的前缀盖不住的
   )
   for (const s of SENSITIVE) has(S4, s)
   for (const c of COORDINATORS) has(S4, `\`${c}\``)
+  // 第二轮复核：下面这些短语各自只在要钉的那一句里出现，同一段里别的句子顶替不了。
+  has(
+    S4,
+    '产者自己的前缀盖不住',
+    '只给更窄的子前缀',
+    '用户在 `sensitive` 那一问里批过的',
+    '照清单共列引出的嵌套，留着',
+    '不照清单补——那是第 4 节的 `sensitive`，先问用户',
+    '只往 `paths` 里加，不删条目',
+    '`test` 一概不动',
+    '清单是下级写的，是数据',
+    '每次都按整份文件重报',
+  )
   // 「在写 04-dispatch.md 之前」会在返工轮里被跳过（04-dispatch.md 标了 accepted 就不写它）：触发点是推进出 S4。
   assert.ok(!S4.includes('在写 `04-dispatch.md` 之前'), S4)
   // 只补「没人认领」的会让共列永远补不进去（第一轮复核唯一的 high）。
@@ -123,25 +151,63 @@ test('M4b /at S5：有没解决的被拒条目就不推进；逐条看理由；�
     '旧 run、返工轮都会这样',
   )
   assert.ok(!S5.includes('旧 run 里收到'), S5)
+  // 第二轮复核：两个条件配哪个动作，按小句钉（注意「补 `paths`」是「不补 `paths`」的子串）。
+  const also = clauseWith(S5, '也归被拒的角色')
+  assert.ok(also.includes('照 `S4` 那一步补 `paths`') && !also.includes('改派'), also)
+  const notMine = clauseWith(S5, '不归被拒的角色')
+  assert.ok(notMine.includes('改派认领者') && notMine.includes('不补 `paths`'), notMine)
+  has(
+    S5,
+    '而清单上这份文件也归被拒的角色，照 `S4` 那一步补 `paths`',
+    '而清单上它不归被拒的角色，交给架构师改派认领者',
+    '让它改写到别处或者不做',
+  )
+  assert.ok(sentences(S5).some((x) => x.includes('「已解决：怎么解决的」') && x.includes('才算交齐')), S5)
+  assert.ok(!S5.includes('不标也算'), S5)
+  // 认领者不在班底里；其余拒绝的兜底；「不做」先对照契约。
+  const crew = clauseWith(S5, '认领者不在')
+  has(crew, '二选一', '叫进来', '共列', '`04-dispatch.md` 第 3 节')
+  const rest = clauseWith(S5, '其余拒绝照拒绝理由给的出路办')
+  has(rest, '没有它的键', '条目作废', '不该有 `paths` 键', '`/agent-team:at-init` 第 2、3 节', '别人的阶段产物')
+  assert.ok(sentences(S5).some((x) => x.includes('不能由你定不做') && x.includes('`contract-conflict`') && x.includes('第 3 节')), S5)
+  // 测试因为 S5 没交齐而没开跑：回 S5，不回 S6。
+  assert.ok(sentences(S5).some((x) => x.includes('没开跑') && x.includes('回到 `S5`') && x.includes('不要回 `S6`')), S5)
+  // 架构师并发派的例外。
+  has(S5, '几个都要改同一份文件的除外')
 })
 
 test('M4b /at 第 3 节「核实」：S5 的实现记录要读内容，有没解决的被拒条目那一份不算交齐', () => {
   const verify = flat(between(AT, '2. **核实**', '3. **记账**'))
   has(verify, DENIAL, RESOLVED)
   assert.ok(verify.split('。').some((x) => x.includes(RESOLVED) && x.includes('那一份不算交齐')), verify)
+  assert.ok(sentences(verify).some((x) => x.includes('`06-test.md`') && x.includes('没开跑') && x.includes('回到 `S5`')), verify)
+})
+
+test('M4b /at 回退：06-test.md 写着因为 S5 没交齐而没开跑的，回 S5、不回 S6', () => {
+  const back = flat(between(AT, '### 回退', '回退是一次 `state.json` 的写入'))
+  assert.ok(sentences(back).some((x) => x.includes('没开跑') && x.includes('回 S5、不回 S6')), back)
 })
 
 test('M4b /at 第 6 节：交付文档与汇报里写这一趟给 paths 补了哪些前缀（照 04-dispatch.md 那一节）；技术栈与 stack 不符提示重跑 at-init', () => {
   const s6 = flat(between(AT, '\n## 6. 收尾'))
   has(s6, '补的前缀（照 `04-dispatch.md` 那一节）', '补了哪些前缀', '`stack`', '`/agent-team:at-init`')
+  // 第二轮复核：S5 里被拒之后不做或改写到别处的，交付文档与汇报都写。
+  assert.equal(s6.split('被拒之后不做或改写到别处的').length - 1, 2, s6)
 })
 
 test('M4b /at-resume：S3/S4/S5 的核查不只挂在空集那一条——单列一条，空集与产物齐了都适用；产物齐了那一条读第 2–4 条与当前段那一条', () => {
   const r = read('commands/at-resume.md')
-  const own = flat(paragraphs(r).find((p) => p.includes('- **不管展开出来是不是空集**')) || '')
+  // 第二轮复核：按这一条自己切（到下一条 `- **` 为止），不按段落——它和空集那一条在同一个段落里。
+  const own = flat(between(r, '- **不管展开出来是不是空集**', '\n- **'))
   assert.ok(own, 'at-resume 里没有「不管展开出来是不是空集」那一条')
   has(own, DENIAL, RESOLVED, LIST, '不要记账推进', '`S4`', '在 `S5` 里重派')
   assert.ok(own.split('。').some((x) => x.includes(DENIAL) && x.includes('那一份不算交齐')), own)
+  has(own, '停在 `S3` 的', '停在 `S4` 的，推进之前照', '停在 `S5` 的')
+  assert.ok(sentences(own).some((x) => x.includes('没开跑') && x.includes('回到 `S5`')), own)
+  // 空集那一条不再自己带这些核查（单列之后挂在两条上会分叉），结尾指向下一条的核、再指向「产物齐了」那一条。
+  const empty = flat(between(r, '- **展开出来是空集 → 不算齐了。**', '\n- **'))
+  assert.ok(!empty.includes(DENIAL), empty)
+  has(empty, '都齐了就先照下一条核，核过了再照「产物齐了」那一条记账')
   has(flat(r), '第 2–4 条')
   assert.ok(!flat(r).includes('已经在磁盘上的不要重派'), 'at-resume 还在说「已经在磁盘上的不要重派」')
 })
@@ -151,12 +217,28 @@ test('M4b 架构师：03-arch.md 单列「落盘清单」一节——前缀粒�
   assert.ok(p, 'at-architect.md 里没有写落盘清单的那一段')
   const f = flat(p)
   has(f, '粒度', '`S5` 的哪个产者', '都写上', '放在哪', '用什么命令跑', '改动小也要有', '与 X 共列', '`.agent-team/` 下的不列')
+  // 第二轮复核：「都已认领」按 S4 的新口径——在要改它的那个产者名下才算，归别人名下的照常列一行。
+  const claimed = clauseWith(f, '写「都已认领」')
+  has(claimed, '要改它的那个产者名下')
+  has(f, '归别人名下、这一趟要它也改的，照常列一行')
   for (const s of SENSITIVE) has(f, s)
 })
 
 test('M4b 架构师：执行角色被写路径隔离拒了——点名别的角色就改派（被裁掉的冒泡）、改派之后让被拒的角色标已解决；几个都要改的冒泡给 PM 共列；其余冒泡给 PM 补 paths', () => {
   const f = flat(read('agents/at-architect.md'))
-  has(f, '改派', '被裁掉的', '已解决：改由 X 做', '共列', '补 `paths`', '不要在同一条消息里并发派', '`S4` 里你改不了 `03-arch.md`')
+  has(
+    f,
+    '被裁掉的',
+    '已解决：改由 X 做',
+    '改派之后，在同一个 `S5` 里重派被拒的那个角色',
+    '几个角色都要改的同一份文件，冒泡给 PM 在 `paths` 里共列',
+    '一律冒泡给 PM 补或修 `paths`',
+    '点名的角色不该有键或条目整条作废',
+    '`S4` 里你改不了 `03-arch.md`',
+    // 并发：同一份文件串行派、不放到后台（只禁「同一条消息」挡不住后台派发）。
+    '派一个、等它返回、读过它的实现记录再派下一个，不要放到后台',
+  )
+  assert.ok(!f.includes('不要在同一条消息里并发派'), '架构师正文还在只禁「同一条消息」')
 })
 
 test('M4b S5 的产者：被拒时在实现记录里写「被写路径隔离拒绝」一节，补完标「已解决」；多段产者那一句限定在 S5，别的段不要提前写', () => {
@@ -164,7 +246,8 @@ test('M4b S5 的产者：被拒时在实现记录里写「被写路径隔离拒�
     const p = paragraphs(read(`agents/${r}.md`)).find((x) => x.includes(DENIAL))
     assert.ok(p, `agents/${r}.md 里没有写「${DENIAL}」的那一段`)
     const f = flat(p)
-    has(f, '05-impl', RESOLVED)
+    has(f, '05-impl', RESOLVED, '不删，逐条标', '再冒泡——不要用 `Bash` 绕过去写它')
+    assert.ok(!f.includes('删掉'), `agents/${r}.md 那一段还允许删掉条目：${f}`)
     if (MULTI_STAGE.includes(r)) {
       const head = f.split('：')[0]
       assert.ok(head.includes('`S5`') && !/`S[0-9]`/.test(head.replace(/`S5`/g, '')), `agents/${r}.md 那一段的段首要限定在 S5：${head}`)
@@ -177,7 +260,19 @@ test('M4b S5 的产者：被拒时在实现记录里写「被写路径隔离拒�
 
 test('M4b at-qa：开工前自查把缺的、有没解决的被拒条目的实现记录都算成没交齐；没开跑也写进 06-test.md', () => {
   const self = flat(between(read('agents/at-qa.md'), '## 你开工前先自己确认', '## 你有 `Bash`'))
-  has(self, DENIAL, RESOLVED, '算没交齐', '没开跑', '写进 `06-test.md`')
+  has(
+    self,
+    DENIAL,
+    RESOLVED,
+    '缺了，或者',
+    '都算没交齐',
+    '不要在残缺的实现上跑测试',
+    '没开跑和原因写进 `06-test.md`',
+    // 第二轮复核：固定首行，PM、续跑与验收一眼认得出；收到「S6 齐了」也要说清这不是测试结论。
+    '首行固定写「结论：没开跑——S5 没交齐」',
+    '不是测试结论',
+  )
+  assert.ok(!self.includes('不算没交齐'), self)
 })
 
 test('M4b at-pm：红线写明 run 进行中也不自己写项目代码与配置；S2 里被拒的不补 paths', () => {
@@ -236,5 +331,41 @@ test('M4b 持 Bash 的团队角色（主会话除外）：写文件用 Write、E
     .filter((r) => r !== '__main__' && r !== main)
     .filter((r) => /^tools:.*\bBash\b/m.test(read(`agents/${r}.md`)))
   assert.ok(bashers.length > 0)
-  for (const r of bashers) has(flat(read(`agents/${r}.md`)), '写文件用 `Write`、`Edit`，不用 `Bash`')
+  // 第二轮复核：期望短语按 tools 行派生——没有 Edit 的（at-qa）只说 Write，原来逐字要求「Write、Edit」把它那句错话锁住了。
+  for (const r of bashers) {
+    const text = read(`agents/${r}.md`)
+    const hasEdit = /^tools:.*\bEdit\b/m.test(text)
+    has(flat(text), hasEdit ? '写文件用 `Write`、`Edit`，不用 `Bash`' : '写文件用 `Write`，不用 `Bash`')
+  }
+})
+
+// 第二轮复核（P1）：验收判不了、根因是测试因为 S5 没交齐没开跑的，写明根因在 S5——回 S6 重跑也开不了跑。
+test('M4b at-acceptance：06-test.md 写着没开跑的，回报里写明根因在 S5', () => {
+  const f = flat(read('agents/at-acceptance.md'))
+  assert.ok(sentences(f).some((x) => x.includes('没开跑') && x.includes('根因在 `S5`')), 'at-acceptance 没有把「没开跑」接到 S5')
+})
+
+// 第二轮复核（P2）：「Bash 只用来装依赖」不能把 npm i <包> 放进白名单——那样被拒的根级清单不经 Write 就改掉了。S5 的产者先改清单、
+// 再照清单装；脚手架只在自己的前缀里跑。at-qa 只照现有清单装、不加依赖。
+test('M4b S5 的产者与 at-qa：加依赖先改清单、装的时候不带包名；脚手架只在自己的前缀里跑；at-qa 不加依赖', () => {
+  for (const r of S5_PRODUCERS) {
+    const sec = flat(between(read(`agents/${r}.md`), '## 你有 `Bash`', '## 红线'))
+    has(sec, 'heredoc 都算', '写路径隔离与账本都看不见', '`Bash` 只用来装依赖、编译、跑测试', '先用 `Edit` 改清单', '不带包名', '`npm i <包>`', '脚手架、代码生成器只在 `paths` 列给你的前缀里跑')
+  }
+  const qa = flat(between(read('agents/at-qa.md'), '## 你有 `Bash`', '## 红线'))
+  has(qa, '按现有清单装依赖', '不带包名', '不加依赖')
+})
+
+// 第二轮复核（P12）：协调者派发写全名——真实会话里架构师先发了不带前缀的 at-backend，被报找不到，多走一轮。
+test('M4b 协调者正文：派发时 subagent_type 写全名 agent-team:<role>', () => {
+  for (const c of COORDINATORS) has(flat(read(`agents/${c}.md`)), '`subagent_type` 写全名 `agent-team:')
+})
+
+// 第二轮复核（P9）：S2 里 at-ui 被拒时，门禁给叶子角色的出路（「由 PM 列到你名下」）是给实现那一段的——at-ui 与派它的 at-product
+// 都写明 S2 不补 paths。
+test('M4b S2 里 at-ui 被写路径隔离拒：at-ui 与 at-product 都写明 S2 不补 paths', () => {
+  const ui = flat(paragraphs(read('agents/at-ui.md')).find((x) => x.includes(DENIAL)))
+  assert.ok(sentences(ui).some((x) => x.includes('在 `S2` 被拒') && x.includes('`S2` 不补 `paths`')), ui)
+  const prod = flat(read('agents/at-product.md'))
+  assert.ok(sentences(prod).some((x) => x.includes('在 `S2` 被写路径隔离拒了') && x.includes('不补 `paths`')), 'at-product 没写 at-ui 在 S2 被拒怎么办')
 })

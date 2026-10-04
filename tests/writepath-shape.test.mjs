@@ -381,3 +381,54 @@ test('M4b 没人认领：自己条目里有要改的前缀（零宽字符）—�
   assert.match(r.reason, /没有被任何角色认领/)
   assert.match(r.reason, /U\+200B/)
 })
+
+// ---- M4b 第二轮复核 ----
+
+// 建了键的 at-qa、at-acceptance：不论写的是别人认领的、没人认领的，还是自己的条目作废，都说同一句——这次写入不是它的活，键本不该有、
+// 由 PM 删掉它。原来只有「归 X」那一支这样说，「没人认领」那一支还叫 PM「划给某个角色」，第 8 步给的是通用的「由 PM 改 project.json」。
+// 不说「删了之后放行」：对正想写别人代码的 at-qa 说这句，等于告诉它删键之后就能写。
+test('M4b 建了键的 at-qa、at-acceptance：三种被拒都说「不是你的活」「不该有你的键」「删掉」；写自己的前缀照旧放行', () => {
+  for (const role of NO_PATHS_ROLES) {
+    const cases = [
+      ['/proj/package.json', withPaths({ ...SHARED.paths, [role]: [] })],
+      ['/proj/zzz/a.ts', withPaths({ ...TEMPLATE.paths, [role]: [] })],
+      ['/proj/package.json', withPaths({ ...SHARED.paths, [role]: ['../x/'] })],
+    ]
+    for (const [target, project] of cases) {
+      const r = decide(role, target, project)
+      assert.equal(r.decision, 'deny', `${role} ${target}`)
+      for (const s of ['不是你的活', '不该有你的键', '删掉']) assert.ok(r.reason.includes(s), `${role} ${target} 缺「${s}」：${r.reason}`)
+      for (const s of ['划给某个角色', '列到你名下', '/agent-team:at-init', '整段放行']) assert.ok(!r.reason.includes(s), `${role} ${target} 不该有「${s}」：${r.reason}`)
+    }
+    assert.equal(decide(role, '/proj/qa/r.md', withPaths({ ...TEMPLATE.paths, [role]: ['qa/'] })).decision, 'allow', role)
+  }
+})
+
+// 认领者是建了键的 at-qa（不只 at-outsider）：协调者不该被叫去派它。
+test('M4b 归谁：认领者是建了键的 at-qa——点明不该有键，不叫协调者去派它', () => {
+  const r = decide('at-architect', '/proj/qa/x.md', withPaths({ ...TEMPLATE.paths, 'at-qa': ['qa/'] }))
+  assert.equal(r.decision, 'deny')
+  assert.ok(r.reason.includes('"at-qa"') && r.reason.includes('不该有 paths 键'), r.reason)
+  assert.ok(!r.reason.includes('分发它的那一段'), r.reason)
+})
+
+// 「归 X」那一支也说出调用者自己条目里要改的前缀：前缀里混了零宽字符，按字面落空、目标又正好归别人，PM 打开 project.json 会以为已经列过了。
+test('M4b 归谁：调用者自己条目里有要改的前缀——「归 X」那一支也写出码点；两条要改的都说出来', () => {
+  const zw = String.fromCharCode(0x200b)
+  const r = decide('at-ios', '/proj/src/shared/a.ts', withPaths({ ...TEMPLATE.paths, 'at-ios': [`src${zw}/shared/`] }))
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /这条路径归/)
+  assert.match(r.reason, /U\+200B/)
+  const two = decide('at-ios', '/proj/ios/a.swift', withPaths({ ...TEMPLATE.paths, 'at-ios': [`ios${zw}/`, ' src/ios/'] }))
+  assert.match(two.reason, /U\+200B/)
+  assert.match(two.reason, /首尾/)
+})
+
+// 协调者那句点名能派的认领者：认领者里混了不该有键的，「派给它」的「它」会被读成那一个。
+test('M4b 归谁：协调者那句点名可派的认领者，不点不该有键的那一个', () => {
+  const mixed = decide('at-architect', '/proj/scripts/x.sh', withPaths({ ...TEMPLATE.paths, 'at-backend': ['src/server/', 'scripts/'], 'at-outsider': ['scripts/'] }))
+  assert.ok(mixed.reason.includes('派给 "at-backend"'), mixed.reason)
+  assert.ok(!mixed.reason.includes('派给 "at-outsider"'), mixed.reason)
+  const both = decide('at-architect', '/proj/package.json', SHARED)
+  assert.ok(both.reason.includes('"at-backend"') && both.reason.includes('派给 "at-backend" 或 "at-frontend"'), both.reason)
+})

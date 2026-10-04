@@ -139,6 +139,7 @@ export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 =
 
 export function buildLedgerNotices({
   kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha, projectReport, reworkStale, budget, grants,
+  writerIsPm = true,
   closeBlockers,
 } = {}) {
   const out = []
@@ -310,10 +311,15 @@ export function buildLedgerNotices({
     // 跟 H3 给出互相矛盾的指示。硬约束 6 不许把提示削弱或按角色掐掉，所以补救的
     // 是措辞：把动作明确归给 PM，再给非 PM 一条不会撞 H3 的下一步。
     // M4a 复核（A-7）：最后一段还收不了口时，回报给上级的是「还收不了口、缺哪几份」，不是「齐了」。
+    // M4b 第二轮复核（docs/36）：执行段里最后写完实现记录的执行角色也收到这一条。它读不到别人的实现记录、改不了 state.json，
+    // 门禁也不读实现记录写了什么——回报给上级的不是「齐了」，是「都在磁盘上了」，再加一句管它自己那一份的。
+    const implStage = isRolePatternStage(stages?.[st.stage])
     const who =
       Array.isArray(closeBlockers) && closeBlockers.length
         ? pmOnlyNotice('改 state.json', '"最后一段还收不了口、缺哪几份"这件事')
-        : pmOnlyNotice('改 state.json', '"这一段的产物已经齐了"这件事')
+        : implStage && !writerIsPm
+          ? pmOnlyNotice('改 state.json', '"这一段的产物都在磁盘上了（门禁不读实现记录写了什么）"这件事')
+          : pmOnlyNotice('改 state.json', '"这一段的产物已经齐了"这件事')
     // M3y（docs/33）：返工轮里下一段在 history 里已经出现过（回到 S5 之后再进 S6），rework 那一段也要照派生量加 1——少了 H6
     // 会拒。这条提示原来只列 stage、history、roster、stage_roles、trimmed，照写会被 H6 拒一次（docs/15 那一趟真撞上过）。
     const again =
@@ -339,7 +345,7 @@ export function buildLedgerNotices({
           `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "<ISO 时间>" }${again}——用同一次 Write 把这一段的账一起记掉：` +
           `叫到的人累加进 roster（state.json 里有 stage_roles 的，同一批人并进它的这一段），决定不叫的产出角色写进 trimmed。` +
           `分两次写，推进那一次会被产者交代当成漏派。` +
-          (isRolePatternStage(stages?.[st.stage]) ? IMPL_RECORD_NOTE : '') +
+          (implStage ? (writerIsPm ? IMPL_RECORD_NOTE : IMPL_RECORD_ROLE_NOTE) : '') +
           `${who}${tail}${over}`
         : Array.isArray(closeBlockers) && closeBlockers.length
           ? `【阶段】${st.stage} 的产物已经写了，它是阶段链的最后一段，但还收不了口——收口要最后一段的前置与产物都在、不是空文件、` +
@@ -365,3 +371,7 @@ function chainIds(stages) {
 export const IMPL_RECORD_NOTE =
   '这一段的产物是各执行角色的实现记录：推进之前逐份读，有「被写路径隔离拒绝」一节、里面还有没标「已解决」的条目的，那一份不算交齐' +
   '（门禁看不出这一点；做法见 /agent-team:at 第 3 节「各段的具体做法」里这一段那一条）。'
+
+// 第二轮复核：同一条回传发给执行角色时用这一句——上面那句叫读者去逐份读、去照 /agent-team:at 做，它都做不了。
+const IMPL_RECORD_ROLE_NOTE =
+  '你自己的实现记录里「被写路径隔离拒绝」一节还有没标「已解决」的条目的话，这一段还没做完：回报时照实说，不要只报「齐了」。'

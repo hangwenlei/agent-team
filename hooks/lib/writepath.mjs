@@ -252,11 +252,30 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     }
   }
 
+  // project.paths 的值是相对项目根的前缀；项目根由 runDir 往上推三级得到
+  // （.agent-team/runs/<id> → 项目根），没有 runDir 时退回用 filePath 的根。
+  const base = runDir ? norm(`${runDir}/../../..`) : '/'
+  // 问题按 audience: 'role' 取：只说问题本身，不带「删掉这一条……收尾时告诉用户」这类说给 PM 的改法——执行角色
+  // 改不了 project.json、也见不到用户，它的出路是冒泡。
+  const own = entryProblems(role, paths[role], { audience: 'role' })
+
+  // 7b. 建了键的 at-qa、at-acceptance（M4b 第二轮复核，docs/36）：写在自己合法的前缀下照旧放行（判据钉着这一格）；别的
+  //     一律说同一句——它不写 run 目录之外的文件，这次写入不是它的活，键本不该有、由 PM 删掉。原来这一格分三路说：第 8 步
+  //     叫 PM「改 project.json」，「没人认领」那一支叫 PM「划给某个角色」，只有「归 X」那一支说键不该有——前两路都会把
+  //     PM 引去往一个账本说「不要建」的键上加前缀。不说「删了之后就能写」：删键之后它确实整段放行（第 2 步），对正想写
+  //     别人代码的 at-qa 说这句，等于告诉它怎么绕过去。
+  if (NO_PATHS_ROLES.includes(role)) {
+    if (!own.block.length && underAny(target, paths[role], base)) return { decision: 'allow' }
+    return {
+      decision: 'deny',
+      reason:
+        `${who} 不得写 ${fp}——你不写 run 目录之外的文件（只写自己那份 run 产物），这次写入不是你的活；` +
+        '另外 .agent-team/project.json 的 paths 里不该有你的键（按设计不认领路径）：回报时提一句，由 PM 删掉它。',
+    }
+  }
+
   // 8. 调用者自己的条目有阻断问题（不是数组、元素不是字符串、前缀出根、认领整个根、带冒号）：只拒它——整条条目
   //    作废，连它其余合法的前缀也写不了。理由里说出来：实测只点一条前缀时，PM 会读成「只有这条前缀失效」而留着它。
-  //    问题按 audience: 'role' 取：只说问题本身，不带「删掉这一条……收尾时告诉用户」这类说给 PM 的改法——执行角色
-  //    改不了 project.json、也见不到用户，它的出路是 fixIt 那句冒泡。
-  const own = entryProblems(role, paths[role], { audience: 'role' })
   if (own.block.length) {
     return {
       decision: 'deny',
@@ -266,9 +285,6 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     }
   }
 
-  // project.paths 的值是相对项目根的前缀；项目根由 runDir 往上推三级得到
-  // （.agent-team/runs/<id> → 项目根），没有 runDir 时退回用 filePath 的根。
-  const base = runDir ? norm(`${runDir}/../../..`) : '/'
   const myPaths = paths[role]
   if (underAny(target, myPaths, base)) return { decision: 'allow' }
 
@@ -297,9 +313,11 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     // 第一轮复核（docs/36）补的几种边角：
     //   - 认领者按设计不该有键（NO_PATHS_ROLES、at-outsider：没有谁派得到它），或者它的条目整条作废（派它去写，它在第 8 步
     //     又被拒）——点明，出路是 PM 改配置，不叫协调者去派它；
-    //   - 调用者自己是建了键的 at-qa、at-acceptance：出路是删掉它的键，不是往错键上再加前缀（账本对同一个键说「不要建」）；
+    //   - 调用者自己是建了键的 at-qa、at-acceptance：第二轮复核挪到第 7b 步统一说，走不到这里；
     //   - 花名册里调用者那一条坏了：判不出它是叶子还是协调者，不给「列到你名下」；
     //   - 协调者那句不看阶段：架构师在 S3 出方案时派不了 S5 的产者（H2 拒），正路是写进落盘清单。
+  // 第二轮复核：协调者那句点名派得到的认领者（混着不该有键的那一个时，「派给它」会被读成那一个）；调用者自己条目里
+  // 「要改」档的前缀这一支也说出来（目标正好归别人时，PM 打开 project.json 会以为调用者已经列过了）。
     const entry = roster[role]
     const rosterOk = isPlainObject(entry) && Array.isArray(entry.can_delegate_to)
     const off = claimants.filter((c) => NO_PATHS_ROLES.includes(c) || c === 'at-outsider')
@@ -309,14 +327,12 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     if (off.length) notes.push(`${off.map((c) => quote(c)).join('、')} 按设计不该有 paths 键——冒泡给派你的上级，由 PM 改 .agent-team/project.json`)
     if (voided.length) notes.push(`${voided.map((c) => quote(c)).join('、')} 的条目眼下整条作废——冒泡给派你的上级，由 PM 先修 .agent-team/project.json`)
     let way
-    if (NO_PATHS_ROLES.includes(role)) {
-      way = '你按设计不认领路径，paths 里不该有你的键：冒泡给派你的上级，由 PM 删掉它。'
-    } else if (!rosterOk) {
+    if (!rosterOk) {
       way = 'roster.json 里你这一条读不出来，门禁判不出该给你哪条出路：冒泡给派你的上级，由 PM 告诉用户重装或更新 agent-team 插件。'
     } else if (entry.can_delegate_to.length) {
       way = usable.length
-        ? '这是认领者的活：到你分发它的那一段再派给它（还在出方案的，把这件事写进你这一段的产物交上去——架构师写进 ' +
-          '03-arch.md 的「落盘清单」）；你派不到它的，冒泡给派你的上级。不要自己动它的文件。'
+        ? `这是认领者的活：到你分发它的那一段再派给 ${usable.map((c) => quote(c)).join(' 或 ')}（还在出方案的，把这件事写进你这一段的` +
+          '产物交上去——架构师写进 03-arch.md 的「落盘清单」）；派不到的，冒泡给派你的上级。不要自己动它的文件。'
         : '不要自己动它的文件，冒泡给派你的上级。'
     } else {
       way =
@@ -327,7 +343,9 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
       decision: 'deny',
       reason:
         `${who} 不得写 ${fp}——这条路径归 ${claimants.map((c) => quote(c)).join('、')}。` +
-        `${notes.length ? `${notes.join('；')}。` : ''}${way}`,
+        `${notes.length ? `${notes.join('；')}。` : ''}` +
+        (own.fix.length ? `你的条目里还有要改的：${own.fix.slice(0, 3).join('；')}。` : '') +
+        way,
     }
   }
 
