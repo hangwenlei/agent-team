@@ -360,3 +360,16 @@ test('M4a 复核二【返工】更早段那一行：验证段的产物只能重�
   const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S7' }, reworkStale: { stage: 'S7', current: [], earlier: [{ name: '06-test.md', stage: 'S6' }] } }).join('\n')
   assert.match(s, /验证段的产物只能重写/)
 })
+
+// M4a 文档核对（PG-4、PG-5）：【阶段】还收不了口那一句与 H6 同一个说法；【返工】对 PM 自己的验证段产物（08-delivery.md）不说「让它的产者」。
+test('M4a 核对【阶段】还收不了口：抬头带「不是空文件」，结尾说从第一步重走一遍', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S8' }, stageDone: true, closeBlockers: [{ name: '07-acceptance.md', why: 'missing', require: true }] }).join('\n')
+  assert.match(s, /不是空文件/)
+  assert.match(s, /从第一步重走一遍/)
+})
+
+test('M4a 核对【返工】08-delivery.md 还旧：说「这是你自己的产物」，不说「让它的产者」', () => {
+  const s = buildLedgerNotices({ ...base, stages: REAL_STAGES, kind: 'state', state: { stage: 'S8' }, reworkStale: { stage: 'S8', current: ['08-delivery.md'], earlier: [] } }).join('\n')
+  assert.match(s, /08-delivery\.md：这是你自己的产物/)
+  assert.doesNotMatch(s, /08-delivery\.md：验证段/)
+})

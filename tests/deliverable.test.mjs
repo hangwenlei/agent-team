@@ -313,3 +313,12 @@ test('M3y：at-ui 只有 02-ui-spec.md 还旧 → 不提 HTML 注释', () => {
   assert.deepEqual(r.stale, ['02-ui-spec.md'])
   assert.doesNotMatch(r.reason, /<!--/)
 })
+
+// M4a 文档核对：空文件单独说「是空文件」，不说成「还没有写到磁盘上」。
+test('M4a 核对 H5b：产物是空文件 → 拒，理由说是空文件', () => {
+  const STAGES6 = { S6: { role: 'at-qa', requires: [], produces: ['06-test.md'] } }
+  const r = decideDeliverable({ role: 'at-qa', stageId: 'S6', stages: STAGES6, artifactExists: () => false, artifactBlank: (n) => n === '06-test.md' })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /06-test\.md 是空文件/)
+  assert.doesNotMatch(r.reason, /还没有写到磁盘上/)
+})

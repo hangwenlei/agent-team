@@ -36,7 +36,7 @@ test('M4a 复核 EMPTY_SHA：写死的常量等于空内容现算的 sha（含�
 
 // ---------------------------------------------------------------- closedAt / lastStageId
 
-test('M4a closedAt：非空字符串才算收口；空串、空白、别的类型、缺键都不算', () => {
+test('M4a closedAt：ISO 形状的时间才算收口；空串、空白、别的类型、缺键都不算', () => {
   assert.equal(closedAt({ closed_at: CLOSED }), CLOSED)
   for (const v of ['', '   ', true, 1, null, [], {}]) assert.equal(closedAt({ closed_at: v }), null, JSON.stringify(v))
   assert.equal(closedAt({}), null)
@@ -435,4 +435,34 @@ test('M4a 复核二 closeBlockers：叫没叫过按那一段的 stage_roles 判�
   const state = st('S8', FULL, { stage_roles: { S6: ['at-qa'], S4: ['at-acceptance'] }, roster: ['at-qa', 'at-acceptance'], trimmed: { 'at-acceptance': 'S7' } })
   const probe = probeOf({ '07-acceptance.md': 'missing' })
   assert.deepEqual(closeBlockers({ stages: STAGES, state, probe }), [])
+})
+
+// ============================================================================ M4a 文档核对
+
+// PG-2：叫过却没交的前置，「照第 4 节问用户放弃这一段」走不通（第 4 节的答复不碰收口条件）——说实话：交不出来这一趟就收不了口。
+test('M4a 核对 阻碍：叫过没交的前置——不给「问用户放弃这一段」，说交不出来就收不了口', () => {
+  const r = close({ before: OPEN_S8, after: { ...CLOSING, stage_roles: { S6: ['at-qa'] }, roster: ['at-qa'] }, files: { '07-acceptance.md': SHA('b'), '08-delivery.md': SHA('c') } })
+  assert.equal(r.ok, false)
+  assert.doesNotMatch(r.reason, /放弃这一段/)
+  assert.match(r.reason, /06-test\.md[^\n]*交不出来[^\n]*收不了口/)
+})
+
+// PG-3：在更早的段写 closed_at——理由叫它逐段推进，不说「单独一次 Write 推进进 S8」（照做就从 S5 跳到 S8）。
+test('M4a 核对 关上：stage 不是最后一段 → 理由叫它逐段推进，不说一次推进进最后一段', () => {
+  const before = st('S5', FULL.slice(0, 5))
+  const r = close({ before, after: st('S5', FULL.slice(0, 5), { closed_at: CLOSED }) })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /逐段推进/)
+  assert.doesNotMatch(r.reason, /单独一次 Write 推进进 S8/)
+})
+
+// F6：第二轮那 4 个「在插件阶段链下等价」的变异（C16、C18、C21、C22）真正靠的两条前提——链一变就红，回来重核 blockerLine 与
+// closeBlockers 的 require 标记。
+test('M4a 核对 前提：最后一段的产物只有 PM 自己的；前置与产物不相交', () => {
+  const id = lastStageId(STAGES)
+  const last = STAGES[id]
+  const producers = Array.isArray(last.producers) ? last.producers : [last.role]
+  assert.deepEqual(producers, ['at-pm'])
+  const produces = Array.isArray(last.produces) ? last.produces : Object.values(last.produces).flat()
+  assert.deepEqual(last.requires.filter((r) => produces.includes(r)), [])
 })

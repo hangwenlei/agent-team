@@ -4,14 +4,15 @@
 // 新改动另起一趟」——照理由做，新需求塞进旧契约、吃旧 run 的返工额度；不照做，最省事的路是 PM 自己写代码。没有收口标记，
 // 【阶段】对走完的 run 反复说「该收口了」，收口本身也不经任何门禁（交付文档缺了没人发现，docs/33 §4）。
 //
-//   - closedAt(state)：state.json 的 closed_at 是非空字符串就返回它，否则 null。「这一趟收没收口」只问它——H6、H2、ledger、
+//   - closedAt(state)：state.json 的 closed_at 是 ISO 形状的时间（过得了 ISO_TIME_RE、Date.parse 解析得出）就返回它，否则 null。「这一趟收没收口」只问它——H6、H2、ledger、
 //     validateState、返工批准的记录器都经它，不各自判 truthy / typeof。模板里它的初值是 null（没收口）；缺键（更早落盘的 run）
 //     同样是没收口。
 //   - decideClosing（H6，排在返工预算与快照判据之前）：
-//       形状：写入后带 closed_at 键、值既不是 null 也不是非空字符串 → 拒。
+//       形状：写入后带 closed_at 键、值既不是 null 也不是 ISO 形状的时间 → 拒。
 //       冻结：写入前已收口 → closed_at 原样、stage 不变、history 不追加；不依赖阶段链。
 //       关上：写入后收口、写入前没有（写入前读不出来也算）→ 阶段链读得出；stage 是最后一段；写入前读得出时这次不往 history 追加
-//         （推进与收口拆成两次写）；最后一段的 requires 与 produces 都在、读得出、不是上一轮的（closeBlockers）。
+//         （推进与收口拆成两次写）；最后一段的 requires 与 produces 都在、不是空文件、读得出、不是上一轮的（closeBlockers；整段裁掉、
+//         这一趟在那一段一个都没叫过的段产出的前置除外）。
 //   - decideClosedDispatch（H2，排在就绪判据之前）：收口之后派花名册里的任何角色 → 拒；最后一段、没收口时派协调者 → 拒。
 //     最后一段是 PM 自己收口的段，正路上没有要派协调者的时候；叶子角色交给 redo.mjs（补收口缺的前置要能派）。
 //
@@ -105,8 +106,9 @@ export function blockerLine(stages, b, state, prior) {
     if (own) return `${b.name}（${what}：这是你自己的产物，你自己写）`
     const called = sid ? calledIn(stages, state, sid, prior) : []
     if (b.require && called.length) {
+      // 文档核对（PG-2）：原来给「要放弃这一段，照第 4 节问用户」——第 4 节的答复不碰收口条件，照做之后照样被拒。说实话。
       return `${b.name}（${what}：${called.join('、')} 在 ${sid} 被叫到过、却没交——派它补交（不用记回退），trimmed 不是出路；` +
-        '要放弃这一段，照 /agent-team:at 第 4 节问用户）'
+        '交不出来（例如测试跑不起来），这一趟就收不了口：照 /agent-team:at 第 4 节把实情告诉用户）'
     }
     const trim = b.require && sid
       ? `；这一趟本来就不叫 ${who}（项目不用它，或者你裁掉了它）：把这个决定补记进 trimmed` +
@@ -189,8 +191,9 @@ export function decideClosing({ before, after, stages, diskSha, atPath }) {
     return {
       ok: false,
       reason:
-        `收口只在阶段链最后一段（${last}）：这次写入后 stage 是 ${quote(after.stage)}。先单独一次 Write 推进进 ${last}` +
-        `（history 追加、离开的那一段照常记账），写完 ${lastProduces}，再单独一次 Write 收口。`,
+        // 文档核对（PG-3）：原来说「先单独一次 Write 推进进 S8」——照做就从早段一步跳到最后一段，中间各段整段跳过。
+        `收口只在阶段链最后一段（${last}）：这次写入后 stage 是 ${quote(after.stage)}。这一趟还没走完：照 /agent-team:at 第 3 节` +
+        `逐段推进到 ${last}（每一段推进各一次 Write，离开的那一段照常记账），写完 ${lastProduces}，再单独一次 Write 收口。`,
     }
   }
   if (isPlainObject(before) && historyLength(after) !== historyLength(before)) {

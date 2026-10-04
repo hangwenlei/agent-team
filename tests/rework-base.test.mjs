@@ -626,3 +626,10 @@ test('M4a 复核二 补记的两句提示', () => {
   const at = decide({ before: state('S6', FIRST_ROUND), after: state('S6', [...FIRST_ROUND, ...H('S5', 'S6')]) })
   assert.match(at.reason, /补记跨过验证段的一律过不了——拆开写，先只记回退/)
 })
+
+// M4a 文档核对（F4 / 第一轮 R05）：同一次写入既标了验证段的产物、又标了还没走到的段的产物——先报验证段（它永远不能标），不能被「不在当前段」吞掉。
+test('M4a 核对 回退之后：同一次把 05（还没走到）与 06（验证段）都标 accepted → 报验证段', () => {
+  const r = decide({ before: IN_REWORK_S4, after: state('S4', IN_REWORK_S4.history, { rework_base: { ...EXPECTED_S4, '05-impl/at-backend.md': 'accepted', '06-test.md': 'accepted' } }) })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /"06-test\.md"：验证段/)
+})

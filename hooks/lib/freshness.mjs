@@ -11,10 +11,12 @@
 // ⚠️ 值是 "accepted" 的不旧：PM 声明这一轮接受它原样（H6 只许当前段及更早段这样标）。
 // ⚠️ 读不出来（artifactBytes 给 null、或读与算 sha 任一步抛异常）一律不旧：与 H2、H5 的 fail open 一致。不能拿
 //    sha256OfContract(null) 去比——normalizeText 把 null 当成字符串 "null"，算出来的 sha 形状合法。
-// ⚠️ 只在 rework_base 里有这一条时才读字节：首轮（没有快照）与快照外的产物一个字节都不多读。
+// ⚠️ 判旧只在 rework_base 里有这一条时才读字节：首轮（没有快照）与快照外的产物，判旧一个字节都不多读。M4a（docs/35）起 artifactCurrent
+//    还要看是不是空文件（isBlank），在的那份要读一次。
 // ⚠️ sha 的口径与 artifacts 同一个（sha256OfContract：归一化 BOM 与 CRLF），只改行尾不算重写。
 import { isPlainObject, isStageChain, productsOfStage, mayAcceptProduct } from './stages.mjs'
 import { SHA_RE, sha256OfContract } from './contract-hash.mjs'
+import { isBlankText } from './text-norm.mjs'
 
 export const ACCEPTED = 'accepted'
 
@@ -53,8 +55,20 @@ export function makeFreshness({ artifactExists, artifactBytes, reworkBase } = {}
       return false
     }
   }
-  const artifactCurrent = (name) => !!artifactExists(name) && !isStale(name)
-  return { isStale, artifactCurrent }
+  // M4a 文档核对（docs/35 §3.2）：空文件（归一化之后去掉空白什么都不剩）不算交了——H5b、H2 的前置、【阶段】的「齐了」都经 artifactCurrent，
+  // 与收口、交付快照、「交过」同一个口径（isBlankText）。原来只有后三处认它：空的 06-test.md 过得了 S6，at-acceptance 对着它写出验收结论，
+  // 收口时补交了 06，07 却重出不了。读不出来的不算空（与 isStale 一样 fail open）。在才读字节。
+  const isBlank = (name) => {
+    if (typeof name !== 'string' || !artifactExists(name)) return false
+    try {
+      const bytes = artifactBytes(name)
+      return bytes !== null && bytes !== undefined && isBlankText(bytes)
+    } catch {
+      return false
+    }
+  }
+  const artifactCurrent = (name) => !!artifactExists(name) && !isBlank(name) && !isStale(name)
+  return { isStale, isBlank, artifactCurrent }
 }
 
 /** 【返工】回传列的那两样（M3y）：当前段还是上一轮的产物，与更早各段还是上一轮的（带所在段）。更晚的段还旧是返工轮的常态

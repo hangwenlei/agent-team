@@ -16,7 +16,7 @@ import { compareContractSha, shaOrNote } from './contract-hash.mjs'
 import { inline, quote, safeJson } from './trusted.mjs'
 import { nextStage } from './state.mjs'
 import { approvalTargetFor, askUserText, limitOf } from './budget.mjs'
-import { isPlainObject, isStageChain } from './stages.mjs'
+import { isPlainObject, isStageChain, productsOfStage, stageRoles } from './stages.mjs'
 import { VERIFY_REDO, splitByAccept } from './freshness.mjs'
 import { closedAt, blockerLine } from './closing.mjs'
 
@@ -256,7 +256,13 @@ export function buildLedgerNotices({
       ? `；这一轮接受它原样${both ? `（${accept.join('、')}）` : ''}，就在 state.json 的 rework_base 里把它的值改成 "accepted"` +
         `（只许当前段及更早段的；用 Write 整份重写 state.json）`
       : ''
-    const redoOut = redo.length ? `\n${redo.join('、')}：${VERIFY_REDO}。` : ''
+    // 文档核对（PG-5）：PM 自己的验证段产物（08-delivery.md）不说「让它的产者重跑」。
+    const pmOwn = (n) => chainIds(stages).some((id) => productsOfStage(stages[id]).includes(n) && stageRoles(stages[id]).includes('at-pm'))
+    const ownRedo = redo.filter(pmOwn)
+    const otherRedo = redo.filter((n) => !pmOwn(n))
+    const redoOut =
+      (otherRedo.length ? `\n${otherRedo.join('、')}：${VERIFY_REDO}。` : '') +
+      (ownRedo.length ? `\n${ownRedo.join('、')}：这是你自己的产物，这一轮重写（验证段的产物，不能标 "accepted"）。` : '')
     out.push(
       `【返工】这是返工轮：state.json 的 rework_base 记着回退那一刻各份产物的 sha，下面这些磁盘内容与它记的一样，` +
         `还是上一轮的——\n${lines.join('\n')}\n` +
@@ -332,9 +338,10 @@ export function buildLedgerNotices({
           `叫到的人累加进 roster（state.json 里有 stage_roles 的，同一批人并进它的这一段），决定不叫的产出角色写进 trimmed。` +
           `分两次写，推进那一次会被产者交代当成漏派。${who}${tail}${over}`
         : Array.isArray(closeBlockers) && closeBlockers.length
-          ? `【阶段】${st.stage} 的产物已经写了，它是阶段链的最后一段，但还收不了口——收口要最后一段的前置与产物都在、而且是这一轮的：\n` +
+          ? `【阶段】${st.stage} 的产物已经写了，它是阶段链的最后一段，但还收不了口——收口要最后一段的前置与产物都在、不是空文件、` +
+            `而且是这一轮的：\n` +
             closeBlockers.map((b) => `  - ${blockerLine(stages, b, st)}`).join('\n') +
-            `\n补齐之后照 /agent-team:at 第 6 节收口。${who}${tail}`
+            `\n补齐之后照 /agent-team:at 第 6 节从第一步重走一遍再收口（补交的验收结论要读，交付文档要照它改）。${who}${tail}`
           : `【阶段】${st.stage} 的产物已经齐了，而它是阶段链的最后一段——该收口了：照 /agent-team:at 第 6 节，用同一次 Write ` +
             `记 never_invoked 与 closed_at（收口那一次 H6 核最后一段的前置与产物；没被拒就是收好了，收口成功不另发回传），再向用户汇报。` +
             `收口之后，交付之后的新改动另起一趟。${who}${tail}`,
@@ -342,4 +349,9 @@ export function buildLedgerNotices({
   }
 
   return out
+}
+
+// 阶段链的段 id（读不出来时空）。
+function chainIds(stages) {
+  return isStageChain(stages) ? Object.keys(stages) : []
 }

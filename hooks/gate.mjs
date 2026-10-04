@@ -1018,7 +1018,8 @@ function main() {
           filePath,
           isDelivered: deliveredOf(ctx, fresh),
           reachableRoles: Object.hasOwn(reach, role) ? reach[role].reachableRoles : null,
-          artifactExists: ctx.artifactExists,
+          // M4a 文档核对（docs/35）：空的兄弟产物不算「刚补上」——否则一份空文件就让补派豁免一直开着（1.8.0 拒这一写入）。
+          artifactExists: (n) => ctx.artifactExists(n) && !fresh.isBlank(n),
           closed: closedAt(ctx.state) !== null,
         })
         if (rd.decision === 'deny') denyAndExit(rd.reason, spec.event)
@@ -1779,6 +1780,7 @@ function main() {
       stages: ctx.stages,
       artifactExists: fresh.artifactCurrent,
       artifactStale: fresh.isStale,
+      artifactBlank: fresh.isBlank,
     })
 
     // 账本比对（Task 4，规格 §6.2 的内容比对补偿）：排在 r.ok 分支判断之前算，因为不管
@@ -1914,7 +1916,16 @@ function main() {
         // 两支措辞不能共用同一份文案："而且它也派不到那个执行者"在 coordinator 为真时
         // 是假话——它明明是合法的协调者，只是这一阶段的产物已经齐了、state.stage 没
         // 跟着推进。
-        const notice = coordinator
+        // 文档核对（PG-6）：最后一段、没收口、PM 收件时，这一格多半是照收口拒绝理由补交缺的前置——先说这条正路，不先断言「两种可能」
+        // （停在旧阶段、派发不该发生，两样都不对）。
+        const lastOpenForPm = !coordinator && recipientCanWriteState && ctx.state?.stage === lastStageId(ctx.stages) && closedAt(ctx.state) === null
+        const notice = lastOpenForPm
+          ? `⚠️ 交付物校验：刚返回的 ${inline(role)} 不是当前阶段（state.stage = ${stageLabel}，阶段链最后一段）的执行者。` +
+            `这次若是在补收口缺的前置（收口时 H6 点过名的），不是返工、不用记回退——等它交完，照 /agent-team:at 第 6 节从第一步` +
+            `重走一遍再收口（补交的验收结论要读，交付文档要照它改）。交付之后的新改动：先照第 6 节收口、再另起一趟；这一趟的产物` +
+            `有问题要返工：照「回退」一节记一次回退，同一次 Write 追加 history、记 rework 与 rework_base。` +
+            `⚠️ **不要靠把 state.stage 改回旧阶段来消掉这条**。`
+          : coordinator
           ? `⚠️ 交付物校验：刚返回的 ${inline(role)} 不是当前阶段（state.stage = ${stageLabel}）的` +
             `执行者，但它能（传递地）派到当前阶段的执行角色——这原本是合法的层级协调。` +
             `只是当前阶段的产物已经全部齐备，state.stage 大概率没有随之推进到下一阶段：` +
@@ -1927,13 +1938,7 @@ function main() {
             `⚠️ **不要靠把 state.stage 改回旧阶段来消掉这条**——那正好制造前一种失效。` +
             // M3y（docs/33）：驳回之后的返工也会落进这一格（回退没记就重派）。记回退不是「把 stage 改回去」：history 追加、
             // rework 与 rework_base 同一次 Write 记上。按收件人分：改得了 state.json 的照「回退」一节记，改不了的冒泡。
-            // M4a（docs/35）：最后一段、没收口时，这一格多半是 PM 照收口拒绝理由去补交缺的前置（at-acceptance 补 07）——那不是返工，
-            // 不用记回退；交付之后的新改动也先收口再另起一趟。只说给改得了 state.json 的人。
-            (recipientCanWriteState && ctx.state?.stage === lastStageId(ctx.stages) && closedAt(ctx.state) === null
-              ? `state.stage 是阶段链最后一段：这次若是在补收口缺的前置（收口时 H6 点过名的），不是返工、不用记回退——等它交完，` +
-                `照 /agent-team:at 第 6 节从第一步重走一遍再收口（补交的验收结论要读，交付文档要照它改）；` +
-                `交付之后的新改动先照 /agent-team:at 第 6 节收口、再另起一趟。`
-              : '') +
+            // M4a（docs/35）：最后一段、没收口、PM 收件那一种挪到最前面单独说（lastOpenForPm）。
             (recipientCanWriteState
               ? `这次派发若是驳回之后的返工，那不是把 stage 改回去，是记一次回退：照 /agent-team:at 的「回退」一节，` +
                 `同一次 Write 追加 history、记 rework 与 rework_base。这一次已经重写过的产物会被快照记成上一轮的，` +
@@ -1997,15 +2002,19 @@ function main() {
       const staleText = r.stale.length
         ? `${r.stale.join('、')} 还是上一轮的（返工轮：磁盘内容与回退那一刻 rework_base 记的 sha 相同，这一轮还没有重写）`
         : ''
-      const notice = !r.stale.length
+      // M4a 文档核对（docs/35）：空文件单列（r.blank），没有它时文案与原来逐字相同。
+      const blankList = Array.isArray(r.blank) ? r.blank : []
+      const blankText = blankList.length ? `${blankList.join('、')} 是空文件（空文件不算交了）` : ''
+      const tail = [blankText, staleText].filter(Boolean).join('；')
+      const notice = !r.stale.length && !blankList.length
         ? `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，` +
           `但磁盘上还没有。${SUBAGENT_STOP_RETRY_NOTE}` +
           `。不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`
         : (r.missing.length
-            ? `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，但磁盘上还没有；${staleText}。`
-            : `⚠️ 交付物校验：${role} 在 ${r.stageId} 的 ${staleText}。`) +
+            ? `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，但磁盘上还没有；${tail}。`
+            : `⚠️ 交付物校验：${role} 在 ${r.stageId} 的 ${tail}。`) +
           `${SUBAGENT_STOP_RETRY_NOTE}。不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实。` +
-          staleOut
+          (r.stale.length ? staleOut : '')
       const notices = [notice]
       // 交付物本身还缺产物时，账本比对一样并进同一条——它审计的是全部阶段的
       // produces，不只是刚被判定缺失的这一段（比如更早的阶段被 Bash 绕过写过）。

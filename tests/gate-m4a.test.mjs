@@ -9,7 +9,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { run, GATE } from './helpers/gate-runner.mjs'
+import { run, hermeticEnv, GATE } from './helpers/gate-runner.mjs'
+import { fileURLToPath } from 'node:url'
 import { makeRun } from './fixtures/make-run.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 import { reworkFromHistory } from '../hooks/lib/state.mjs'
@@ -415,6 +416,7 @@ test('M4a 复核二 G1：06-test.md 是空文件（快照里记着空内容的 s
   })
 })
 
+// 文档核对订正：空文件现在让那一段根本不算齐（artifactCurrent），【阶段】不发——与交付文档缺着时一样，不再单独点名「空文件」。
 test('M4a 复核二 G5：只有换行与空白的 08-delivery.md → 收口拒、【阶段】不说该收口了', () => {
   using({ ...AT_S8, files: { ...DONE_FILES, '08-delivery.md': '\r\n  \n' } }, (fx) => {
     const r = run('rework', writeState(fx, { ...fx.state, closed_at: CLOSED_AT }), GATE, fx.p)
@@ -422,7 +424,6 @@ test('M4a 复核二 G5：只有换行与空白的 08-delivery.md → 收口拒�
     assert.match(reasonOf(r), /08-delivery\.md[^\n]*空文件/)
     const c = contextOf(run('ledger', postedState(fx), GATE, fx.p))
     assert.doesNotMatch(c, /该收口了/)
-    assert.match(c, /空文件/)
   })
 })
 
@@ -465,5 +466,55 @@ test('M4a 复核二 D02、F03：已收口 H3 拒绝理由给出路；H5b 对产�
   })
   using(B, (fx) => {
     assert.match(run('stop-gate', stopped('agent-team:at-qa'), GATE, fx.p).stderr, /只在末尾追加一句「核过」不算/)
+  })
+})
+
+// ============================================================================ M4a 文档核对
+
+const INJECT = fileURLToPath(new URL('./helpers/inject-throw.cjs', import.meta.url))
+
+// F1：空文件在交付那一刻就不算交了——at-qa 交一个空的 06-test.md 停不下来；PM 跳过它派 at-acceptance，H2 按前置缺拒。
+test('M4a 核对 F1：首轮 S6，at-qa 交空的 06-test.md 就停 → H5b 拒，说是空文件', () => {
+  using({ stage: 'S6', history: FIRST, files: { ...R1, '06-test.md': '\n  \n' } }, (fx) => {
+    const r = run('stop-gate', stopped('agent-team:at-qa'), GATE, fx.p)
+    assert.equal(r.status, 2)
+    assert.match(r.stderr, /06-test\.md 是空文件/)
+  })
+})
+
+test('M4a 核对 F1：S7，06-test.md 是空文件，派 at-acceptance → H2 拒，前置缺 06', () => {
+  using({ stage: 'S7', history: [...FIRST, ...H('S7')], files: { ...R1, '06-test.md': '' } }, (fx) => {
+    const r = run('readiness', dispatch('agent-team:at-acceptance'), GATE, fx.p)
+    assert.ok(denied(r))
+    assert.match(reasonOf(r), /前置产物还缺[^\n]*06-test\.md/)
+  })
+})
+
+// F2：空的兄弟产物不再让 H3 的补派豁免一直开着（1.8.0 拒这一写入）。
+test('M4a 核对 F2：S6，at-ui 的 02-wireframe.html 是空文件，它改已经交过的 02-ui-spec.md → 拒（不当成补派）', () => {
+  using({ stage: 'S6', history: FIRST, files: { ...R1, '02-wireframe.html': '' } }, (fx) => {
+    writeFileSync(join(fx.runDir, 'delivered.json'), JSON.stringify({ stage: 'S6', products: { '02-ui-spec.md': sha(R1['02-ui-spec.md']) } }))
+    const w = { hook_event_name: 'PreToolUse', tool_name: 'Write', agent_type: 'agent-team:at-ui', tool_input: { file_path: join(fx.runDir, '02-ui-spec.md'), content: 'y' } }
+    assert.ok(denied(run('writepath', w, GATE, fx.p)))
+  })
+})
+
+// F3（G07）：ledger 的收口阻碍对「在、却读不出来」那一支——用崩溃注入的 read: 模式造出来。
+test('M4a 核对 G07：最后一段的 08-delivery.md 读不出来 → 【阶段】不催收口，点名读不出来', () => {
+  using(AT_S8, (fx) => {
+    const r = run('ledger', postedState(fx), GATE, fx.p, { ...hermeticEnv(), AGENT_TEAM_TEST_THROW: 'read:08-delivery.md' }, { nodeArgs: ['-r', INJECT] })
+    const c = contextOf(r)
+    assert.doesNotMatch(c, /该收口了/)
+    assert.match(c, /08-delivery\.md（在磁盘上但读不出来/)
+  })
+})
+
+// PG-6：最后一段、没收口，补交的 at-acceptance 返回——先说补交这条正路，不先断言「两种可能」（两样都不对）。
+test('M4a 核对 PG-6：最后一段补交的 at-acceptance 返回 → 回传不说「两种可能」', () => {
+  const { ['07-acceptance.md']: _gone, ...files } = DONE_FILES
+  using({ ...AT_S8, files }, (fx) => {
+    const c = contextOf(run('deliverable', returned('agent-team:at-acceptance'), GATE, fx.p))
+    assert.match(c, /补收口缺的前置/)
+    assert.doesNotMatch(c, /两种可能/)
   })
 })
