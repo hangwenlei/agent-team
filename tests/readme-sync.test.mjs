@@ -1691,3 +1691,26 @@ test('两半的安装一节点名的 /agent-team:* 命令，恰好是 commands/ 
     assert.doesNotMatch(s, /one blocked write/, half)
   }
 })
+
+// M4c（docs/37，审查第 37 条后半）：「什么时候会问你」那张表两半各一行对应一个升级类别。类别从 ESCALATION_KINDS 派生——加一类
+// 而 README 没跟上（或者这张对照表没跟上），当场红。两半都不报总数（原来写「只在下面五类事上」）。
+const README_KIND_ROWS = {
+  sensitive: ['| 敏感操作 |', '| Sensitive |'],
+  'contract-conflict': ['| 契约冲突 |', '| Conflict |'],
+  tradeoff: ['| 需要取舍 |', '| Trade-off |'],
+  'contract-hole': ['| 需求缺口 |', '| Gap |'],
+  'budget-exhausted': ['| 返工用尽 |', '| Rework |'],
+  'env-blocked': ['| 环境阻塞 |', '| Blocked |'],
+}
+test('M4c README 两半「什么时候会问你」：每个升级类别各有一行，不报总数', async () => {
+  const { ESCALATION_KINDS } = await import('../hooks/lib/state.mjs')
+  assert.deepEqual(Object.keys(README_KIND_ROWS), ESCALATION_KINDS, '对照表要与 ESCALATION_KINDS 一一对应')
+  const zh = read(README_ZH)
+  const en = read(README_EN)
+  for (const [k, [z, e]] of Object.entries(README_KIND_ROWS)) {
+    assert.ok(zh.includes(z), `中文部分缺 ${k} 那一行（${z}）`)
+    assert.ok(en.includes(e), `英文部分缺 ${k} 那一行（${e}）`)
+  }
+  assert.ok(!zh.includes('五类'), '中文部分还在报总数')
+  assert.ok(!/\bfive kinds\b/.test(en), '英文部分还在报总数')
+})

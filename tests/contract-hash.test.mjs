@@ -81,7 +81,7 @@ test('compareContractSha：actual 为 null（契约还没写出来）不报漂�
 
 // M4c（docs/37，审查第 37 条前半）：「contract_sha 与磁盘」唯一的比较函数，返回结构化的 kind——写契约那一刻的【契约】用它的 problem
 // （带新值，那是合法修订记账的来源），派发返回与写 state.json 时的【契约】按 kind 另组措辞（不报磁盘上的值）。
-test('M4c compareContractSha：五种 kind 各就各位', () => {
+test('M4c compareContractSha：每一种 kind 各就各位', () => {
   const h = sha256OfContract(LF)
   const h2 = sha256OfContract(LF + 'x')
   assert.equal(compareContractSha({ recorded: h, actual: h }).kind, 'ok')

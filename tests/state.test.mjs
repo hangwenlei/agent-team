@@ -115,17 +115,27 @@ test('写着的值超过上限、派生值没超：只报「对不上派生值�
   assert.match(r.problems[0], /应当是 1/)
 })
 
-test('escalations 的 kind 必须是五类之一', () => {
+test('escalations 的 kind 必须是规格 §5.1 列的那几类之一（报错文案逐个列出、不报总数）', () => {
   const esc = { stage: 'S2', kind: 'whatever', question: 'q', answer: 'a', at: 'x' }
   const r = validateState(good({ escalations: [esc] }), { stages: STAGES })
   assert.equal(r.ok, false)
   assert.ok(r.problems.some((p) => ESCALATION_KINDS.every((k) => p.includes(k))))
+  assert.ok(r.problems.every((p) => !/[一二三四五六七八九十]类/.test(p)), '列举，不报总数（docs/16 §3.1）：加一类时这句话不该跟着变假')
 })
 
-test('五类升级条件与规格 §5.1 一一对应', () => {
+// M4c（docs/37，审查第 37 条后半）：加 env-blocked（环境挡住了：缺工具、服务或权限，构建或测试跑不起来，交不出来或验证不了）。
+// 收口门禁自己就把「测试跑不起来」指向第 4 节，原来照做如实记 env-blocked 会被报成状态不合法、记成 contract-hole 反倒一声不响。
+// user-change（用户主动改需求）没加：它记不记回退、吃不吃返工额度还没定（docs/37 §5）。
+test('升级条件与规格 §5.1 一一对应（M4c 加了 env-blocked）', () => {
   assert.deepEqual(ESCALATION_KINDS, [
-    'sensitive', 'contract-conflict', 'tradeoff', 'contract-hole', 'budget-exhausted',
+    'sensitive', 'contract-conflict', 'tradeoff', 'contract-hole', 'budget-exhausted', 'env-blocked',
   ])
+})
+
+test('M4c 记一条 env-blocked 的 escalation 不报问题', () => {
+  const esc = { stage: 'S6', kind: 'env-blocked', question: '测试要连的数据库起不来，怎么办？', answer: '先跳过集成测试', at: 'x' }
+  const r = validateState(good({ escalations: [esc] }), { stages: STAGES })
+  assert.ok(!r.problems.some((p) => p.includes('escalations[0].kind')), JSON.stringify(r.problems))
 })
 
 test('缺字段逐条报出来，一次报全不要只报第一条', () => {

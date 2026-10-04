@@ -37,7 +37,7 @@ $ARGUMENTS
   那一条问用户，问题里写清是哪一种。
 - `stage` 停在更早的段、没收口：那一趟还没走完，先用 `AskUserQuestion` 问用户：续跑那一趟（`/agent-team:at-resume`），
   还是放弃它、另起这一趟——放弃的那一趟原样留在磁盘上，`current-run` 一改，门禁就不再按它判派发与交付。
-  这一问不属于第 4 节那五类：不记 escalation，也不动契约（新的这一趟还没建）。用户选续跑：告诉用户这次的需求还没开始，
+  这一问不属于第 4 节那几类：不记 escalation，也不动契约（新的这一趟还没建）。用户选续跑：告诉用户这次的需求还没开始，
   照 `/agent-team:at-resume` 接着跑那一趟，走完再提。问不了用户（工具面里没有 `AskUserQuestion`）：另起这一趟，
   并告诉用户那一趟的 run id 与接回它的办法（先把 `.agent-team/current-run` 改回那个 run id，再跑 `/agent-team:at-resume`）。
 
@@ -277,7 +277,7 @@ $ARGUMENTS
 
 ## 4. 什么时候必须停下来问用户
 
-下面五类**你无权自决**（规格 §5.1），用 `AskUserQuestion` 问，并且必须带上：
+下面这几类**你无权自决**（规格 §5.1），用 `AskUserQuestion` 问，并且必须带上：
 冲突的契约原文引用、2–4 个具体选项、每项的后果、你的推荐。**禁止开放式提问。**
 
 | kind | 什么情况 |
@@ -287,6 +287,7 @@ $ARGUMENTS
 | `tradeoff` | 两方案都满足契约但不能兼得，且差异用户可感知（范围/时间/体验/技术债） |
 | `contract-hole` | 原始需求自相矛盾或缺关键信息，任一猜测都可能导致白做 |
 | `budget-exhausted` | 返工至第 3 轮仍不通过 |
+| `env-blocked` | 环境挡住了：缺工具、服务或权限，构建或测试跑不起来，这一段交不出来或验证不了 |
 
 用户答复之后**两件事都要做**：
 1. 往 `state.json` 的 `escalations` 追加一条 `{ stage, kind, question, answer, at }`，
