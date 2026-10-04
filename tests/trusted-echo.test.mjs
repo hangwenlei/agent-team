@@ -202,6 +202,18 @@ const SCENARIOS = [
     anchor: SHA_NOTE,
   },
   {
+    // M4c 复核：契约不在时【契约】走 missing 那一支，记录的值同样要经 shaOrNote——上一格里契约总在磁盘上，喂不到这一支。
+    name: 'state.contract_sha，契约不在（【契约】的 missing 那一支）',
+    disk: true,
+    omit: ['00-contract.md'],
+    state: (s, P) => ({ ...s, contract_sha: P }),
+    calls: ({ run }) => [
+      ['ledger', posted('at-pm', join(run, 'state.json'))],
+      ['deliverable', returned('agent-team:at-product')],
+    ],
+    anchor: SHA_NOTE,
+  },
+  {
     name: 'validateState 读到的各个字段与键名（【state.json】）',
     disk: true,
     state: (s, P) => ({

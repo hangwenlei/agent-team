@@ -537,6 +537,10 @@ test('/at 第 4 节的表与 04-dispatch 模板写全了升级条件的 kind 取
     assert.ok(t.includes(`| \`${k}\` |`), `commands/at.md 第 4 节的表里没有 ${k} 那一行`)
     assert.ok(tpl.includes(k), `templates/04-dispatch.md 第 4 节没有列 ${k}`)
   }
+  // M4c 复核：反过来也要对上——表里多一行 ESCALATION_KINDS 没有的类别，PM 照表记它会被 validateState 拒。
+  const s4 = t.slice(t.indexOf('## 4. 什么时候必须停下来问用户'), t.indexOf('\n## 5.'))
+  const rows = [...s4.matchAll(/^\| `([a-z-]+)` \|/gm)].map((m) => m[1])
+  assert.deepEqual(rows, ESCALATION_KINDS, '第 4 节的表与 ESCALATION_KINDS 要一一对应、同序')
 })
 
 // ——— 命令之间的互相引用必须带插件命名空间 ———

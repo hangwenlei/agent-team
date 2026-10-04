@@ -291,7 +291,7 @@ test('M4b S5 的产者：被拒时在实现记录里写「被写路径隔离拒�
   }
 })
 
-test('M4b at-qa：开工前自查把缺的、有没解决的被拒条目的实现记录都算成没交齐；没开跑也写进 06-test.md', () => {
+test('M4b at-qa：开工前自查把缺的、有没解决的被拒条目的实现记录都算成没交齐；没开跑是冒泡、不写 06-test.md（M4c）', () => {
   const self = flat(between(read('agents/at-qa.md'), '## 你开工前先自己确认', '## 你有 `Bash`'))
   has(
     self,
@@ -303,7 +303,7 @@ test('M4b at-qa：开工前自查把缺的、有没解决的被拒条目的实�
     // M4c（docs/37）：没开跑是冒泡，不写 06-test.md（写了门禁就当测试报告交了）；第一行是固定的标记与原因，第一回被拦之后原样再停。
     `「${BUBBLE_MARK}没开跑——S5 没交齐」`,
     '也不要写 `06-test.md`',
-    '原样再停一次',
+    '原样再发一遍',
   )
   assert.ok(!self.includes('不算没交齐'), self)
   assert.ok(!self.includes('结论：没开跑'), self)

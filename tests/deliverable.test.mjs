@@ -9,7 +9,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { decideDeliverable, isBubbleStop, BUBBLE_MARK, BUBBLE_EXIT } from '../hooks/lib/deliverable.mjs'
+import { decideDeliverable, isBubbleStop, BUBBLE_MARK, BUBBLE_EXIT, BUBBLE_WHEN } from '../hooks/lib/deliverable.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from '../hooks/lib/retry-budget.mjs'
 
 const STAGES = {
@@ -263,7 +263,7 @@ test('M3y：没有上一轮的产物时，理由是固定的那一句（M4c 起�
   assert.equal(
     r.reason,
     'at-product 在 S2 应当产出 01-prd.md，但 01-prd.md 还没有写到磁盘上。在结束之前把它写出来。' +
-      `确实交不出来、要上级定的（契约有问题、缺输入、写入被拒），${BUBBLE_EXIT}`,
+      `${BUBBLE_WHEN}，${BUBBLE_EXIT}`,
   )
   assert.deepEqual(r.stale, [])
   const old = decideDeliverable({ role: 'at-product', stageId: 'S2', stages: REAL, artifactExists: have() })
@@ -338,6 +338,15 @@ test('M4c isBubbleStop：只在 stop_hook_active 为真、第一个非空行以�
   const yes = [
     `${BUBBLE_MARK}契约冲突`,
     `**${BUBBLE_MARK}**契约冲突`,
+    // 复核（docs/37 §3）：中文里加粗标签最常见的写法是冒号在加粗外面；冒号前多一个空格也认。
+    `**${BUBBLE_MARK.slice(0, -1)}**：契约冲突`,
+    `__${BUBBLE_MARK.slice(0, -1)}__：契约冲突`,
+    `${BUBBLE_MARK.slice(0, -1)} ：契约冲突`,
+    `\`${BUBBLE_MARK.slice(0, -1)}\`：契约冲突`,
+    // 复核：把指令里的直角引号一起抄下来、编号列表、方括号标签加冒号，都认。
+    `「${BUBBLE_MARK}契约冲突」`,
+    `1. ${BUBBLE_MARK}契约冲突`,
+    `【${BUBBLE_MARK.slice(0, -1)}】：契约冲突`,
     `# ${BUBBLE_MARK}契约冲突`,
     `## ${BUBBLE_MARK}契约冲突`,
     `> ${BUBBLE_MARK}契约冲突`,
@@ -354,6 +363,7 @@ test('M4c isBubbleStop：只在 stop_hook_active 为真、第一个非空行以�
     ['true', `${BUBBLE_MARK}契约冲突`],
     [true, `我看了契约。\n${BUBBLE_MARK}契约冲突`],
     [true, `${BUBBLE_MARK.slice(0, -1)}排序写完了`],
+    [true, `${BUBBLE_MARK.slice(0, -1)}排序：写完了`],
     [true, ''],
     [true, '   \n  '],
     [true, undefined],
@@ -366,7 +376,7 @@ test('M4c isBubbleStop：只在 stop_hook_active 为真、第一个非空行以�
   assert.equal(isBubbleStop(), false, '缺参数不抛')
 })
 
-test('M4c：缺/空与还旧两支的拒绝文案都教同一个出口（标记原样写出、说清原样再停一次），不再许诺门禁不认的「写进回报」', () => {
+test('M4c：缺/空与还旧两支的拒绝文案都教同一个出口（标记原样写出、说清怎么再停），不再许诺门禁不认的「写进回报」', () => {
   const missing = decideDeliverable({ role: 'at-architect', stageId: 'S3', stages: REAL, ...fresh({}) })
   const blank = decideDeliverable({ role: 'at-architect', stageId: 'S3', stages: REAL, artifactExists: () => false, artifactBlank: (n) => n === '03-arch.md' })
   const stale = decideDeliverable({ role: 'at-qa', stageId: 'S6', stages: REAL, ...fresh({ stale: ['06-test.md'] }) })
@@ -376,7 +386,12 @@ test('M4c：缺/空与还旧两支的拒绝文案都教同一个出口（标记�
     assert.ok(r.reason.includes(BUBBLE_EXIT), r.reason)
     assert.ok(!r.reason.includes('把理由写进你的回报'), r.reason)
   }
-  assert.ok(BUBBLE_EXIT.includes('原样再停一次'), BUBBLE_EXIT)
+  // 复核（docs/37 §3）：「原样再停一次」会被读成「什么都不改再停」——子代理回一句「已按要求原样再停」，第一行没有标记，照拦。
+  assert.ok(BUBBLE_EXIT.includes('原样再发一遍'), BUBBLE_EXIT)
+  assert.ok(BUBBLE_EXIT.includes('只回一句'), BUBBLE_EXIT)
+  // 两支用同一个引子（不需要产出、不该由你改是还旧那一支多出来的情形）。
+  assert.ok(missing.reason.includes(`${BUBBLE_WHEN}，${BUBBLE_EXIT}`), missing.reason)
+  assert.ok(stale.reason.includes(`${BUBBLE_WHEN}，或者这一段确实不需要产出、不该由你改的，${BUBBLE_EXIT}`), stale.reason)
   assert.ok(BUBBLE_EXIT.includes('产物照旧算没交'), '要说清冒泡不等于交了')
 })
 
@@ -388,4 +403,22 @@ test('M4c SUBAGENT_STOP_RETRY_NOTE：说出冒泡这一种可能、点名环境�
   assert.ok(SUBAGENT_STOP_RETRY_NOTE.includes('设为 0'), SUBAGENT_STOP_RETRY_NOTE)
   assert.ok(SUBAGENT_STOP_RETRY_NOTE.includes('清零'), SUBAGENT_STOP_RETRY_NOTE)
   assert.ok(!SUBAGENT_STOP_RETRY_NOTE.includes('不是一个固定值'), SUBAGENT_STOP_RETRY_NOTE)
+})
+
+// 复核（docs/37 §3）：「写入被拒」不是「不写、冒泡」的理由——执行段（S5）被写路径隔离拒了的，正文要它把被拒的路径与拒绝原文写进
+// 实现记录的「被写路径隔离拒绝」一节（PM、续跑、at-qa 都按那一节判交没交齐），写了就停得下。拒绝文案在执行段点出这一条，别的段不提。
+test('M4c 拒绝文案：执行段点出「被拒写进实现记录那一节、写了就能停」，引子里不再有「写入被拒」；别的段不提那一节', () => {
+  const s5 = decideDeliverable({ role: 'at-backend', stageId: 'S5', stages: REAL, ...fresh({}) })
+  assert.ok(s5.reason.includes('被写路径隔离拒绝'), s5.reason)
+  assert.ok(s5.reason.includes('写了就能停'), s5.reason)
+  assert.ok(!s5.reason.includes('写入被拒'), s5.reason)
+  const s2 = decideDeliverable({ role: 'at-product', stageId: 'S2', stages: REAL, ...fresh({}) })
+  assert.ok(!s2.reason.includes('被写路径隔离拒绝'), s2.reason)
+  assert.ok(!BUBBLE_WHEN.includes('写入被拒'), BUBBLE_WHEN)
+})
+
+// 复核（docs/37 §3）：H5a 那句「产物不在有两种可能」在还旧的那一格不对——产物在磁盘上，只是上一轮的。
+test('M4c SUBAGENT_STOP_RETRY_NOTE：说「产物没交（不在，或者还是上一轮的）」，不说「产物不在」', () => {
+  assert.ok(SUBAGENT_STOP_RETRY_NOTE.includes('产物没交（不在，或者还是上一轮的）'), SUBAGENT_STOP_RETRY_NOTE)
+  assert.ok(!SUBAGENT_STOP_RETRY_NOTE.includes('产物不在也有'), SUBAGENT_STOP_RETRY_NOTE)
 })

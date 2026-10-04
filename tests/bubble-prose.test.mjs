@@ -23,3 +23,29 @@ test('M4c 协调者正文：下级回报第一行是冒泡标记的，它没交�
     for (const k of ['没交', '原样冒泡给 PM']) assert.ok(s.includes(k), `${file}：${s}`)
   }
 })
+
+// 复核（docs/37 §3）：环境的原因跑不起来（缺工具、服务、权限）不是冒泡——那就是这一轮的测试结论，照实写进 06-test.md；冒泡只用于
+// S5 没交齐。回退表不让 PM 为它回 S6 重跑（同一个环境再跑一遍也一样），照第 4 节 env-blocked 问用户；用户定了照现状交付的，收口那一步
+// 写明哪些没验证。
+test('M4c 环境原因跑不起来：at-qa 照实写进 06-test.md、不冒泡；回退表不回 S6 重跑、问用户；收口写明哪些没验证', () => {
+  const qa = flat(read('agents/at-qa.md'))
+  assert.ok(sentences(qa).some((x) => x.includes('环境的原因跑不起来') && x.includes('06-test.md') && x.includes('不要冒泡')), 'at-qa 没写环境原因跑不起来怎么办')
+  const at = flat(read('commands/at.md'))
+  const back = at.slice(at.indexOf('### 回退'), at.indexOf('回退是一次 `state.json` 的写入'))
+  assert.ok(back.includes('环境') && back.includes('`env-blocked`') && back.includes('不回退重跑'), back)
+  const closing = at.slice(at.indexOf('**一、验收没过不收口。**'), at.indexOf('**二、**'))
+  for (const k of ['`env-blocked`', '照现状交付', '写明哪些没验证']) assert.ok(closing.includes(k), `第 6 节第一步缺「${k}」`)
+})
+
+// 复核（docs/37 §3）：at-resume 说「契约不要重写」，而门禁的【契约】会叫 PM「原样重写一次 00-contract.md、从回传里拿 sha」——两句要对上。
+test('M4c at-resume：「契约不要重写」带上例外——门禁回传叫原样重写一次拿 sha 的照做，第 1 节一个字不动', () => {
+  const r = flat(read('commands/at-resume.md'))
+  for (const k of ['原样重写一次 `00-contract.md`', '一个字不动']) assert.ok(r.includes(k), `at-resume 缺「${k}」`)
+})
+
+// 复核（docs/37 §3）：at-acceptance 收不到【契约】（第 20 条），不再许诺「没收到漂移告警就按原话用、收到了就冒泡」。
+test('M4c at-acceptance：不再许诺它结构上收不到的漂移告警', () => {
+  const f = flat(read('agents/at-acceptance.md'))
+  assert.ok(!f.includes('没收到漂移告警'), f)
+  assert.ok(!f.includes('收到了就停下来冒泡给 PM'), f)
+})

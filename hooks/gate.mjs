@@ -362,11 +362,11 @@ function failOpenNotice(label, ctx) {
 // ⚠️ **这不是 fail open，措辞不要写成 fail open**，所以不复用 failOpenNotice：那一族说的是
 // 「运行上下文读不到、本次放行」；这里运行上下文是好的、判据照常算了、回传照常发了，
 // **没有放行任何东西**——错的是收件人，不是判定。混用同一句话就是上面那种口径分叉。
-function misroutedNotice(label, channel, recipient) {
+// M4c：holds 说「它要动的东西在哪、谁拦」——契约那一条要动的可能是 contract_sha，也可能是契约本身（H4）。
+function misroutedNotice(label, channel, recipient, holds = '它要动的东西住在 state.json 里，H3 写路径门禁在 PreToolUse 上把非 PM 对控制文件的 Edit/Write 拒掉') {
   return (
     `agent-team ${label}：这次的回传落在 ${inline(recipient)} 手里——${channel} 只发给这次工具调用` +
-    `所属的那个上下文，而它要动的东西住在 state.json 里，H3 写路径门禁在 PreToolUse 上把` +
-    `非 PM 对控制文件的 Edit/Write 拒掉。告警照发、判据没有放行任何东西，发错的是收件人` +
+    `所属的那个上下文，而${holds}。告警照发、判据没有放行任何东西，发错的是收件人` +
     `不是判定；这一条要被处理，得靠 ${inline(recipient)} 把那段回传原样冒泡上去，一路带到 PM。\n`
   )
 }
@@ -457,26 +457,36 @@ function buildDriftNotice(cmp, recipientCanWriteState) {
 }
 
 // 收件人改不了这一条时的收尾（M3b 起在 buildDriftNotice 里；M4c 抽出来，契约那一段共用——同一个收件人分支只留一份实现）。
-function relayTail(why) {
+// swallowed：咽掉的后果。账本比对那一条咽掉了就没人再看见；契约那一条 PM 下一次派发返回或写 state.json 时还会再报（复核）。
+function relayTail(why, swallowed = '咽掉之后没有任何人会再看见它') {
   return (
     `⚠️ **这一条你改不了**：${why}。而这条回传只发给` +
     `发起这次派发的人——**也就是你，PM 不会同时收到一份**。` +
     `**把上面这几行原样冒泡给派你的人**，让它继续往上带到 PM；` +
-    `**不要自己把它咽掉**——咽掉之后没有任何人会再看见它。`
+    `**不要自己把它咽掉**——${swallowed}。`
   )
 }
 
 // M4c（docs/37，全量审查第 37 条前半）：派发返回时拿 contract_sha 对磁盘上的契约（账本比对已经不看契约，见
 // hooks/lib/artifact-drift.mjs）。措辞在 hooks/lib/ledger.mjs 的 contractCheckNotice（写 state.json 时同一句）；收件人改不了
 // state.json 时接上 relayTail，误投痕由调用点留，与账本比对同一个分工。
+// 复核（docs/37 §3）：契约在、这一次却读不出，说读不出、没核，不说它不在。
 function contractNoticeFor(ctx, recipientCanWriteState) {
   const bytes = ctx.artifactBytes(CONTRACT_FILE)
   const recorded = ctx.state?.contract_sha
-  const notice = contractCheckNotice(compareContractSha({ recorded, actual: bytes ? sha256OfContract(bytes) : null }), recorded)
+  const cmp =
+    bytes === null && ctx.artifactExists(CONTRACT_FILE)
+      ? { ok: false, kind: 'unreadable' }
+      : compareContractSha({ recorded, actual: bytes ? sha256OfContract(bytes) : null })
+  const notice = contractCheckNotice(cmp, recorded)
   if (!notice) return null
   return recipientCanWriteState
     ? notice
-    : notice + relayTail('contract_sha 住在 state.json 里、契约只有 PM 写得了：state.json 与契约，H3、H4 在 PreToolUse 上都把非 PM 拒掉')
+    : notice +
+        relayTail(
+          'contract_sha 住在 state.json 里、契约只有 PM 写得了：state.json 与契约，H3、H4 在 PreToolUse 上都把非 PM 拒掉',
+          '咽掉了，PM 要到它自己下一次派发返回或写 state.json 时才会再看到它',
+        )
 }
 
 // M3a Task 2：「已经走过的那几段，产者有没有交代」的措辞组装。decideCoverage
@@ -1440,7 +1450,7 @@ function main() {
     }
     const produceBytes = produceName ? ctx.artifactBytes(produceName) : null
 
-    // M4c（docs/37）：写 state.json 时也读契约——buildLedgerNotices 拿 contract_sha 比它（契约那一处的注释）。
+    // M4c（docs/37）：写 state.json 时也读契约——buildLedgerNotices 拿 contract_sha 比它（契约那一处的注释）；在却读不出的单说。
     const bytes = kind === 'contract' || kind === 'state' ? ctx.artifactBytes(CONTRACT_FILE) : null
     const reach =
       kind === 'project' && ctx.project
@@ -1554,6 +1564,7 @@ function main() {
       // M4b 第二轮复核：执行段「齐了」那句按写者分（谓词与 H3 同一个 isContractWriter）。
       writerIsPm: isContractWriter(input.agent_type),
       writer: callerOf(input),
+      contractUnreadable: kind === 'state' && bytes === null && ctx.artifactExists(CONTRACT_FILE),
     })
 
     // M3a Task 2：产者交代判据的触发点是「state.stage 推进出去时」（设计 §3.2），
@@ -1854,7 +1865,9 @@ function main() {
     // M4c（docs/37）：契约那一段（contractNoticeFor 上方）。与账本比对一样只在 deliverable 上算、收件人改不了时留误投痕。
     const contractNotice = CHECK === 'deliverable' ? contractNoticeFor(ctx, recipientCanWriteState) : null
     if (contractNotice && !recipientCanWriteState) {
-      process.stderr.write(misroutedNotice('契约', 'PostToolUse:Agent 的 additionalContext', recipient))
+      process.stderr.write(
+        misroutedNotice('契约', 'PostToolUse:Agent 的 additionalContext', recipient, '它要动的是 state.json 的 contract_sha 或契约本身，H3、H4 在 PreToolUse 上把非 PM 对它们的 Edit/Write 拒掉'),
+      )
     }
 
     if (r.ok) {
@@ -2007,8 +2020,8 @@ function main() {
       // 这里另写一次。
       //
       // ⚠️ 解释「为什么会这样」那一整段来自 ./lib/retry-budget.mjs 的
-      // SUBAGENT_STOP_RETRY_NOTE，**不要在这里把它的计数写成字面量**：那个计数不是
-      // 常数（本仓库的几次观测彼此不等，数法也不同），而且同一份知识此前在八句话里
+      // SUBAGENT_STOP_RETRY_NOTE，**不要在这里把它的计数写成字面量**：它的单一真源在那里（M4c 起是源码核过的
+      // 可配置默认值，原来几次观测彼此不等是数法不同），而且同一份知识此前在八句话里
       // 各写了一份。判据见 tests/retry-budget-single-source.test.mjs，它会拦住第二份。
       //
       // ⚠️ M3k：**这个模板上一版自己写着「SubagentStop 已经尝试拦截过，但」，

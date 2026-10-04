@@ -8,7 +8,8 @@
 //   - 要 stop_hook_active：子代理第一回停下一定先看到「缺的是什么」——忘了写的会去写，真要冒泡的原样再停一回。
 //   - 只认第一行：标记夹在正文中间不算，免得一段顺带提到「冒泡」的回报被当成冒泡。
 //   - 放行是 exit 0、什么都不写：SubagentStop 上 stdout 或 additionalContext 都等于拦截（hooks/lib/fail-open.mjs）。
-//   - 产物照旧算没交：冒泡不改「交没交」的语义，H2、【阶段】、H6、收口对这一段照常判缺。
+//   - 产物照旧算没交：冒泡不改「交没交」的语义——下一段的前置（H2）与收口照常判缺，【阶段】不说齐了；推进本身不核缺产物
+//     （第 17 条，docs/37 §5），不在任何前置里的那几份冒泡之后照样能被推进过去，与原来顶到平台上限被静默放行是同一个洞。
 // 输入照 CLI 2.1.286 实测的键（docs/37 §1）；这里只放 H5b 读得到的那几个。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -64,7 +65,7 @@ test('M4c H5b：第一回停下（stop_hook_active 为假）带着标记 → 照
     assert.equal(r.status, 2)
     assert.match(r.stderr, /03-arch\.md/, '先让它看到缺的是什么')
     assert.ok(r.stderr.includes(BUBBLE_MARK), r.stderr)
-    assert.ok(r.stderr.includes('原样再停一次'), r.stderr)
+    assert.ok(r.stderr.includes('原样再发一遍'), r.stderr)
   })
 })
 
@@ -100,6 +101,8 @@ test('M4c H5b：标记前面带 Markdown 装饰（加粗、标题、引用、列
   const plain = BUBBLE_MARK.slice(0, -1)
   for (const message of [
     `**${BUBBLE_MARK}**${REASON}`,
+    `**${BUBBLE_MARK.slice(0, -1)}**：${REASON}`,
+    `${BUBBLE_MARK.slice(0, -1)} ：${REASON}`,
     `# ${BUBBLE_MARK}${REASON}`,
     `> ${BUBBLE_MARK}${REASON}`,
     `- ${BUBBLE_MARK}${REASON}`,

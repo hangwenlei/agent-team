@@ -11,7 +11,7 @@
 // 回传不报磁盘上算出来的 sha，也不说「把 artifacts 改成与磁盘一致」：照着磁盘去改账，就把一次漂移洗成了合法。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { run, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
@@ -92,6 +92,9 @@ test('M4c G5：修订块追加了、contract_sha 没跟上 → 报【契约】�
     assert.ok(!ctx.includes(H1), '磁盘上算出来的那个值不报：照着它改账就把漂移洗成了合法')
     assert.ok(!ctx.includes('把 artifacts 改成与磁盘一致'), ctx)
     assert.ok(ctx.includes('不要自己算'), ctx)
+    // 复核（docs/37 §3）：对得上格式、对不上值，门禁分不出是修订后没记、记了自己算的值、还是契约被改了——不断言成因，几种都列出来。
+    for (const k of ['可能是', '自己算', '恢复原样', '记进 contract_sha']) assert.ok(ctx.includes(k), `缺「${k}」：${ctx}`)
+    assert.ok(!ctx.includes('契约在记账之后被改过'), ctx)
   })
 })
 
@@ -122,7 +125,11 @@ test('M4c G8：收件人不是 PM（架构师派 at-backend 返回）→ 契约�
     const ctx = ctxOf(r.stdout)
     assert.match(ctx, /【契约】/)
     assert.ok(ctx.includes('原样冒泡给派你的人'), ctx)
+    assert.ok(ctx.includes('PM 不会同时收到一份'), ctx)
+    // 复核：契约这一条咽掉了，PM 自己下一次派发返回或写 state.json 时还会看到——不说「没有任何人会再看见它」。
+    assert.ok(!ctx.includes('没有任何人会再看见它'), ctx)
     assert.match(r.stderr, /契约/)
+    assert.match(r.stderr, /H4/, '误投痕要说到契约本身（H4），不只是 state.json')
   })
   withRun({ contract: REVISED, state: { contract_sha: H0 } }, ({ dirs }) => {
     const r = h5a(dirs)
@@ -188,3 +195,53 @@ test('M4c S6：写契约那一刻的【契约】照旧给新值（合法修订�
     assert.ok(ctx.includes(H1), '写契约那一刻要把新值交给 PM——这是合法修订记账的唯一来源')
   })
 })
+
+// 复核（docs/37 §3）：派发返回时「产物没交」那一支（异步派发启动那一刻、冒泡返回都走它）也带【契约】——原来只删那一行全套照绿。
+test('M4c G11：被派角色的产物没交（例：架构师冒泡返回）、契约漂了 → 同样报【契约】；协调者收件时带冒泡的收尾', () => {
+  withRun({ stage: 'S3', roster: ['at-architect'], files: ['00-contract.md', '01-prd.md'], contract: REVISED, state: { contract_sha: H0 } }, ({ dirs }) => {
+    const ctx = ctxOf(h5a(dirs, returned('agent-team:at-architect')).stdout)
+    assert.match(ctx, /交付物校验/)
+    assert.match(ctx, /【契约】/)
+  })
+  const S5 = { stage: 'S5', roster: ['at-architect', 'at-backend'], files: ['00-contract.md'], contract: REVISED, state: { contract_sha: H0 } }
+  withRun(S5, ({ dirs }) => {
+    const r = h5a(dirs, returned('agent-team:at-backend', 'agent-team:at-architect'))
+    const ctx = ctxOf(r.stdout)
+    assert.match(ctx, /交付物校验/)
+    assert.match(ctx, /【契约】/)
+    assert.ok(ctx.includes('原样冒泡给派你的人'), ctx)
+    assert.match(r.stderr, /契约/)
+  })
+})
+
+// 复核（docs/37 §3）：contract_sha 缺键或乱写，不是「契约在记账之后被改过」——单说它不合法，出路是写 PENDING、原样重写一次契约拿 sha。
+test('M4c G12：contract_sha 不合法 → 【契约】说它不合法、给 PENDING 那条出路，不说契约被改过，也不套两层括号', () => {
+  withRun({ state: { contract_sha: 'x' } }, ({ dirs }) => {
+    const ctx = ctxOf(h5a(dirs).stdout)
+    assert.match(ctx, /【契约】/)
+    assert.ok(ctx.includes('不是合法的 sha256'), ctx)
+    assert.ok(ctx.includes('PENDING'), ctx)
+    assert.ok(ctx.includes('原样重写一次'), ctx)
+    assert.ok(!ctx.includes('在记账之后被改过'), ctx)
+    assert.ok(!ctx.includes('（（'), ctx)
+  })
+})
+
+// 复核（docs/37 §3）：契约在、只是这一次读不出（例：被别的程序占着）——说「这次读不出、没核」，不说「需求基线不在了、告诉用户」。
+// Windows 上造不出「在、却读不出」的文件（锁要另一个进程持着），只在 POSIX 上用权限造。
+test('M4c G13：契约在却读不出 → 【契约】说这一次读不出、没核，不说它不在', { skip: process.platform === 'win32' }, () => {
+  withRun({ state: { contract_sha: H0 } }, ({ dirs, runDir }) => {
+    const p = join(runDir, '00-contract.md')
+    chmodSync(p, 0o000)
+    try {
+      const ctx = ctxOf(h5a(dirs).stdout)
+      if (process.getuid && process.getuid() === 0) return // root 无视权限位
+      assert.match(ctx, /【契约】/)
+      assert.ok(ctx.includes('读不出'), ctx)
+      assert.ok(!ctx.includes('磁盘上没有 00-contract.md'), ctx)
+    } finally {
+      chmodSync(p, 0o644)
+    }
+  })
+})
+

@@ -48,7 +48,10 @@ export function sha256OfContract(buf) {
  * recorded：state.json 里记的值（'PENDING' 表示还没记）。
  * actual：磁盘上 00-contract.md 算出来的值，契约文件不存在时传 null。
  *
- * M4c（docs/37）：「contract_sha 与磁盘」唯一的比较函数，多返回一个结构化的 kind（ok / unstarted / pending / missing / drift）。
+ * M4c（docs/37）：「contract_sha 与磁盘」唯一的比较函数，多返回一个结构化的 kind（ok / unstarted / pending / missing / invalid / drift）。
+ * PENDING 而契约不在一律当「还没写」（unstarted）：过了第一段契约又丢了、而 contract_sha 还是 PENDING，是两样都出了错，这里不分
+ * （docs/37 §5；按阶段分会让大批停在后段、没写契约的夹具一起改口）。
+ * invalid：记的值不是合法的 sha256（缺键、乱写、自己算错了格式）——不是「契约被改过」，出路是写 PENDING 再从回传里拿（复核，docs/37 §3）。
  * problem 是写契约那一刻的【契约】用的（带磁盘上的新值：合法修订记账的唯一来源）；派发返回与写 state.json 时的【契约】按 kind
  * 另组措辞、不报磁盘上的值（hooks/lib/ledger.mjs 的 contractCheckNotice）。
  */
@@ -73,6 +76,13 @@ export function compareContractSha({ recorded, actual }) {
     }
   }
   if (recorded === actual) return { ok: true, kind: 'ok' }
+  if (typeof recorded !== 'string' || !SHA_RE.test(recorded)) {
+    return {
+      ok: false,
+      kind: 'invalid',
+      problem: `state.json 的 contract_sha 不是合法的 sha256（原值不回显）。契约的 sha256 是 ${actual}，把这个值原样写进 contract_sha——不要自己拼一个。`,
+    }
+  }
   return {
     ok: false,
     kind: 'drift',

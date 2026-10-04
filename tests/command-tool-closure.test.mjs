@@ -1,6 +1,6 @@
 // Task 10a：实现者在人工走读 Task 9 时带回来的范围外发现，控制方核实属实——
 // agents/at-pm.md 的 tools: 行没有 AskUserQuestion，而 commands/at.md 第 4 节
-// 把它定为五类强制升级条件唯一的打断出口；commands/at-status.md、
+// 把它定为强制升级条件（规格 §5.1 那几类）唯一的打断出口；commands/at-status.md、
 // commands/at-resume.md 又都指示 PM 用 Glob 去磁盘核实产物。规格自己早就写了
 // （docs/superpowers/specs/2026-09-15-agent-team-plugin-design.md §7 目录树
 // 第 461 行、§3.1 机制映射表、§5.3、§9 测试策略第 4 条），只是没有传播到

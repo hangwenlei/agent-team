@@ -83,6 +83,8 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 契约那一段（`00-contract.md`）**不要重写**。它是这趟 run 的需求基线，S1 之后就冻结了；
 要改只能走升级流程（见 `/agent-team:at` 的第 4 节，`${CLAUDE_PLUGIN_ROOT}/commands/at.md`）。
+例外：门禁回传叫你「原样重写一次 `00-contract.md`、从回传里拿 sha」的（`contract_sha` 是 PENDING 或不合法，或者 `state.json` 是重建的），
+照它逐字原样重写——第 1 节一个字不动，那不是改契约。
 
 ## 3. 状态文件有问题时
 

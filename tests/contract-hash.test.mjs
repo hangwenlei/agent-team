@@ -89,7 +89,10 @@ test('M4c compareContractSha：每一种 kind 各就各位', () => {
   assert.equal(compareContractSha({ recorded: 'PENDING', actual: h }).kind, 'pending')
   assert.equal(compareContractSha({ recorded: h, actual: null }).kind, 'missing')
   assert.equal(compareContractSha({ recorded: h2, actual: h }).kind, 'drift')
-  assert.equal(compareContractSha({ recorded: 'x', actual: h }).kind, 'drift', '不合法的记录值与磁盘对不上，也是 drift')
+  // 复核（docs/37 §3）：记录值不合法（缺键、乱写）不是「契约在记账之后被改过」——单列 invalid，出路是写 PENDING 再拿 sha。
+  assert.equal(compareContractSha({ recorded: 'x', actual: h }).kind, 'invalid')
+  assert.equal(compareContractSha({ recorded: undefined, actual: h }).kind, 'invalid')
+  assert.equal(compareContractSha({ recorded: 'x', actual: null }).kind, 'missing', '契约不在时先说基线不在了')
 })
 
 test('M4c CONTRACT_FILE：契约文件名的单一真源，等于 stages.json 第一段唯一的产物', () => {
