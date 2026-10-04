@@ -157,6 +157,14 @@ export function buildLedgerNotices({
     const cmp = compareContractSha({ recorded: st.contract_sha, actual: contractSha ?? null })
     if (!cmp.ok) out.push(`【契约】${cmp.problem}`)
   }
+  // M4c（docs/37，全量审查第 37 条前半）：写 state.json 时也拿 contract_sha 比磁盘上的契约。写它的只能是 PM，不分收件人。理由是
+  // 异步派发：H5a 只在派发那一刻跑，S6 里用 Bash 改的契约要到下一次派发才报——推进到 S7 的那一次写入在派验收之前，它才是规格
+  // §4.2 ①「S7 验收前校验哈希未变」的那一刻，收口那一次写入也在这里核。contractSha 是调用方读过契约之后给的（磁盘上没有时是
+  // null）；不给（undefined，例：坏 state.json 那一支只报形状）就不核。
+  if (kind === 'state' && contractSha !== undefined && isPlainObject(state)) {
+    const n = contractCheckNotice(compareContractSha({ recorded: st.contract_sha, actual: contractSha }), st.contract_sha)
+    if (n) out.push(n)
+  }
 
   // M3u：花名册读坏、或者 project.json 有阻断时不发触达表的 JSON，说清为什么、什么时候会收到。花名册读坏时 computeReach
   // 拿 {} 算，恒得出「没有角色的触达超出」（实测 PM 用这份 {} 覆盖了一份正确的 reach.json）。有阻断时一律等改完再发：
@@ -387,4 +395,31 @@ const IMPL_RECORD_PEER_NOTE =
 function implRecordNote({ stage, writerIsPm, writer }) {
   if (writerIsPm) return IMPL_RECORD_NOTE
   return typeof writer === 'string' && stageRoles(stage).includes(writer) ? IMPL_RECORD_ROLE_NOTE : IMPL_RECORD_PEER_NOTE
+}
+
+// M4c（docs/37，全量审查第 37 条前半）：派发返回（H5a）与写 state.json 时的【契约】。与写契约那一刻的【契约】（buildLedgerNotices
+// 里 kind === 'contract' 那一支，带磁盘上的新值）不同：这里**不报磁盘上算出来的 sha**，也不说「改成与磁盘一致」——照着磁盘去改账，
+// 就把一次漂移洗成了合法。合法修订拿新值的路只有一条：写契约那一次的回传（手上没有就原样重写一次契约）。按 compareContractSha 的
+// kind 组措辞；收件人改不了 state.json 时，由调用方（gate.mjs 的 contractNoticeFor）接上冒泡的收尾。记录的值经 shaOrNote 才进文字。
+export function contractCheckNotice(cmp, recorded) {
+  if (!cmp || cmp.ok) return null
+  if (cmp.kind === 'pending') {
+    return (
+      '【契约】00-contract.md 在磁盘上，state.json 的 contract_sha 还是 PENDING。把写契约那一次【契约】回传给的 sha 原样记进' +
+      ' contract_sha；手上没有那个值（例如 state.json 是重建的），就原样重写一次 00-contract.md，从这一次的回传里拿——不要自己算' +
+      '（门禁先统一行尾再算，自己算的对不上）。'
+    )
+  }
+  if (cmp.kind === 'missing') {
+    return (
+      `【契约】state.json 记着 contract_sha ${shaOrNote(recorded)}，但磁盘上没有 00-contract.md：这趟 run 唯一的需求基线不在了，` +
+      '后面每一步都失去了对账的依据。不要凭记忆另写一份顶上（第 1 节是用户原话）——把这件事告诉用户，由用户定怎么补回。'
+    )
+  }
+  return (
+    `【契约】磁盘上的 00-contract.md 与 state.json 记的 contract_sha（${shaOrNote(recorded)}）对不上：契约在记账之后被改过。` +
+    '是照 /agent-team:at 第 4 节做的修订（修订块已追加、escalations 已记），就把那一次写契约收到的【契约】回传给的新 sha 记进' +
+    ' contract_sha，手上没有就原样重写一次契约、从回传里拿；不是，就把契约恢复原样，告诉用户。不要自己算 sha——这一段也不报' +
+    '磁盘上算出来的值。'
+  )
 }

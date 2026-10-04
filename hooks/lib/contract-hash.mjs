@@ -26,6 +26,10 @@ export function normalizeContract(buf) {
 // 让 state.mjs 与 trusted.mjs 互相引用）。
 export const SHA_RE = /^sha256:[0-9a-f]{64}$/
 
+// M4c（docs/37，全量审查第 37 条前半）：契约文件名的单一真源（H4 的契约门禁、ledger 认契约、H5a 与写 state.json 时的契约核对、账本
+// 比对把它排除在外，都从这里取）。判据钉着它等于 stages.json 第一段唯一的产物。
+export const CONTRACT_FILE = '00-contract.md'
+
 /**
  * 记录下来的 sha 值要进回传文字时用它（M3s，docs/27，全量审查第 7 条）：合法的 sha256 与
  * 'PENDING' 原样回显，其余一概不回显原值，只说它不合法——那个值是写得进 state.json 的任何人
@@ -43,12 +47,17 @@ export function sha256OfContract(buf) {
 /**
  * recorded：state.json 里记的值（'PENDING' 表示还没记）。
  * actual：磁盘上 00-contract.md 算出来的值，契约文件不存在时传 null。
+ *
+ * M4c（docs/37）：「contract_sha 与磁盘」唯一的比较函数，多返回一个结构化的 kind（ok / unstarted / pending / missing / drift）。
+ * problem 是写契约那一刻的【契约】用的（带磁盘上的新值：合法修订记账的唯一来源）；派发返回与写 state.json 时的【契约】按 kind
+ * 另组措辞、不报磁盘上的值（hooks/lib/ledger.mjs 的 contractCheckNotice）。
  */
 export function compareContractSha({ recorded, actual }) {
   if (actual === null || actual === undefined) {
-    if (recorded === 'PENDING') return { ok: true }
+    if (recorded === 'PENDING') return { ok: true, kind: 'unstarted' }
     return {
       ok: false,
+      kind: 'missing',
       problem:
         `state.json 记着 contract_sha ${shaOrNote(recorded)}，但磁盘上没有 00-contract.md。` +
         `契约是这趟 run 唯一的需求基线，它不在了，后面每一步都失去了对账的依据。`,
@@ -57,14 +66,16 @@ export function compareContractSha({ recorded, actual }) {
   if (recorded === 'PENDING') {
     return {
       ok: false,
+      kind: 'pending',
       problem:
         `契约的 sha256 是 ${actual}，state.json 里还没有记（contract_sha 仍是 PENDING）。` +
         `把这个值原样写进 state.json 的 contract_sha——不要自己拼一个。`,
     }
   }
-  if (recorded === actual) return { ok: true }
+  if (recorded === actual) return { ok: true, kind: 'ok' }
   return {
     ok: false,
+    kind: 'drift',
     problem:
       `契约漂移：磁盘上 00-contract.md 的 sha256 是 ${actual}，state.json 记的是 ${shaOrNote(recorded)}。` +
       `契约可以改，但只能由用户改、经 PM 转写，而且按规格 §5.3，每次改动都要在 escalations[] ` +

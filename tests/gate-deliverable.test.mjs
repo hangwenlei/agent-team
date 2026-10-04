@@ -430,10 +430,9 @@ test('deliverable：目标角色已经写出产物——stdout 为空，不记 w
     // 悄悄依赖"没人检查账本"这个已经不再成立的前提。
     const statePath = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
     const state = JSON.parse(readFileSync(statePath, 'utf8'))
-    state.artifacts = {
-      '00-contract.md': sha256OfContract('fixture 00-contract.md\n'),
-      '01-prd.md': sha256OfContract('fixture 01-prd.md\n'),
-    }
+    // M4c（docs/37）：契约的账只在 contract_sha，不进 artifacts——「记账也对得上」对契约就是 contract_sha 等于磁盘。
+    state.contract_sha = sha256OfContract('fixture 00-contract.md\n')
+    state.artifacts = { '01-prd.md': sha256OfContract('fixture 01-prd.md\n') }
     writeFileSync(statePath, JSON.stringify(state), 'utf8')
 
     const input = {

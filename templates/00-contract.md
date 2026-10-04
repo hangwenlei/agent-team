@@ -21,9 +21,9 @@
 ## 4. 修订记录
 
 <规格 §5.3：用户对升级问题的每一次答复，都作为一个带日期的修订块追加在这里。
-每追加一块，契约的 sha256 就变了——把 ledger 回传的新哈希写进 state.json 的
-contract_sha，并在 escalations[] 里留一条对应记录。两件事缺一不可，只改其中一件
-会被 ledger 报成契约漂移。>
+每追加一块，契约的 sha256 就变了——把写契约那一次回传（【契约】）给的新哈希写进 state.json 的
+contract_sha，并在 escalations[] 里留一条对应记录。contract_sha 没跟上的，之后每一次派发返回、
+每一次写 state.json 都会报【契约】；escalations 那一条门禁不核，靠 PM 做全。>
 
 <!-- 修订块格式：
 ### 2026-09-17 · 升级 #1（kind: tradeoff）

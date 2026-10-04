@@ -33,8 +33,8 @@ import { deliveredSnapshot, readSnapshot, makeDelivered, decideRedispatch, decid
 import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispatch } from './lib/closing.mjs'
 import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
-import { sha256OfContract, shaOrNote } from './lib/contract-hash.mjs'
-import { buildLedgerNotices, brokenProjectNotice, IMPL_RECORD_NOTE } from './lib/ledger.mjs'
+import { CONTRACT_FILE, compareContractSha, sha256OfContract, shaOrNote } from './lib/contract-hash.mjs'
+import { buildLedgerNotices, brokenProjectNotice, contractCheckNotice, IMPL_RECORD_NOTE } from './lib/ledger.mjs'
 import { NO_PATHS_ROLES, validateProject } from './lib/project.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
@@ -445,11 +445,7 @@ function buildDriftNotice(cmp, recipientCanWriteState) {
   // 两支收尾。前面那一整段（审计边界）两支共用，一个字不改：它对谁都成立。
   const tail = recipientCanWriteState
     ? `去 run 目录核实磁盘内容，需要的话把 artifacts 改成与磁盘一致。`
-    : `⚠️ **这一条你改不了**：artifacts 住在 state.json 里，它是编排层的控制文件，` +
-      `H3 写路径门禁在 PreToolUse 上把非 PM 对它的 Edit/Write 拒掉。而这条回传只发给` +
-      `发起这次派发的人——**也就是你，PM 不会同时收到一份**。` +
-      `**把上面这几行原样冒泡给派你的人**，让它继续往上带到 PM；` +
-      `**不要自己把它咽掉**——咽掉之后没有任何人会再看见它。`
+    : relayTail('artifacts 住在 state.json 里，它是编排层的控制文件，H3 写路径门禁在 PreToolUse 上把非 PM 对它的 Edit/Write 拒掉')
 
   return (
     `【账本比对】以下产物对不上账：\n${lines.join('\n')}\n` +
@@ -458,6 +454,29 @@ function buildDriftNotice(cmp, recipientCanWriteState) {
     `PM 开，但 Bash 不经任何 hook），但那时它不再是顺手绕过，而是一次需要同时改两处的刻意` +
     `行为。${tail}`
   )
+}
+
+// 收件人改不了这一条时的收尾（M3b 起在 buildDriftNotice 里；M4c 抽出来，契约那一段共用——同一个收件人分支只留一份实现）。
+function relayTail(why) {
+  return (
+    `⚠️ **这一条你改不了**：${why}。而这条回传只发给` +
+    `发起这次派发的人——**也就是你，PM 不会同时收到一份**。` +
+    `**把上面这几行原样冒泡给派你的人**，让它继续往上带到 PM；` +
+    `**不要自己把它咽掉**——咽掉之后没有任何人会再看见它。`
+  )
+}
+
+// M4c（docs/37，全量审查第 37 条前半）：派发返回时拿 contract_sha 对磁盘上的契约（账本比对已经不看契约，见
+// hooks/lib/artifact-drift.mjs）。措辞在 hooks/lib/ledger.mjs 的 contractCheckNotice（写 state.json 时同一句）；收件人改不了
+// state.json 时接上 relayTail，误投痕由调用点留，与账本比对同一个分工。
+function contractNoticeFor(ctx, recipientCanWriteState) {
+  const bytes = ctx.artifactBytes(CONTRACT_FILE)
+  const recorded = ctx.state?.contract_sha
+  const notice = contractCheckNotice(compareContractSha({ recorded, actual: bytes ? sha256OfContract(bytes) : null }), recorded)
+  if (!notice) return null
+  return recipientCanWriteState
+    ? notice
+    : notice + relayTail('contract_sha 住在 state.json 里、契约只有 PM 写得了：state.json 与契约，H3、H4 在 PreToolUse 上都把非 PM 拒掉')
 }
 
 // M3a Task 2：「已经走过的那几段，产者有没有交代」的措辞组装。decideCoverage
@@ -1401,7 +1420,7 @@ function main() {
 
     const target = norm(filePath)
     let kind = 'other'
-    if (target === norm(`${ctx.runDir}/00-contract.md`)) kind = 'contract'
+    if (target === norm(`${ctx.runDir}/${CONTRACT_FILE}`)) kind = 'contract'
     // project.json 这一问复用上面那个谓词，不在这里再写一遍同样的等式——
     // 上面 !ctx.ok 那条分支问的是同一个问题，两处分叉就是 C1 的复发形状。
     else if (isProjectJson(filePath, ctx.agentTeamDir)) kind = 'project'
@@ -1421,7 +1440,8 @@ function main() {
     }
     const produceBytes = produceName ? ctx.artifactBytes(produceName) : null
 
-    const bytes = kind === 'contract' ? ctx.artifactBytes('00-contract.md') : null
+    // M4c（docs/37）：写 state.json 时也读契约——buildLedgerNotices 拿 contract_sha 比它（契约那一处的注释）。
+    const bytes = kind === 'contract' || kind === 'state' ? ctx.artifactBytes(CONTRACT_FILE) : null
     const reach =
       kind === 'project' && ctx.project
         ? computeReach({ roster: loadRoster(), paths: ctx.project.paths })
@@ -1831,6 +1851,11 @@ function main() {
         misroutedNotice('账本比对', 'PostToolUse:Agent 的 additionalContext', recipient),
       )
     }
+    // M4c（docs/37）：契约那一段（contractNoticeFor 上方）。与账本比对一样只在 deliverable 上算、收件人改不了时留误投痕。
+    const contractNotice = CHECK === 'deliverable' ? contractNoticeFor(ctx, recipientCanWriteState) : null
+    if (contractNotice && !recipientCanWriteState) {
+      process.stderr.write(misroutedNotice('契约', 'PostToolUse:Agent 的 additionalContext', recipient))
+    }
 
     if (r.ok) {
       // ⚠️ ok 有三种成因，只有一种是真的「交付了」。skipped 的两种是门禁**哑掉**：
@@ -1959,6 +1984,7 @@ function main() {
       // 告警都不适用时这里保持原来的完全沉默。账本比对不受这条静默表约束（docs/11
       // §5.8）：它审的是产物内容对不对得上账，跟阶段有没有推进是两件独立的事。
       if (driftNotice) notices.push(driftNotice)
+      if (contractNotice) notices.push(contractNotice)
       emitHookJson(spec.event, { contexts: notices, systemMessage: message })
     }
 
@@ -2031,6 +2057,7 @@ function main() {
       // 交付物本身还缺产物时，账本比对一样并进同一条——它审计的是全部阶段的
       // produces，不只是刚被判定缺失的这一段（比如更早的阶段被 Bash 绕过写过）。
       if (driftNotice) notices.push(driftNotice)
+      if (contractNotice) notices.push(contractNotice)
       emitHookJson(spec.event, { contexts: notices })
     }
   }

@@ -30,8 +30,10 @@ import { resolve } from 'node:path'
 import { exoticPath, norm } from './path-norm.mjs'
 import { MAIN, callerOf } from './decide.mjs'
 import { inline } from './trusted.mjs'
+import { CONTRACT_FILE } from './contract-hash.mjs'
 
-const CONTRACT = '00-contract.md'
+// M4c：契约文件名从 contract-hash.mjs 的单一真源取。
+const CONTRACT = CONTRACT_FILE
 
 // 谁算"PM/主线程"，因而对 00-contract.md 没有约束：真正的主线程（没有
 // agent_type）、以及被 settings.json 的 agent 键钉成主线程的 at-pm——
@@ -118,7 +120,7 @@ export function decideContractGuard({ agentType, filePath, runDir }) {
       `不得写 ${CONTRACT}。契约是这趟 run 唯一的需求基线，只能由用户改、经 PM（项目经理）` +
       `在主会话里转写——任何 subagent 都不能碰它。如果执行角色能自己改契约，"做出来的东西` +
       `是否符合契约"这件事就永远查不出来：契约可以被悄悄改成跟已经做出来的东西一致，制造出` +
-      `验收通过的假象，S7 验收环节拿它的哈希对账也就失去意义。如果你认为契约本身有问题` +
+      `验收通过的假象，门禁拿它的哈希对账也就失去意义。如果你认为契约本身有问题` +
       `（比如自相矛盾、有遗漏、需要取舍），把问题冒泡给上级，由 PM 决定是否要升级给用户` +
       `裁决，不要自己动手改契约。`,
   }

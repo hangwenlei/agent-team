@@ -23,7 +23,7 @@ const bytesOf = (m) => (rel) => (m[rel] === undefined ? null : Buffer.from(m[rel
 
 test('记录与磁盘一致时三个清单都空', () => {
   const r = compareArtifacts({
-    artifacts: { '00-contract.md': A }, stages: STAGES, artifactBytes: bytesOf({ '00-contract.md': '甲\n' }),
+    artifacts: { '01-prd.md': A }, stages: STAGES, artifactBytes: bytesOf({ '01-prd.md': '甲\n' }),
   })
   assert.deepEqual(r, { drifted: [], missing: [], unrecorded: [] })
 })
@@ -36,25 +36,25 @@ test('记录与磁盘一致时三个清单都空', () => {
 // 同一个场景的两个不同字段，不是同一断言形状的不同数据点，不适用那条例外。
 test('记录了但磁盘上内容变了 → drifted 里有这条记录，两个哈希都带出来', () => {
   const r = compareArtifacts({
-    artifacts: { '00-contract.md': A }, stages: STAGES, artifactBytes: bytesOf({ '00-contract.md': '乙\n' }),
+    artifacts: { '01-prd.md': A }, stages: STAGES, artifactBytes: bytesOf({ '01-prd.md': '乙\n' }),
   })
-  assert.deepEqual(r.drifted, [{ name: '00-contract.md', recorded: A, actual: B }])
+  assert.deepEqual(r.drifted, [{ name: '01-prd.md', recorded: A, actual: B }])
 })
 
 test('记录了但磁盘上内容变了 → missing 仍为空（drifted 与 missing 互斥）', () => {
   const r = compareArtifacts({
-    artifacts: { '00-contract.md': A }, stages: STAGES, artifactBytes: bytesOf({ '00-contract.md': '乙\n' }),
+    artifacts: { '01-prd.md': A }, stages: STAGES, artifactBytes: bytesOf({ '01-prd.md': '乙\n' }),
   })
   assert.deepEqual(r.missing, [])
 })
 
 test('记录了但磁盘上没有 → missing 里有这条记录', () => {
-  const r = compareArtifacts({ artifacts: { '00-contract.md': A }, stages: STAGES, artifactBytes: bytesOf({}) })
-  assert.deepEqual(r.missing, [{ name: '00-contract.md', recorded: A }])
+  const r = compareArtifacts({ artifacts: { '01-prd.md': A }, stages: STAGES, artifactBytes: bytesOf({}) })
+  assert.deepEqual(r.missing, [{ name: '01-prd.md', recorded: A }])
 })
 
 test('记录了但磁盘上没有 → drifted 仍为空（missing 与 drifted 互斥）', () => {
-  const r = compareArtifacts({ artifacts: { '00-contract.md': A }, stages: STAGES, artifactBytes: bytesOf({}) })
+  const r = compareArtifacts({ artifacts: { '01-prd.md': A }, stages: STAGES, artifactBytes: bytesOf({}) })
   assert.deepEqual(r.drifted, [])
 })
 
@@ -112,9 +112,9 @@ test('CRLF 与语义相同的 LF 内容不产生假漂移——账本比对必�
   const lf = '甲\n乙\n'
   const crlf = '甲\r\n乙\r\n'
   const r = compareArtifacts({
-    artifacts: { '00-contract.md': sha256OfContract(lf) },
+    artifacts: { '01-prd.md': sha256OfContract(lf) },
     stages: STAGES,
-    artifactBytes: bytesOf({ '00-contract.md': crlf }),
+    artifactBytes: bytesOf({ '01-prd.md': crlf }),
   })
   assert.deepEqual(r.drifted, [])
 })
@@ -237,4 +237,15 @@ test('形状 B：产物已经落盘而写它的角色还没进 roster（roster �
     artifactBytes: bytesOf({ '05-impl/at-backend.md': '甲\n', '05-impl/at-frontend.md': '甲\n' }),
   })
   assert.deepEqual(r.unrecorded, ['05-impl/at-backend.md', '05-impl/at-frontend.md'])
+})
+
+// M4c（docs/37，审查第 37 条前半）：契约不进账本比对——它的账只在 state.json 的 contract_sha，派发返回（H5a）与写 state.json 时
+// 由【契约】核（tests/gate-contract-sha.test.mjs）。上面那几条原来拿 00-contract.md 当通用示例，M4c 换成了 01-prd.md：它们钉的
+// 是比对的通用行为，与契约无关（CRLF 那条换过之后照样打得红「裸字节哈希」那一刀）。
+test('M4c 契约不在任何一个清单里：artifacts 记旧值、记新值、不记、契约被删，结果都是空', () => {
+  const disk = bytesOf({ '00-contract.md': '乙\n' })
+  for (const artifacts of [{ '00-contract.md': A }, { '00-contract.md': B }, {}]) {
+    assert.deepEqual(compareArtifacts({ artifacts, stages: STAGES, artifactBytes: disk }), { drifted: [], missing: [], unrecorded: [] }, JSON.stringify(artifacts))
+  }
+  assert.deepEqual(compareArtifacts({ artifacts: { '00-contract.md': A }, stages: STAGES, artifactBytes: bytesOf({}) }), { drifted: [], missing: [], unrecorded: [] })
 })
