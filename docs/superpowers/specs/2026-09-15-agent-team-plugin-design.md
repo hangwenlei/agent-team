@@ -313,6 +313,9 @@ S6 失败回 S5，最多 3 轮，第 3 轮终局，不过则升级。S7 驳回�
 > **M4b 补（`docs/36`）**：还有第三条——`06-test.md` 首行写着没开跑、因为 S5 没交齐的（PM 逐份核过实现记录，确实没交齐），不论在 S6
 > 还是 S7 发现，都回 S5、不回 S6：拒绝还在，`at-qa` 回 S6 也开不了跑。上面「S7 验收判不了、要人补跑测试，回 S6」不管这一种。
 
+> **M4c 订正（`docs/37` §2.2）**：`at-qa` 不再把没开跑写进 `06-test.md`，改成冒泡（最后一条回复第一行「冒泡：没开跑——S5 没交齐」），S6 照旧判缺、
+> S7 碰不到它，「在 S7 发现」那一支随之不存在：PM 逐份核过实现记录、确实没交齐的，回 S5。
+
 **本表的单一真源是 `hooks/lib/state.mjs` 的 `rejectTo(kind)`（M2a 补）。**
 `REJECTION_KINDS` 四类：`requirement` / `design` / `implementation` / `contract-conflict`，
 前三类分别回到 S2 / S3 / S5，`contract-conflict` 返回 `null`——它不由代码决定回哪，
@@ -475,6 +478,10 @@ sha 相同的产物就是上一轮的，H5a/H5b、H2、【阶段】与 H5a「停
 | H4 | PreToolUse / Edit\|Write | 契约保护：subagent 写契约 | deny | deny（fail closed） |
 | H5 | `SubagentStop`（真拦截）+ `PostToolUse` / Agent（权威记录） | 交付物校验：声明产出却未写文件 | `SubagentStop`：deny（exit 2 附理由，约 8 次补救机会）；`PostToolUse`：记 warning，不 block | `SubagentStop`：allow（fail open，流程辅助）；`PostToolUse`：记 warning |
 | H6 | PreToolUse / Edit\|Write | 返工预算写时强制：只对 `runs/*/state.json` 生效。返工计数：`history` 只许追加、某阶段出现次数不许变少、`rework` 不许低于派生值；`rework` 超上限（3 + 覆盖它的返工批准条数，§4.2 ③）而且比写入前大才拒，回退那一次写入先按「这一轮走完」预判、越限就拒并给规范标签（**M3z 起**；此前这一条拦的是一切超过 `REWORK_LIMIT` 的值，第 4 轮没有诚实的写法）；**M3z 起**另核 stage 不变量（`stage` 与新追加的 `history` 条目都在阶段链上、`stage` 等于 `history` 末条）。上限内的推进与回退照常放行——PM 每推进一个阶段都要正常重写这个文件；**M3y 起**另核 `rework_base`（§4.4）：回退那一次写入照磁盘记快照（不晚于写入后 stage 的可以直接标 `"accepted"`）、之后原样带着（只许当前段及更早段改成 `"accepted"`，坏条目可删），推进离开一段时那一段里不许还有上一轮的产物（**M4a 起**补记照推进核，跨过快照里有产物的验证段的补记直接拒；一次写入只许记一次回退）；**M4a 起**验证段的产物不许标 `"accepted"`，并核收口标记 `closed_at`（形状、已收口之后冻结、关上那一次最后一段齐没齐），排在返工计数之前 | deny | deny（fail closed）；只有旧的一侧 parse 不出 JSON 时放行（M3r 起新内容必须是合法 JSON），见 §4.2 ③；阶段链读不出来或形状不对时 `rework_base` 几条跳过、往 stderr 留痕（**M3z 起**回退预判与 stage 不变量也一起跳过，stderr 只留 `rework_base` 那一句；判据④照 3 轮上限拒、理由叫用户重装插件），读不出来的产物不核；**M4a 起**收口那一次（写入后带 `closed_at`、写入前没收口）是单向门：阶段链读不出来就拒，写入前读不出来照样核收口条件；已收口之后的冻结不依赖阶段链 |
+
+> **M4c 补（`docs/37`，全量审查第 18 条）**：H5 那一行的「约 8 次补救机会」以 `hooks/lib/retry-budget.mjs` 为准（CLI 源码里是可配置的默认值，
+> 两次停下之间调过工具计数清零）。H5b 另认一个出口：子代理已经被拦过一回（`stop_hook_active`）、最后一条回复的第一行是「冒泡：…」，
+> 就放它停下，这一段的产物照旧算没交。
 
 另有两个记录器（M3z 补，`docs/34`），不是门禁、不拒任何东西：`approval-ask`（`PostToolUse` / `AskUserQuestion`）与 `approval-prompt`
 （`UserPromptSubmit`）。用户选了（或单独发了）规范标签、而这一轮确实需要批准时，往当前 run 的 `approvals.jsonl` 追加一条；记不下时
@@ -661,6 +668,9 @@ skill 的 `agent:` frontmatter 并对照花名册），不能直接放开——�
 PM 开，但 `Bash` 不经任何 hook；`at-backend`/`at-frontend` 按 §3.3.1 的上界模型也拿到了
 `Bash`，不是只有 PM 一个人做得到）——但那时它不再是「顺手绕过」，而是一次需要同时改两处
 的刻意行为。
+
+> **M4c 补（`docs/37`，全量审查第 37 条前半）**：契约不在这张账里——`compareArtifacts` 把 `00-contract.md` 排除在外，它的账只在
+> `contract_sha`。H5a（派发返回时）与 PM 写 `state.json` 时拿 `contract_sha` 比磁盘上的契约，对不上单列【契约】，不报磁盘上算出来的值。
 
 README 明示此边界，不将其表述为沙箱。
 
