@@ -381,9 +381,11 @@ function clausesOf(sentence) {
   out.push(cur)
   return out
 }
-function claimsNo(paragraph, names) {
+// skip：含这些字样的小句不算（收尾核对：「团队里其余角色也拿不到 MCP 与 WebSearch」会替 at-pm 那半满足判据）。
+function claimsNo(paragraph, names, skip = []) {
   return sentencesOf(paragraph)
     .flatMap(clausesOf)
+    .filter((c) => !skip.some((s) => c.includes(s)))
     .some((c) => {
       const at = Math.max(c.indexOf('拿不到'), c.indexOf('does not get'))
       if (at < 0) return false
@@ -415,6 +417,9 @@ test('自检：claimsNo() 只认否定管得到的名字——同一小句、否
   assert.ok(claimsNo(fullComma, WEB), fullComma)
   const listMark = '> 1) It does not get the MCP tools, but it keeps WebSearch and WebFetch.'
   assert.ok(claimsNo(listMark, MCP) && !claimsNo(listMark, WEB), listMark)
+  // 收尾核对：skip 掉「其余角色」那一小句之后，at-pm 那半只看它自己的小句。
+  const othersOnly = '> 它能用 MCP 工具与网页搜索（WebSearch、WebFetch），团队里其余角色也拿不到 MCP 与 WebSearch、WebFetch。'
+  assert.ok(claimsNo(othersOnly, MCP) && !claimsNo(othersOnly, MCP, ['其余角色']), othersOnly)
 })
 
 for (const f of [README_EN, README_ZH]) {
@@ -430,8 +435,9 @@ for (const f of [README_EN, README_ZH]) {
     const hasWeb = pm.some(isWeb)
     const why = `（at-pm 有 mcp__：${hasMcp}；有 WebSearch/WebFetch：${hasWeb}）。这句是用户判断「装上之后还能做什么」的那一句，` +
       '两半都要写，名字不加反引号，否定写在名字前面、同一小句里。'
-    assert.equal(claimsNo(p, MCP), !hasMcp, `${f}：「主会话拿不到 MCP 工具」那句与 agents/at-pm.md 的 tools: 对不上${why}`)
-    assert.equal(claimsNo(p, WEB), !hasWeb, `${f}：「主会话拿不到 WebSearch、WebFetch」那句与 agents/at-pm.md 的 tools: 对不上${why}`)
+    const OTHERS = ['其余角色', 'no other role']
+    assert.equal(claimsNo(p, MCP, OTHERS), !hasMcp, `${f}：「主会话拿不到 MCP 工具」那句与 agents/at-pm.md 的 tools: 对不上${why}`)
+    assert.equal(claimsNo(p, WEB, OTHERS), !hasWeb, `${f}：「主会话拿不到 WebSearch、WebFetch」那句与 agents/at-pm.md 的 tools: 对不上${why}`)
     const holders = PRODUCT_ROLES.filter((r) => r !== 'at-pm' && toolsOf(r).some((n) => isMcp(n) || isWeb(n)))
     const others = f === README_ZH ? '团队里其余角色也拿不到' : 'no other role on the team gets them either'
     assert.equal(p.includes(others), holders.length === 0, `${f}：「${others}」与其余角色的 tools: 对不上（持 MCP 或网页工具的：${holders.join('、') || '没有'}）`)

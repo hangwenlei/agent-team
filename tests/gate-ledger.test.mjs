@@ -1384,5 +1384,6 @@ test('M4b【阶段】执行段齐了、写者是非产者（架构师改 03-arch
     assert.ok(out.includes('这一段的产物是各执行角色的实现记录'), `${agent}：${out}`)
     assert.ok(!out.includes('推进之前逐份读'), `${agent}：${out}`)
     assert.ok(out.includes('都在磁盘上了'), `${agent}：${out}`)
+    assert.match(out, /被写路径隔离拒绝[^。]*已解决[^。]*那一份不算交齐/, agent)
   }
 })

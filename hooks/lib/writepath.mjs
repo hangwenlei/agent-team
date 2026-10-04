@@ -316,7 +316,8 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     //   - 调用者自己是建了键的 at-qa、at-acceptance：第二轮复核挪到第 7b 步统一说，走不到这里；
     //   - 花名册里调用者那一条坏了：判不出它是叶子还是协调者，不给「列到你名下」；
     //   - 协调者那句不看阶段：架构师在 S3 出方案时派不了 S5 的产者（H2 拒），正路是写进落盘清单。
-  // 第二轮复核：协调者那句点名派得到的认领者（混着不该有键的那一个时，「派给它」会被读成那一个）；调用者自己条目里
+  // 第二轮复核：协调者那句只点名没被排除的认领者（不该有键、条目作废的不点——混着它们时「派给它」会被读成那一个；调用者
+  // 自己派不到的，靠紧跟着的「派不到的，冒泡」兜住，不按 can_delegate_to 再筛）；调用者自己条目里
   // 「要改」档的前缀这一支也说出来（目标正好归别人时，PM 打开 project.json 会以为调用者已经列过了）。
     const entry = roster[role]
     const rosterOk = isPlainObject(entry) && Array.isArray(entry.can_delegate_to)
