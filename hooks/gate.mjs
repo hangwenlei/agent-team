@@ -1533,6 +1533,7 @@ function main() {
       grants,
       // M4b 第二轮复核：执行段「齐了」那句按写者分（谓词与 H3 同一个 isContractWriter）。
       writerIsPm: isContractWriter(input.agent_type),
+      writer: callerOf(input),
     })
 
     // M3a Task 2：产者交代判据的触发点是「state.stage 推进出去时」（设计 §3.2），

@@ -1373,3 +1373,16 @@ test('M4b【阶段】执行段齐了、写的是执行角色：给它自己的�
   assert.ok(!role.includes('推进之前逐份读') && !role.includes('/agent-team:at 第 3 节'), role)
   assert.ok(!role.includes('"这一段的产物已经齐了"这件事'), role)
 })
+
+// 文档核对（docs/36 §3.2）：「你自己的实现记录」那句只给当段的产者。S5 里改 03-arch.md 的架构师、提前被派来写 06-test.md 的 at-qa 也是
+// 非 PM 写者，它们没有实现记录——给它们的是不预设「你自己的」那一句。回报口径（都在磁盘上了）对任何非 PM 写者都成立，照旧。
+test('M4b【阶段】执行段齐了、写者是非产者（架构师改 03-arch.md、at-qa 写 06-test.md）：不说「你自己的实现记录」，说这一段的实现记录', () => {
+  for (const [write, agent] of [['03-arch.md', 'agent-team:at-architect'], ['06-test.md', 'agent-team:at-qa']]) {
+    const out = m3xLedger({ ...M3X_S5_ACCOUNTED, artifacts: [...M3X_S5_ACCOUNTED.artifacts, write], write, agent })
+    assert.match(out, /【阶段】S5/, agent)
+    assert.ok(!out.includes('你自己的实现记录'), `${agent}：${out}`)
+    assert.ok(out.includes('这一段的产物是各执行角色的实现记录'), `${agent}：${out}`)
+    assert.ok(!out.includes('推进之前逐份读'), `${agent}：${out}`)
+    assert.ok(out.includes('都在磁盘上了'), `${agent}：${out}`)
+  }
+})

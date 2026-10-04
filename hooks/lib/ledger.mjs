@@ -140,6 +140,7 @@ export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 =
 export function buildLedgerNotices({
   kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha, projectReport, reworkStale, budget, grants,
   writerIsPm = true,
+  writer = null,
   closeBlockers,
 } = {}) {
   const out = []
@@ -345,7 +346,7 @@ export function buildLedgerNotices({
           `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "<ISO 时间>" }${again}——用同一次 Write 把这一段的账一起记掉：` +
           `叫到的人累加进 roster（state.json 里有 stage_roles 的，同一批人并进它的这一段），决定不叫的产出角色写进 trimmed。` +
           `分两次写，推进那一次会被产者交代当成漏派。` +
-          (implStage ? (writerIsPm ? IMPL_RECORD_NOTE : IMPL_RECORD_ROLE_NOTE) : '') +
+          (implStage ? implRecordNote({ stage: stages?.[st.stage], writerIsPm, writer }) : '') +
           `${who}${tail}${over}`
         : Array.isArray(closeBlockers) && closeBlockers.length
           ? `【阶段】${st.stage} 的产物已经写了，它是阶段链的最后一段，但还收不了口——收口要最后一段的前置与产物都在、不是空文件、` +
@@ -375,3 +376,15 @@ export const IMPL_RECORD_NOTE =
 // 第二轮复核：同一条回传发给执行角色时用这一句——上面那句叫读者去逐份读、去照 /agent-team:at 做，它都做不了。
 const IMPL_RECORD_ROLE_NOTE =
   '你自己的实现记录里「被写路径隔离拒绝」一节还有没标「已解决」的条目的话，这一段还没做完：回报时照实说，不要只报「齐了」。'
+// 文档核对（docs/36 §3.2）：非 PM、又不是这一段产者的写者（S5 里改 03-arch.md 的架构师、提前被派来写 06-test.md 的 at-qa）没有
+// 实现记录，「你自己的」对它们是空话。给一句不预设收件人有实现记录的。
+const IMPL_RECORD_PEER_NOTE =
+  '这一段的产物是各执行角色的实现记录，门禁不读写了什么：有「被写路径隔离拒绝」一节、里面还有没标「已解决」的条目的那一份' +
+  '不算交齐，回报时照实说，不要只报「齐了」。'
+
+// 执行段「齐了」那句按写者分三档：PM（推进者）、这一段的产者（写的是自己的实现记录）、其余非 PM 写者。产者按 stages.json 这一段
+// 的 role 与 producers 认（stageRoles），writer 是剥过前缀的调用者；读不出来时按「其余」说，那一句对谁都不是假话。
+function implRecordNote({ stage, writerIsPm, writer }) {
+  if (writerIsPm) return IMPL_RECORD_NOTE
+  return typeof writer === 'string' && stageRoles(stage).includes(writer) ? IMPL_RECORD_ROLE_NOTE : IMPL_RECORD_PEER_NOTE
+}

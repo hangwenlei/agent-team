@@ -423,6 +423,13 @@ const SCENARIOS = [
     ],
   },
   {
+    // 文档核对：「归 X」那一支也拼 own.fix——上一条只喂到「没人认领」那一支（写的是没人认领的路径）。这一条写归 at-frontend 的文件。
+    name: 'project.paths 的元素落在要改档（H3「归 X」那一支的 own.fix）',
+    disk: true,
+    project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, 'at-backend': ['src/server/', `${P} `] } }),
+    calls: ({ p }) => [['writepath', write('agent-team:at-backend', join(p, 'src', 'web', 'a.ts'))]],
+  },
+  {
     name: 'project.paths 里某个角色的值不是数组（H3 的配置错误）',
     disk: true,
     project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, 'at-backend': P } }),
