@@ -406,6 +406,8 @@ const SCENARIOS = [
     project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, [P]: ['nowhere/'], 'at-backend': ['src/server/', P] } }),
     calls: ({ p }) => [
       ['writepath', write('agent-team:at-frontend', join(p, 'nowhere', 'a.md'))],
+      // M4b：「没人认领」那一支逐条引调用者自己的认领清单——载荷在 at-backend 的条目里，at-backend 写一份没人认领的文件。
+      ['writepath', write('agent-team:at-backend', join(p, 'nowhere', 'b.md'))],
       ['ledger', posted('at-pm', join(p, '.agent-team', 'project.json'))],
     ],
   },

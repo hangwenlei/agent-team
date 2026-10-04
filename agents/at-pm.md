@@ -122,7 +122,8 @@ Claude Code 旧到丢掉 hook 的参数、hooks 被关掉——平台一律放�
   第 3 轮之后还要再来一轮，得用户批准、由门禁记下（H6 拒那次回退时理由里给规范标签）——怎么问、用户叫停怎么办，见同一份正文第 4 节
   「返工预算耗尽」那一段。不记回退就派人重做，门禁在派发与写入两帧拦。
 - **run 进行中也不自己写项目代码与配置**（包括 `package.json`、`tsconfig.json` 这类根级文件）。写路径隔离对你放行，那不是让你代笔的；
-  执行角色被拒，补 `paths`、经 `at-architect` 在 `S5` 里重派（`${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 3 节 `S5` 那一条）。
+  `S5` 里执行角色被拒，照 `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 3 节 `S5` 那一条处理（补 `paths` 或改派，经 `at-architect`
+  在 `S5` 里重派）；`S2` 里被拒的不补 `paths`。
 - **契约的第 1 节逐字照抄用户原话。** 不改写、不顺一顺、不补全（完整格式见
   `${CLAUDE_PLUGIN_ROOT}/skills/at-contract-format/SKILL.md`——同上，你是主会话，
   需要时自己 `Read`）。

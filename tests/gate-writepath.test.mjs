@@ -81,7 +81,9 @@ test('writepath：run 存在但 project.json 坏了——仍然 fail closed，�
 // 下面三条是另一半——被 settings.json 钉成主线程的 at-pm 必须能过去。
 //
 // ⚠️ 订正（M4b，docs/36）：settings.json 现在写全名 {"agent": "agent-team:at-pm"}；钉住的 PM 在 hook 输入里的原始
-// agent_type 一直是全名（docs/22），裸 'at-pm' 是剥前缀之后的值，也是用户显式 --agent at-pm 时的形状。两种都该放行。
+// agent_type 一直是全名（docs/22），裸 'at-pm' 是剥前缀之后的值。原始值是裸名的只有一种：项目或用户层另有一份非插件的
+// at-pm.md，用户经 --agent at-pm 或自己设置里的 agent 键选中了它（只有插件的 at-pm 时，--agent at-pm 按后缀解析成全名）。
+// 两种都按 PM 放行。
 // 为什么：H4 在 Task 5 评审之后已经把 PM 的短路排到了读 ctx 之前，理由写在
 // hooks/gate.mjs 的 contract 分支里（「修复一个坏掉的 run 恰恰要 PM 动手，
 // 门禁会把自己需要的人也锁在门外」）。H3 当时没有跟着做，只豁免 role ===
@@ -89,7 +91,8 @@ test('writepath：run 存在但 project.json 坏了——仍然 fail closed，�
 // 输入带 agent_type: 'at-pm'（M0 实测「次要事实」），落不进 MAIN。三点叠成
 // 硬死锁：(a) unreadable 的 deny 发生在看路径之前，拒的是这个会话的每一次
 // Edit/Write，不只是敏感路径；(b) agents/at-pm.md 现在有 Bash（M1c 设计
-// §1.1 的上界要求），但逼 PM 用 `echo >` 去修一个坏掉的 run 不是可接受的
+// §1.1 的上界要求——M4b 订正：那条「上界」的前提，主线程的 tools: 封顶子代理的工具，P4 实测不成立，docs/36；
+// hooks/gate.mjs 那段同款注释同步订正了），但逼 PM 用 `echo >` 去修一个坏掉的 run 不是可接受的
 // 运维路径；(c) 触发条件很廉价——project.json / state.json 坏了、或
 // current-run 被截断成空文件，任意一条即可。结果是插件把自己唯一的运维人
 // 锁在门外，只能由用户离开 Claude 手工改文件。同一个死锁形状在这条分支上

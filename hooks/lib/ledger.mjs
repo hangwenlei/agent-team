@@ -10,7 +10,7 @@
 // #2（PM 就能 echo > 01-prd.md 伪造 H2 的判据）。更根本的一条：hook 一定会触发，
 // 脚本要靠 PM 记得跑——这与 §4.2 ② 把就绪门禁写成 hook 而不是提示词是同一条理由。
 // ⚠️ 订正（M4b，docs/36）：「tools: 行就是整个会话的能力上界」在工具这一维不成立——P4 实测，主线程的 tools: 只封顶
-// 派发宇宙，子代理拿的是自己清单里的工具。PM 后来也拿到了 Bash（M1c），持 Bash 的理由待裁定。「hook 一定会触发」那一条照旧。
+// 派发宇宙，子代理拿的是自己清单里的工具。PM 后来也拿到了 Bash（M1c），现行正文的理由是跑构建与测试，要不要收回待裁定。「hook 一定会触发」那一条照旧。
 //
 // 本模块只做格式化，一切 I/O 在 gate.mjs 里；判据本身来自这些纯函数模块：contract-hash.mjs、
 // reach.mjs、state.mjs、project.mjs。
@@ -18,7 +18,7 @@ import { compareContractSha, shaOrNote } from './contract-hash.mjs'
 import { inline, quote, safeJson } from './trusted.mjs'
 import { nextStage } from './state.mjs'
 import { approvalTargetFor, askUserText, limitOf } from './budget.mjs'
-import { isPlainObject, isStageChain, productsOfStage, stageRoles } from './stages.mjs'
+import { isPlainObject, isStageChain, productsOfStage, stageRoles, isRolePatternStage } from './stages.mjs'
 import { VERIFY_REDO, splitByAccept } from './freshness.mjs'
 import { closedAt, blockerLine } from './closing.mjs'
 
@@ -338,7 +338,9 @@ export function buildLedgerNotices({
         ? `【阶段】${st.stage} 的产物已经齐了。这一段如果确实结束了，需要把 state.stage 推进到 ` +
           `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "<ISO 时间>" }${again}——用同一次 Write 把这一段的账一起记掉：` +
           `叫到的人累加进 roster（state.json 里有 stage_roles 的，同一批人并进它的这一段），决定不叫的产出角色写进 trimmed。` +
-          `分两次写，推进那一次会被产者交代当成漏派。${who}${tail}${over}`
+          `分两次写，推进那一次会被产者交代当成漏派。` +
+          (isRolePatternStage(stages?.[st.stage]) ? IMPL_RECORD_NOTE : '') +
+          `${who}${tail}${over}`
         : Array.isArray(closeBlockers) && closeBlockers.length
           ? `【阶段】${st.stage} 的产物已经写了，它是阶段链的最后一段，但还收不了口——收口要最后一段的前置与产物都在、不是空文件、` +
             `而且是这一轮的：\n` +
@@ -357,3 +359,9 @@ export function buildLedgerNotices({
 function chainIds(stages) {
   return isStageChain(stages) ? Object.keys(stages) : []
 }
+
+// M4b 第一轮复核（docs/36）：执行段「齐了」的回传末尾固定带这一句。执行角色在 S5 被写路径隔离拒绝时，要先写一份实现记录才停得下
+// （H5b），被拒还没解决的那一份在门禁看来就是交了；门禁不读它写了什么，这一句把 PM 引到那一节上。H5a「全部齐备」那句同用。
+export const IMPL_RECORD_NOTE =
+  '这一段的产物是各执行角色的实现记录：推进之前逐份读，有「被写路径隔离拒绝」一节、里面还有没标「已解决」的条目的，那一份不算交齐' +
+  '（门禁看不出这一点；做法见 /agent-team:at 第 3 节「各段的具体做法」里这一段那一条）。'

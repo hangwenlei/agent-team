@@ -84,6 +84,10 @@ export function runAsync(check, input, { gate = GATE, cwd, env = hermeticEnv(), 
         reject(e)
       }
     })
+    // M4b 第一轮复核：子进程在读完 stdin 之前退出时，写 stdin 会报 EPIPE——退出码与输出由上面的 close 处理器判，EPIPE 不算失败。
+    child.stdin.on('error', (e) => {
+      if (e && e.code !== 'EPIPE') reject(e)
+    })
     child.stdin.end(typeof input === 'string' ? input : JSON.stringify(input))
   })
 }

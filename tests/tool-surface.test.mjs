@@ -132,7 +132,7 @@ test('前置条件：agents/ 下每个 .md 都解得出至少一个工具名—�
         'tests/helpers/agent-tools.mjs 还不认识的 YAML 写法——两种情况下，下面那条' +
         '「不得出现 Skill / SendMessage / ListAgents」的否定断言都是在对着空文本做，' +
         '恒真、什么都不证明（M1b 终审 C2 的成因）。而且一份没有 tools: 行的正文会继承全部工具，' +
-        '包括禁授的那三样——主线程的 tools: 不替它兜着（M4b P4，docs/36）。',
+        '包括禁授的那三样（官方文档：省略 tools 即继承全部工具）——主线程的 tools: 不替它兜着（M4b P4，docs/36）。',
     )
   }
 })

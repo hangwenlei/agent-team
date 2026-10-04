@@ -61,7 +61,7 @@ description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json
     `gradle/libs.versions.toml`；Python 的 `pyproject.toml`），以及顶层的测试目录，逐个列给每个会改它们的 `S5` 产者
     （`${CLAUDE_PLUGIN_ROOT}/stages.json` 里 `S5` 的 `producers` 中这个项目用得上的）。同一条前缀列给几个产者是有意的，与上面共享目录同一种写法；
     按磁盘上的实际文件名逐个列，不写通配。不列给 `at-architect`、`at-product`（它们定方案，不写实现）。空目录里看不到这些：
-    照模板骨架写的根级文件只是占位，收尾时告诉用户哪些是占位；不是 Node 项目的，模板里 `package.json`、`package-lock.json`、
+    照模板骨架写的根级文件、`stack`、`build`、`test` 都只是占位，收尾时告诉用户哪些是占位；不是 Node 项目的，模板里 `package.json`、`package-lock.json`、
     `tsconfig.json` 这几条不要带过去。实现要新建的根级文件，由 `/agent-team:at` 在 S4 照架构方案的落盘清单补。
 - `available_roles`：**这个项目用得上哪些执行角色**（规格 §7.1 的「可用班底」）。
   值是角色名数组，名字只能取自花名册。

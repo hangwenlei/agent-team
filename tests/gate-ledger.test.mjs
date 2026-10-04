@@ -1352,3 +1352,11 @@ test('坏指针时写 project.json：fail-open 留痕本轮开始出现——这
     rmSync(pluginDir, { recursive: true, force: true })
   }
 })
+
+// M4b 第一轮复核（docs/36）：执行段（produces 是 <role> 模式的那一段，插件自带的链里是 S5）的【阶段】「齐了」末尾固定提醒先读
+// 实现记录里的「被写路径隔离拒绝」一节——门禁分不出那一节写了什么，只看在不在；被拒还没解决的那一份在门禁看来就是交了。
+// 别的段不带这一句（不是每段都写实现记录）。
+test('M4b【阶段】执行段齐了：末尾提醒先读「被写路径隔离拒绝」一节；别的段不带', () => {
+  assert.match(m3xLedger(M3X_S5_ACCOUNTED), /【阶段】S5 的产物已经齐了[\s\S]*被写路径隔离拒绝[\s\S]*已解决/)
+  assert.doesNotMatch(m3xLedger({ ...M3X_S2, stage_roles: { S2: ['at-product'] } }), /被写路径隔离拒绝/)
+})

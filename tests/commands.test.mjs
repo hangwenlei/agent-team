@@ -261,7 +261,7 @@ test('commands/ 正文里不得出现硬编码的角色名清单——班底要�
 //
 // ⚠️ 这条测试只证明「正文写对了前缀」，**不证明 PM 真的读得到那个文件**——那需要
 // 真实环境，见 docs/10 第 8 条。
-const PLUGIN_OWNED = ['stages.json', 'roster.json', 'templates/']
+const PLUGIN_OWNED = ['stages.json', 'roster.json', 'templates/', 'agents/']
 const pluginSpansOf = (f) =>
   [...textOf(f).matchAll(/`([^`\n]+)`/g)]
     .map((m) => m[1])

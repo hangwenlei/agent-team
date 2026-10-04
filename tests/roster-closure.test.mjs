@@ -48,8 +48,8 @@ test('stages.json 里每个阶段的 role 都必须是 roster.json 的键', () =
 
 // H4 契约保护（hooks/lib/contract-guard.mjs）把"被 settings.json 钉成主线程
 // 的 at-pm"和 MAIN 同等对待、一并豁免——hook 输入本身分不清"被钉成主线程
-// 的 at-pm"和"被派发出来的 at-pm 子代理"，两者的 agent_type 都是裸的
-// 'at-pm'。这条豁免的安全性不是自己成立的，靠的是这里守住的结构性不变量：
+// 的 at-pm"和"被派发出来的 at-pm 子代理"，两者的 agent_type 剥掉插件前缀之后都是
+// 'at-pm'（M4b 订正：原来写「都是裸的」）。这条豁免的安全性不是自己成立的，靠的是这里守住的结构性不变量：
 // 当前花名册里没有任何角色能把 at-pm 当作派发目标，所以"at-pm 作为被派发
 // 出来的子代理出现"这条路径根本不存在（Task 5 评审顾虑 1）。这条测试一旦
 // 变红，说明有人往某个角色的 can_delegate_to 里加了 at-pm——H4 的 at-pm
@@ -102,7 +102,7 @@ test('roster.json 的 __main__ 与 at-pm 的 can_delegate_to 必须逐字相同�
     roster.__main__?.can_delegate_to,
     roster['at-pm']?.can_delegate_to,
     '__main__ 与 at-pm 的 can_delegate_to 分叉了。主会话就是 PM：被 settings.json 的 agent ' +
-      '键钉住的主会话带 agent_type: at-pm，未钉住的按 __main__ 处理（docs/05-M0-结论.md 的' +
+      '键钉住的主会话带 agent_type: at-pm（剥掉插件前缀之后），未钉住的按 __main__ 处理（docs/05-M0-结论.md 的' +
       '实测结论），**钉没钉住只影响它报哪个名字，不该影响它能派谁**。两个键都要保留、不能' +
       '合并，但内容必须一致。分叉的后果是 H1 fail closed：钉丢了的那种会话里派那几个只写进' +
       '一侧的角色会被直接拒，而拒绝理由指向花名册，排查的人要翻到 docs/05 才知道根因是' +

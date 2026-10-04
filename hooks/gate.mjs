@@ -34,12 +34,12 @@ import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispat
 import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
 import { sha256OfContract, shaOrNote } from './lib/contract-hash.mjs'
-import { buildLedgerNotices, brokenProjectNotice } from './lib/ledger.mjs'
+import { buildLedgerNotices, brokenProjectNotice, IMPL_RECORD_NOTE } from './lib/ledger.mjs'
 import { NO_PATHS_ROLES, validateProject } from './lib/project.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
 import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
-import { isPlainObject, participantsOf } from './lib/stages.mjs'
+import { isPlainObject, participantsOf, isRolePatternStage } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
 import { GATE_CHECK_PATH, gateCheckReason, isGateCheck } from './lib/gate-check.mjs'
@@ -950,7 +950,7 @@ function main() {
       // 把 at-pm 钉成主线程时，主会话自己的调用带 agent_type（原始值是全名 "agent-team:at-pm"，docs/22），落不进
       // MAIN。而这里的 deny 发生在看路径之前，拒的是这个会话的**每一次**
       // Edit/Write；agents/at-pm.md 现在有 Bash（M1c 设计 §1.1 的上界要求——M4b 订正：那条「上界」的前提，主线程的
-      // tools: 封顶子代理的工具，P4 实测不成立，PM 持 Bash 的理由待裁定，docs/36。这条
+      // tools: 封顶子代理的工具，P4 实测不成立；agents/at-pm.md 现行的理由是跑构建与测试，要不要收回待裁定，docs/36。这条
       // 注释此前写的是「PM 的工具面没有 Bash」，commit 2d0147c 给 at-pm.md 加上
       // Bash 之后这句话就不成立了，评审发现 5 指出没人回来改），但逼 PM 用
       // `echo >` 去修一个坏掉的 run 不是可接受的运维路径；触发条件又很廉价
@@ -1931,7 +1931,8 @@ function main() {
             `执行者，但它能（传递地）派到当前阶段的执行角色——这原本是合法的层级协调。` +
             `只是当前阶段的产物已经全部齐备，state.stage 大概率没有随之推进到下一阶段：` +
             `这正是**停在旧阶段**，H5 会对新阶段全程哑火。去 run 目录核实产物是否真的都已` +
-            `完成，确认后照 /agent-team:at 第 3 节记推进的账：stage 与 history 用同一次 Write 推进，roster、stage_roles、trimmed 一起记。`
+            `完成，确认后照 /agent-team:at 第 3 节记推进的账：stage 与 history 用同一次 Write 推进，roster、stage_roles、trimmed 一起记。` +
+            (isRolePatternStage(ctx.stages?.[ctx.state?.stage]) ? IMPL_RECORD_NOTE : '')
           : `⚠️ 交付物校验：刚返回的 ${inline(role)} 不是当前阶段（state.stage = ${stageLabel}）的` +
             `执行者，**而且它也派不到那个执行者**（所以不是一次层级协调），所以这次校验` +
             `**没有意见**——不是它查过了没问题。两种可能：state.stage 停在旧阶段没推进，` +

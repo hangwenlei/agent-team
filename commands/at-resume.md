@@ -49,16 +49,17 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 - **展开出来是空集 → 不算齐了。** 空集只说明这一段还没记账（`stage_roles` 里还没有这一段；旧 run 是
   `roster` 里还没有这一段的产者——PM 在推进出一段时才记它），不说明没人干过活。`stage` 还等于这一段，就说明它
-  还没推进出去：`history` 里有它只说明进过，`artifacts` 里有哈希只说明产物交过。S5 去看 `04-dispatch.md` 的分工，
-  实现记录逐份读一遍：有「被写路径隔离拒绝」一节、里面还有没标「已解决」的条目的，那一份不算交齐，照
-  `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 3 节「各段的具体做法」`S5` 那一条往 `.agent-team/project.json` 里补认领、在 `S5` 里重派，不要记账推进；
-  停在 S3 的，`03-arch.md` 没有「落盘清单」一节也不算齐，在 S3 里重派 `at-architect` 补；
+  还没推进出去：`history` 里有它只说明进过，`artifacts` 里有哈希只说明产物交过。S5 去看 `04-dispatch.md` 的分工；
   S2 先看 `01-prd.md` 在不在，在就不要重派 `at-product`——`at-ui` 那两份（`02-ui-spec.md`、`02-wireframe.html`）只在这一趟要用 `at-ui` 时才算缺，
   用不用按磁盘判（契约、`01-prd.md`、`project.json` 的 `available_roles`），不凭记忆；不用，就在记账那次 Write 里把它写进
   `trimmed`（不在 `available_roles` 里的不用写）。已经在磁盘上、内容是做完了的不要重派，该有而没在的从这一段继续派；都齐了就照下一条记账。
   「全部都在磁盘上」对空集是真命题，照字面判会把整段跳过。判「齐了」的口径只在 `hooks/lib/state.mjs` 的 `isStageDone` 一处，
   它对空集答「没齐」。run 目录下的产物用 `.agent-team/runs/<run_id>/` 开头的路径去 `Glob`。
-- **产物齐了**（不是最后一段） → 这一段其实已经做完，只是没记账。先 `Read` `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 的「逐段推进」一节（第 3、4 条），照它用同一次 Write 记账（`stage`、`history`、`roster`、`stage_roles`、`trimmed`，下一段在 `history` 里已经出现过时还有 `rework`；两个字段方向相反：`stage_roles` 是 `{ 段: [角色] }`，`trimmed` 是 `{ 角色: 段 }`），
+- **不管展开出来是不是空集**，停在下面这几段的，先核这几样，核不过就不算齐、不要记账推进：停在 `S3` 的，`03-arch.md` 要有
+  「落盘清单」一节，没有就在 `S3` 里重派 `at-architect` 补；停在 `S4` 的，推进之前照 `${CLAUDE_PLUGIN_ROOT}/commands/at.md`
+  第 3 节「各段的具体做法」`S4` 那一条拿落盘清单对 `.agent-team/project.json` 的认领；停在 `S5` 的，实现记录逐份读一遍——有
+  「被写路径隔离拒绝」一节、里面还有没标「已解决」的条目的，那一份不算交齐，照同一节 `S5` 那一条处理、在 `S5` 里重派。
+- **产物齐了**（不是最后一段） → 这一段其实已经做完，只是没记账。先 `Read` `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 的「逐段推进」一节（第 2–4 条，以及「各段的具体做法」里当前段那一条），照它用同一次 Write 记账（`stage`、`history`、`roster`、`stage_roles`、`trimmed`，下一段在 `history` 里已经出现过时还有 `rework`；两个字段方向相反：`stage_roles` 是 `{ 段: [角色] }`，`trimmed` 是 `{ 角色: 段 }`），
   然后从下一段继续。`state.json` 里没有 `stage_roles`（更早落盘的 run）就不要加，照旧只累加 `roster`。
 - **产物不齐** → 从这一段继续，先看缺哪个产物、该派谁。
 - **`stage` 是阶段链最后一段、它的产物齐了**（而且不是上一轮的）→ 这一趟走完了、只是没写收口标记：照

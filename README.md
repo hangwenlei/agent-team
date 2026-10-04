@@ -146,7 +146,7 @@ flowchart TB
 ## 已知边界
 
 > [!WARNING]
-> **这不是沙箱。** 写路径隔离按 `project.json` 的 `paths` 管项目经理以外的各个角色：在 run 目录之外，只能写划给自己的前缀，没有条目就哪都写不了；例外是 `at-qa` 与 `at-acceptance`——它们按设计不认领目录，这道检查对它们在 run 目录之外整段放行。`Bash` 没有任何门禁看着，而执行角色保留它来构建和测试。项目经理在实现之前会照架构方案往 `paths` 里补前缀（只加不删，补了什么会告诉你），这些前缀留给以后各趟。
+> **这不是沙箱。** 写路径隔离按 `project.json` 的 `paths` 管项目经理以外的各个角色：在 run 目录之外，只能写划给自己的前缀，没有条目就哪都写不了；例外是 `at-qa` 与 `at-acceptance`——它们按设计不认领目录，这道检查对它们在 run 目录之外整段放行。`Bash` 没有任何门禁看着，而执行角色保留它来构建和测试。项目经理在实现之前（实现中有角色被拒时也会）照架构方案往 `paths` 里补前缀（只加不删，补了什么会告诉你），这些前缀留给以后各趟。
 
 > [!WARNING]
 > **主会话会被接管成 `at-pm`。** 它的工具面是 `Agent(...)`（受派发白名单约束）、`AskUserQuestion`、`Bash`、`Read`、`Glob`、`Grep`、`Write`、`Edit`——能改动的范围与普通会话相当，把它限制在目标项目里的是角色说明，不是工具权限。它拿不到你在普通会话里能用的 MCP 工具与网页搜索、抓取（WebSearch、WebFetch）；其余角色各自只拿自己清单里的工具。按上面的方式安装，影响范围只在安装它的那个项目目录；也不要用 `--agent`、或在你自己的设置里设 `agent` 键，把主会话换成别的角色，门禁按主会话的身份判定。
@@ -331,7 +331,7 @@ You can watch a role but not talk to it: roles report their questions to the pro
 ## Known Limitations
 
 > [!WARNING]
-> **This is not a sandbox.** Write-path isolation governs every team role except the project manager by the `paths` in `project.json`: outside the run directory a role may write only its own prefixes, and nothing at all without an entry; the exception is `at-qa` and `at-acceptance`, which claim no directories by design, so outside the run directory the check lets them through entirely. `Bash` is not watched by any gate, and implementation roles keep it to build and test. Before implementation the project manager adds prefixes to `paths` from the architecture plan (it only adds, and tells you what it added); they stay for later runs.
+> **This is not a sandbox.** Write-path isolation governs every team role except the project manager by the `paths` in `project.json`: outside the run directory a role may write only its own prefixes, and nothing at all without an entry; the exception is `at-qa` and `at-acceptance`, which claim no directories by design, so outside the run directory the check lets them through entirely. `Bash` is not watched by any gate, and implementation roles keep it to build and test. Before implementation (and during it, when a role is refused) the project manager adds prefixes to `paths` from the architecture plan (it only adds, and tells you what it added); they stay for later runs.
 
 > [!WARNING]
 > **The main session is taken over as `at-pm`.** Its tool surface is `Agent(...)` (bound by the dispatch whitelist), `AskUserQuestion`, `Bash`, `Read`, `Glob`, `Grep`, `Write` and `Edit` — it can change anything an ordinary session can, and what keeps it inside the target project is its role definition, not its permissions. It does not get the MCP tools or the web search and fetch tools (WebSearch, WebFetch) that an ordinary session has; every other role gets only the tools on its own list. Installed as above, its reach is limited to the one project directory that declares it. Don't swap the main session for another role with `--agent` or an `agent` key in your own settings either: the gates judge by the main session's identity.

@@ -318,6 +318,9 @@ test('M4b 归谁：协调者（at-architect、at-product）不拿「列到你名
     assert.equal(r.decision, 'deny')
     assert.ok(!r.reason.includes('列到你名下'), `${role}：${r.reason}`)
     assert.ok(r.reason.includes('认领者的活'), `${role}：${r.reason}`)
+    // 第一轮复核：这句不看阶段——架构师在 S3 出方案时派不了 S5 的产者（H2 拒），正路是写进落盘清单；派不到的冒泡。
+    assert.ok(r.reason.includes('落盘清单'), `${role}：${r.reason}`)
+    assert.match(r.reason, /冒泡给派你的上级/)
   }
 })
 
@@ -332,4 +335,49 @@ test('M4b 没人认领：自己的认领清单逐条引，排在末尾的前缀�
   const e = decide('at-product', '/proj/x.md', withPaths({ ...TEMPLATE.paths, 'at-product': [] }))
   assert.equal(e.decision, 'deny')
   assert.match(e.reason, /只写 run 目录/)
+})
+
+// ---- M4b 第一轮复核：出路的边角 ----
+
+// 调用者是建了键的 at-qa、at-acceptance：它按设计不认领路径，叫 PM 再往这个错键上加前缀，与账本「不要给它建键」打架。
+test('M4b 归谁：建了键的 at-qa 写别人的文件——出路是让 PM 删掉它的键，不是「列到你名下」', () => {
+  const r = decide('at-qa', '/proj/package.json', withPaths({ ...SHARED.paths, 'at-qa': [] }))
+  assert.equal(r.decision, 'deny')
+  assert.ok(r.reason.includes('不该有你的键'), r.reason)
+  assert.ok(!r.reason.includes('列到你名下'), r.reason)
+})
+
+// 认领者是按设计不该有键的角色（at-outsider、at-qa、at-acceptance）：没有谁派得到 at-outsider，协调者不该被叫去「派给认领者」。
+test('M4b 归谁：认领者是 at-outsider——点明它不该有键、冒泡给 PM 改配置，不叫协调者去派它', () => {
+  const r = decide('at-architect', '/proj/scripts/x.sh', withPaths({ ...TEMPLATE.paths, 'at-outsider': ['scripts/'] }))
+  assert.equal(r.decision, 'deny')
+  assert.ok(r.reason.includes('"at-outsider"') && r.reason.includes('不该有 paths 键'), r.reason)
+  assert.ok(!r.reason.includes('分发它的那一段'), r.reason)
+})
+
+// 认领者自己的条目整条作废：派它去写，它在第 8 步又被拒——先说条目作废，不叫协调者派它。
+test('M4b 归谁：认领者的条目整条作废——点明作废、先修 project.json，不叫协调者去派它', () => {
+  const r = decide('at-architect', '/proj/src/web/a.ts', withPaths({ ...TEMPLATE.paths, 'at-frontend': ['src/web/', '../shared/'] }))
+  assert.equal(r.decision, 'deny')
+  assert.ok(r.reason.includes('"at-frontend"') && r.reason.includes('整条作废'), r.reason)
+  assert.ok(!r.reason.includes('分发它的那一段'), r.reason)
+})
+
+// 花名册读得出、调用者自己那一条坏了：判不出它是叶子还是协调者，不给「列到你名下」（那会把代码路径划给设计类角色）。
+test('M4b 归谁：花名册里调用者那一条坏了——不给「列到你名下」，指向重装插件', () => {
+  for (const broken of [null, {}, { can_delegate_to: 'at-backend' }]) {
+    const r = decide('at-architect', '/proj/package.json', SHARED, { ...ROSTER, 'at-architect': broken })
+    assert.equal(r.decision, 'deny')
+    assert.ok(!r.reason.includes('列到你名下'), r.reason)
+    assert.ok(r.reason.includes('roster.json'), r.reason)
+  }
+})
+
+// 没人认领：自己条目里「要改」档的前缀（不可见格式字符、首尾空白）原样引出来，读着像「认领了却说没人认领」——把问题一并说出来。
+test('M4b 没人认领：自己条目里有要改的前缀（零宽字符）——理由把问题说出来（写出码点）', () => {
+  const zw = String.fromCharCode(0x200b)
+  const r = decide('at-ios', '/proj/ios/a.swift', withPaths({ ...TEMPLATE.paths, 'at-ios': [`ios${zw}/`] }))
+  assert.equal(r.decision, 'deny')
+  assert.match(r.reason, /没有被任何角色认领/)
+  assert.match(r.reason, /U\+200B/)
 })

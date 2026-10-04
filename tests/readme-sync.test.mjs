@@ -361,34 +361,75 @@ test('前置条件：agents/at-pm.md 的 tools: 解得出非空的工具名清�
 function sentencesOf(text) {
   return text.split(/[。；]|(?<=[.;])\s+/)
 }
+// 第一轮复核（docs/36）：再按括号外的中英逗号切小句，否定标记要在名字之前、同一小句里——否则「拿不到 MCP，网页工具照样能用」
+// 「does not get the MCP tools, but it keeps … (WebSearch, WebFetch)」这种否定只管一半的写法也会被认成「三样都拿不到」。
+// 括号里的「WebSearch, WebFetch」不切。残余：没有逗号的「does not get MCP and keeps WebSearch」仍认不出。
+function clausesOf(sentence) {
+  const out = []
+  let depth = 0
+  let cur = ''
+  for (const ch of sentence) {
+    if (ch === '（' || ch === '(') depth++
+    if (ch === '）' || ch === ')') depth = Math.max(0, depth - 1)
+    if (depth === 0 && (ch === '，' || ch === ',')) {
+      out.push(cur)
+      cur = ''
+      continue
+    }
+    cur += ch
+  }
+  out.push(cur)
+  return out
+}
 function claimsNo(paragraph, names) {
-  return sentencesOf(paragraph).some(
-    (s) => (s.includes('拿不到') || s.includes('does not get')) && names.every((n) => new RegExp(`(^|[^\`A-Za-z_])${n}([^\`A-Za-z_]|$)`).test(s)),
-  )
+  return sentencesOf(paragraph)
+    .flatMap(clausesOf)
+    .some((c) => {
+      const at = Math.max(c.indexOf('拿不到'), c.indexOf('does not get'))
+      if (at < 0) return false
+      const rest = c.slice(at)
+      return names.every((n) => new RegExp(`(^|[^\`A-Za-z_])${n}([^\`A-Za-z_]|$)`).test(rest))
+    })
 }
 
-test('自检：claimsNo() 认同一句里的否定与不加反引号的名字；分在两句、写成「能用」、加了反引号的都不算', () => {
-  assert.ok(claimsNo('> 它拿不到 MCP 工具与网页工具（WebSearch、WebFetch）；其余角色只拿自己的。', ['MCP', 'WebSearch', 'WebFetch']))
-  assert.ok(claimsNo('> It does not get the MCP tools or WebSearch and WebFetch; others differ.', ['MCP', 'WebSearch', 'WebFetch']))
-  assert.ok(!claimsNo('> 它拿不到 MCP 工具。它能用 WebSearch、WebFetch。', ['MCP', 'WebSearch', 'WebFetch']))
-  assert.ok(!claimsNo('> 它能用 MCP 工具与 WebSearch、WebFetch。', ['MCP', 'WebSearch', 'WebFetch']))
-  assert.ok(!claimsNo('> 它拿不到 `MCP` 与 `WebSearch`、`WebFetch`。', ['MCP', 'WebSearch', 'WebFetch']))
+const MCP = ['MCP']
+const WEB = ['WebSearch', 'WebFetch']
+
+test('自检：claimsNo() 只认否定管得到的名字——同一小句、否定在前、不加反引号；否定只管一半、写成「能用」、加了反引号的都不算', () => {
+  const zh = '> 它拿不到你在普通会话里能用的 MCP 工具与网页搜索、抓取（WebSearch、WebFetch）；其余角色只拿自己的。'
+  const en = '> It does not get the MCP tools or the web search and fetch tools (WebSearch, WebFetch) that an ordinary session has; others differ.'
+  for (const t of [zh, en]) assert.ok(claimsNo(t, MCP) && claimsNo(t, WEB), t)
+  const halfZh = '> 它拿不到 MCP 工具，网页搜索、抓取（WebSearch、WebFetch）照样能用。'
+  const halfEn = '> It does not get the MCP tools, but it keeps the web search and fetch tools (WebSearch, WebFetch).'
+  for (const t of [halfZh, halfEn]) assert.ok(claimsNo(t, MCP) && !claimsNo(t, WEB), t)
+  const inverted = '> 它能用你在普通会话里能用的 MCP 工具与网页搜索、抓取（WebSearch、WebFetch），只是拿不到 Skill；'
+  assert.ok(!claimsNo(inverted, MCP) && !claimsNo(inverted, WEB), inverted)
+  const split = '> 它拿不到 MCP 工具。它能用 WebSearch、WebFetch。'
+  assert.ok(claimsNo(split, MCP) && !claimsNo(split, WEB), split)
+  const ticked = '> 它拿不到 `MCP` 与 `WebSearch`、`WebFetch`。'
+  assert.ok(!claimsNo(ticked, MCP) && !claimsNo(ticked, WEB), ticked)
 })
 
 for (const f of [README_EN, README_ZH]) {
-  test(`M4b ${f} 的 at-pm 那一段写明主会话拿不到 MCP 与网页工具——与 agents/at-pm.md 的 tools: 双向一致`, () => {
+  test(`M4b ${f} 的 at-pm 那一段写明主会话拿不到 MCP 与网页工具——与 agents/at-pm.md 的 tools: 双向一致（两组分开判）`, () => {
     const p = atPmParagraph(read(f))
     const hasMcp = AT_PM_TOOLS.some((n) => n.startsWith('mcp__'))
     const hasWeb = AT_PM_TOOLS.includes('WebSearch') || AT_PM_TOOLS.includes('WebFetch')
-    assert.equal(
-      claimsNo(p, ['MCP', 'WebSearch', 'WebFetch']),
-      !hasMcp && !hasWeb,
-      `${f}：at-pm 那一段「主会话拿不到 MCP 与网页工具（WebSearch、WebFetch）」那句与 agents/at-pm.md 的 tools: 对不上` +
-        `（at-pm 有 mcp__：${hasMcp}；有 WebSearch/WebFetch：${hasWeb}）。这句是用户判断「装上之后还能做什么」的那一句，` +
-        '两半都要写，名字不加反引号，同一句里写否定。',
-    )
+    const why = `（at-pm 有 mcp__：${hasMcp}；有 WebSearch/WebFetch：${hasWeb}）。这句是用户判断「装上之后还能做什么」的那一句，` +
+      '两半都要写，名字不加反引号，否定写在名字前面、同一小句里。'
+    assert.equal(claimsNo(p, MCP), !hasMcp, `${f}：「主会话拿不到 MCP 工具」那句与 agents/at-pm.md 的 tools: 对不上${why}`)
+    assert.equal(claimsNo(p, WEB), !hasWeb, `${f}：「主会话拿不到 WebSearch、WebFetch」那句与 agents/at-pm.md 的 tools: 对不上${why}`)
   })
 }
+
+// 第一轮复核：README 两半这条分支新加的两句用户看得见的后果，按两半成对钉住——run 会往 project.json 里补前缀；
+// 自己设置里的 agent 键也会把主会话换掉（P8）。
+test('M4b README 两半都写了：项目经理会往 paths 里补前缀；自己设置里的 agent 键也会换掉主会话', () => {
+  const zh = read(README_ZH)
+  const en = read(README_EN)
+  assert.ok(zh.includes('补前缀') && en.includes('adds prefixes'), '「补前缀」那句两半不齐')
+  assert.ok(zh.includes('`agent` 键') && en.includes('`agent` key'), '「agent 键」那句两半不齐')
+})
 
 for (const f of [README_EN, README_ZH]) {
   test(`${f} 的已知边界那一节把 at-pm 的工具面一个不漏地写出来了`, () => {

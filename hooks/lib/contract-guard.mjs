@@ -57,7 +57,7 @@ const CONTRACT = '00-contract.md'
 //
 // 这条豁免的安全性依赖什么（评审 Task 5 顾虑 1）：hook 输入本身分不清
 // "被钉成主线程的 at-pm"和"被别人派发出来的 at-pm 子代理"——两者的
-// agent_type 都是裸的 'at-pm'，这个函数拿到的只是一个字符串，看不出
+// agent_type 剥掉插件前缀之后都是 'at-pm'（M4b 订正：原来写「都是裸的」），这个函数拿到的只是一个字符串，看不出
 // 背后的调用形态。这条豁免因此不是自己成立的，靠的是花名册闭包这个
 // 结构性不变量：当前 roster.json 里没有任何角色的 can_delegate_to 包含
 // at-pm（tests/roster-closure.test.mjs「没有任何角色能把 at-pm 当作

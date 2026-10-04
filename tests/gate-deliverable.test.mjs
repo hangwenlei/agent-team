@@ -1493,3 +1493,10 @@ test('M3b：收件人是主线程（没有 agent_type 这个键）时，保持�
 test('M3b：收件人是主线程时 stderr 为空', () => {
   assert.equal(driftAs(null).stderr, '')
 })
+
+// M4b 第一轮复核（docs/36）：H5a 对协调者说「当前阶段的产物已经全部齐备……核实」时，执行段（produces 是 <role> 模式）末尾提醒先读
+// 「被写路径隔离拒绝」一节——旧 run、返工轮里这一句会催 PM 推进，被拒还没解决的实现记录在门禁看来就是交了。
+test('M4b H5a：执行段的「产物已经全部齐备」末尾提醒先读「被写路径隔离拒绝」一节', () => {
+  const out = runH5a(H5A_TOPOLOGY_BEHAVIOUR.coordinatorDoneViaUi, { ledger: LEDGER_UI })
+  assert.match(out, /产物已经全部齐备[\s\S]*被写路径隔离拒绝[\s\S]*已解决/)
+})
