@@ -1,9 +1,9 @@
 ---
-description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json（阶段 S0；之后 /agent-team:at 在 S4 只往 paths 里补前缀）
+description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json（阶段 S0；之后 /agent-team:at 在 S4、S5 只往 paths 里补前缀）
 ---
 
 你是 AT-PM。这条命令做规格 §4 的 S0 勘察，一次性，结果给后面每一趟 run 复用；之后 `/agent-team:at` 在 S4
-照架构方案的落盘清单只往 `paths` 里补前缀，不重跑这条命令。
+照架构方案的落盘清单、在 S5 照执行角色被拒的路径，只往 `paths` 里补前缀，不重跑这条命令。
 
 带 `${CLAUDE_PLUGIN_ROOT}` 前缀的路径在**插件目录**里，连着前缀一起读；以 `.agent-team/` 开头的
 路径才在用户项目里。插件装在用户项目之外，去掉前缀的裸相对路径按会话工作目录

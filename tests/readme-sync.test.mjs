@@ -413,8 +413,10 @@ test('自检：claimsNo() 只认否定管得到的名字——同一小句、否
 for (const f of [README_EN, README_ZH]) {
   test(`M4b ${f} 的 at-pm 那一段写明主会话拿不到 MCP 与网页工具——与 agents/at-pm.md 的 tools: 双向一致（两组分开判）`, () => {
     const p = atPmParagraph(read(f))
-    const hasMcp = AT_PM_TOOLS.some((n) => n.startsWith('mcp__'))
-    const hasWeb = AT_PM_TOOLS.includes('WebSearch') || AT_PM_TOOLS.includes('WebFetch')
+    // 第一轮复核：README 现在说「团队里其余角色也拿不到」，所以按全体团队角色（agents/ 减去测试替身）的工具并集判。
+    const TEAM_TOOLS = PRODUCT_ROLES.flatMap((r) => toolsDeclarationOf(read(`agents/${r}.md`)).names)
+    const hasMcp = TEAM_TOOLS.some((n) => n.startsWith('mcp__'))
+    const hasWeb = TEAM_TOOLS.includes('WebSearch') || TEAM_TOOLS.includes('WebFetch')
     const why = `（at-pm 有 mcp__：${hasMcp}；有 WebSearch/WebFetch：${hasWeb}）。这句是用户判断「装上之后还能做什么」的那一句，` +
       '两半都要写，名字不加反引号，否定写在名字前面、同一小句里。'
     assert.equal(claimsNo(p, MCP), !hasMcp, `${f}：「主会话拿不到 MCP 工具」那句与 agents/at-pm.md 的 tools: 对不上${why}`)

@@ -114,6 +114,13 @@ Available agents: agent-team:at-architect, agent-team:at-product
 
 ### 3.3.1 更一般的表述：主线程 agent 定义的是整个会话的能力上界（M1 · U7 实测补）
 
+> ⚠️ **M4b 订正**（`docs/36`，审查第 29 条）：本节在工具这一维不成立，只在派发宇宙这一维成立（U4，照旧）。U7 引的
+> 「`Skill is disabled for this session, in subagents as well as here`」是一句固定文案（2.1.286 源码读法：调用方自己清单里没有、内建工具
+> 目录里有的工具一律这样报），`docs/15` §3.7 在 2.1.278 上的阴性对照早是反证。实测（`docs/36` P4，2.1.286）：主线程 `tools:` 只有
+> `Agent(...)` 与 `Read` 时，子代理照样调通了自己 `tools:` 里列的 `Grep`、`WebSearch`、`WebFetch` 与 MCP 工具。所以主线程的 `tools:`
+> 只封顶整个会话的派发宇宙与主会话自己的工具面；每个子代理拿的是自己 `tools:` 里的工具（没写 `tools:` 的按官方文档继承全部，未实测）。
+> 「给 `at-pm` 少配（或多配）一个工具，影响的是整棵子树」与「给执行角色就必须同时给 `at-pm`」这两条推论作废；禁授改靠每一份 `tools:` 行（§6.1 的订正）。
+
 U4 与 U7 是同一个机制的两个观测面，只是分别撞在「agent 宇宙」与「工具面」这两层上：
 
 - **M0 · U4**：主线程 `tools: Agent(A, B)` 圈定的是整个会话能解析到的 **agent 集合**，
@@ -603,6 +610,11 @@ session, in subagents as well as here`，见 §3.3.1）——这是 `tools:` fro
 `ListAgents`：只要 `at-pm.md` 的 `tools:` 不写这三个工具中的任何一个，这条限制自动
 覆盖 `at-product`/`at-architect`/全部执行角色，不需要逐个角色配置。
 
+> ⚠️ **M4b 订正**（`docs/36`，审查第 29 条）：上一段后半不成立——主线程的 `tools:` 不封顶子代理的工具（见 §3.3.1 的订正）。哪个角色自己的
+> `tools:` 写了这三样之一，它就真拿到；没写 `tools:` 的角色按官方文档继承全部工具（未实测）。所以禁授**要逐个角色配置**，由三样一起守：
+> `tests/tool-surface.test.mjs` 的逐份禁授判据、「每份都解得出至少一个工具名」那条前置、逐份期望值 `EXPECTED_TOOLS`。
+> 「主防线是不给工具，不是加 hook」照旧。
+
 **为什么零代价**：设计里跨角色共享契约走的是角色 frontmatter 的 `skills:` 预加载
 （见 §7 目录树的 `skills/` 一节；**主会话例外，见 §6.6**——`at-pm` 是这条路的唯一
 主会话消费者，对它这条论证不完整成立），这与 `Skill` 工具是两回事——前者是会话启动时把
@@ -681,6 +693,12 @@ run 都会算出一份内容完全相同的拷贝，且这份拷贝会随那趟 
 堵住它的依据从**「PM 写不了」**退成**「写了对不上账」**（§6.2 的内容比对）。
 这是一次真实的安全性让步，`docs/09` 账一 #2 的论证到此为止。完整理由与代价见
 `docs/superpowers/specs/2026-09-18-M1c-角色层-design.md` §1.1／§1.2。
+
+> ⚠️ **M4b 订正**（`docs/36`）：「§3.3.1 的上界模型意味着给执行角色就必须同时给 `at-pm`」不成立（§3.3.1 的订正）。降级照样成立，原因换成：
+> 执行角色自己持 `Bash`（§6.2），同样能 `echo > 01-prd.md`——「H2 的判据对所有角色继续不可伪造」从执行角色拿到 `Bash` 那一刻起就不完整成立，
+> 与 PM 有没有 `Bash` 无关。PM 现在持 `Bash` 的理由见 `docs/36` §2.9。另外，上面「M0 实测：钉住时主会话的 hook 输入带裸的
+> `agent_type: 'at-pm'`」：原始值是插件全名 `agent-team:at-pm`（`docs/07` §4、`docs/22` §3），`at-pm` 是 `callerOf` 剥掉前缀之后的值；
+> 结论（钉住的 PM 落不进 `MAIN`）不变。
 
 ### 6.3 提示注入防护
 
@@ -798,11 +816,18 @@ agent-team/
 ├── LICENSE  README.md  README.zh-CN.md  CHANGELOG.md
 ```
 
+> ⚠️ **M4b 订正**（`docs/36`）：`settings.json` 现在是 `{"agent": "agent-team:at-pm"}`。写裸名时平台先找完全同名的 agent，项目或用户层
+> 一份自己的 `at-pm.md` 会抢先当上主会话（`docs/36` P8）；markdown agent 的名字不许含冒号，写全名就没有谁撞得上。判据是
+> `tests/plugin-name-sync.test.mjs`。
+
 ### 7.1 项目配置
 
 per-role 写路径隔离要求插件知道用户项目的路径归属，对外发布不可写死。
 `/at-init` 探测技术栈与目录布局，生成 `.agent-team/project.json`：
 路径归属、可用班底、技术栈、构建与测试命令。用户改配置只改这一个文件。
+
+> **M4b 补**（`docs/36`）：`/agent-team:at` 在 S4 照架构方案的「落盘清单」、在 S5 照被拒的路径，只往 `paths` 里补前缀（只加不删，敏感位置先问
+> 用户，收尾告诉用户）；根级清单、构建配置、顶层测试目录共列给每个会改它们的 S5 产者，不加 `shared` 键。
 
 ## 8. 交接契约
 
@@ -832,6 +857,9 @@ Claude Code 无类型系统，派发提示里的 JSON 契约即全部类型系�
 | U6 | 一趟十角色的真实成本 | 未测 | **有实测单价的推算，真值待 M2 首次完整运行**——单价（实现者/评审 agent 中位约 13 万 tokens，调研 agent 均值约 9 万）取自本仓库 M0 期间真实运行计数，按十次角色调用外推：不返工约 100 万–250 万 tokens/趟，带返工约 200 万–400 万 tokens/趟。建议 M1 先在三到四个角色上跑通闭环，但 §11 实现顺序是否调整由用户决定。详见 `docs/07-U5-U6-U8-实测结论.md` |
 | U7 | 除 `Agent` 工具外，是否还有别的路径能起一个 subagent（如 `Skill`、`SendMessage`） | **是（存在旁路）** | `context: fork` 的 skill 可以带 `agent:` 参数直接起一个 subagent，全程不经过 `Agent` 工具，H1 看不见。目标在花名册白名单（宇宙）内时 fork 拿到该角色真实定义；目标在宇宙外时 fork 仍成功但角色定义不加载。缓解：角色工具面一律不得包含 `Skill`，本插件自带 skill 一律不得声明 `context: fork`（§6.1，`tests/tool-surface.test.mjs` 强制）。详见 `docs/06-U7-实测结论.md` |
 | U8 | `SendMessage` 能否被 subagent 用来续起一个花名册禁止它接触的 agent | **当前配置下不存在该路径（未授予工具）；授予后的行为未实测** | 实测：`at-product` 的 `tools:` 未含 `SendMessage`/`ListAgents`，调用即报工具不存在（`tool_uses: 0`）。若将来授予，官方 `ListAgents` 范围含「本机其它 Claude 会话」，`SendMessage` 文档明确警告 cross-session permission laundering——但本轮未像 U7 对 `Skill` 那样做临时授予实验，这部分是文档推断，不是实测。缓解：规格 §6.1 推广为角色工具面一律不授予 `Skill`/`SendMessage`/`ListAgents`。详见 `docs/07-U5-U6-U8-实测结论.md` |
+
+> ⚠️ **M4b 订正**（`docs/36`）：U1 那一格「插件自己的 `settings.json` 没有理由写全限定名」不再成立——裸名时项目或用户层同名的 `at-pm.md`
+> 会抢先当上主会话（P8），M4b 起写全名（§7 目录树底下的订正）。U2 那一格「被所有子孙代理继承」只在派发宇宙这一维成立（§3.3.1 的订正）。
 
 U1–U4 必须在写任何角色正文之前，用一个最小插件先验，任一为否都会改变实现路径。
 U7 优先级与 U1–U4 同级，应在 M1 第一步一并验证。

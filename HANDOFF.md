@@ -30,7 +30,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/35` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查逐条的现状（原文在它的附录），下一轮从那里挑。
+- `docs/13`…`docs/36` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查逐条的现状（原文在它的附录），下一轮从那里挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
 ## 🧠 长期决策与理由
@@ -80,6 +80,14 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   `mayAcceptProduct`。不按「上游这一轮改过没有」判：标了 accepted 就抹掉了那份基线。只有空白的产物不算交了，收口、交付快照、「交过」、
   H5b、H2 的前置、【阶段】与 H3 的兄弟检查共用 `text-norm.mjs` 的 `isBlankText`（经 `freshness.mjs` 的 `isBlank` 进 `artifactCurrent`），
   只改一处，出路就互相打架。理由在 `docs/35`。
+- **主线程的 `tools:` 只封顶派发宇宙与主会话自己的工具面，不封顶子代理的工具**：每个角色拿自己 `tools:` 里的工具（实测），禁授三样
+  （`Skill`、`SendMessage`、`ListAgents`）靠每一份自己的 `tools:` 行（`tests/tool-surface.test.mjs` 的逐份判据与「每份都解得出工具名」那条前置）。
+  `at-pm` 拿不到用户的 MCP 与网页工具，README 两半写着、双向判据钉着。验证段的产者（主会话除外）不持 `Edit`——摩擦，不是屏障。插件
+  `settings.json` 的 `agent` 写全名 `agent-team:at-pm`（裸名会被项目或用户层同名的 `at-pm.md` 抢先当上主会话），`tests/plugin-name-sync.test.mjs`
+  从 `PLUGIN_PREFIX` 派生。门禁按剥前缀的名字认 PM 不收紧。理由在 `docs/36`。
+- **根级文件共列，不加 `shared` 键**：根级清单、构建配置、顶层测试目录列给每个会改它们的 S5 产者；S3 的「落盘清单」与 S4「照清单补 `paths`」
+  是对齐的那一步（加了 `shared` 也省不掉，前缀按字面比、S0 时文件还不存在）。S5 被拒的在实现记录里留「被写路径隔离拒绝」一节、标「已解决」，
+  PM、at-resume、at-qa 按它判交没交齐，执行段「齐了」时门禁提醒先读它（`IMPL_RECORD_NOTE`）。理由在 `docs/36`。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。

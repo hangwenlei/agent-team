@@ -55,6 +55,10 @@ S5 是第一种（一个模式配 N 个角色），S2 是第二种（`at-product
 `at-ui` 交 `02-ui-spec.md` 与 `02-wireframe.html`）。完整对照与理由见主规格 §4 阶段表
 下方「注记（M2b 补）」那一条。
 
+第一种形状（`produces` 是含 `<role>` 的模式）的段是**执行段**（M4b，`docs/36`）：`hooks/lib/stages.mjs` 的 `isRolePatternStage` 按形状认它，
+不写死段号。ledger 的【阶段】「齐了」与 H5a 的「全部齐备」在执行段末尾提醒先读实现记录里的「被写路径隔离拒绝」一节（`ledger.mjs` 的
+`IMPL_RECORD_NOTE`）。再加一段同形状的段，它也会收到这句。
+
 ⚠️ **两种形式的展开都收在 `hooks/lib/stages.mjs` 的 `expandProduces` 一处**——它是全部
 消费方的单一真源，**不要在任何调用点另写分支**，也不要在正文里复述展开规则（那会是
 第二份）。要知道「某一阶段该有哪些产物」，走 `expandProduces(stage, stageRolesInRun(stage, <角色集合>))`——问「这一段

@@ -267,9 +267,9 @@ test('本插件自带的 skills/**/SKILL.md 不声明 context: fork（当前 0 �
 // 验证段（stages.json 里 "verifies": true 的段）的产者，除主会话角色外不持 Edit。验证段的产物在返工轮里要整份重新出，
 // 门禁只按 sha 判新旧、认不出「在上一轮那份末尾补一句」（hooks/lib/freshness.mjs 的 VERIFY_REDO）。不给 Edit 让这一招
 // 从一次小编辑变回整份重写——这是**摩擦，不是屏障**：Write 读一遍再整份写回照样做得到，持 Bash 的 at-qa 一行 >> 也
-// 做得到；主会话角色（at-pm，S8 的产者）要用 Edit 追加契约修订块、改 state.json，豁免。所以它对 at-acceptance（没有
-// Bash）守的是真东西，对 at-qa 只是代理；「只补一句」在这几处最终靠 freshness 的 sha 与正文。主会话角色从 settings.json
-// 剥前缀取，不写字面量。
+// 做得到；主会话角色（at-pm，S8 的产者）要用 Edit 追加契约修订块、改 state.json，豁免。所以它对 at-acceptance 是一层摩擦
+// （只能整份写回），对 at-qa 更弱（一行 >>）；「只补一句」门禁认不出，只靠正文的要求。主会话角色从 settings.json 剥前缀取，
+// 不写字面量。
 const STAGES = JSON.parse(readFileSync(join(ROOT, 'stages.json'), 'utf8'))
 const SETTINGS = JSON.parse(readFileSync(join(ROOT, 'settings.json'), 'utf8'))
 const MAIN_ROLE = stripPluginPrefix(SETTINGS.agent)
