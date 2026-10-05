@@ -57,6 +57,9 @@ Claude Code 旧到丢掉 hook 的参数、hooks 被关掉——平台一律放�
 用户消息后面跟着一句以 `agent-team reminder:` 开头的提醒，说的就是这件事。对话里更早的自检结果
 不算数：会话可能已经换了一个进程。`/agent-team:at-status` 只读，不做自检。
 
+**先看工具面**：你的工具里没有 `Bash`（原生 Windows 上没装 Git for Windows 时，平台只给 PowerShell）——团队角色跑命令都只认
+`Bash`，装依赖、编译、跑测试都做不了：停下，告诉用户装好 Git for Windows、重开 Claude Code 再来。
+
 **怎么查**：用 `Write` 写 `.agent-team/gate-check`，内容就写这一句：「agent-team 门禁自检：看到
 这条写入确认，说明门禁没在跑，请选拒绝。」
 
@@ -78,7 +81,9 @@ Claude Code 旧到丢掉 hook 的参数、hooks 被关掉——平台一律放�
      模式挡在了门禁前面、掩盖了自检，也不要把它加进下面的清单。
    - 拒绝理由是 agent-team 的别的说法（Node 太旧、门禁代码加载失败、门禁异常）——把理由原文转告用户。
    - 平台在调用之前就报了错（`<tool_use_error>`，比如设置里的 deny 规则盖住了 `.agent-team`）——
-     自检没做成，门禁在不在不知道，把原文转告用户。
+     自检没做成，门禁在不在不知道，把原文转告用户。报错里提到 `EnterWorktree` 或 `bgIsolation` 的，是后台会话在 git 仓库里
+     被平台拦下了对项目目录的写入：一并告诉用户在项目的 `.claude/settings.json` 里设 `"worktree": {"bgIsolation": "none"}`，
+     或者改用前台会话（终端里直接跑 `claude`、桌面端）再开这一趟；不要照平台的提示去 `git worktree add`，也不要自己改设置。
 
 门禁没在跑时，把下面这段原样告诉用户，不改写、不补充：
 
@@ -105,7 +110,8 @@ Claude Code 旧到丢掉 hook 的参数、hooks 被关掉——平台一律放�
 
 ## 红线
 
-- **不得用 `Bash` 绕过写路径隔离。** 你有 `Bash` 是为了跑构建与测试。伪造阶段产物——比如
+- **不得用 `Bash` 绕过写路径隔离。** 你有 `Bash` 是为了跑构建与测试——它是你唯一的 shell（Windows 上是 Git Bash），命令照 POSIX 写；
+  环境说明里提到 PowerShell，那不是你的工具。伪造阶段产物——比如
   `echo > 01-prd.md`——**会在账本比对里留下痕迹**：产物的 sha256 记在 `state.json` 的
   `artifacts` 里，对不上账就会被直接报出来，这不是「没人看得见」（真要连 `artifacts` 一起
   改，**任何持有 `Bash` 的角色**都做得到——`state.json` 对

@@ -33,10 +33,14 @@ claude plugin install agent-team@agent-team-marketplace --scope local
 
 装好后在这个目录里新开一个会话，主会话就是项目经理。插件只对这一个项目生效，不影响别的项目。
 
+> [!WARNING]
+> **两条命令都要带 `--scope local`。** 不带它、或者在 `/plugin` 面板里选了默认的第一项，装的是 user 作用域：这台机器上此后开的每一个新会话、不分项目，主会话都会变成项目经理。装错了就执行 `claude plugin uninstall agent-team@agent-team-marketplace`（不带 `--scope`，卸的就是 user 作用域那一份），再照上面重装。
+
 **前提**：
 
 - **Node 16.9 或更新**，而且要在 Claude Code 启动时的 PATH 上——门禁就是用它跑的。原生安装的 Claude Code 自己不需要 Node，所以要单独确认。桌面端和 IDE 起的会话用的是它们自己的环境，不一定和你终端里的一致；装完或换了 Node，要重开 Claude Code（桌面端要完全退出再打开）。
 - **Claude Code 2.1.276 或更新**。桌面端保持应用为最新即可。
+- **原生 Windows 上要装 Git for Windows**。团队角色跑命令只用 `Bash`（Git Bash）；没装的话 Claude Code 只给 PowerShell，角色装依赖、编译、跑测试都做不了，项目经理会停下来告诉你。
 
 Node 找不到、旧到门禁起不来，或者 hooks 被关掉时，平台不拦任何调用，门禁一道都不生效，界面上至多一行不起眼的灰字。所以项目经理在 `/agent-team:at`、`/agent-team:at-resume`、`/agent-team:at-init` 开头，以及之后你每发一条消息、它这一轮第一次派发或写 `.agent-team` 之前（续会话之后也一样），都会做一次**门禁自检**：故意写一个门禁一定会拦下的文件。每次自检都会在界面上留下一条被拦下的写入（显示为一条错误），内容以「门禁自检：在线」开头——那就是自检，属预期。门禁没拦下它，项目经理会停下来，告诉你怎么查。`/agent-team:at-status` 只读，不做这项检查。
 
@@ -136,6 +140,8 @@ flowchart TB
 
 代码本身写进 `project.json` 分给各角色的目录里。
 
+`.agent-team/` 建议加进 `.gitignore`（初始化时项目经理会先问你）：既不进版本库也不忽略的话，`git clean -fd`、`git stash -u` 会把进行中的 run 一起清掉或藏起，门禁随之失效；提交进了版本库的话，`git stash`、`git checkout -- .` 会把 `state.json` 倒回提交时那一版，返工计数一起清零。
+
 ## 怎么看每个角色
 
 在桌面应用里，项目经理就是你正在看的这个会话，其余角色是它派出去的子代理。每次派发在对话里收成一行灰色小字（如「Ran an agent, finished 6 background tasks」）：
@@ -158,6 +164,9 @@ flowchart TB
 
 > [!CAUTION]
 > **不要用 `claude plugin disable` 或 `claude plugin enable` 开关插件。** 一个会话的工具面在它的生命周期内是固定的，disable 不会把它还回来；enable 会接管已经在跑的会话。用完就结束会话，不再需要就卸载。
+
+> [!NOTE]
+> **在 git 仓库里用后台会话**（`claude --bg`、agent view）跑团队，先在项目的 `.claude/settings.json` 里设 `"worktree": {"bgIsolation": "none"}`。不设的话，平台会拦下后台会话对项目目录的写入，项目经理第一步自检就停下来告诉你。前台会话与桌面端不受影响；团队不进 worktree。
 
 > [!NOTE]
 > 在用着这支团队的项目里，门禁会拒绝它认不出指向哪个文件的写法：网络路径（项目不在同一个共享上时）、带流后缀或以点、空格结尾的 Windows 路径、不带盘符的设备路径；项目放在网络共享上时，写本地盘路径同样被拒。需要写这些位置时由你自己来写。
@@ -220,10 +229,16 @@ claude plugin install agent-team@agent-team-marketplace --scope local
 
 Then start a new session in that directory — the main session is the project manager. The plugin applies to this one project only.
 
+> [!WARNING]
+> **Both commands need `--scope local`.** Without it, or if you pick the default first option in the `/plugin` panel, you get a user-scope install: every new session on this machine, in every project, starts with the project manager as its main session. If that happened, run `claude plugin uninstall agent-team@agent-team-marketplace` (no `--scope` — that removes the user-scope copy) and reinstall as above.
+
+**Language:** the plugin runs in Chinese — role prompts, artifact templates, gate messages and status lines are all Chinese, and the gates recognise a few Chinese labels verbatim (for example the rework-approval label under “When it asks you”).
+
 **Requirements:**
 
 - **Node 16.9 or later** on the PATH that Claude Code starts with — the gates run on it. A native install of Claude Code does not need Node itself, so check it separately. Sessions started from the desktop app or an IDE use that app's environment, which may differ from your terminal's; after installing or switching Node, restart Claude Code (quit the desktop app completely and reopen it).
 - **Claude Code 2.1.276 or later.** For the desktop app, keeping the app up to date is enough.
+- **On native Windows, Git for Windows.** The roles run commands only through `Bash` (Git Bash); without it Claude Code offers only PowerShell, so the roles cannot install, build or test, and the project manager stops and tells you.
 
 If Node is missing or too old for the gates to start, or hooks are disabled, the platform blocks nothing: no gate takes effect, and at most one easy-to-miss grey line appears. That is why the project manager runs a **gate self-check** at the start of `/agent-team:at`, `/agent-team:at-resume` and `/agent-team:at-init`, and again after each message you send, before its first dispatch or first write under `.agent-team` in that turn (including after a session is resumed): it deliberately writes a file the gates always block. Each self-check shows up as a blocked write (shown as an error) whose text starts with the self-check's “online” message — that is expected. If the gates fail to block it, the project manager stops and tells you what to check. `/agent-team:at-status` is read-only and skips this check.
 
@@ -323,6 +338,8 @@ When rework runs out, only the option 「再返工一轮：回到 <stage>」 is 
 
 The code itself goes into the directories `project.json` assigns to each role.
 
+We suggest adding `.agent-team/` to `.gitignore` (the project manager asks you first during setup): left untracked and unignored, `git clean -fd` or `git stash -u` sweeps away or stashes the run in progress and the gates lose it; committed, `git stash` or `git checkout -- .` rolls `state.json` back to the committed version, rework counts included.
+
 ## Watching each role
 
 In the desktop app the project manager is the session you are looking at; every other role is a subagent it dispatches. Each dispatch collapses into one grey line in the conversation (such as "Ran an agent, finished 6 background tasks"):
@@ -345,6 +362,9 @@ You can watch a role but not talk to it: roles report their questions to the pro
 
 > [!CAUTION]
 > **Don't toggle the plugin with `claude plugin disable` or `claude plugin enable`.** A session's tool surface is fixed for its lifetime, and disabling does not hand it back; enabling takes over sessions that are already running. End the session when you are done, and uninstall when you no longer need it.
+
+> [!NOTE]
+> **Background sessions in a git repository** (`claude --bg`, agent view): set `"worktree": {"bgIsolation": "none"}` in the project's `.claude/settings.json` first. Otherwise the platform blocks the background session's writes to the project directory, and the project manager stops at its first self-check and tells you. Foreground sessions and the desktop app are unaffected; the team does not work in worktrees.
 
 > [!NOTE]
 > In a project that uses the team, the gates refuse writes whose target they cannot pin down: network paths (unless the project sits on that same share), Windows paths with a stream suffix or a segment ending in a dot or space, and device paths without a drive letter; with the project on a network share, local-drive paths are refused too. Write to such locations yourself.

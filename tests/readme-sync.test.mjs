@@ -1470,7 +1470,7 @@ test('README 中英两半的命令行互为镜像——同一组命令、同一�
 // **两份 README 的命令行里不得出现本项目明令禁止的那两个作用域。**
 //
 // 为什么恰好拿得到：`--scope user` 与 `--scope project` 不是「也许不太合适」，
-// 它们是**本项目给自己禁掉的**——两份 README 的收场那一段、`docs/04` §9 ③、
+// 它们是**本项目给自己禁掉的**——两半 README 安装一节的作用域警告、`docs/04` §9 ③、
 // `docs/17` §1 的安全边界执行记录，说的都是这件事。「不得出现」这条不需要任何判断，
 // **也不在仓库里造第三份拷贝**：它是一张禁令表，不是命令的第二份真源。
 //
@@ -1522,7 +1522,7 @@ for (const f of [README_EN, README_ZH]) {
         '  `--scope user` 会作用到**这台机器上此后开的每一个新会话，不分项目**；\n' +
         '  `--scope project` 写的是要提交进版本库的 .claude/settings.json，' +
         '等于替所有克隆这个仓库的人做主。\n' +
-        '  两份 README 的收场那一段、docs/04 §9 ③ 与 docs/17 §1 的安全边界记录，' +
+        '  两半 README 安装一节的作用域警告、docs/04 §9 ③ 与 docs/17 §1 的安全边界记录，' +
         '说的都是这件事。**这一条与第九节是两件事**：第九节管「两份别分叉」，' +
         '所以两份**一起**改成禁用作用域时它不响，这一条才是接住那一刀的。',
     )
@@ -1713,4 +1713,45 @@ test('M4c README 两半「什么时候会问你」：每个升级类别各有一
   }
   assert.ok(!zh.includes('五类'), '中文部分还在报总数')
   assert.ok(!/\bfive kinds\b/.test(en), '英文部分还在报总数')
+})
+
+// M4e（docs/39 §2.4、§2.2、§2.3、§2.5，审查第 23、43、39、25、49 条）：README 两半的安装警告与前提、`.agent-team/` 与 git、
+// git 仓库里的后台会话、英文那一半的语言说明。误装之后的卸载命令不带 `--scope`：CLI 的 `plugin uninstall` 默认就是 user 作用域，
+// 而第十节不许命令行里出现 `--scope user`——写成带 `--scope user` 的那一种，第十节当场红。
+const UNINSTALL_USER_SCOPE = '`claude plugin uninstall agent-team@agent-team-marketplace`'
+
+test('M4e 第 23 条：两半的安装一节都警告两条命令要带 --scope local，并给出误装之后的卸载命令（不带 --scope）', () => {
+  for (const [half, heading, head] of [
+    [README_EN, pairOf('## Installation')[0], 'Both commands need `--scope local`'],
+    [README_ZH, pairOf('## Installation')[1], '两条命令都要带 `--scope local`'],
+  ]) {
+    const s = installSectionOf(read(half), heading) ?? ''
+    assert.ok(s.includes(head), `${half} 的安装一节缺作用域警告`)
+    assert.ok(s.includes(UNINSTALL_USER_SCOPE), `${half} 的安装一节缺误装之后的卸载命令`)
+  }
+})
+
+test('M4e 第 43 条：两半的安装前提都写了原生 Windows 要装 Git for Windows', () => {
+  for (const [half, heading] of [[README_EN, pairOf('## Installation')[0]], [README_ZH, pairOf('## Installation')[1]]]) {
+    assert.ok((installSectionOf(read(half), heading) ?? '').includes('Git for Windows'), half)
+  }
+})
+
+test('M4e 第 25 条：两半的已知边界都写了 git 仓库里的后台会话要设 worktree.bgIsolation 为 "none"', () => {
+  for (const half of [README_EN, README_ZH]) {
+    const block = limitationsBlock(read(half))
+    for (const k of ['`claude --bg`', '`"worktree": {"bgIsolation": "none"}`']) assert.ok(block.includes(k), `${half} 的引用块里缺 ${k}`)
+  }
+})
+
+test('M4e 第 39 条：两半都建议把 .agent-team/ 加进 .gitignore，并说清不加与入库各会怎样', () => {
+  for (const half of [README_EN, README_ZH]) {
+    const t = read(half)
+    for (const k of ['`.agent-team/`', '`.gitignore`', '`git clean -fd`', '`git stash -u`', '`git checkout -- .`']) assert.ok(t.includes(k), `${half} 缺 ${k}`)
+  }
+})
+
+test('M4e 第 49 条：英文那一半说明插件运行时是中文、门禁按中文字面认几个标签', () => {
+  const s = installSectionOf(read(README_EN), pairOf('## Installation')[0]) ?? ''
+  for (const k of ['**Language:**', 'runs in Chinese', 'Chinese labels verbatim']) assert.ok(s.includes(k), `英文安装一节缺「${k}」`)
 })
