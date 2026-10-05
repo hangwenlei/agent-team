@@ -152,6 +152,8 @@ export function outputContractViolations(check, { stdout, stderr, status }) {
       }
     }
   }
+  // M4d 复核（docs/38 §3）：UserPromptSubmit 上 exit 2 会把用户的话或完成通知吞掉——那个事件上的检查项永不拒。
+  if (event === 'UserPromptSubmit' && status === 2) out.push('UserPromptSubmit 上 exit 2（会把用户的话或完成通知吞掉）')
   if (stderr.includes('agent-team BUG:')) out.push('stderr 里有 BUG 行')
   if (stderr.includes(SECOND_WRITE_NOTE)) out.push('stderr 里有「已经写过一份」那句')
   return out

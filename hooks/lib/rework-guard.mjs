@@ -577,7 +577,7 @@ function decideCarry({ before, after, stages }) {
   return { ok: true, notes: [] }
 }
 
-function decideAdvance({ before, after, stages, diskSha }) {
+function decideAdvance({ before, after, stages, diskSha, dispatched = null }) {
   const { ids, at } = stageIndexer(stages)
   const from = at(before.stage)
   const to = at(after.stage)
@@ -592,7 +592,7 @@ function decideAdvance({ before, after, stages, diskSha }) {
     if (d.blank || d.sha === EMPTY_SHA) return 'empty'
     return 'ok'
   }
-  const dep = departureBlockers({ stages, sids, state: after, prior: before, probe })
+  const dep = departureBlockers({ stages, sids, state: after, prior: before, probe, dispatched })
   const gone = new Set(dep.blockers.map((b) => b.name))
   const ab = after.rework_base
   const stale = []
@@ -653,7 +653,8 @@ function decideAdvance({ before, after, stages, diskSha }) {
  * @param {{ before: object|null, after: object, stages: object|null, diskSha: (name: string) => { exists: boolean, sha: string|null } }} args
  * @returns {{ ok: true, notes: string[] } | { ok: false, reason: string }}
  */
-export function decideReworkBase({ before, after, stages, diskSha }) {
+// dispatched：门禁派发记录里每一段派出去过的角色（{ 段: [角色] }，可选）——推进判「这一段叫过谁」时并上它（advance.mjs 的 calledIn）。
+export function decideReworkBase({ before, after, stages, diskSha, dispatched = null }) {
   if (!isPlainObject(before) || !isPlainObject(after)) return { ok: true, notes: [] }
   if (!isStageChain(stages)) return { ok: true, notes: ['rework_base：阶段链读不出来或形状不对，回退快照的几条判据这次跳过'] }
   const restart = restartInfo({ before, after, stages })
@@ -665,6 +666,27 @@ export function decideReworkBase({ before, after, stages, diskSha }) {
         reason:
           '一次 Write 只记一次回退：这次 history 新追加的条目里有不止一条在阶段链上不晚于它前一条。先单独记最早的那次回退' +
           '（stage 写成回到的那一段，rework_base 照那一刻的磁盘拍），之后要推进再分开写，每一段推进各一次 Write。',
+      }
+    }
+    // M4d 复核（docs/38 §3）：回退（或原地重来）那一条之前，同一次写入先往前记了几段——「先推进、再原地重来」（[S6, S6]、[S6, S7, S8, S8]）
+    // 被认成一次回退，一次只推一段与离开那一段的核查一起跳过；PM 无心把 S6 追加两遍、照判据③补 rework，也就这样推过去了。
+    // 往前的那一截照推进核：从写入前的 stage 到那一截走到的最远段。
+    {
+      const idx = stageIndexer(stages)
+      const from = idx.at(before.stage)
+      const ha = historyOf(after)
+      let reach = from
+      for (let j = historyOf(before).length; j < restart.index; j++) {
+        const k = isPlainObject(ha[j]) ? idx.at(ha[j].stage) : -1
+        if (k > reach) reach = k
+      }
+      if (from >= 0 && reach > from) {
+        const mid = { ...after, stage: idx.ids[reach] }
+        const lead = `这次写入在回退（或原地重来）那一条之前，先往前记到了 ${quote(idx.ids[reach])}：往前那一截照推进核——`
+        const single = decideSingleStep({ before, after: mid, stages })
+        if (!single.ok) return { ok: false, reason: lead + single.reason }
+        const fwd = decideAdvance({ before, after: mid, stages, diskSha, dispatched })
+        if (!fwd.ok) return { ok: false, reason: lead + fwd.reason }
       }
     }
     const at = decideAtRestart({ before, after, stages, diskSha, restart })
@@ -688,7 +710,7 @@ export function decideReworkBase({ before, after, stages, diskSha }) {
     }
     // M4a（docs/35）：补记（回退那一条之后同一次写入又往前记了几段）也是一次推进——离开回到的那一段到写入后 stage 之前的各段。
     // 原来这里不核，一次写入「回到 S3 再记到 S6」就把 S4、S5 这一轮整段跳过，推进把关再也不回头查它们（评审 restart-write-accepted）。
-    const adv = decideAdvance({ before: { ...before, stage: restart.stage }, after, stages, diskSha })
+    const adv = decideAdvance({ before: { ...before, stage: restart.stage }, after, stages, diskSha, dispatched })
     if (!adv.ok) {
       return {
         ok: false,
@@ -708,7 +730,7 @@ export function decideReworkBase({ before, after, stages, diskSha }) {
   // 第 17 条：一次只推进一段（advance.mjs）。排在「原样带着」之后：rework_base 的错（例：跳段时把验证段的产物标 accepted）先说。
   const single = decideSingleStep({ before, after, stages })
   if (!single.ok) return single
-  const advance = decideAdvance({ before, after, stages, diskSha })
+  const advance = decideAdvance({ before, after, stages, diskSha, dispatched })
   if (!advance.ok) return advance
   return { ok: true, notes: [...carry.notes, ...advance.notes] }
 }

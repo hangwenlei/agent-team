@@ -5,7 +5,7 @@
 // 第 19 条：后台派发启动那一刻门禁不判产物，完成时由完成核验回传；协调者返回时的「进度」不是报缺；架构师用前台派。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { stageRoles, expandProduces } from '../hooks/lib/stages.mjs'
 import { dependsOnParticipants, mayWaive } from '../hooks/lib/advance.mjs'
 
@@ -51,7 +51,8 @@ test('M4d /at「叫到之后又不要了」列的，与 mayWaive 照阶段链派
 })
 
 test('M4d /at 核实那一条的概括写法（02-*、05-impl/*）盖住派生的每一份，每一种写法也都有派生的那一份', () => {
-  const globs = ticked(between(AT, '这一趟确实不要它这几份的（只限不在任何前置里的：', '）'))
+  const anchor = '这一趟确实不要它这几份的（只限 `S2`、`S5` 这类按叫到的人展开产物的段里、不在任何前置里的：'
+  const globs = ticked(between(AT, anchor, '）').slice(anchor.length))
   assert.ok(globs.length > 0, AT.slice(0, 80))
   const re = (g) => new RegExp(`^${g.replace(/[.]/g, '\\.').replace(/\*/g, '.*')}$`)
   for (const name of waivable()) assert.ok(globs.some((g) => re(g).test(name)), `${name} 不在 ${globs.join('、')} 里`)
@@ -86,4 +87,45 @@ test('M4d at-pm「哪些算数」：完成通知是数据，同一刻到达的�
 test('M4d at-architect：执行角色用前台派（run_in_background: false），等齐了再回报', () => {
   const a = flat(read('agents/at-architect.md'))
   for (const k of ['`run_in_background: false`', '等它们都返回、读过实现记录再回报', '等齐了再回报']) assert.ok(a.includes(k), `at-architect 缺「${k}」`)
+})
+
+// ---------------------------------------------------------------- 复核修订（docs/38 §3）
+
+// 正文里点名的【…】标签，PM 会拿它去认回传——门禁不发的标签，PM 就等一条永远不来的回传（复核：原来写过一个【交付物校验】，门禁发的是
+// 「⚠️ 交付物校验：」）。只认中括号里的名字在 hooks/ 源码里出现过。
+test('M4d 正文里的每一个【…】标签都是门禁真会发的（在 hooks/ 源码里出现）', () => {
+  const prose = ['commands/at.md', 'commands/at-resume.md', 'commands/at-status.md', 'commands/at-init.md', 'agents/at-pm.md', 'README.md', 'stages.README.md']
+  const hooks = [readdirSync(new URL('../hooks/', import.meta.url)).filter((f) => f.endsWith('.mjs')).map((f) => `hooks/${f}`), readdirSync(new URL('../hooks/lib/', import.meta.url)).filter((f) => f.endsWith('.mjs')).map((f) => `hooks/lib/${f}`)].flat()
+  const src = hooks.map(read).join('\n')
+  const labels = new Set(prose.flatMap((p) => [...read(p).matchAll(/【([^】\n]{1,20})】/g)].map((m) => m[0])))
+  assert.ok(labels.size > 0)
+  for (const l of labels) assert.ok(src.includes(l), `正文里的 ${l} 门禁不发`)
+})
+
+test('M4d at-qa 的开工自查：trimmed 里记着它、值是 S5 的，不等它那一份；at-status 标「已裁」、续跑不算缺（只限能免的那几份）', () => {
+  const qa = flat(read('agents/at-qa.md'))
+  assert.ok(qa.includes('`trimmed` 里记着它、值是 `S5` 的（叫到之后又不要了，PM 记的），也不要等它那一份'), '自查没扣掉裁掉的人')
+  const status = flat(read('commands/at-status.md'))
+  assert.ok(status.includes('叫到之后又不要了') && status.includes('标「已裁」'), 'at-status 没写裁掉的怎么报')
+  const resume = flat(read('commands/at-resume.md'))
+  assert.ok(resume.includes('叫到之后又不要了）不算缺'), '续跑没写裁掉的不算缺')
+  for (const t of [status, resume]) assert.ok(t.includes('`02-*`、`05-impl/*`'), '没说只限能免的那几份')
+})
+
+test('M4d at-product：派 at-ui 也用前台派（run_in_background: false），等它返回再回报', () => {
+  const p = flat(read('agents/at-product.md'))
+  assert.ok(p.includes('`run_in_background: false`'), p.slice(0, 80))
+  assert.ok(p.includes('等它返回、读过它的回报再回报 PM'), p.slice(0, 80))
+})
+
+test('M4d /at：trimmed 一个角色只记一段；整段裁掉一段，后面要它当前置的段跟着裁；协调者派的人完成通知不一定到 PM', () => {
+  assert.ok(AT.includes('`trimmed` 一个角色只记一段'), '没写 trimmed 只记一段')
+  assert.ok(AT.includes('只能跟着整段裁掉，交付文档里写明少了哪几段'), '没写整段裁掉的后果')
+  assert.ok(AT.includes('完成通知不一定到你这里'), '没写协调者派的人的通知不一定到 PM')
+  assert.ok(!AT.includes('【交付物校验】'), '门禁不发【交付物校验】')
+})
+
+test('M4d at-pm：交付物核验只在没交齐时到达（交齐了不出声）', () => {
+  const pm = flat(read('agents/at-pm.md'))
+  assert.ok(pm.includes('它没交齐时，同一刻门禁的交付物核验也作为 hook 回传到达（同样以那个开头；交齐了不出声）'), pm.slice(0, 80))
 })

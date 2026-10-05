@@ -3,7 +3,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { decideSingleStep, departureNeeds, departureBlockers, mayWaive } from '../hooks/lib/advance.mjs'
+import { decideSingleStep, departureNeeds, departureBlockers, departureLines, mayWaive, wholeStageTrimmed } from '../hooks/lib/advance.mjs'
+import { closeBlockers } from '../hooks/lib/closing.mjs'
 import { decideReworkBase } from '../hooks/lib/rework-guard.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 
@@ -163,4 +164,108 @@ test('前提：stages.json 里的验证段都是产物固定的段', () => {
   for (const [id, s] of Object.entries(STAGES)) {
     if (s.verifies === true) assert.equal(Array.isArray(s.produces) && s.produces.every((p) => !p.includes('<role>')), true, id)
   }
+})
+
+// ---------------------------------------------------------------- 复核修订（docs/38 §3）
+
+test('复核 H6：先推进、再原地重来写在一次里（[S6, S6]、[S6, S7, S8, S8]）→ 往前那一截照推进核：离开的 S5 没交齐、跳段，都拒', () => {
+  const before = at5()
+  const twice = { ...before, stage: 'S6', history: [...before.history, ...H('S6', 'S6')], rework: { S6: 1 } }
+  const r1 = decideReworkBase({ before, after: twice, stages: STAGES, diskSha: disk(ROUND) })
+  assert.equal(r1.ok, false)
+  assert.match(r1.reason, /先往前记到了 "S6"/)
+  assert.match(r1.reason, /at-frontend 在 S5 被叫到过：05-impl\/at-frontend\.md 缺/)
+  const far = { ...before, stage: 'S8', history: [...before.history, ...H('S6', 'S7', 'S8', 'S8')], rework: { S8: 1 } }
+  const r2 = decideReworkBase({ before, after: far, stages: STAGES, diskSha: disk({ ...ROUND, '05-impl/at-frontend.md': 'f' }) })
+  assert.equal(r2.ok, false)
+  assert.match(r2.reason, /一次只推进一段/)
+})
+
+test('复核 H6：派发记录里在 S5 派出去过、stage_roles 却没记的执行角色 → 照样要它交，理由说它是从派发记录里认出来的', () => {
+  const before = at5({ stage_roles: { S5: ['at-architect'] } })
+  const files = { ...ROUND, '05-impl/at-backend.md': ' ' }
+  const r = decideReworkBase({ before, after: to6(before), stages: STAGES, diskSha: disk(files), dispatched: { S5: ['at-architect', 'at-backend'] } })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /at-backend 在 S5 被派出去过（stage_roles 里没记它，门禁的派发记录里有）：05-impl\/at-backend\.md 是空文件/)
+  assert.equal(decideReworkBase({ before, after: to6(before), stages: STAGES, diskSha: disk(files) }).ok, true, '没有派发记录时只看 stage_roles')
+})
+
+test('复核：派出去过人的那一段，补写 trimmed 也不算整段裁掉（推进与收口同一个口径）', () => {
+  const s7 = st('S7', { stage_roles: { S6: [] }, trimmed: { 'at-qa': 'S6' } })
+  assert.equal(wholeStageTrimmed(STAGES, 'S6', s7, undefined, null), true)
+  assert.equal(wholeStageTrimmed(STAGES, 'S6', s7, undefined, { S6: ['at-qa'] }), false)
+  const s8 = st('S8', { stage_roles: { S6: [], S7: [] }, trimmed: { 'at-qa': 'S6', 'at-acceptance': 'S7' } })
+  const probe = (n) => (n === '08-delivery.md' ? 'ok' : 'missing')
+  assert.deepEqual(closeBlockers({ stages: STAGES, state: s8, probe }).map((b) => b.name), [])
+  assert.ok(closeBlockers({ stages: STAGES, state: s8, probe, dispatched: { S6: ['at-qa'] } }).some((b) => b.name === '06-test.md'))
+})
+
+test('复核 H6：S5 这一段的 stage_roles 值不是数组（字符串、对象、null）→ 算没记账，拒', () => {
+  for (const v of ['at-architect, at-backend', { 'at-backend': true }, null]) {
+    const before = at5({ stage_roles: { S5: v } })
+    const r = decideReworkBase({ before, after: to6(before), stages: STAGES, diskSha: disk(ROUND) })
+    assert.equal(r.ok, false, JSON.stringify(v))
+    assert.match(r.reason, /没有 S5 这一段（或者它的值不是角色名的数组）/)
+  }
+})
+
+test('复核 H6：旧 run（没有 stage_roles）按整趟 roster 算参与者——理由说「这一趟被叫到过（旧 run……）」，不说「在 S5 被叫到过」', () => {
+  const before = { stage: 'S5', history: H('S1', 'S2', 'S3', 'S4', 'S5'), rework: {}, roster: ['at-product', 'at-ui', 'at-backend'] }
+  const r = decideReworkBase({ before, after: to6(before), stages: STAGES, diskSha: disk(ROUND) })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /at-ui 这一趟被叫到过（旧 run 没有 stage_roles，门禁按整趟 roster 算 S5 的参与者）/)
+  assert.doesNotMatch(r.reason, /at-ui 在 S5 被叫到过/)
+})
+
+test('复核 H6：写入前记着的参与者，同一次写入从 stage_roles 删掉 → 照样要它交', () => {
+  const before = at5()
+  const after = to6(before, { stage_roles: { S5: ['at-architect', 'at-backend'] } })
+  const r = decideReworkBase({ before, after, stages: STAGES, diskSha: disk(ROUND) })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /at-frontend 在 S5 被叫到过：05-impl\/at-frontend\.md 缺/)
+})
+
+test('复核 H6：读不出来的产物不拦、留痕；缺的不重复列进还旧；缺的与还旧的并在同一条理由里', () => {
+  const unread = (name) => (name === '05-impl/at-frontend.md' ? { exists: true, sha: null } : disk(ROUND)(name))
+  const u = decideReworkBase({ before: at5(), after: to6(at5()), stages: STAGES, diskSha: unread })
+  assert.equal(u.ok, true, u.reason)
+  assert.ok(u.notes.some((n) => n.includes('05-impl/at-frontend.md') && n.includes('读不出来')), u.notes.join('\n'))
+  const base = { '05-impl/at-backend.md': sha('b'), '05-impl/at-frontend.md': sha('gone') }
+  const before = at5({ history: H('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S5'), rework_base: base })
+  const r = decideReworkBase({ before, after: to6(before), stages: STAGES, diskSha: disk(ROUND) })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /at-frontend 在 S5 被叫到过：05-impl\/at-frontend\.md 缺/)
+  assert.match(r.reason, /上一轮的产物（磁盘内容与 rework_base 记的 sha 相同）：05-impl\/at-backend\.md/)
+  assert.doesNotMatch(r.reason, /上一轮的产物[^\n]*05-impl\/at-frontend\.md/)
+})
+
+test('复核 拒绝理由的出路：PM 自己的产物自己写；没叫过的产者派它或整段裁掉，后面要它当前置的说清裁掉的后果', () => {
+  const text = departureLines(STAGES, [
+    { sid: 'S4', name: '04-dispatch.md', role: 'at-pm', called: false, why: 'missing' },
+    { sid: 'S3', name: '03-alignment.md', role: 'at-architect', called: false, why: 'missing' },
+    { sid: 'S6', name: '06-test.md', role: 'at-qa', called: false, why: 'missing' },
+  ], []).join('\n')
+  assert.match(text, /04-dispatch\.md 缺：这是你自己的产物，你自己写/)
+  assert.match(text, /S3 这一趟还没叫过 at-architect——派它/)
+  assert.match(text, /S7、S8 要它当前置：整段裁掉它，那几段要派的人就派不出去，只能跟着整段裁掉/)
+})
+
+// 验证段的产物（06、07）今天都被后面的段当前置，「要它当前置」先判——「验证段的产物」那一支在插件自带的链上走不到，是纵深防御。
+test('复核 拒绝理由的出路：叫过却没交，trimmed 不是出路的原因（要它当前置、这一段只有它一个产者）；能免的给写法与 04-dispatch 的时机', () => {
+  const fixed = departureLines(STAGES, [
+    { sid: 'S2', name: '01-prd.md', role: 'at-product', called: true, via: 'roles', why: 'missing' },
+    { sid: 'S6', name: '06-test.md', role: 'at-qa', called: true, via: 'roles', why: 'empty' },
+    { sid: 'S3', name: '03-alignment.md', role: 'at-architect', called: true, via: 'roles', why: 'missing' },
+  ], []).join('\n')
+  assert.match(fixed, /at-product（S3、S4、S7 要它当前置）/)
+  assert.match(fixed, /at-qa（S7、S8 要它当前置）/)
+  assert.match(fixed, /at-architect（S3 只有它一个产者）/)
+  assert.match(fixed, /trimmed 不是出路/)
+  const waive = departureLines(STAGES, [{ sid: 'S2', name: '02-ui-spec.md', role: 'at-ui', called: true, via: 'roles', why: 'missing' }], []).join('\n')
+  assert.match(waive, /\{"at-ui": "S2"\} 写进 trimmed（理由记进 04-dispatch\.md；S4 之前的段，S4 写它时补上）/)
+})
+
+test('复核 一次只推进一段的理由：跨过去的段确实不做时，后面要它产物当前置的段跟着也派不出人', () => {
+  const r = decideSingleStep({ before: st('S5'), after: st('S7'), stages: STAGES })
+  assert.match(r.reason, /只能一起整段裁掉/)
 })

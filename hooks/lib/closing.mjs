@@ -58,9 +58,10 @@ function stageIdOf(stages, name) {
 // 前置由整段裁掉的段产出：那一段的产者都在 trimmed 里、记的就是那一段（PM 照「班底裁剪自决」裁掉了 S6、S7 的人），而且这一趟在那一段
 // 一个都没叫过。复核（A-2）：原来只看 trimmed——叫过却没交的 at-qa，收口那一次补写 trimmed 就把一份没交的测试报告豁免了。
 // M4d：判定本身挪进 advance.mjs 的 wholeStageTrimmed（推进判据共用）。
-function trimmedAway(stages, state, name, prior) {
+// M4d 复核：dispatched（门禁派发记录里每一段派出去过的角色）一并算进「叫过」——派出去过的人所在的段，补写 trimmed 也不算整段裁掉。
+function trimmedAway(stages, state, name, prior, dispatched = null) {
   const sid = stageIdOf(stages, name)
-  return sid !== null && wholeStageTrimmed(stages, sid, state, prior)
+  return sid !== null && wholeStageTrimmed(stages, sid, state, prior, dispatched)
 }
 
 /**
@@ -68,7 +69,7 @@ function trimmedAway(stages, state, name, prior) {
  * probe(name) → 'ok' | 'missing' | 'empty' | 'stale' | 'unreadable'。顺序：前置在前、产物在后，各自照 stages.json 的书写顺序。
  * @returns {{ name: string, why: 'missing'|'empty'|'stale'|'unreadable', require: boolean }[]}
  */
-export function closeBlockers({ stages, state, probe, prior }) {
+export function closeBlockers({ stages, state, probe, prior, dispatched = null }) {
   const last = lastStageId(stages)
   if (!last) return []
   const stage = stages[last]
@@ -76,7 +77,7 @@ export function closeBlockers({ stages, state, probe, prior }) {
   const produces = expandProduces(stage, stageRolesInRun(stage, participantsOf(state, last)))
   const out = []
   const seen = new Set()
-  const reqs = requires.filter((r) => !trimmedAway(stages, state, r, prior))
+  const reqs = requires.filter((r) => !trimmedAway(stages, state, r, prior, dispatched))
   for (const name of [...reqs, ...produces]) {
     if (seen.has(name)) continue
     seen.add(name)
@@ -88,7 +89,7 @@ export function closeBlockers({ stages, state, probe, prior }) {
 
 // 一条阻碍的出路。产物名、段名、角色名都是插件自己的名字（stages.json），原样。H6 的收口拒绝理由与 ledger 的【阶段】共用。
 // state 用来分「这一趟在那一段叫没叫过它的产者」（复核 A-2、F5）。
-export function blockerLine(stages, b, state, prior) {
+export function blockerLine(stages, b, state, prior, dispatched = null) {
   const sid = stageIdOf(stages, b.name)
   const roles = sid ? stageRoles(stages[sid]) : []
   const own = roles.includes('at-pm')
@@ -96,7 +97,7 @@ export function blockerLine(stages, b, state, prior) {
   if (b.why === 'missing' || b.why === 'empty') {
     const what = b.why === 'empty' ? '是空文件' : '缺'
     if (own) return `${b.name}（${what}：这是你自己的产物，你自己写）`
-    const called = sid ? calledIn(stages, sid, state, prior) : []
+    const called = sid ? calledIn(stages, sid, state, prior, dispatched) : []
     if (b.require && called.length) {
       // 文档核对（PG-2）：原来给「要放弃这一段，照第 4 节问用户」——第 4 节的答复不碰收口条件，照做之后照样被拒。说实话。
       return `${b.name}（${what}：${called.join('、')} 在 ${sid} 被叫到过、却没交——派它补交（不用记回退），trimmed 不是出路；` +
@@ -136,7 +137,7 @@ function historyLength(state) {
  * @param {{ before: object|null, after: object, stages: object|null, diskSha: Function, atPath?: string }} args
  * @returns {{ ok: true } | { ok: false, reason: string }}
  */
-export function decideClosing({ before, after, stages, diskSha, atPath }) {
+export function decideClosing({ before, after, stages, diskSha, atPath, dispatched = null }) {
   if (!isPlainObject(after)) return { ok: true }
   if (Object.hasOwn(after, 'closed_at') && after.closed_at !== null && closedAt(after) === null) {
     const v = after.closed_at
@@ -209,14 +210,14 @@ export function decideClosing({ before, after, stages, diskSha, atPath }) {
     if (d.blank || d.sha === EMPTY_SHA) return 'empty'
     return isSha(rb[name]) && rb[name] === d.sha ? 'stale' : 'ok'
   }
-  const blockers = closeBlockers({ stages, state: after, probe, prior: isPlainObject(before) ? before : undefined })
+  const blockers = closeBlockers({ stages, state: after, probe, prior: isPlainObject(before) ? before : undefined, dispatched })
   if (!blockers.length) return { ok: true }
   return {
     ok: false,
     reason:
       `收口要最后一段（${last}）的前置与产物都在、不是空文件、而且是这一轮的（整段裁掉、这一趟在那一段一个都没叫过的段产出的` +
       `前置不要求）。还不行的：\n` +
-      blockers.map((b) => `  - ${blockerLine(stages, b, after, isPlainObject(before) ? before : undefined)}`).join('\n') +
+      blockers.map((b) => `  - ${blockerLine(stages, b, after, isPlainObject(before) ? before : undefined, dispatched)}`).join('\n') +
       '\n补齐之后照 /agent-team:at 第 6 节从第一步重走一遍再收口（补交的验收结论要读，交付文档要照它改）。',
   }
 }

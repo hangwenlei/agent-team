@@ -14,6 +14,11 @@
 //         叫过（与收口的 trimmedAway 同一个口径），而且不是你自己的段（at-pm 不裁自己）。
 //   - 已经标了 "accepted" 的算交了（在、不是空的就行）；还是上一轮的由 rework-guard.mjs 原来那条判据管，两样并在同一条理由里。
 //   - 读不出来的不拦（推进不是单向门，与「还旧」那一条同一个 fail open），留痕。
+// 复核（docs/38 §3）：
+//   - 「叫过」再并上门禁自己的派发记录（dispatches.jsonl 里在这一段派出去过的产者，completion.mjs 的 dispatchedByStage）：首轮推进出
+//     一段时，这一段的 stage_roles 正是这一次写入才记上的，PM 少记、漏记一个人，写入前后取并集也接不住它。读不出来就退回只看 stage_roles。
+//   - 随参与者展开的段，stage_roles 里这一段的值不是数组，同样算没记账（原来按「一个都没叫」放行）。
+//   - 拒绝理由按参与者从哪来分开说：stage_roles 记着的、旧 run 按整趟 roster 算的、只在派发记录里有的。
 import { isPlainObject, isStageChain, stageRoles, expandProduces, productsOfStage, participantsOf, isVerifyStage } from './stages.mjs'
 import { isContractWriter } from './contract-guard.mjs'
 import { quote } from './trusted.mjs'
@@ -33,13 +38,26 @@ export function requiredBy(stages, name) {
 // 与 closing.mjs 的 calledIn 同一个口径），再与这一段的产者求交。participantsOf 给 undefined（roster 不是数组的坏 state）按空集算。
 // 旧 run 半路加上 stage_roles（/agent-team:at 第 3 节明令不要）时写入前那一边是整趟 roster，S2 叫过的 at-ui 会被算成 S5 的参与者——
 // 照收口那一处（复核二 G2）的取舍不剔掉它：剔掉的话「新加 stage_roles」就能把叫过的人翻成没叫过。出路是 trimmed（值写那一段）。
-export function calledIn(stages, sid, state, prior) {
+// dispatched：{ 段: [角色] }，门禁派发记录里在每一段派出去过的角色（可选；调用方读不出来时不给）。
+export function calledIn(stages, sid, state, prior, dispatched = null) {
+  const set = new Set(recordedIn(sid, state, prior))
+  for (const r of dispatchedIn(sid, dispatched)) set.add(r)
+  return stageRoles(stages[sid]).filter((r) => set.has(r))
+}
+
+// state.json 记着的「这一段叫过谁」：写入后与写入前 participantsOf 的并集（没有 stage_roles 的旧 run 是整趟 roster）。
+function recordedIn(sid, state, prior) {
   const set = new Set()
   for (const s of [state, prior]) {
     const who = isPlainObject(s) ? participantsOf(s, sid) : undefined
     for (const r of Array.isArray(who) ? who : []) set.add(r)
   }
-  return stageRoles(stages[sid]).filter((r) => set.has(r))
+  return set
+}
+
+function dispatchedIn(sid, dispatched) {
+  const who = isPlainObject(dispatched) && Object.hasOwn(dispatched, sid) ? dispatched[sid] : null
+  return Array.isArray(who) ? who.filter((r) => typeof r === 'string') : []
 }
 
 const trimmedAt = (state, role, sid) => isPlainObject(state?.trimmed) && Object.hasOwn(state.trimmed, role) && state.trimmed[role] === sid
@@ -47,10 +65,10 @@ const trimmedAt = (state, role, sid) => isPlainObject(state?.trimmed) && Object.
 // 整段裁掉：这一段的产者都在 trimmed 里、记的就是这一段（PM 照「班底裁剪自决」裁掉了它们），这一趟在这一段一个都没叫过（calledIn，
 // 写入前后取并集），而且没有一个是 PM——PM 不裁自己的段。推进（departureNeeds）与收口（closing.mjs 的 trimmedAway）共用这一份：
 // 「整段裁掉」此前在两处各写一份，收口那一份没有「PM 不裁自己」这一条（收口的前置不是 PM 的产物，所以两份当时行为相同）。
-export function wholeStageTrimmed(stages, sid, state, prior) {
+export function wholeStageTrimmed(stages, sid, state, prior, dispatched = null) {
   if (!isStageChain(stages) || typeof sid !== 'string' || !Object.hasOwn(stages, sid)) return false
   const roles = stageRoles(stages[sid])
-  return roles.length > 0 && roles.every((r) => !isContractWriter(r) && trimmedAt(state, r, sid)) && calledIn(stages, sid, state, prior).length === 0
+  return roles.length > 0 && roles.every((r) => !isContractWriter(r) && trimmedAt(state, r, sid)) && calledIn(stages, sid, state, prior, dispatched).length === 0
 }
 
 /** 叫到之后又裁掉，能不能免掉它在 sid 的这一份：值就是这一段、不是验证段、没有哪一段要它当前置。 */
@@ -60,19 +78,23 @@ export function mayWaive(stages, sid, name) {
 
 /**
  * 离开 sid 这一段时要求在的产物。state 是写入后的、prior 是写入前的。
- * @returns {{ needs: { name: string, role: string, called: boolean }[], keyMissing: boolean, excused: { name: string, role: string }[] }}
+ * called 的来源 via：roles（stage_roles 记着）、roster（旧 run 没有 stage_roles，按整趟 roster 算）、dispatch（只在门禁的派发记录里有）。
+ * @returns {{ needs: { name: string, role: string, called: boolean, via: string|null }[], keyMissing: boolean, excused: { name: string, role: string }[] }}
  */
-export function departureNeeds({ stages, sid, state, prior }) {
+export function departureNeeds({ stages, sid, state, prior, dispatched = null }) {
   const out = { needs: [], keyMissing: false, excused: [] }
   if (!isStageChain(stages) || typeof sid !== 'string' || !Object.hasOwn(stages, sid)) return out
   const stage = stages[sid]
   const roles = stageRoles(stage)
-  const called = calledIn(stages, sid, state, prior)
+  const called = calledIn(stages, sid, state, prior, dispatched)
+  const recorded = recordedIn(sid, state, prior)
+  const legacy = !isPlainObject(state?.stage_roles) && !isPlainObject(prior?.stage_roles)
+  const via = (role) => (!called.includes(role) ? null : recorded.has(role) ? (legacy ? 'roster' : 'roles') : 'dispatch')
   const seen = new Set()
   const need = (name, role) => {
     if (seen.has(name)) return
     seen.add(name)
-    out.needs.push({ name, role, called: called.includes(role) })
+    out.needs.push({ name, role, called: called.includes(role), via: via(role) })
   }
   const excuse = (name, role) => {
     if (seen.has(name)) return
@@ -80,11 +102,11 @@ export function departureNeeds({ stages, sid, state, prior }) {
     out.excused.push({ name, role })
   }
   if (!dependsOnParticipants(stage)) {
-    const whole = wholeStageTrimmed(stages, sid, state, prior)
+    const whole = wholeStageTrimmed(stages, sid, state, prior, dispatched)
     for (const r of roles) for (const n of expandProduces(stage, [r])) (whole ? excuse : need)(n, r)
     return out
   }
-  out.keyMissing = isPlainObject(state?.stage_roles) && !Object.hasOwn(state.stage_roles, sid)
+  out.keyMissing = isPlainObject(state?.stage_roles) && (!Object.hasOwn(state.stage_roles, sid) || !Array.isArray(state.stage_roles[sid]))
   // 不含 <role> 的条目（插件自带的链里没有）不随参与者变，照固定产物要。
   for (const n of expandProduces(stage, [])) need(n, roles[0])
   for (const r of called) {
@@ -109,7 +131,8 @@ export function decideSingleStep({ before, after, stages }) {
     reason:
       `一次只推进一段：这次写入从 ${quote(before.stage)} 推进到 ${quote(after.stage)}，跨过了 ${skipped.join('、')}。先只推进到 ` +
       `${ids[from + 1]}（离开 ${ids[from]} 的账同一次记掉），之后每一段推进各一次 Write（/agent-team:at 第 3 节）——每一次推进，` +
-      '门禁都核离开的那一段交齐了没有。跨过去的段要是确实不做，走到它、推进出它的那一次把它的产者写进 trimmed。',
+      '门禁都核离开的那一段交齐了没有。跨过去的段要是确实不做，走到它、推进出它的那一次把它的产者写进 trimmed——后面要它的产物当前置的段' +
+      '（例：S7 的验收要 S6 的测试报告），跟着也派不出人，只能一起整段裁掉，交付文档里写明少了哪几段。',
   }
 }
 
@@ -118,12 +141,12 @@ export function decideSingleStep({ before, after, stages }) {
  * 还旧的不在这里判（rework-guard.mjs 的 decideAdvance）。
  * @returns {{ blockers: { sid, name, role, called, why }[], unrecorded: string[], unreadable: string[] }}
  */
-export function departureBlockers({ stages, sids, state, prior, probe }) {
+export function departureBlockers({ stages, sids, state, prior, probe, dispatched = null }) {
   const blockers = []
   const unrecorded = []
   const unreadable = []
   for (const sid of sids) {
-    const { needs, keyMissing } = departureNeeds({ stages, sid, state, prior })
+    const { needs, keyMissing } = departureNeeds({ stages, sid, state, prior, dispatched })
     if (keyMissing) unrecorded.push(sid)
     for (const n of needs) {
       const why = probe(n.name)
@@ -142,7 +165,7 @@ export function departureLines(stages, blockers, unrecorded) {
   const groups = []
   for (const b of blockers) {
     let g = groups.find((x) => x.sid === b.sid && x.role === b.role)
-    if (!g) groups.push((g = { sid: b.sid, role: b.role, called: b.called, items: [] }))
+    if (!g) groups.push((g = { sid: b.sid, role: b.role, called: b.called, via: b.via ?? null, items: [] }))
     g.items.push(b)
   }
   const what = (b) => `${b.name} ${b.why === 'empty' ? '是空文件' : '缺'}`
@@ -154,20 +177,26 @@ export function departureLines(stages, blockers, unrecorded) {
     if (isContractWriter(g.role)) {
       lines.push(`  - ${items}：这是你自己的产物，你自己写。`)
     } else if (g.called) {
-      lines.push(`  - ${g.role} 在 ${g.sid} 被叫到过：${items}。`)
+      lines.push(
+        g.via === 'roster'
+          ? `  - ${g.role} 这一趟被叫到过（旧 run 没有 stage_roles，门禁按整趟 roster 算 ${g.sid} 的参与者）：${items}。`
+          : g.via === 'dispatch'
+            ? `  - ${g.role} 在 ${g.sid} 被派出去过（stage_roles 里没记它，门禁的派发记录里有）：${items}。`
+            : `  - ${g.role} 在 ${g.sid} 被叫到过：${items}。`,
+      )
       if (g.items.every((b) => mayWaive(stages, g.sid, b.name))) waivable.push(g)
       else fixed.push(g)
     } else {
       const later = [...new Set(g.items.flatMap((b) => requiredBy(stages, b.name)))]
       lines.push(
         `  - ${items}：${g.sid} 这一趟还没叫过 ${g.role}——派它；这一趟不叫它（项目不用它，或者你裁掉了它）：同一次 Write 把 ` +
-          `{"${g.role}": "${g.sid}"} 写进 trimmed，整段裁掉${later.length ? `（${later.join('、')} 要它当前置，那几段也就要它不着）` : ''}。`,
+          `{"${g.role}": "${g.sid}"} 写进 trimmed，整段裁掉${later.length ? `（${later.join('、')} 要它当前置：整段裁掉它，那几段要派的人就派不出去，只能跟着整段裁掉，交付文档里写明少了哪几段）` : ''}。`,
       )
     }
   }
   for (const sid of unrecorded) {
     lines.push(
-      `  - state.json 有 stage_roles，却没有 ${sid} 这一段：${sid} 的产物随这一段叫到的人展开，没记账门禁核不了。同一次 Write 把这一段` +
+      `  - state.json 有 stage_roles，却没有 ${sid} 这一段（或者它的值不是角色名的数组）：${sid} 的产物随这一段叫到的人展开，没记账门禁核不了。同一次 Write 把这一段` +
         `真正叫到的每一个记进 stage_roles 的 ${sid}（含下级派出去的、被叫去分发的；一个都没叫就写 []），决定不叫的产者写进 trimmed。`,
     )
   }
@@ -181,7 +210,7 @@ export function departureLines(stages, blockers, unrecorded) {
     if (waivable.length) {
       lines.push(
         `这一趟确实不要 ${waivable.map((g) => g.role).join('、')} 在那一段的那几份：同一次 Write 把 ` +
-          `${waivable.map((g) => `{"${g.role}": "${g.sid}"}`).join('、')} 写进 trimmed（理由写进 04-dispatch.md）。`,
+          `${waivable.map((g) => `{"${g.role}": "${g.sid}"}`).join('、')} 写进 trimmed（理由记进 04-dispatch.md；S4 之前的段，S4 写它时补上）。`,
       )
     }
     if (fixed.length) {

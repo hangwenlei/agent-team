@@ -24,7 +24,8 @@ skills: at-handoff-package
 
 **自己确认 `S5` 的实现记录都在**——既在 `stages.json` 的 `S5` `producers` 里、又在 `state.json` 的 `stage_roles`
 的 `S5` 那一段里的每一个，都该在 `05-impl/` 下有一份（没有 `stage_roles` 的旧 run 看整趟 `roster`）。两边都有才算：
-`S5` 那一段里还记着被叫去分发的 `at-architect`，它不在 `producers` 里，不交实现记录，不要等它那一份。
+`S5` 那一段里还记着被叫去分发的 `at-architect`，它不在 `producers` 里，不交实现记录，不要等它那一份。`trimmed` 里记着它、
+值是 `S5` 的（叫到之后又不要了，PM 记的），也不要等它那一份。
 别拿整趟 `roster` 对：`at-ui` 在 `S2` 干过活就会在里面，`S5` 却未必叫过它。**H2 不会替你拦这一条**：它只查
 `requires` 里静态列出的产物，而 `S6` 的 `requires` 里没有实现记录。缺了，或者实现记录里有「被写路径隔离拒绝」一节、
 里面还有没标「已解决」的条目的，都算没交齐：**不要在残缺的实现上跑测试**——在半份实现上跑出来的绿，比红更坏。
