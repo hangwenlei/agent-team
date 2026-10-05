@@ -483,15 +483,28 @@ sha 相同的产物就是上一轮的，H5a/H5b、H2、【阶段】与 H5a「停
 > 两次停下之间调过工具计数清零）。H5b 另认一个出口：子代理已经被拦过一回（`stop_hook_active`）、最后一条回复的第一行是「冒泡：…」，
 > 就放它停下，这一段的产物照旧算没交。
 
+> **M4d 补（`docs/38`，全量审查第 17、19 条）**：H5a 读 `tool_response.status`——后台派发启动那一刻不判产物，前台派发跑完时按成因说（冒泡了、
+> 门禁最后一回拦了它、门禁放它停下时它不在那一段的名单上、门禁没见它停下）；子代理完成时由新检查项 `completion`（UserPromptSubmit）按门禁专属的
+> 派发记录核产物。H6 推进那一次另核两件：一次只推进一段；离开的那一段交齐了（叫到的产者各自那几份、固定产物，空文件算没交，裁掉的不算，
+> `"accepted"` 算交了；「叫到」并上派发记录）。
+
 另有两个记录器（M3z 补，`docs/34`），不是门禁、不拒任何东西：`approval-ask`（`PostToolUse` / `AskUserQuestion`）与 `approval-prompt`
 （`UserPromptSubmit`）。用户选了（或单独发了）规范标签、而这一轮确实需要批准时，往当前 run 的 `approvals.jsonl` 追加一条；记不下时
 fail open（后果只是「没有批准」，H6 照样拒那次回退）。前者在回传里说记没记下、为什么；后者 stdout 一个字都不写（那里的 stdout 进模型
 上下文），只往 stderr 留痕。
 
+> **M4d 补（`docs/38`）**：同一个事件上另有一个检查项 `completion`：认出 `<task-notification>`、核刚完成的那个角色的产物，没交齐时发受信回传
+> （`additionalContext`）——UserPromptSubmit 上只有标了 `speaks` 的检查项能说话，`approval-prompt` 照旧一个字都不写；它不拒任何东西（这个事件上
+> exit 2 会把消息吞掉）。
+
 **门禁专属文件**（M3z 补）：`runs/*/approvals.jsonl`（上面两个记录器写的返工批准）与 `runs/*/delivered.json`（交付快照：PM 写
 `state.json`、而 `stage` 变了（推进、回退）之后，由 ledger 照磁盘拍下早于当前段的各段产物的 sha，H2、H3 拿它判「这一轮交过」——
 快照之后才落盘、或者快照之后改过的，补派与【返工】的出口写几次都放行，直到下一次推进或回退；只记账、不动 `stage` 的写入不重拍）。它们不是控制文件：控制文件是 PM 记的账，这两份是门禁记的账，H3 对任何人的
 Edit/Write 都拒，排在主线程豁免之前。`Bash` 照样写得进（与 §6.2 同一条边界）。
+
+> **M4d 补（`docs/38`）**：第三份 `runs/*/dispatches.jsonl`——H5a 记团队角色的每一次派发（谁、哪一段、谁派的、前台还是后台），H5b 每一回停下记
+> 一行结果（放行、冒泡、拦）。完成核验靠它对回角色与段、说成因；推进与收口判「叫过」时并上它。和上面两份一样，H3 对任何人的 Edit/Write 都拒，
+> `Bash` 照样写得进。
 
 **表里的 warning 发给谁**（M3v 补，`docs/30`，全量审查第 12 条）：fail open 那几格的 warning 一律先往 stderr 写一行，
 那只进转录，模型与用户都看不到。另外按检查项：

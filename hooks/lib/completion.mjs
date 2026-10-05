@@ -276,7 +276,8 @@ export function coordinatorProgress({ role, stageId, rows, recipientIsPm }) {
     const short = row.items.some((it) => it.state !== 'ok')
     let tail = ''
     if (!short && row.stop === 'bubble') {
-      // M4d 实测（M5）：产物在，它停下时却冒泡了——那一份多半只写了它卡在哪。
+      // M4d 实测：产物在，它停下时却冒泡了——那一份可能只写了它卡在哪（M5 的前端），也可能交齐了、只是借标记转述别人的问题
+      // （M5b 的后端）。门禁不读内容，不下结论，叫 PM 读。
       stoppedShort = true
       tail = '——但它停下时冒泡了：那一份可能只写了它卡在哪，读它（或协调者的回报）再定'
     } else if (short) {

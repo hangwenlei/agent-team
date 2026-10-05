@@ -907,7 +907,7 @@ function missingNotice({ ctx, r, role, recipientCanWriteState, why = null, redis
 // M4d（docs/38，全量审查第 19 条修法 3）：协调者返回、它协调的那一段还没齐时，列出门禁记着它（这一次运行，按 agent_id）在这一段派出去的执行角色、
 // 各自产物现在的样子与门禁见没见它停下（lastStop）。复核：认不出协调者这次运行的 agent_id 就不报——原型退回按角色名认，同一段里派过几次
 // 架构师，会把上一次运行派的人也列进来。
-// M4d 复核：账本比对的「没记」里剔掉这一次派发的角色刚交的那几份（见 deliverable 分支 ownFresh 上方）。
+// M4d 复核：账本比对的「没记」里剔掉当前段的产物——前台跑完时它自己与同一段的兄弟刚交、PM 还没记的那几份（见 deliverable 分支 ownFresh 上方）。
 function withoutOwn(cmp, own) {
   if (!Array.isArray(own) || !own.length || !isPlainObject(cmp) || !Array.isArray(cmp.unrecorded)) return cmp
   return { ...cmp, unrecorded: cmp.unrecorded.filter((n) => !own.includes(n)) }
@@ -2107,7 +2107,7 @@ function main() {
     const recipient = callerOf(input)
     const recipientCanWriteState = isContractWriter(recipient)
     // M4d 复核（docs/38 §3）：前台派发跑完那一刻，它自己这一段刚交的那几份当然还没记进 artifacts（PM 读过回报、核过磁盘才记）——
-    // 那一条「没记」每一次都会出现、还要协调者原样冒泡上去，是噪声；完成核验因为同一个理由整段不带账本比对。这里只剔它自己的那几份。
+    // 那一条「没记」每一次都会出现、还要协调者原样冒泡上去，是噪声；完成核验因为同一个理由整段不带账本比对。复核那一版只剔它自己的那几份；
     // stage 不是阶段链上的段（坏 state.json、对象当键）时不展开：拿它当属性键会崩（tests/trusted-echo.test.mjs 的非字符串那一格）。
     // M4d 实测（M5）：前台并发派发时，后返回的那个收到的账本比对里还有先返回的兄弟刚交的那一份「没记」——剔掉这一段所有的产物，不只是它自己的。
     const ownFresh = phase === 'completed' && isKnownStage(ctx.stages, ctx.state?.stage) ? productsOfStage(ctx.stages[ctx.state.stage]) : []

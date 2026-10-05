@@ -30,7 +30,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/37` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查逐条的现状（原文在它的附录），下一轮从那里挑。
+- `docs/13`…`docs/38` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查逐条的现状（原文在它的附录），下一轮从那里挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
 ## 🧠 长期决策与理由
@@ -96,6 +96,14 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **契约的账只认 `contract_sha`**：账本比对不看契约（`compareArtifacts` 排除 `CONTRACT_FILE`）；派发返回（H5a）与 PM 写 `state.json` 时拿
   `contract_sha` 比磁盘，对不上出【契约】——不报磁盘上算出来的值、不说「改成与磁盘一致」（照着磁盘改账就把漂移洗成了合法），合法修订的新值
   只从写契约那一次的回传来。升级类别从 `ESCALATION_KINDS` 派生、正文不报总数。理由在 `docs/37`。
+- **推进由 H6 在推进那一次核：一次只推一段、离开的那一段要交齐**（`hooks/lib/advance.mjs`，在 `rework-guard.mjs` 的 `decideReworkBase` 里接上）：
+  叫到的产者各自那几份、固定产物都在，空白算没交，`"accepted"` 算交了；「叫到」= 写入前后的 `participantsOf` 并上门禁的派发记录（PM 少记一个人、
+  先单独删名字都翻不成没叫过）；`trimmed` 里记着、值是这一段的免掉，只限按叫到的人展开产物的段里、不被任何段当前置的那几份（`mayWaive`）；
+  产者全裁掉、谁都没叫过的段整段不核。先推进再原地重来写在一次里，往前那一截照推进核。不选只告警：告警到时已经推进了，也拦不住跳段。理由在 `docs/38`。
+- **交付物核验在子代理真正完成的那一刻做**：H5a 读 `tool_response.status`，后台启动那一刻不判产物；门禁专属的派发记录 `runs/<id>/dispatches.jsonl`
+  （H5a 记派发，H5b 记每一回停下的结果；H3 对任何人的 Edit/Write 都拒）；完成通知到主会话时，UserPromptSubmit 上的 `completion` 按 `agent_id`
+  对回角色与段、核产物，成因按最后一回停下的结果判（`completion.mjs` 的 `missingCause`）。UserPromptSubmit 上只有标了 `speaks` 的检查项说话、
+  永不 exit 2。协调者返回时报它派出去的人各自的进度，不许诺之后的通知会到 PM。理由在 `docs/38`。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。
@@ -141,6 +149,10 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **SubagentStop 的平台事实**（CLI 2.1.286，`docs/37` §1.2）：`stop_hook_active` 被任何 SubagentStop hook 拦过一回之后，这次运行余下的每一回都为真，
   调工具也不清；续跑上限只数连续的拦截，两次停下之间调过工具就清零——交替调工具的子代理平台不封顶。SubagentStop 放行时递不出任何话给父级。
   探针插件没进仓库，平台升级后照 `docs/37` §1.2 的做法另搭一个重跑。
+- **派发与完成通知的平台事实**（CLI 2.1.286，`docs/38` §1.3）：交互模式（终端、`--bg`）下 Agent 工具没有 `run_in_background`，一律后台；
+  只有 `-p`、SDK 宿主能前台派（`PostToolUse` 在子代理跑完之后才到，`status` 是 `completed`）。完成通知每一条在主会话触发一次 UserPromptSubmit，
+  `prompt` 就是那段 `<task-notification>` XML，同一个 task-id 会通知不止一次。嵌套派发的通知按模式路由：交互模式下孙代理的通知回到停车的协调者、
+  `-p` 下协调者还在跑时也送给它——这两种情形主会话都只收到协调者那一条。子代理回报里出现指令形状的字样时，CLI 在最前面插一段 `[harness: …]` 注记。
 - **拿内置浏览器验页面行为之前，先看面板显没显示**（`tabs_context` 会说）：面板隐藏时页面不渲染，`requestAnimationFrame`
   不跑，连 `window.scrollTo` 都不生效——点锚点「不动」、动画「不播」都会是假阴性。要么让面板显示，要么用 Playwright 无头浏览器测
   （它打不开 `file://`，本地页面要起 `python -m http.server` 再看；快照与截图只能写进仓库下的 `.playwright-mcp/`，测完删掉）。2026-09-27 就因此把一个能用的 `<a name>` 锚点误判成不能跳，多发了一版。
