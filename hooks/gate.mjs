@@ -56,7 +56,7 @@ import { NO_PATHS_ROLES, validateProject } from './lib/project.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
 import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
-import { isPlainObject, participantsOf, isRolePatternStage, expandProduces, stageRoles } from './lib/stages.mjs'
+import { isPlainObject, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
 import { GATE_CHECK_PATH, gateCheckReason, isGateCheck } from './lib/gate-check.mjs'
@@ -2109,7 +2109,8 @@ function main() {
     // M4d 复核（docs/38 §3）：前台派发跑完那一刻，它自己这一段刚交的那几份当然还没记进 artifacts（PM 读过回报、核过磁盘才记）——
     // 那一条「没记」每一次都会出现、还要协调者原样冒泡上去，是噪声；完成核验因为同一个理由整段不带账本比对。这里只剔它自己的那几份。
     // stage 不是阶段链上的段（坏 state.json、对象当键）时不展开：拿它当属性键会崩（tests/trusted-echo.test.mjs 的非字符串那一格）。
-    const ownFresh = phase === 'completed' && isKnownStage(ctx.stages, ctx.state?.stage) ? expandProduces(ctx.stages[ctx.state.stage], [role]) : []
+    // M4d 实测（M5）：前台并发派发时，后返回的那个收到的账本比对里还有先返回的兄弟刚交的那一份「没记」——剔掉这一段所有的产物，不只是它自己的。
+    const ownFresh = phase === 'completed' && isKnownStage(ctx.stages, ctx.state?.stage) ? productsOfStage(ctx.stages[ctx.state.stage]) : []
     const driftNotice =
       CHECK === 'deliverable'
         ? buildDriftNotice(
@@ -2148,7 +2149,9 @@ function main() {
     }
 
     if (r.ok) {
-      if (CHECK === 'stop-gate') recordStop('pass')
+      // M4d 实测（docs/38 §4 的 M5）：产物在、回复第一行却是冒泡标记的（执行角色把「卡在哪」写进了实现记录再冒泡），记成 bubble——门禁照旧算它交了
+      // （只看在不在、空不空），但协调者进度不能因此说「名单上的都交了」。
+      if (CHECK === 'stop-gate') recordStop(bubbleOf([input?.last_assistant_message]) !== null ? 'bubble' : 'pass')
       // ⚠️ ok 有三种成因，只有一种是真的「交付了」。skipped 的两种是门禁**哑掉**：
       // 它没有意见，不是它检查过了没问题。H5a 是权威记录，这种区别必须留痕，
       // 否则和 docs/08 §0 说的「看起来通过了」完全无法区分。

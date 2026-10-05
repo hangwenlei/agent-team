@@ -461,11 +461,13 @@ test('19-32 进度：执行角色已经停下（冒泡了）→ 那一行说它�
     run('stop-gate', stop('agent-team:at-frontend', 'a00000000000000f5', { active: true, message: `${BUBBLE_MARK}缺组件库。` }), GATE, dirs.projectDir)
     const c = contextOf(run('completion', prompt(note('a00000000000000a5', { toolUseId: 'toolu_01A5' })), GATE, dirs.projectDir))
     assert.match(c, /at-frontend（后台派发）：05-impl\/at-frontend\.md 还没有——它停下时冒泡了/)
-    assert.match(c, /停下了却没交齐的/)
+    assert.match(c, /停下了却没交齐、或者交了却冒泡的/)
     assert.ok(!c.includes('名单上的都交了'), c)
     assert.ok(!c.includes('还在跑'), c)
     mkdirSync(join(dirs.runDir, '05-impl'), { recursive: true })
     writeFileSync(join(dirs.runDir, '05-impl', 'at-frontend.md'), '# 实现记录\n')
+    // 它被续上、写完、正常停下（最后一回停下是放行），收尾才说都交了。
+    run('stop-gate', stop('agent-team:at-frontend', 'a00000000000000f5', { active: false, message: '写好了。' }), GATE, dirs.projectDir)
     const ok = contextOf(run('completion', prompt(note('a00000000000000a5', { toolUseId: 'toolu_01A5' })), GATE, dirs.projectDir))
     assert.match(ok, /名单上的都交了/)
   })
@@ -531,6 +533,31 @@ test('19-39 前台派发跑完、它这一段的产物交了却还没记账 → 
     mkdirSync(join(dirs.runDir, '05-impl'), { recursive: true })
     writeFileSync(join(dirs.runDir, '05-impl', 'at-backend.md'), '# 实现记录\n做了。\n')
     const c = contextOf(run('deliverable', post('agent-team:at-backend', completed('a00000000000000b7', '做完了。'), { caller: ARCH, callerId: 'a00000000000000a7', toolUseId: 'toolu_01B7' }), GATE, dirs.projectDir))
+    assert.ok(!c.includes('05-impl/at-backend.md'), c)
+  })
+})
+
+test('19-40 实测 M5：执行角色写了实现记录、回复第一行却是冒泡 → H5b 记成 bubble；协调者进度那一行照实说、收尾不说「名单上的都交了」', () => {
+  inRun({ stage: 'S5', roster: ['at-architect', 'at-frontend'], stage_roles: { S3: ['at-architect'] } }, (dirs) => {
+    mkdirSync(join(dirs.runDir, '05-impl'), { recursive: true })
+    writeFileSync(join(dirs.runDir, '05-impl', 'at-frontend.md'), '# 实现记录' + String.fromCharCode(10) + '冒泡：组件库不存在，没写代码。' + String.fromCharCode(10))
+    assert.equal(run('stop-gate', stop('agent-team:at-frontend', 'a00000000000000f8', { active: false, message: `${BUBBLE_MARK}组件库不存在。` }), GATE, dirs.projectDir).status, 0)
+    assert.deepEqual(logOf(dirs).stops.get('a00000000000000f8'), ['bubble'])
+    run('deliverable', post('agent-team:at-frontend', completed('a00000000000000f8', `${BUBBLE_MARK}组件库不存在。`), { caller: ARCH, callerId: 'a00000000000000a8', toolUseId: 'toolu_01F8' }), GATE, dirs.projectDir)
+    const c = contextOf(run('deliverable', post(ARCH, completed('a00000000000000a8', `${BUBBLE_MARK}前端卡住了。`), { toolUseId: 'toolu_01A8' }), GATE, dirs.projectDir))
+    assert.match(c, /at-frontend（前台派发）：05-impl\/at-frontend\.md 在磁盘上——但它停下时冒泡了/)
+    assert.ok(!c.includes('名单上的都交了'), c)
+    assert.match(c, /交了却冒泡的/)
+  })
+})
+
+test('19-41 实测 M5：前台并发派发时，后返回的那个收到的账本比对里不报先返回的兄弟刚交的那一份「没记」', () => {
+  inRun({ stage: 'S5', roster: ['at-architect', 'at-backend', 'at-frontend'], stage_roles: { S3: ['at-architect'] } }, (dirs) => {
+    mkdirSync(join(dirs.runDir, '05-impl'), { recursive: true })
+    writeFileSync(join(dirs.runDir, '05-impl', 'at-frontend.md'), '# 前端' + String.fromCharCode(10))
+    writeFileSync(join(dirs.runDir, '05-impl', 'at-backend.md'), '# 后端' + String.fromCharCode(10))
+    const c = contextOf(run('deliverable', post('agent-team:at-backend', completed('a00000000000000b8', '做完了。'), { caller: ARCH, callerId: 'a00000000000000a9', toolUseId: 'toolu_01B8' }), GATE, dirs.projectDir))
+    assert.ok(!c.includes('05-impl/at-frontend.md'), c)
     assert.ok(!c.includes('05-impl/at-backend.md'), c)
   })
 })

@@ -275,7 +275,11 @@ export function coordinatorProgress({ role, stageId, rows, recipientIsPm }) {
     const facts = row.items.map((it) => `${it.name} ${STATE[it.state] ?? '读不出来'}`).join('，')
     const short = row.items.some((it) => it.state !== 'ok')
     let tail = ''
-    if (short) {
+    if (!short && row.stop === 'bubble') {
+      // M4d 实测（M5）：产物在，它停下时却冒泡了——那一份多半只写了它卡在哪。
+      stoppedShort = true
+      tail = '——但它停下时冒泡了：那一份可能只写了它卡在哪，读它（或协调者的回报）再定'
+    } else if (short) {
       if (row.stop && Object.hasOwn(STOP_TAIL, row.stop)) {
         stoppedShort = true
         tail = `——${STOP_TAIL[row.stop]}`
@@ -297,7 +301,7 @@ export function coordinatorProgress({ role, stageId, rows, recipientIsPm }) {
   } else {
     close =
       (running ? '还在跑的，等它停下再核——它的完成通知不一定到你这里（交互模式下送回派它的协调者）；' : '') +
-      (stoppedShort ? '停下了却没交齐的，照 /agent-team:at 第 3 节「核实」定：同一段里经协调者重派、照第 4 节问用户，或者推进那一次照出路写 trimmed；' : '') +
+      (stoppedShort ? '停下了却没交齐、或者交了却冒泡的，照 /agent-team:at 第 3 节「核实」定：同一段里经协调者重派、照第 4 节问用户，或者推进那一次照出路写 trimmed；' : '') +
       '推进出这一段时门禁会核每一份。这一条不是在催你推进。'
   }
   return (
