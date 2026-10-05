@@ -153,6 +153,34 @@ const dispatch = (subagent, caller, extra = {}) => ({
 })
 const stateWrite = (run, content) => write('at-pm', join(run, 'state.json'), { content: JSON.stringify(content) })
 
+// M4d（docs/38）：完成核验的输入——主会话收到的那条 <task-notification>（UserPromptSubmit 的 prompt），以及门禁在派发那一刻记下的那一行。
+const DISPATCHES = 'dispatches.jsonl'
+const oneLine = (P) => P.split('\n').join(' ')
+const notify = ({ status = 'completed', result = null } = {}) => ({
+  hook_event_name: 'UserPromptSubmit',
+  prompt: [
+    '<task-notification>',
+    '<task-id>a0000000000000001</task-id>',
+    '<tool-use-id>toolu_01</tool-use-id>',
+    `<status>${status}</status>`,
+    '<summary>Agent "x" finished</summary>',
+    ...(result === null ? [] : [`<result>${result}</result>`]),
+    '</task-notification>',
+  ].join('\n'),
+})
+const dispatchRecord = ({ caller = 'at-architect' } = {}) =>
+  JSON.stringify({
+    kind: 'dispatch',
+    at: '2026-10-05T00:00:00Z',
+    agent_id: 'a0000000000000001',
+    tool_use_id: 'toolu_01',
+    role: 'at-backend',
+    stage: 'S5',
+    caller,
+    caller_id: 'a00000000000000c0',
+    mode: 'background',
+  }) + '\n'
+
 // 记录的 sha 不回显原值，载荷的标签不会出现——锚点改认 shaOrNote 的说明。
 const SHA_NOTE = (text) => text.includes('不是合法的 sha256')
 // 坏 JSON 只写了载荷的前 18 个字符，标签多半不在里面——锚点改认「读不出来」那一支。
@@ -564,6 +592,37 @@ const SCENARIOS = [
       ['writepath', write('at-pm', join(run, P, '.agent-team', 'runs', 'r1', 'approvals.jsonl'))],
     ],
   },
+  // M4d（docs/38，全量审查第 19 条）：前台派发跑完时 H5a 读 tool_response.content、完成核验读通知里的 <result> 与 <status>——
+  // 都是子代理或平台写的文字，引出来要过 quote。冒泡理由只取第一行，所以载荷里的 \n 先换成空格（别的换行字符照原样进第一行）。
+  {
+    name: 'H5a 前台派发跑完：回报第一行冒泡的理由（tool_response.content）',
+    calls: (_, P) => [
+      [
+        'deliverable',
+        { ...returned('agent-team:at-backend', 'agent-team:at-architect'), tool_response: { status: 'completed', agentId: 'a0000000000000001', content: [{ type: 'text', text: `冒泡：${oneLine(P)}` }] } },
+      ],
+      ['deliverable', { ...returned('agent-team:at-backend'), tool_response: { status: 'completed', agentId: 'a0000000000000002', content: [{ type: 'text', text: `冒泡：${oneLine(P)}` }] } }],
+    ],
+  },
+  {
+    name: '完成核验：通知 <result> 第一行冒泡的理由',
+    runFiles: { [DISPATCHES]: () => dispatchRecord() },
+    calls: (_, P) => [['completion', notify({ result: `冒泡：${oneLine(P)}` })]],
+  },
+  {
+    name: '完成核验：通知的 <status>（不是 completed 的）',
+    runFiles: { [DISPATCHES]: () => dispatchRecord() },
+    // <status> 那一行由头字段正则逐行认，正则里的 . 不跨 CR、U+2028、U+2029：带这几种的载荷整行认不出、只当没有 status，根本进不了
+    // 回传——这里把它们也换成空格，让载荷走到 quote 那一步。
+    calls: (_, P) => [['completion', notify({ status: [LS, PS, '\r', '\n'].reduce((s, c) => s.split(c).join(' '), P) })]],
+  },
+  {
+    // 派发记录里的 caller 来自磁盘：不是花名册里的角色就不回显，退回「经派得到它的那一层」。载荷一个字都不该出现——锚点认那句退路。
+    name: '完成核验：派发记录里的 caller（不回显，退回通用说法）',
+    runFiles: { [DISPATCHES]: (P) => dispatchRecord({ caller: P }) },
+    calls: () => [['completion', notify({ result: '做完了' })]],
+    anchor: (text) => text.includes('经派得到 at-backend 的那一层再派它一次'),
+  },
 ]
 
 const FIXTURE_FILES = ['00-contract.md', '01-prd.md', '03-arch.md', '04-dispatch.md']
@@ -583,6 +642,7 @@ async function runScenario(sc, pname, P) {
     }
     if (sc.pointer) writeFileSync(join(p, '.agent-team', 'current-run'), sc.pointer(P))
     if (sc.approvals) writeFileSync(join(run, 'approvals.jsonl'), sc.approvals(P).map((a) => JSON.stringify(a)).join('\n') + '\n')
+    for (const [f, make] of Object.entries(sc.runFiles ?? {})) writeFileSync(join(run, f), make(P))
     const results = await Promise.all(sc.calls({ p, run }, P).map(([check, input]) => gate(check, input, p)))
     const bad = results.flatMap((r) => violations(r, sc).map((v) => `${pname} · ${r.check}：${v}`))
     const all = results.flatMap((r) => channels(r).map((c) => c.text)).join('\n')

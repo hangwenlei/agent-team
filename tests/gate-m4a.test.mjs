@@ -80,7 +80,15 @@ const returned = (target, caller) => ({
   tool_name: 'Agent',
   ...as(caller),
   tool_input: { subagent_type: target, prompt: 'x' },
-  tool_response: { isAsync: true, status: 'async_launched' },
+  tool_use_id: 'toolu_01M4A',
+  tool_response: { isAsync: true, status: 'async_launched', agentId: 'a000000000000m4a1' },
+})
+// M4d（docs/38，全量审查第 19 条）：后台派发完成时主会话收到的那条通知（UserPromptSubmit 的 prompt）。
+const finished = (result = '做完了。') => ({
+  hook_event_name: 'UserPromptSubmit',
+  prompt:
+    '<task-notification>\n<task-id>a000000000000m4a1</task-id>\n<tool-use-id>toolu_01M4A</tool-use-id>\n<status>completed</status>\n' +
+    `<summary>Agent "x" finished</summary>\n<result>${result}</result>\n</task-notification>`,
 })
 const stopped = (agent) => ({ hook_event_name: 'SubagentStop', agent_type: agent })
 const writeState = (fx, after, agent = 'at-pm') => ({
@@ -108,9 +116,11 @@ const B = {
 // 「不能标 "accepted"」，不算。
 const NO_ACCEPT = /改成 "accepted"|由项目经理标 "accepted"/
 
-test('M4a B：PM 异步派 at-qa 那一刻（H5a）——06-test.md 还旧，回传只给「重跑之后重写」，不给标 accepted', () => {
+// M4d（docs/38，全量审查第 19 条）：异步派发启动那一刻 H5a 不判产物（at-qa 才刚起来）；它完成时由完成核验（UserPromptSubmit）判，口径不变。
+test('M4a B：PM 异步派 at-qa——启动那一刻不判；完成时 06-test.md 还旧，回传只给「重跑之后重写」，不给标 accepted', () => {
   using(B, (fx) => {
-    const c = contextOf(run('deliverable', returned('agent-team:at-qa'), GATE, fx.p))
+    assert.doesNotMatch(contextOf(run('deliverable', returned('agent-team:at-qa'), GATE, fx.p)), /交付物校验/)
+    const c = contextOf(run('completion', finished(), GATE, fx.p))
     assert.match(c, /06-test\.md/)
     assert.match(c, /重跑之后重写/)
     assert.doesNotMatch(c, NO_ACCEPT)
@@ -172,7 +182,8 @@ test('M4a B：PM 照旧把 06-test.md 标 accepted（H6）——拒，点名验�
 test('M4a B 锚：回到 S5、实现记录还旧时，【返工】与 H5a 照旧给「标 accepted」', () => {
   using({ stage: 'S5', history: [...FIRST, ...H('S5')], reworkBase: baseOf('05-impl/at-backend.md', '06-test.md') }, (fx) => {
     assert.match(contextOf(run('ledger', postedState(fx), GATE, fx.p)), NO_ACCEPT)
-    assert.match(contextOf(run('deliverable', returned('agent-team:at-backend'), GATE, fx.p)), NO_ACCEPT)
+    run('deliverable', returned('agent-team:at-backend'), GATE, fx.p)
+    assert.match(contextOf(run('completion', finished(), GATE, fx.p)), NO_ACCEPT)
   })
 })
 

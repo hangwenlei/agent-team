@@ -39,6 +39,11 @@ export const CHECKS = {
   // 失败路径上照它选说法（复核 platform-5）。
   'approval-ask': { event: 'PostToolUse', toolNames: ['AskUserQuestion'], failClosed: false, recorder: true },
   'approval-prompt': { event: 'UserPromptSubmit', toolNames: null, failClosed: false, recorder: true },
+  // M4d（docs/38，全量审查第 19 条）：完成核验。后台派发的子代理完成时，主会话收到一条 <task-notification>，UserPromptSubmit 随之触发；这一项认出
+  // 通知、按门禁记的派发记录（runs/<id>/dispatches.jsonl）对回角色与段，核它的产物，用 additionalContext 告诉收件人（PM）。不是门禁：
+  // 不拦任何东西（exit 2 会把这条消息吞掉）。speaks：这个事件上它可以发受信回传——hookOutput 与 tests/helpers/gate-runner.mjs 的
+  // 出口契约只放它，approval-prompt 照旧一个字都不写。
+  completion: { event: 'UserPromptSubmit', toolNames: null, failClosed: false, speaks: true },
 }
 
 export const KNOWN_CHECKS = new Set(Object.keys(CHECKS))

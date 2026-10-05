@@ -148,6 +148,20 @@
             "statusMessage": "核对返工批准…"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "completion"
+            ],
+            "timeout": 30,
+            "statusMessage": "核对子代理交付…"
+          }
+        ]
       }
     ]
   }

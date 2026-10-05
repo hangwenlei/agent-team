@@ -33,6 +33,7 @@ export const GATE_NAME = {
   ledger: '账本',
   'approval-ask': '返工批准',
   'approval-prompt': '返工批准',
+  completion: '交付物核验',
 }
 // 记录器不放行任何东西：它读不出输入、自己出错，后果是「这次的回答没有记下」，通用文案里的「放行」会说错后果（P3）。
 const RECORDERS = new Set(Object.keys(CHECKS).filter((c) => CHECKS[c].recorder === true))
@@ -202,6 +203,10 @@ export function crashContext(check, err, recipientIsPm) {
     text =
       `【门禁】交付物核验这次没有做完——门禁自己出了错（${msg}）：这次派发的交付物核验与账本比对都没有。` +
       '等被派角色返回后，自己去 run 目录核实它该交的产物在不在；再出错就把这一段原样告诉用户。'
+  } else if (check === 'completion') {
+    text =
+      `【门禁】这次完成通知的交付物核验没有做完——门禁自己出了错（${msg}）。` +
+      '去 run 目录核实刚完成的那个角色该交的产物在不在；再出错就把这一段原样告诉用户。'
   } else if (check === 'approval-ask') {
     // M3z（docs/34）：approval-prompt 在 UserPromptSubmit 上，什么都发不了（hookOutput），这里只有 approval-ask。
     text =
@@ -273,9 +278,11 @@ export function systemMessage(kind, { cause, check } = {}) {
  * - PostToolUse：contexts 并成一份受信块，进 hookSpecificOutput.additionalContext；systemMessage 在顶层。
  * - PreToolUse：只许 systemMessage；有 contexts 就丢掉并报 BUG（见文件头）。
  * - SubagentStop 与其它事件：stdout 为空；有东西要发就报 BUG。
+ * - UserPromptSubmit（M4d，docs/38，全量审查第 19 条）：只有 checks.mjs 里标了 speaks 的检查项（completion）能发受信块，进
+ *   hookSpecificOutput.additionalContext；systemMessage 不发（这一行会画在用户自己的消息底下）。别的检查项（approval-prompt）照旧恒为空。
  * @returns {{ stdout: string, bug: string | null }}
  */
-export function hookOutput(event, { contexts = [], systemMessage: sm = null } = {}) {
+export function hookOutput(event, { contexts = [], systemMessage: sm = null } = {}, check = null) {
   const parts = (Array.isArray(contexts) ? contexts : []).filter((c) => typeof c === 'string' && c)
   const message = typeof sm === 'string' && sm ? sm : null
   const bug = (what) => `agent-team BUG: ${JSON.stringify(event)} 上不能发${what}，这一段没有发出。\n`
@@ -291,6 +298,12 @@ export function hookOutput(event, { contexts = [], systemMessage: sm = null } = 
     return {
       stdout: message ? JSON.stringify({ systemMessage: message }) : '',
       bug: parts.length ? bug('受信回传') : null,
+    }
+  }
+  if (event === 'UserPromptSubmit' && typeof check === 'string' && CHECKS[check]?.event === event && CHECKS[check]?.speaks === true) {
+    return {
+      stdout: parts.length ? JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: trustedBlock(parts.join('\n\n')) } }) : '',
+      bug: message ? bug('systemMessage') : null,
     }
   }
   return { stdout: '', bug: parts.length || message ? bug('回传或 systemMessage') : null }

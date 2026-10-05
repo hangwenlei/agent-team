@@ -64,7 +64,7 @@ test('控制文件清单是闭集合，改了要回头同步规格 §6.2.1 与�
 import { GATE_FILES, leafName, mayBeGateFile, isGateFile, mayBeStateFile } from '../hooks/lib/control-files.mjs'
 
 test('M3z 门禁专属文件清单是闭集合', () => {
-  assert.deepEqual([...GATE_FILES].sort(), ['runs/*/approvals.jsonl', 'runs/*/delivered.json'])
+  assert.deepEqual([...GATE_FILES].sort(), ['runs/*/approvals.jsonl', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl'])
 })
 
 test('M3z isGateFile：任意项目、任意 run 下的 approvals.jsonl、delivered.json；它们不是控制文件（PM 也写不了）', () => {

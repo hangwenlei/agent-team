@@ -41,7 +41,7 @@ import { join, dirname } from 'node:path'
 //     顺带覆盖那条真实存在的形状。要测「声明过的裁剪」就显式传进来。
 //
 // M3x：加可选 stage_roles（{ 段: [角色] }，roster 按段拆开，docs/32）。缺省 null 时**不写这个键**，与 trimmed 同一个
-// 写法：没有它的 state.json 是更早落盘的旧 run，按段的消费方（isStageDone 的两处调用、产者交代）对它退回整趟 roster，
+// 写法：没有它的 state.json 是更早落盘的旧 run，按段的消费方（isStageDone 的每一处调用、产者交代）对它退回整趟 roster，
 // 所以上面那段「空 roster 让账本比对看不见 01-prd.md」对缺省夹具照样成立。传了它，当前段没有键就是「这一段还没记账」。
 export function makeRun({ runId = 'r1', stage = 'S2', artifacts = [], project = null, stages = null, roster = [], history = null, trimmed = null, stage_roles = null } = {}) {
   // 两个根分开造：projectDir 模拟用户仓库，pluginDir 模拟插件安装目录。

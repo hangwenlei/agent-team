@@ -275,13 +275,18 @@ test('M3y 推进：跳过一段（S5 → S7）时，被跳过的那一段里旧�
   const files = { ...ROUND1, '05-impl/at-backend.md': 'backend r2', '05-impl/at-frontend.md': 'frontend r2' }
   const r = decide({ before: IN_REWORK, after, files })
   assert.equal(r.ok, false)
-  assert.match(r.reason, /06-test\.md/)
+  assert.match(r.reason, /一次只推进一段/)
 })
 
-test('M3y 推进：旧的那份已经不在磁盘上、或读不出来 → 不拦（缺的由 H5、H2 报）；读不出来的留痕', () => {
+test('M3y 推进：旧的那份已经不在磁盘上 → 不算还旧；这一段记了谁参与过的，按缺拦（M4d，第 17 条）；读不出来的不拦、留痕', () => {
   const after = state('S6', [...keepHistory, ...H('S6')], { rework_base: EXPECTED_S5 })
   const { ['05-impl/at-frontend.md']: _gone, ...files } = { ...ROUND1, '05-impl/at-backend.md': 'backend r2' }
-  assert.equal(decide({ before: IN_REWORK, after, files }).ok, true)
+  assert.equal(decide({ before: IN_REWORK, after, files }).ok, true, '没有 roster、stage_roles：门禁不知道这一段叫过谁，不核缺')
+  const called = { stage_roles: { S5: ['at-backend', 'at-frontend'] } }
+  const gone = decide({ before: { ...IN_REWORK, ...called }, after: { ...after, ...called }, files })
+  assert.equal(gone.ok, false)
+  assert.match(gone.reason, /at-frontend 在 S5 被叫到过：05-impl\/at-frontend\.md 缺/)
+  assert.doesNotMatch(gone.reason, /上一轮的产物/, '不在磁盘上的不算还旧，不重复点名')
   const u = decide({ before: IN_REWORK, after, files: { ...ROUND1, '05-impl/at-backend.md': 'backend r2' }, unreadable: ['05-impl/at-frontend.md'] })
   assert.equal(u.ok, true)
   assert.ok(u.notes.some((n) => n.includes('05-impl/at-frontend.md')))
@@ -524,8 +529,7 @@ test('M4a 推进：还旧的有验证段的也有别的 → 两样分开说，�
   const before = state('S5', [...FIRST_ROUND, ...H('S5')], { rework_base: EXPECTED_S5 })
   const r = decide({ before, after: state('S7', [...FIRST_ROUND, ...H('S5', 'S7')], { rework_base: EXPECTED_S5 }), files: B_FILES })
   assert.equal(r.ok, false)
-  assert.match(r.reason, /05-impl\/at-frontend\.md[^\n]*改成 "accepted"/)
-  assert.match(r.reason, /06-test\.md[^\n]*重跑之后重写/)
+  assert.match(r.reason, /一次只推进一段/)
 })
 
 // ------------------------------------- M4a 复核：补记的两个口子
@@ -600,7 +604,7 @@ test('M4a 复核二 补记：跨过的验证段没有产物 → 不按「跨过�
   delete files['06-test.md']
   const hist = [...FIRST_ROUND, ...H('S7')]
   const snap = { '05-impl/at-backend.md': 'accepted', '05-impl/at-frontend.md': 'accepted' }
-  const r = decide({ before: state('S7', hist), after: state('S7', [...hist, ...H('S5', 'S6', 'S7')], { rework_base: snap }), files })
+  const r = decide({ before: state('S7', hist), after: state('S7', [...hist, ...H('S5', 'S6', 'S7')], { rework_base: snap, trimmed: { 'at-qa': 'S6', 'at-acceptance': 'S7' } }), files })
   assert.equal(r.ok, true, r.reason)
 })
 

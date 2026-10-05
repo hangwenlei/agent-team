@@ -75,7 +75,9 @@ S5 是第一种（一个模式配 N 个角色），S2 是第二种（`at-product
 |---|---|
 | H3 写路径（`writepath.mjs` 的 `stageOwnerOfRunPath`） | 写入者自己 |
 | `ledger` 的 `produce` 回传 | 写入者自己——与上一行共用同一个 `stageOwnerOfRunPath` |
-| `isStageDone`（推进判据，`gate.mjs` 两处调用） | 当前段叫到的人 `∩ producers`（`participantsOf`：`stage_roles`，旧 run 退回 `roster`） |
+| `isStageDone`（`gate.mjs` 里的每一处调用，清单以 `tests/stage-done-call-site.test.mjs` 为准） | 当前段叫到的人 `∩ producers`（`participantsOf`：`stage_roles`，旧 run 退回 `roster`） |
+| H6 推进判据 `departureNeeds`（`advance.mjs`，M4d） | 离开的那一段叫到的人（写入前后 `participantsOf` 的并集，再并上派发记录里在这一段派出去过的）`∩ producers`；`trimmed` 记着这一段、不在任何前置里的免掉 |
+| 完成核验与协调者进度（`completion.mjs`，M4d） | 派发记录里那一次派发的角色（按 `agent_id`），进度是协调者这一次运行派出去的 |
 | 产者交代 `decideCoverage`（走过的每一段） | 那一段叫到的人（`participantsOf`）∪ `trimmed` 的键，对 `producers ∩ available_roles` |
 | 账本比对 `compareArtifacts` 的 `drifted` / `missing` | `roster ∩ producers`（有意整趟） |
 | 账本比对 `compareArtifacts` 的 `unrecorded` | 全部 `producers` |
@@ -272,6 +274,8 @@ M3z（`docs/34`，全量审查第 16 条）起依赖它的不只 H5：H2、H3 �
 （`ctx.state?.roster` 不是数组时传 `undefined`，宁可多报不要漏报），理由见上面消费方表下那一段。
 ⚠️ 上一版这里写的是「传参的写法这几处一致（这里、ledger 分支里那处、`compareArtifacts`、`readiness`）」——M3x 起只有
 两处 `isStageDone` 之间还一致。
+⚠️ M4d（`docs/38`）：完成核验（`CHECK === 'completion'`）里多了一处，判协调者那一段齐没齐，传参与上面两处逐字相同——调用点的清单以
+`tests/stage-done-call-site.test.mjs` 为准，这里不再数有几处。
 
 ⚠️ **M3k（2026-09-21）：`CHECK === 'ledger'` 分支里那处是这一轮才进上面这张清单的。**
 在那之前它是 `hooks/gate.mjs` 里唯一**不**传 `roster` 的一处 `isStageDone` 调用，
@@ -298,6 +302,13 @@ M3z（`docs/34`，全量审查第 16 条）起依赖它的不只 H5：H2、H3 �
 （`drifted`/`missing`/`unrecorded`）只要非空就照发，跟这次返回是不是合法协调、当前阶段有没有
 `done` 都无关——它审的是「产物内容对不对得上账」，是独立于「阶段有没有推进」的另一个问题，
 两者故意分开判定，即使同一次 `emitHookJson` 调用会把两条都发出来（M3v 之前这个出口叫 `emitLedger`）。
+
+⚠️ **S5 那一行的「静默」，M4d 起指的是「不报缺」**（`docs/38`，全量审查第 19 条修法 3）：协调者返回而 S5 还没齐时，门禁记着它这一次
+运行派出去的执行角色（派发记录 `runs/<id>/dispatches.jsonl`，按 `agent_id`）就报一段「进度」——各自的产物现在在不在、门禁见没见它停下
+（H5b 每一回停下记一行结果）：没见它停下的后台派发说「可能还在跑」，停下了没交的说它停下时怎样（冒泡了、门禁最后一回拦了它、门禁
+放行了）；不许诺「它完成时完成通知会到 PM」——交互模式下、`-p` 下协调者还在跑时，那条通知都不到 PM。不带 ⚠️，也不说「停在旧阶段」；
+一个都没记着、或者认不出协调者这一次运行的 `agent_id` 时不出声。
+后台派发刚启动那一刻不报：那时它还没开始派。上面这张表的判定（第 1、2 条）不变。
 
 ## 另一条相关的缺口（M1b 已解决）
 
@@ -368,6 +379,14 @@ M3y（`docs/33`，全量审查第 15 条）给它加了 `rework_base` 的几条�
 写入前就坏了的条目可以删掉或标 `"accepted"`；推进离开一段时，那一段里磁盘内容
 与它记的 sha 相同的产物不许留着（回退那一条之后同一次写入又往前记了几段的，照推进核离开的那几段；跨过快照里有产物的验证段的直接拒、要拆开写；一次 Write 只许记一次回退。M4a）。**这几条不只拦减少**：`hooks/lib/rework-guard.mjs` 头部那句「只拦减少、不碰增加」说的是返工计数那四条（M3z 起那四条也不全是了：超过上限的增加要用户批准，见上面的订正；规格 H6 那一行已在 M3z 改写）——推进本身照样放行，
 只要离开的段里没有上一轮的产物。阶段链读不出来时这几条跳过、往 stderr 留痕；产物逐份读，读不出来的不核。
+
+M4d（`docs/38`，全量审查第 17 条）：上面那句「推进本身照样放行」到此为止——推进那一次 H6 还核两件事（`hooks/lib/advance.mjs`）：
+一次只推进一段（不是回退的写入里，写入后的 `stage` 在链上恰好是写入前的下一段）；离开的那一段交齐了——这一段叫到的产者（写入前后
+`participantsOf` 的并集）各自那几份、这一段固定的产物都在、不是空文件，裁掉的不算，标了 `"accepted"` 的算交了。产物随参与者展开的段
+（`S2`、`S5`）在 `stage_roles` 是对象时要有这一段的键；叫到之后又不要了的，只有不在任何前置里、不是验证段的那几份（`02-*`、
+`05-impl/*`）能靠 `trimmed`（值写这一段）免掉。最后一段没有「离开」，照旧由收口核。复核补的两条：「叫到」并上门禁的派发记录（PM 少记进
+`stage_roles` 的人照样要交，派出去过人的段补写 `trimmed` 也不算整段裁掉）；回退（或原地重来）那一条之前同一次写入先往前记了几段的，
+往前那一截照推进核。
 
 ## `verifies` 与收口标记（M4a，`docs/35`）
 

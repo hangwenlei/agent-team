@@ -63,6 +63,7 @@ const INPUTS = {
     tool_response: { questions: [], answers: {} },
   },
   'approval-prompt': { hook_event_name: 'UserPromptSubmit', prompt: 'x' },
+  completion: { hook_event_name: 'UserPromptSubmit', prompt: 'x' },
 }
 
 test('前置：INPUTS 覆盖 checks.mjs 里的每一个检查项——否则下面的逐项断言在空转', () => {

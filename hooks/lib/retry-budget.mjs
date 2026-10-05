@@ -88,11 +88,17 @@ import { BUBBLE_MARK } from './deliverable.mjs'
 // 加了之后同一句话里出现两个（落盘前打出来看过一次，就是这么发现的）。
 // M4c（docs/37）：后半句从「平台的重试有上限、到点静默放行」扩成「产物不在的两种可能」——H5b 现在认冒泡这个出口，子代理
 // 照正文冒泡时被正常放行、产物照旧没交；计数那一半换成源码核过的事实（见本文件头部「这个数是多少」）。
+// M4d（docs/38，全量审查第 19 条）：平台续跑上限这件事本身抽成 CAP_FACT——完成核验（hooks/lib/completion.mjs 的 explainMissing）在「门禁拦过它、
+// 它没交也没冒泡」时拿它说「平台静默放行了它」。计数仍只写在本文件里；SUBAGENT_STOP_RETRY_NOTE 逐字不变，只剩认不出派发是前台
+// 还是后台（tool_response 没有 status）的那一格用它。
+export const CAP_FACT =
+  '平台的续跑上限到了——默认连续顶回 8 次之后，下一回静默放行（环境变量 CLAUDE_CODE_STOP_HOOK_BLOCK_CAP 改得了它，' +
+  '设为 0 不设上限；两次停下之间子代理调过工具，计数清零），子代理那边没有任何提示，这边看到的是一次普通的完成'
 export const SUBAGENT_STOP_RETRY_NOTE =
   '别把这条读成「SubagentStop 已经替你拦过了」：它发在这次 Agent 工具调用返回的那一刻，' +
   '而异步派发下那一刻子代理才刚启动，SubagentStop 一次都还没发生' +
   '（是不是异步，看这次工具结果第一句是不是 Async agent launched successfully.）；' +
   '而即便 SubagentStop 已经发生过，产物没交（不在，或者还是上一轮的）也有两种可能：一是它冒泡了——回报的第一行是' +
   `「${BUBBLE_MARK}…」，门禁认这一行、放它停下，产物照旧算没交，读它写的理由；` +
-  '二是平台的续跑上限到了——默认连续顶回 8 次之后，下一回静默放行（环境变量 CLAUDE_CODE_STOP_HOOK_BLOCK_CAP 改得了它，' +
-  '设为 0 不设上限；两次停下之间子代理调过工具，计数清零），子代理那边没有任何提示，这边看到的是一次普通的完成'
+  '二是' +
+  CAP_FACT

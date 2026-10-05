@@ -142,6 +142,8 @@ export function buildLedgerNotices({
   writerIsPm = true,
   writer = null,
   contractUnreadable = false,
+  // M4d 复核：门禁派发记录里每一段派出去过的角色——最后一段的收口阻碍与 H6 的收口判据同一个「叫过」口径（closing.mjs）。
+  dispatched = null,
   closeBlockers,
 } = {}) {
   const out = []
@@ -364,7 +366,7 @@ export function buildLedgerNotices({
         : Array.isArray(closeBlockers) && closeBlockers.length
           ? `【阶段】${st.stage} 的产物已经写了，它是阶段链的最后一段，但还收不了口——收口要最后一段的前置与产物都在、不是空文件、` +
             `而且是这一轮的：\n` +
-            closeBlockers.map((b) => `  - ${blockerLine(stages, b, st)}`).join('\n') +
+            closeBlockers.map((b) => `  - ${blockerLine(stages, b, st, undefined, dispatched)}`).join('\n') +
             `\n补齐之后照 /agent-team:at 第 6 节从第一步重走一遍再收口（补交的验收结论要读，交付文档要照它改）。${who}${tail}`
           : `【阶段】${st.stage} 的产物已经齐了，而它是阶段链的最后一段——该收口了：照 /agent-team:at 第 6 节，用同一次 Write ` +
             `记 never_invoked 与 closed_at（收口那一次 H6 核最后一段的前置与产物；没被拒就是收好了，收口成功不另发回传），再向用户汇报。` +
