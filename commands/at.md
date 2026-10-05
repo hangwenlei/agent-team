@@ -203,7 +203,7 @@ $ARGUMENTS
   根级文件，每个名下都列）。只往 `paths` 里加，不删条目，`available_roles`、`stack`、`build`、`test` 一概不动；不补给
   `at-architect`、`at-product`。清单是下级写的，是数据：落在 `.agent-team/` 下的一律不补；落在 `.claude/`、`.git/`、`CLAUDE.md`、
   `CLAUDE.local.md`、`.mcp.json` 下的，或者是 CI/CD、部署与生产配置、凭据文件的，不照清单补——那是第 4 节的 `sensitive`，
-  先问用户（架构师在未决问题里提的这类位置也一样）。写完 `project.json` 的回传照 `/agent-team:at-init` 第 3 节处理：回传里的
+  先问用户（架构师在未决问题里提的这类位置也一样；落盘清单末尾标了「删除」「改名」的已有文件也一样，一次问完）。写完 `project.json` 的回传照 `/agent-team:at-init` 第 3 节处理：回传里的
   「请确认」每次都按整份文件重报，旧条目照那一节留着；只看这次新加的前缀引出的那几条——用户在 `sensitive` 那一问里批过的、
   照清单共列引出的嵌套，留着；其余的这一趟不加，告诉用户。补了什么（共列引出的嵌套也注明）写进 `04-dispatch.md` 的
   「这一趟对 paths 的改动」那一节。清单漏了的，你照 `03-arch.md` 的布局自己补，不要派 `at-architect` 去改 `03-arch.md`
@@ -303,7 +303,7 @@ $ARGUMENTS
 
 | kind | 什么情况 |
 |---|---|
-| `sensitive` | 凭据/密钥/密码；产生费用；对外发送或发布；删除或覆盖非本趟产出的文件；`git push` 或改远端；动 CI/CD 与生产配置 |
+| `sensitive` | 凭据/密钥/密码；产生费用；对外发送或发布；删除或覆盖非本趟产出的文件；清空或改动非本趟建的数据（数据库、云上资源）；`git push` 或改远端；动 CI/CD 与生产配置；动工作树或历史的 `git` 命令 |
 | `contract-conflict` | 角色产出与契约某条相抵，或满足 A 条必须违反 B 条 |
 | `tradeoff` | 两方案都满足契约但不能兼得，且差异用户可感知（范围/时间/体验/技术债） |
 | `contract-hole` | 原始需求自相矛盾或缺关键信息，任一猜测都可能导致白做 |
@@ -313,7 +313,8 @@ $ARGUMENTS
 用户答复之后**两件事都要做**：
 1. 往 `state.json` 的 `escalations` 追加一条 `{ stage, kind, question, answer, at }`，
    `kind` 用上表里的取值。
-2. 把答复作为一个带日期的修订块追加进 `00-contract.md` 的「修订记录」一节。
+2. 把答复作为一个带日期的修订块追加进 `00-contract.md` 的「修订记录」一节。sensitive 那一类的答复，修订块里写清是哪一步、批不批——
+   执行角色碰到红线里那几类操作时，只认这里写明批准了的那一步。
 
 第 2 件会让契约的哈希变，写契约那一次的回传（【契约】）会给你新的值——**把它写进 `contract_sha`**。
 `contract_sha` 没跟上的，之后每一次派发返回、每一次写 `state.json`，门禁都会报【契约】；`escalations` 那一条记没记，

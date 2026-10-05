@@ -227,7 +227,7 @@ export function explainMissing(why, { recipientIsPm, redispatch, trimHint = '' }
       `门禁认「${BUBBLE_MARK}」这一行、放它停下，产物照旧算没交。读它回报里写的缺什么、要谁定：` +
       (recipientIsPm
         ? `属于 /agent-team:at 第 4 节那几类的照第 4 节问用户；其余你来定——同一段里${redispatch}（不计返工），或者照第 3 节「回退」记回退。${trim}`
-        : `定得了的你定（同一段里${redispatch}）；定不了的把这一条连同它的理由原样冒泡给派你的人。`)
+        : `定得了的你定（同一段里${redispatch}）；定不了的、为红线里的敏感操作冒泡的，把这一条连同它的理由原样冒泡给派你的人。`)
     )
   }
   if (why.kind === 'cap') {

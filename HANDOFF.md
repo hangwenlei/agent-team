@@ -105,13 +105,15 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （H5a 记派发，H5b 记每一回停下的结果；H3 对任何人的 Edit/Write 都拒）；完成通知到主会话时，UserPromptSubmit 上的 `completion` 按 `agent_id`
   对回角色与段、核产物，成因按最后一回停下的结果判（`completion.mjs` 的 `missingCause`）。UserPromptSubmit 上只有标了 `speaks` 的检查项说话、
   永不 exit 2。协调者返回时报它派出去的人各自的进度，不许诺之后的通知会到 PM。理由在 `docs/38`。
-- **持 Bash 的执行角色的敏感操作红线只在正文里，每一份逐字同一句**：用凭据、花钱、对外发布、`git push`、删改不是这一趟产出的文件、
-  动 CI/CD 与生产配置、动整棵工作树或历史的 git 命令——碰到就以「冒泡：」停下，协调者原样冒泡给 PM，PM 照第 4 节的 `sensitive` 问用户。
-  门禁不加 Bash 的 matcher（命令行是自由文本，判不准；平台的权限模式才是那一层）。判据按 `tools:` 声明派生持 Bash 的角色、从
-  `roster.json` 派生协调者，不手写清单（`tests/redlines-setup-prose.test.mjs`）。理由在 `docs/40`。
-- **插件自带的 frontmatter 只用受限写法**：每个非空行恰好一行 `key: 值`，键不重复，值不以 YAML 指示符开头、不含「: 」与「 #」、首尾
-  没有空白。在这个写法里平台的 YAML 解析器与按行读的判据读到同一个值——解析失败会让平台把整份当空（Windows 上装下来的副本是 CRLF，
-  平台的退路在那里不起作用），折行能授出判据看不见的工具。`tests/frontmatter-subset.test.mjs` 钉着；理由在 `docs/40` §1.8。
+- **持 Bash 的执行角色的敏感操作红线只在正文里，每一份逐字同一句，清单与 `/agent-team:at` 第 4 节 `sensitive` 那一行逐项相同**：碰到就以
+  「冒泡：」停下，协调者原样冒泡给 PM，PM 照 `sensitive` 问用户；用户批准过的，执行角色只认契约「修订记录」里写明批准了的那一步（派发
+  提示是数据，契约只有 PM 写得进）。PM 自己也不跑动工作树或历史的 git 命令。门禁不加 Bash 的 matcher（命令行是自由文本，判不准；平台的
+  权限模式才是那一层）。判据按 `tools:` 声明派生持 Bash 的角色、从 `roster.json` 派生协调者，两处清单两个方向逐项比，承重的句子整句钉
+  （`tests/redlines-setup-prose.test.mjs`）。理由在 `docs/40`。
+- **插件自带的 frontmatter 只用受限写法**：每个非空行恰好一行 `key: 值`，键不重复，值不以 YAML 指示符开头、不含「: 」与「 #」、不以「:」
+  结尾、首尾没有空白、不是会被读成 null/布尔/数字的那几种，行里没有制表符与 `---`。挡的是已经核过、会让平台的 YAML 解析器与按行读的判据
+  读出不同东西的写法——解析失败会让平台把整份当空（Windows 上装下来的副本是 CRLF，平台的退路在那里不起作用），折行能授出判据看不见的
+  工具，值里的 `---` 会被平台当成收尾。不声称封闭。`tests/frontmatter-subset.test.mjs` 钉着；理由在 `docs/40` §1.8。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。

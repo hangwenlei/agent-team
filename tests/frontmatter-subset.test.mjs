@@ -8,7 +8,10 @@
 //     core.autocrlf，仓库没有 .gitattributes），退路在那里一行都匹配不上。
 //   · 合法的折行——`tools:` 行末加一个逗号、下一行缩进接一个工具名，YAML 把它接成同一个值，平台照授；按行读的判据只看见第一行。
 //     这样能把规格 §6.1 禁授的 Skill 授出去，禁授判据看不见。
-// 在这个受限写法里 YAML 既不会解析失败、也不会折行，按行读出来的就是平台读到的值——上面两条都不需要再去模拟平台的解析器。
+// 下面挡住的是已经核过、会让两边读出不同东西的写法（docs/40 §1.8 与复核）：值里的「: 」与以「:」结尾（YAML 解析失败）、「 #」
+// （后面被当注释截掉）、以 YAML 指示符开头、首尾空白、制表符（两个解析器的处理不一样）、行里的 `---`（平台截 frontmatter 的
+// 正则不锚行首，值里的 `---` 会被当成收尾，后面的键全丢）、会被 YAML 读成别的类型的值（null、true、数字……）、键重复、不是
+// 一行一个「key: 值」（折行与块序列）。不声称封闭：平台换了解析器或退路之后的别的差异，这里挡不住。
 // 代价：值里不能写半角「: 」（写全角「：」）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -27,6 +30,8 @@ function frontmatterFiles() {
 
 // 朴素标量不许以 YAML 指示符开头。
 const BAD_START = /^[-?:,[\]{}#&*!|>'"%@`]/
+// 会被 YAML 读成 null、布尔或数字的朴素标量。
+const TYPED = /^(?:null|Null|NULL|~|true|True|TRUE|false|False|FALSE|yes|Yes|YES|no|No|NO|on|On|ON|off|Off|OFF|[-+]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)$/
 
 /** 逐条返回这份文件的 frontmatter 不在受限写法里的地方；空数组 = 合规。行尾的 CR 先剥掉（CRLF 的签出照样判）。 */
 function frontmatterProblems(text) {
@@ -38,6 +43,8 @@ function frontmatterProblems(text) {
   const seen = new Set()
   for (const line of lines.slice(1, end)) {
     if (line.trim() === '') continue
+    if (line.includes('\t')) problems.push(`有制表符：${JSON.stringify(line)}`)
+    if (line.includes('---')) problems.push(`行里有 ---（平台截 frontmatter 的正则会把它当收尾）：${JSON.stringify(line)}`)
     const m = /^([a-z][a-z-]*): (.+)$/.exec(line)
     if (!m) {
       problems.push(`不是「key: 值」一行：${JSON.stringify(line)}`)
@@ -50,6 +57,8 @@ function frontmatterProblems(text) {
     if (BAD_START.test(value)) problems.push(`${key} 的值以 YAML 指示符开头：${JSON.stringify(value.slice(0, 20))}`)
     if (value.includes(': ')) problems.push(`${key} 的值含「: 」（写全角「：」）`)
     if (value.includes(' #')) problems.push(`${key} 的值含「 #」（YAML 把它后面当注释截掉）`)
+    if (value.endsWith(':')) problems.push(`${key} 的值以「:」结尾（YAML 解析失败）`)
+    if (TYPED.test(value)) problems.push(`${key} 的值会被 YAML 读成别的类型：${JSON.stringify(value)}`)
   }
   return problems
 }
@@ -59,6 +68,21 @@ const GOOD = ['---', 'name: at-x', 'description: 一个角色：做某件事', '
 test('自检：受限写法的判据认得出合规的样本（含全角冒号与 agent-team: 前缀），CRLF 的签出照样判', () => {
   assert.deepEqual(frontmatterProblems(GOOD), [])
   assert.deepEqual(frontmatterProblems(GOOD.split('\n').join('\r\n')), [])
+})
+
+test('自检：受限写法的判据认得出复核补的几种——值以「:」结尾、值里有 ---、制表符、会被读成别的类型的值；CRLF 上一样', () => {
+  const cases = [
+    GOOD.replace('description: 一个角色：做某件事', 'description: 一个角色:'),
+    GOOD.replace('description: 一个角色：做某件事', 'description: 一个角色 --- 做某件事'),
+    GOOD.replace('description: 一个角色：做某件事', 'description: 一个角色\t# 做某件事'),
+    GOOD.replace('description: 一个角色：做某件事', 'description:\t一个角色'),
+    GOOD.replace('model: sonnet', 'model: null'),
+    GOOD.replace('model: sonnet', 'model: 4.5'),
+  ]
+  for (const bad of cases) {
+    assert.ok(frontmatterProblems(bad).length > 0, bad)
+    assert.ok(frontmatterProblems(bad.split('\n').join('\r\n')).length > 0, bad)
+  }
 })
 
 test('自检：受限写法的判据认得出三种已知违规——值里的「: 」、以引号开头、折行续上的工具名；CRLF 上一样', () => {

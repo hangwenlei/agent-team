@@ -205,8 +205,13 @@ test('no-run 派发那句：说明是有意的放行，给条件分支，不下�
   assert.match(t, /有意的放行/)
   assert.match(t, /告诉用户可以用 \/agent-team:at 起一趟 run/)
   // M4e（docs/39 §2.2，审查第 39 条）：没进版本库的 .agent-team 会被 git clean、git stash -u 清掉或藏起——那时门禁照样说「没有 run」。
-  assert.match(t, /git clean、git stash -u/)
-  assert.match(t, /git stash pop 找回/)
+  assert.ok(
+    t.includes(
+      '在的话，看 .agent-team/current-run 与 .agent-team/runs/ 还在不在——没进版本库的这几份会被 git clean、git stash -u 这类命令一起清掉或' +
+        '藏起：告诉用户（藏起的他能用 git stash pop 找回，清掉的找不回），这些 git 命令你不要自己跑。',
+    ),
+    t,
+  )
   assert.doesNotMatch(t, /先用/)
 })
 

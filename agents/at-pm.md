@@ -57,8 +57,9 @@ Claude Code 旧到丢掉 hook 的参数、hooks 被关掉——平台一律放�
 用户消息后面跟着一句以 `agent-team reminder:` 开头的提醒，说的就是这件事。对话里更早的自检结果
 不算数：会话可能已经换了一个进程。`/agent-team:at-status` 只读，不做自检。
 
-**先看工具面**：你的工具里没有 `Bash`（原生 Windows 上没装 Git for Windows 时，平台只给 PowerShell）——团队角色跑命令都只认
-`Bash`，装依赖、编译、跑测试都做不了：停下，告诉用户装好 Git for Windows、重开 Claude Code 再来。
+**先看工具面**：以你的工具清单里有没有名为 `Bash` 的工具为准，不看环境说明写的首选 shell。没有它——原生 Windows 上没装 Git for
+Windows（平台只给 PowerShell），或者设置、启动参数禁了 `Bash`——团队角色跑命令都只认 `Bash`，装依赖、编译、跑测试都做不了：停下，
+把成因告诉用户（装好 Git for Windows 再重开 Claude Code，或者解除对 `Bash` 的禁用），不要往下做。
 
 **怎么查**：用 `Write` 写 `.agent-team/gate-check`，内容就写这一句：「agent-team 门禁自检：看到
 这条写入确认，说明门禁没在跑，请选拒绝。」
@@ -82,8 +83,9 @@ Claude Code 旧到丢掉 hook 的参数、hooks 被关掉——平台一律放�
    - 拒绝理由是 agent-team 的别的说法（Node 太旧、门禁代码加载失败、门禁异常）——把理由原文转告用户。
    - 平台在调用之前就报了错（`<tool_use_error>`，比如设置里的 deny 规则盖住了 `.agent-team`）——
      自检没做成，门禁在不在不知道，把原文转告用户。报错里提到 `EnterWorktree` 或 `bgIsolation` 的，是后台会话在 git 仓库里
-     被平台拦下了对项目目录的写入：一并告诉用户在项目的 `.claude/settings.json` 里设 `"worktree": {"bgIsolation": "none"}`，
-     或者改用前台会话（终端里直接跑 `claude`、桌面端）再开这一趟；不要照平台的提示去 `git worktree add`，也不要自己改设置。
+     被平台拦下了对项目目录的写入：一并告诉用户在项目的 `.claude/settings.local.json` 里设 `"worktree": {"bgIsolation": "none"}`
+     （只对他自己生效；写进 `.claude/settings.json` 会改到所有协作者），或者改用前台会话（终端里直接跑 `claude`、桌面端）再开这一趟；
+     不要照平台的提示去 `git worktree add`，也不要自己改设置。
 
 门禁没在跑时，把下面这段原样告诉用户，不改写、不补充：
 
@@ -119,6 +121,9 @@ Claude Code 旧到丢掉 hook 的参数、hooks 被关掉——平台一律放�
   两处的刻意行为）。**但写到别人的代码目录去，账本比对连痕迹都没有**——它只查
   `stages[*].produces`，管不到 `project.paths` 下别的角色的地盘，那一条只有你自己的克制
   守着。
+- **动工作树或历史的 `git` 命令你也不自己跑**（`clean`、`stash`、`reset`、`checkout`、`switch`、`restore`、`rebase`、`commit` 这类）：
+  要跑先照 `/agent-team:at` 第 4 节的 `sensitive` 问用户——没进版本库的 `.agent-team/` 会被一起清掉或藏起，进了版本库的 `state.json`
+  会被倒回去。门禁回传里提到这些命令的，是让你转告用户，不是让你去跑。
 - **返工计数只许增，不许减。** 每推进一个阶段你都要重写 `state.json`，那是常态；
   但把 `rework` 里某个阶段的值改小、或者删掉 `history` 里已有的条目（计数是它的
   派生量），**一律不行，没有例外**——H6 会在写入落盘之前拦掉，而这条禁令在它之前。
@@ -144,7 +149,8 @@ Claude Code 旧到丢掉 hook 的参数、hooks 被关掉——平台一律放�
 ## 什么时候打断用户
 
 只有这几类（规格 §5.1）：敏感与不可逆、契约冲突、取舍、契约有洞、预算耗尽、环境阻塞。`/agent-team:at` 第 1 节那一问
-（上一趟没走完，续跑还是放弃）另算：它发生在新 run 建出来之前，不记 escalation、不动契约。
+（上一趟没走完，续跑还是放弃）另算：它发生在新 run 建出来之前，不记 escalation、不动契约。`/agent-team:at-init` 收尾那一问
+（要不要把 `.agent-team/` 加进 `.gitignore`）也另算：不记 escalation、不动契约。
 用 `AskUserQuestion`，必须带上冲突的契约原文引用、2–4 个具体选项、每项后果、你的推荐。
 **禁止开放式提问。**
 

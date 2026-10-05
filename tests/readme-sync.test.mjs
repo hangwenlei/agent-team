@@ -1715,43 +1715,120 @@ test('M4c README 两半「什么时候会问你」：每个升级类别各有一
   assert.ok(!/\bfive kinds\b/.test(en), '英文部分还在报总数')
 })
 
-// M4e（docs/39 §2.4、§2.2、§2.3、§2.5，审查第 23、43、39、25、49 条）：README 两半的安装警告与前提、`.agent-team/` 与 git、
-// git 仓库里的后台会话、英文那一半的语言说明。误装之后的卸载命令不带 `--scope`：CLI 的 `plugin uninstall` 默认就是 user 作用域，
-// 而第十节不许命令行里出现 `--scope user`——写成带 `--scope user` 的那一种，第十节当场红。
-const UNINSTALL_USER_SCOPE = '`claude plugin uninstall agent-team@agent-team-marketplace`'
+// M4e（docs/40，审查第 23、43、39、25、49 条）：README 两半的安装警告与前提、`.agent-team/` 与 git、git 仓库里的后台会话、英文那一半的
+// 语言说明。复核（docs/40 §3）：承重的句子整句钉、按小节取——只认关键词的判据挡不住「把话说反」，在整半份里找挡不住「挪到别处」。
+// 误装之后的卸载命令不带 `--scope`：CLI 的 `plugin uninstall` 默认就是 user 作用域，而第十节不许命令行里出现 `--scope user`。
+const stripWs = (t) => t.replace(/\s+/g, '')
+const hasSentence = (t, sentence) => stripWs(t).includes(stripWs(sentence))
 
-test('M4e 第 23 条：两半的安装一节都警告两条命令要带 --scope local，并给出误装之后的卸载命令（不带 --scope）', () => {
-  for (const [half, heading, head] of [
-    [README_EN, pairOf('## Installation')[0], 'Both commands need `--scope local`'],
-    [README_ZH, pairOf('## Installation')[1], '两条命令都要带 `--scope local`'],
-  ]) {
-    const s = installSectionOf(read(half), heading) ?? ''
-    assert.ok(s.includes(head), `${half} 的安装一节缺作用域警告`)
-    assert.ok(s.includes(UNINSTALL_USER_SCOPE), `${half} 的安装一节缺误装之后的卸载命令`)
+/** 某个标题底下那一节：从这个标题起，到下一个同级或更高级的标题止。找不到返回空串。 */
+function blockUnder(text, heading) {
+  const lines = text.split(/\r?\n/)
+  const start = lines.findIndex((l) => l.trim() === heading)
+  if (start < 0) return ''
+  const level = heading.match(/^#+/)[0].length
+  const rest = lines.slice(start + 1)
+  const end = rest.findIndex((l) => new RegExp(`^#{1,${level}}\\s`).test(l))
+  return (end < 0 ? rest : rest.slice(0, end)).join('\n')
+}
+
+/** 围栏代码块里以 `claude plugin` 开头的命令行（行内代码不算）。 */
+function fencedPluginCommands(text) {
+  const out = []
+  let inFence = false
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence && /^claude plugin\s/.test(line.trim())) out.push(line.trim())
+  }
+  return out
+}
+
+const README_M4E = {
+  warning: [
+    '> **Install with `--scope local`.** If `install` runs without it, or you pick the default first option in the `/plugin` panel, you get a user-scope install: every new session on this machine, in every project, starts with the project manager as its main session. If that happened, run `claude plugin uninstall agent-team@agent-team-marketplace` (no `--scope` — that removes the user-scope copy) and reinstall as above. `marketplace add` without it only registers the marketplace at user level and takes over no session.',
+    '> **安装命令要带 `--scope local`。** `install` 不带它、或者在 `/plugin` 面板里选了默认的第一项，装的是 user 作用域：这台机器上此后开的每一个新会话、不分项目，主会话都会变成项目经理。装错了就执行 `claude plugin uninstall agent-team@agent-team-marketplace`（不带 `--scope`，卸的就是 user 作用域那一份），再照上面重装。`marketplace add` 不带它，只是把市场登记在 user 一层，不接管会话。',
+  ],
+  git4win: [
+    '- **On native Windows, Git for Windows.** The roles run commands only through `Bash` (Git Bash); without it Claude Code offers only PowerShell, so the roles cannot install, build or test, and the project manager stops and tells you.',
+    '- **原生 Windows 上要装 Git for Windows**。团队角色跑命令只用 `Bash`（Git Bash）；没装的话 Claude Code 只给 PowerShell，角色装依赖、编译、跑测试都做不了，项目经理会停下来告诉你。',
+  ],
+  gitignore: [
+    'We suggest adding `.agent-team/` to `.gitignore` (the project manager asks you first during setup): left untracked and unignored, `git clean -fd` or `git stash -u` sweeps away or stashes the run in progress and the gates lose it; committed, `git stash` or `git checkout -- .` rolls `state.json` back to the committed version, rework counts included.',
+    '`.agent-team/` 建议加进 `.gitignore`（初始化时项目经理会先问你）：既不进版本库也不忽略的话，`git clean -fd`、`git stash -u` 会把进行中的 run 一起清掉或藏起，门禁随之失效；提交进了版本库的话，`git stash`、`git checkout -- .` 会把 `state.json` 倒回提交时那一版，返工计数一起清零。',
+  ],
+  background: [
+    '> **Background sessions in a git repository** (`claude --bg`, agent view): set `"worktree": {"bgIsolation": "none"}` in the project\'s `.claude/settings.local.json` first (it applies to you only; putting it in `.claude/settings.json` changes it for every collaborator). Otherwise the platform blocks the background session\'s writes to the project directory, and the project manager stops at its first self-check and tells you. Foreground sessions and the desktop app are unaffected; the team does not work in worktrees.',
+    '> **在 git 仓库里用后台会话**（`claude --bg`、agent view）跑团队，先在项目的 `.claude/settings.local.json` 里设 `"worktree": {"bgIsolation": "none"}`（只对你自己生效；写进 `.claude/settings.json` 会改到所有协作者）。不设的话，平台会拦下后台会话对项目目录的写入，项目经理第一步自检就停下来告诉你。前台会话与桌面端不受影响；团队不进 worktree。',
+  ],
+  setupAsk: [
+    'in a git repository, setup also asks once whether to add `.agent-team/` to `.gitignore`.',
+    '项目在 git 仓库里时，初始化还会问一次要不要把 `.agent-team/` 加进 `.gitignore`。',
+  ],
+}
+const HALVES = [
+  [README_EN, 0],
+  [README_ZH, 1],
+]
+
+test('M4e 第 23 条：两半的安装一节都警告 install 要带 --scope local，给出误装之后不带 --scope 的卸载命令，并说清 marketplace add 不接管会话', () => {
+  for (const [half, k] of HALVES) {
+    const s = installSectionOf(read(half), pairOf('## Installation')[k]) ?? ''
+    assert.ok(hasSentence(s, README_M4E.warning[k]), `${half} 的安装一节缺作用域警告（整句）`)
   }
 })
 
-test('M4e 第 43 条：两半的安装前提都写了原生 Windows 要装 Git for Windows', () => {
-  for (const [half, heading] of [[README_EN, pairOf('## Installation')[0]], [README_ZH, pairOf('## Installation')[1]]]) {
-    assert.ok((installSectionOf(read(half), heading) ?? '').includes('Git for Windows'), half)
+test('M4e 复核：两半安装一节代码块里的每一条 claude plugin 命令都带 --scope local——不带就是 user 作用域，第十节只拦写出来的 --scope user', () => {
+  for (const [half, k] of HALVES) {
+    const cmds = fencedPluginCommands(installSectionOf(read(half), pairOf('## Installation')[k]) ?? '')
+    assert.ok(cmds.length > 0, `${half} 的安装一节抠不出代码块里的 claude plugin 命令`)
+    for (const c of cmds) assert.ok(/(?:^|\s)--scope local(?:\s|$)/.test(c), `${half}：${c}`)
   }
 })
 
-test('M4e 第 25 条：两半的已知边界都写了 git 仓库里的后台会话要设 worktree.bgIsolation 为 "none"', () => {
-  for (const half of [README_EN, README_ZH]) {
-    const block = limitationsBlock(read(half))
-    for (const k of ['`claude --bg`', '`"worktree": {"bgIsolation": "none"}`']) assert.ok(block.includes(k), `${half} 的引用块里缺 ${k}`)
+test('自检：fencedPluginCommands() 只抠代码块里的 claude plugin 命令，行内代码不算', () => {
+  const sample = ['说明 `claude plugin uninstall x` 一句', '```sh', 'claude plugin install x --scope local', 'claude --plugin-dir /p', '```'].join('\n')
+  assert.deepEqual(fencedPluginCommands(sample), ['claude plugin install x --scope local'])
+})
+
+test('M4e 第 43 条：两半的安装前提都写了原生 Windows 要装 Git for Windows（整句）', () => {
+  for (const [half, k] of HALVES) {
+    assert.ok(hasSentence(installSectionOf(read(half), pairOf('## Installation')[k]) ?? '', README_M4E.git4win[k]), half)
   }
 })
 
-test('M4e 第 39 条：两半都建议把 .agent-team/ 加进 .gitignore，并说清不加与入库各会怎样', () => {
-  for (const half of [README_EN, README_ZH]) {
-    const t = read(half)
-    for (const k of ['`.agent-team/`', '`.gitignore`', '`git clean -fd`', '`git stash -u`', '`git checkout -- .`']) assert.ok(t.includes(k), `${half} 缺 ${k}`)
+test('M4e 第 25 条：两半的已知边界一节里都写了 git 仓库里的后台会话要在 settings.local.json 里设 bgIsolation（整句、在那一节里）', () => {
+  for (const [half, k] of HALVES) {
+    const s = blockUnder(read(half), pairOf('## Known Limitations')[k])
+    assert.ok(s, `${half} 找不到已知边界那一节`)
+    assert.ok(hasSentence(s, README_M4E.background[k]), `${half} 的已知边界缺后台会话那一条（整句）`)
   }
 })
 
-test('M4e 第 49 条：英文那一半说明插件运行时是中文、门禁按中文字面认几个标签', () => {
+test('M4e 第 39 条：两半的「产物在哪」一节都建议把 .agent-team/ 加进 .gitignore，并说清不加与入库各会怎样（整句、在那一节里）', () => {
+  for (const [half, k] of HALVES) {
+    const s = blockUnder(read(half), pairOf('### Where things land')[k])
+    assert.ok(s, `${half} 找不到产物在哪那一节`)
+    assert.ok(hasSentence(s, README_M4E.gitignore[k]), `${half} 的产物在哪缺 .gitignore 那一段（整句）`)
+  }
+})
+
+test('M4e 复核：两半的「什么时候会问你」都说了初始化时那一问（.gitignore）', () => {
+  for (const [half, k] of HALVES) {
+    const s = blockUnder(read(half), pairOf('### When it asks you')[k])
+    assert.ok(hasSentence(s, README_M4E.setupAsk[k]), `${half} 的什么时候会问你缺初始化那一问`)
+  }
+})
+
+test('M4e 第 49 条：英文那一半的安装一节说明插件运行时是中文、门禁按中文字面认几个标签（整句）', () => {
   const s = installSectionOf(read(README_EN), pairOf('## Installation')[0]) ?? ''
-  for (const k of ['**Language:**', 'runs in Chinese', 'Chinese labels verbatim']) assert.ok(s.includes(k), `英文安装一节缺「${k}」`)
+  assert.ok(
+    hasSentence(
+      s,
+      '**Language:** the plugin runs in Chinese — role prompts, artifact templates, gate messages and status lines are all Chinese, and the gates recognise a few Chinese labels verbatim (for example the rework-approval label under “When it asks you”).',
+    ),
+    '英文安装一节缺语言说明（整句）',
+  )
 })

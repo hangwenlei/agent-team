@@ -121,7 +121,7 @@ const BUBBLE_HEAD = new RegExp(`^[\\s#>*_\`\\-「【]*(?:\\d+[.)、]\\s*)?${BUBB
 // ./retry-budget.mjs 里（tests/retry-budget-single-source.test.mjs）。
 // 复核（docs/37 §3）：「写入被拒」不在冒泡的理由里——执行段被写路径隔离拒了的，正文要它把被拒写进实现记录那一节
 // （执行段的拒绝文案另点出这一条，见 IMPL_DENIAL_NOTE）。「原样再停一次」会被读成「什么都不改再停」，改成说清再发什么。
-export const BUBBLE_WHEN = '确实交不出来、要上级定的（契约有问题、缺输入）'
+export const BUBBLE_WHEN = '确实交不出来、要上级定的（契约有问题、缺输入、红线里的敏感操作）'
 export const BUBBLE_EXIT =
   `就不写：把你最后一条回复的第一行写成「${BUBBLE_MARK}<一句话理由>」，下面写清缺什么、要上级定什么，再停下` +
   '——门禁认这一行、放你停下；这一段的产物照旧算没交，上级读你的回复来定。已经这样写过、又被拦回来的，把那条回复原样再发一遍' +

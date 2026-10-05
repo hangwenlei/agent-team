@@ -34,7 +34,7 @@ claude plugin install agent-team@agent-team-marketplace --scope local
 装好后在这个目录里新开一个会话，主会话就是项目经理。插件只对这一个项目生效，不影响别的项目。
 
 > [!WARNING]
-> **两条命令都要带 `--scope local`。** 不带它、或者在 `/plugin` 面板里选了默认的第一项，装的是 user 作用域：这台机器上此后开的每一个新会话、不分项目，主会话都会变成项目经理。装错了就执行 `claude plugin uninstall agent-team@agent-team-marketplace`（不带 `--scope`，卸的就是 user 作用域那一份），再照上面重装。
+> **安装命令要带 `--scope local`。** `install` 不带它、或者在 `/plugin` 面板里选了默认的第一项，装的是 user 作用域：这台机器上此后开的每一个新会话、不分项目，主会话都会变成项目经理。装错了就执行 `claude plugin uninstall agent-team@agent-team-marketplace`（不带 `--scope`，卸的就是 user 作用域那一份），再照上面重装。`marketplace add` 不带它，只是把市场登记在 user 一层，不接管会话。
 
 **前提**：
 
@@ -109,7 +109,7 @@ flowchart TB
 
 | 类别 | 情形 |
 |---|---|
-| 敏感操作 | 凭据密钥、花钱、对外发布、删改非本趟产出的文件、`git push`、改 CI/CD 或生产配置 |
+| 敏感操作 | 凭据密钥、花钱、对外发布、删改非本趟产出的文件或数据、`git push`、改 CI/CD 或生产配置、动工作树或历史的 git 命令 |
 | 契约冲突 | 某个角色的产出违背契约，或契约里的两条没法同时满足 |
 | 需要取舍 | 两个方案都满足契约但不能兼得，而且差别你感受得到 |
 | 需求缺口 | 需求自相矛盾或缺关键信息，怎么猜都可能白做 |
@@ -118,7 +118,7 @@ flowchart TB
 
 每次提问都会引用契约原文，给出 2–4 个具体选项、各自的后果和它的推荐；你的回答会作为修订写进契约。技术选型、裁掉哪些角色、代码风格这类事，它自己决定。
 
-另外，上一趟还没走完你又起了一趟新的，它会先问你接着跑哪一趟。
+另外，上一趟还没走完你又起了一趟新的，它会先问你接着跑哪一趟；项目在 git 仓库里时，初始化还会问一次要不要把 `.agent-team/` 加进 `.gitignore`。
 
 返工用尽时，只有选项「再返工一轮：回到 <段>」会被门禁记成再来一轮的批准；在对话里单独发一条只写这一句的消息也算——会话问不了你时（后台会话、不带权限提示的 `-p`），这是唯一的路。
 
@@ -166,7 +166,7 @@ flowchart TB
 > **不要用 `claude plugin disable` 或 `claude plugin enable` 开关插件。** 一个会话的工具面在它的生命周期内是固定的，disable 不会把它还回来；enable 会接管已经在跑的会话。用完就结束会话，不再需要就卸载。
 
 > [!NOTE]
-> **在 git 仓库里用后台会话**（`claude --bg`、agent view）跑团队，先在项目的 `.claude/settings.json` 里设 `"worktree": {"bgIsolation": "none"}`。不设的话，平台会拦下后台会话对项目目录的写入，项目经理第一步自检就停下来告诉你。前台会话与桌面端不受影响；团队不进 worktree。
+> **在 git 仓库里用后台会话**（`claude --bg`、agent view）跑团队，先在项目的 `.claude/settings.local.json` 里设 `"worktree": {"bgIsolation": "none"}`（只对你自己生效；写进 `.claude/settings.json` 会改到所有协作者）。不设的话，平台会拦下后台会话对项目目录的写入，项目经理第一步自检就停下来告诉你。前台会话与桌面端不受影响；团队不进 worktree。
 
 > [!NOTE]
 > 在用着这支团队的项目里，门禁会拒绝它认不出指向哪个文件的写法：网络路径（项目不在同一个共享上时）、带流后缀或以点、空格结尾的 Windows 路径、不带盘符的设备路径；项目放在网络共享上时，写本地盘路径同样被拒。需要写这些位置时由你自己来写。
@@ -230,7 +230,7 @@ claude plugin install agent-team@agent-team-marketplace --scope local
 Then start a new session in that directory — the main session is the project manager. The plugin applies to this one project only.
 
 > [!WARNING]
-> **Both commands need `--scope local`.** Without it, or if you pick the default first option in the `/plugin` panel, you get a user-scope install: every new session on this machine, in every project, starts with the project manager as its main session. If that happened, run `claude plugin uninstall agent-team@agent-team-marketplace` (no `--scope` — that removes the user-scope copy) and reinstall as above.
+> **Install with `--scope local`.** If `install` runs without it, or you pick the default first option in the `/plugin` panel, you get a user-scope install: every new session on this machine, in every project, starts with the project manager as its main session. If that happened, run `claude plugin uninstall agent-team@agent-team-marketplace` (no `--scope` — that removes the user-scope copy) and reinstall as above. `marketplace add` without it only registers the marketplace at user level and takes over no session.
 
 **Language:** the plugin runs in Chinese — role prompts, artifact templates, gate messages and status lines are all Chinese, and the gates recognise a few Chinese labels verbatim (for example the rework-approval label under “When it asks you”).
 
@@ -307,7 +307,7 @@ The project manager is the only role that talks to you, and it stops to ask only
 
 | Kind | When |
 |---|---|
-| Sensitive | Secrets, spending, publishing, deleting others' files, `git push`, CI/CD or prod config |
+| Sensitive | Secrets, spending, publishing, deleting others' files or data, `git push`, CI/CD or prod config, git commands that rewrite the working tree or history |
 | Conflict | A role's output violates the contract, or two of its clauses cannot both be met |
 | Trade-off | Two options both meet the contract, can't both be had, and differ in ways you'd notice |
 | Gap | The requirement contradicts itself or lacks key facts; any guess may waste the work |
@@ -316,7 +316,7 @@ The project manager is the only role that talks to you, and it stops to ask only
 
 Each question quotes the contract and offers two to four concrete options with their consequences and a recommendation; your answer is added to the contract as a revision. Technology choices, which roles to leave out and code style are decided without asking you.
 
-Also, if you start a new run while the previous one is unfinished, it first asks which one to continue.
+Also, if you start a new run while the previous one is unfinished, it first asks which one to continue; in a git repository, setup also asks once whether to add `.agent-team/` to `.gitignore`.
 
 When rework runs out, only the option 「再返工一轮：回到 <stage>」 is recorded by the gates as approval for another round; a message containing just that line counts too — in a session that cannot ask you (a background session, `-p` without a permission prompt), it is the only way.
 
@@ -364,7 +364,7 @@ You can watch a role but not talk to it: roles report their questions to the pro
 > **Don't toggle the plugin with `claude plugin disable` or `claude plugin enable`.** A session's tool surface is fixed for its lifetime, and disabling does not hand it back; enabling takes over sessions that are already running. End the session when you are done, and uninstall when you no longer need it.
 
 > [!NOTE]
-> **Background sessions in a git repository** (`claude --bg`, agent view): set `"worktree": {"bgIsolation": "none"}` in the project's `.claude/settings.json` first. Otherwise the platform blocks the background session's writes to the project directory, and the project manager stops at its first self-check and tells you. Foreground sessions and the desktop app are unaffected; the team does not work in worktrees.
+> **Background sessions in a git repository** (`claude --bg`, agent view): set `"worktree": {"bgIsolation": "none"}` in the project's `.claude/settings.local.json` first (it applies to you only; putting it in `.claude/settings.json` changes it for every collaborator). Otherwise the platform blocks the background session's writes to the project directory, and the project manager stops at its first self-check and tells you. Foreground sessions and the desktop app are unaffected; the team does not work in worktrees.
 
 > [!NOTE]
 > In a project that uses the team, the gates refuse writes whose target they cannot pin down: network paths (unless the project sits on that same share), Windows paths with a stream suffix or a segment ending in a dot or space, and device paths without a drive letter; with the project on a network share, local-drive paths are refused too. Write to such locations yourself.
