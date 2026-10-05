@@ -28,8 +28,8 @@
 
 ## 4. 没有自决、已升级给用户的
 
-<§5.1 的五类。每条对应 state.json 的 escalations[] 里一条，kind 用同一个取值：
-sensitive / contract-conflict / tradeoff / contract-hole / budget-exhausted。>
+<规格 §5.1 那几类。每条对应 state.json 的 escalations[] 里一条，kind 用同一个取值：
+sensitive / contract-conflict / tradeoff / contract-hole / budget-exhausted / env-blocked。>
 
 ## 5. 这一趟对 paths 的改动
 

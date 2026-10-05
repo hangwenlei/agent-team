@@ -101,7 +101,7 @@ flowchart TB
 
 ### 什么时候会问你
 
-项目经理是唯一会跟你说话的角色，只在下面五类事上停下来问你：
+项目经理是唯一会跟你说话的角色，只在下面这几类事上停下来问你：
 
 | 类别 | 情形 |
 |---|---|
@@ -110,6 +110,7 @@ flowchart TB
 | 需要取舍 | 两个方案都满足契约但不能兼得，而且差别你感受得到 |
 | 需求缺口 | 需求自相矛盾或缺关键信息，怎么猜都可能白做 |
 | 返工用尽 | 返工次数用完了还不通过 |
+| 环境阻塞 | 缺工具、服务或权限，构建或测试跑不起来，交不出来或验证不了 |
 
 每次提问都会引用契约原文，给出 2–4 个具体选项、各自的后果和它的推荐；你的回答会作为修订写进契约。技术选型、裁掉哪些角色、代码风格这类事，它自己决定。
 
@@ -286,7 +287,7 @@ Once delivered, the run is closed: no more rollbacks and no more dispatches. For
 
 ### When it asks you
 
-The project manager is the only role that talks to you, and it stops to ask about five kinds of things only:
+The project manager is the only role that talks to you, and it stops to ask only about the kinds of things below:
 
 | Kind | When |
 |---|---|
@@ -295,6 +296,7 @@ The project manager is the only role that talks to you, and it stops to ask abou
 | Trade-off | Two options both meet the contract, can't both be had, and differ in ways you'd notice |
 | Gap | The requirement contradicts itself or lacks key facts; any guess may waste the work |
 | Rework | Rework still fails after its budget is used up |
+| Blocked | A missing tool, service or permission stops the build or tests, so the work can't be delivered or verified |
 
 Each question quotes the contract and offers two to four concrete options with their consequences and a recommendation; your answer is added to the contract as a revision. Technology choices, which roles to leave out and code style are decided without asking you.
 

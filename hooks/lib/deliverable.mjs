@@ -17,7 +17,7 @@
 // ⚠️ 这条注释**不重复那份认知状态**（异步是不是唯一、同步量到过几次）——
 // 单一真源是 docs/11 §5.33；发给用户的那段文案在 ./retry-budget.mjs。
 // ⚠️ **这里不写它到底顶多少下，那个计数的单一真源是 ./retry-budget.mjs**
-// （它不是常数，四次观测、三种数法，逐条在那里）。此前这句话连同同一份知识
+// （它是一个可配置的默认值，源码与几次观测逐条在那里）。此前这句话连同同一份知识
 // 在八句话、六个文件里各写了一份，其中五句用的是中文数字、词形扫不到
 // （docs/16 §3.4 的实物，逐句在 docs/11 §5.29）。判据：
 // tests/retry-budget-single-source.test.mjs。
@@ -89,7 +89,7 @@
 // 一次，结果逐字等于 stage.produces 本身——这条改动对那些阶段是零行为差异
 // （tests/deliverable.test.mjs 现有各条据此必须仍然全绿，不改签名）。
 // 哪些阶段属于这一类，去 stages.json 看，不要在这里抄一份清单。
-import { expandProduces, stageRoles } from './stages.mjs'
+import { expandProduces, isRolePatternStage, stageRoles } from './stages.mjs'
 import { VERIFY_REDO_SELF, splitByAccept } from './freshness.mjs'
 
 // 「这个阶段 id 在不在阶段链里」。M3v（docs/30）起门禁自检的追加句与 unknown-stage 的修法（hooks/lib/fail-open.mjs）也要
@@ -99,6 +99,39 @@ export function isKnownStage(stages, stageId) {
     !!stages && typeof stages === 'object' && typeof stageId === 'string' && Object.hasOwn(stages, stageId) &&
     !!stages[stageId]
   )
+}
+
+// M4c（docs/37，全量审查第 18 条）：冒泡的出口。各角色正文叫它们「契约有问题、缺输入、写入被拒就冒泡，不要自己改了继续写」，
+// 拒绝文案也许诺「把理由写进你的回报，由上级判断」——可 H5b 从不认这条出口，照做的子代理每次停下都被顶回去，顶到平台的
+// 续跑上限（真实会话 066acaaa）。现在门禁认一个固定的形状：已经被拦过一回（SubagentStop 输入的 stop_hook_active 为真），而且
+// 最后一条回复（last_assistant_message）的第一个非空行以 BUBBLE_MARK 开头，就放它停下。
+//   - 要 stop_hook_active：第一回停下一定先被拦、先看到缺的是什么——忘了写的会去写，真要冒泡的原样再停一回（拒绝文案这么教）。
+//     它不专属本插件（别家的 SubagentStop 拦过、CLI 自己的收尾强制也会把它置真），那时第一回就带着标记的也直接放行——标记是
+//     子代理自己写的，门禁核不了真假，放行它也造不出进度：产物照旧算没交。
+//   - 只认第一个非空行，容许常见的包装：行首的 Markdown 装饰（#、>、*、_、`、-）、编号、照抄下来的「、【，「冒泡」两个字
+//     本身加粗（**冒泡**：）、冒号前的空白与半角冒号。夹在正文里的不认；「冒泡排序」这种不带冒号的不认（docs/37 §3 的复核）。
+//   - 冒泡不改「交没交」：这里只决定 H5b 放不放它停下。下一段的前置（H2）与收口照常判缺，【阶段】不说齐了；但推进本身
+//     不核缺产物（第 17 条）——不在任何前置里的那几份（02-*、03-alignment.md、05-impl/*），冒泡之后照样能被推进过去，
+//     与原来顶到平台上限被静默放行是同一个洞（docs/37 §5），靠 PM 读回复。父级那一侧不加机制——同步派发时工具结果、
+//     异步派发时完成通知里就是这条回复的原文（docs/37 §1），读它的是正文（/agent-team:at 第 3 节「核实」）。
+export const BUBBLE_MARK = '冒泡：'
+const BUBBLE_HEAD = new RegExp(`^[\\s#>*_\`\\-「【]*(?:\\d+[.)、]\\s*)?${BUBBLE_MARK.slice(0, -1)}[\\s*_\`」】]*[：:]`)
+
+// 拒绝文案里教这个出口的那几句（缺/空与还旧两支共用；单一真源，判据从这里取）。不写任何次数：重试上限的计数只准在
+// ./retry-budget.mjs 里（tests/retry-budget-single-source.test.mjs）。
+// 复核（docs/37 §3）：「写入被拒」不在冒泡的理由里——执行段被写路径隔离拒了的，正文要它把被拒写进实现记录那一节
+// （执行段的拒绝文案另点出这一条，见 IMPL_DENIAL_NOTE）。「原样再停一次」会被读成「什么都不改再停」，改成说清再发什么。
+export const BUBBLE_WHEN = '确实交不出来、要上级定的（契约有问题、缺输入）'
+export const BUBBLE_EXIT =
+  `就不写：把你最后一条回复的第一行写成「${BUBBLE_MARK}<一句话理由>」，下面写清缺什么、要上级定什么，再停下` +
+  '——门禁认这一行、放你停下；这一段的产物照旧算没交，上级读你的回复来定。已经这样写过、又被拦回来的，把那条回复原样再发一遍' +
+  `再停下（第一行仍是「${BUBBLE_MARK}…」），只回一句「已冒泡」不算。`
+const IMPL_DENIAL_NOTE = '被写路径隔离拒了的，照你的正文把被拒的路径与拒绝原文写进实现记录的「被写路径隔离拒绝」一节——写了就能停。'
+
+export function isBubbleStop({ stopHookActive, lastMessage } = {}) {
+  if (stopHookActive !== true || typeof lastMessage !== 'string') return false
+  const first = lastMessage.split('\n').find((line) => line.trim() !== '')
+  return first !== undefined && BUBBLE_HEAD.test(first)
 }
 
 // M3y（docs/33，全量审查第 15 条）：调用方把 artifactExists 换成 freshness 的 artifactCurrent（在、而且不是上一轮的），另传
@@ -140,6 +173,7 @@ export function decideDeliverable({ role, stageId, stages, artifactExists, artif
   // 一层两条分支永远同时成立或同时不成立的判断，删掉任何一层都测不出行为差异
   // （Task 5 的教训：变异测试要能证明每一层都必要）。
   if (missing.length === 0 && stale.length === 0 && blank.length === 0) return { ok: true }
+  const denial = isRolePatternStage(stage) ? IMPL_DENIAL_NOTE : ''
   const gone = [missing.length ? `${missing.join('、')} 还没有写到磁盘上` : '', blank.length ? `${blank.join('、')} 是空文件` : '']
     .filter(Boolean)
     .join('，')
@@ -153,7 +187,7 @@ export function decideDeliverable({ role, stageId, stages, artifactExists, artif
       stale,
       reason:
         `${role} 在 ${stageId} 应当产出 ${produces.join('、')}，但 ${gone}。` +
-        `在结束之前把它写出来；如果这一段确实不需要产出，把理由写进你的回报，由上级判断。`,
+        `在结束之前把它写出来。${denial}${BUBBLE_WHEN}，${BUBBLE_EXIT}`,
     }
   }
 
@@ -175,6 +209,6 @@ export function decideDeliverable({ role, stageId, stages, artifactExists, artif
     reason:
       `${role} 在 ${stageId} 应当产出 ${produces.join('、')}，但 ${notWritten}${stale.join('、')} 还是上一轮的——这是返工轮，` +
       `它的内容与回退那一刻磁盘上的一样。在结束之前把这一轮的写出来。${redoOut}${appendOut}` +
-      `如果这一段确实不需要产出、或者不该由你改，就不要写，把理由写进你的回报，由上级判断。`,
+      `${denial}${BUBBLE_WHEN}，或者这一段确实不需要产出、不该由你改的，${BUBBLE_EXIT}`,
   }
 }

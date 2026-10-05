@@ -192,7 +192,25 @@ const SCENARIOS = [
     name: 'state.contract_sha（【契约】）',
     disk: true,
     state: (s, P) => ({ ...s, contract_sha: P }),
-    calls: ({ run }) => [['ledger', posted('at-pm', join(run, '00-contract.md'))]],
+    // M4c（docs/37）：派发返回（收件人是 PM 与不是 PM 各一次）与写 state.json 时也拿它比磁盘、对不上就出【契约】。
+    calls: ({ run }) => [
+      ['ledger', posted('at-pm', join(run, '00-contract.md'))],
+      ['ledger', posted('at-pm', join(run, 'state.json'))],
+      ['deliverable', returned('agent-team:at-product')],
+      ['deliverable', returned('agent-team:at-backend', 'agent-team:at-architect')],
+    ],
+    anchor: SHA_NOTE,
+  },
+  {
+    // M4c 复核：契约不在时【契约】走 missing 那一支，记录的值同样要经 shaOrNote——上一格里契约总在磁盘上，喂不到这一支。
+    name: 'state.contract_sha，契约不在（【契约】的 missing 那一支）',
+    disk: true,
+    omit: ['00-contract.md'],
+    state: (s, P) => ({ ...s, contract_sha: P }),
+    calls: ({ run }) => [
+      ['ledger', posted('at-pm', join(run, 'state.json'))],
+      ['deliverable', returned('agent-team:at-product')],
+    ],
     anchor: SHA_NOTE,
   },
   {

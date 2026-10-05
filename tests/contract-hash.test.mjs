@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { compareContractSha, normalizeContract, sha256OfContract } from '../hooks/lib/contract-hash.mjs'
+import { CONTRACT_FILE, compareContractSha, normalizeContract, sha256OfContract } from '../hooks/lib/contract-hash.mjs'
+import { readFileSync } from 'node:fs'
 
 const LF = '# 契约\n\n用户原话。\n'
 
@@ -49,7 +50,7 @@ test('normalizeContract 不碰孤立的 \\r——那是正文里的真实内容�
 
 test('compareContractSha：相等就 ok', () => {
   const h = sha256OfContract(LF)
-  assert.deepEqual(compareContractSha({ recorded: h, actual: h }), { ok: true })
+  assert.deepEqual(compareContractSha({ recorded: h, actual: h }), { ok: true, kind: 'ok' })
 })
 
 test('compareContractSha：PENDING 是「还没记」，不是漂移', () => {
@@ -72,8 +73,30 @@ test('compareContractSha：不相等报漂移，并把两个值都带出来', ()
 })
 
 test('compareContractSha：actual 为 null（契约还没写出来）不报漂移', () => {
-  assert.deepEqual(compareContractSha({ recorded: 'PENDING', actual: null }), { ok: true })
+  assert.deepEqual(compareContractSha({ recorded: 'PENDING', actual: null }), { ok: true, kind: 'unstarted' })
   const r = compareContractSha({ recorded: sha256OfContract(LF), actual: null })
   assert.equal(r.ok, false)
   assert.match(r.problem, /磁盘上没有/)
+})
+
+// M4c（docs/37，审查第 37 条前半）：「contract_sha 与磁盘」唯一的比较函数，返回结构化的 kind——写契约那一刻的【契约】用它的 problem
+// （带新值，那是合法修订记账的来源），派发返回与写 state.json 时的【契约】按 kind 另组措辞（不报磁盘上的值）。
+test('M4c compareContractSha：每一种 kind 各就各位', () => {
+  const h = sha256OfContract(LF)
+  const h2 = sha256OfContract(LF + 'x')
+  assert.equal(compareContractSha({ recorded: h, actual: h }).kind, 'ok')
+  assert.equal(compareContractSha({ recorded: 'PENDING', actual: null }).kind, 'unstarted')
+  assert.equal(compareContractSha({ recorded: 'PENDING', actual: h }).kind, 'pending')
+  assert.equal(compareContractSha({ recorded: h, actual: null }).kind, 'missing')
+  assert.equal(compareContractSha({ recorded: h2, actual: h }).kind, 'drift')
+  // 复核（docs/37 §3）：记录值不合法（缺键、乱写）不是「契约在记账之后被改过」——单列 invalid，出路是写 PENDING 再拿 sha。
+  assert.equal(compareContractSha({ recorded: 'x', actual: h }).kind, 'invalid')
+  assert.equal(compareContractSha({ recorded: undefined, actual: h }).kind, 'invalid')
+  assert.equal(compareContractSha({ recorded: 'x', actual: null }).kind, 'missing', '契约不在时先说基线不在了')
+})
+
+test('M4c CONTRACT_FILE：契约文件名的单一真源，等于 stages.json 第一段唯一的产物', () => {
+  const stages = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
+  assert.equal(CONTRACT_FILE, '00-contract.md')
+  assert.deepEqual(stages[Object.keys(stages)[0]].produces, [CONTRACT_FILE])
 })

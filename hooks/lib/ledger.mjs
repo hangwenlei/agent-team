@@ -141,6 +141,7 @@ export function buildLedgerNotices({
   kind, contractSha, state, reach, stages, stageDone, stateProblems, produceName, produceSha, projectReport, reworkStale, budget, grants,
   writerIsPm = true,
   writer = null,
+  contractUnreadable = false,
   closeBlockers,
 } = {}) {
   const out = []
@@ -156,6 +157,18 @@ export function buildLedgerNotices({
   if (kind === 'contract') {
     const cmp = compareContractSha({ recorded: st.contract_sha, actual: contractSha ?? null })
     if (!cmp.ok) out.push(`【契约】${cmp.problem}`)
+  }
+  // M4c（docs/37，全量审查第 37 条前半）：写 state.json 时也拿 contract_sha 比磁盘上的契约。写它的只能是 PM，不分收件人。理由是
+  // 异步派发：H5a 只在派发那一刻跑，S6 里用 Bash 改的契约要到下一次派发才报——推进到 S7 的那一次写入在派验收之前，它才是规格
+  // §4.2 ①「S7 验收前校验哈希未变」的那一刻，收口那一次写入也在这里核。contractSha 是调用方读过契约之后给的（磁盘上没有时是
+  // null）；不给（undefined，例：坏 state.json 那一支只报形状）就不核。
+  // 复核（docs/37 §3）：契约在、这一次却读不出（contractUnreadable，调用方给）——说读不出、没核，不说它不在。
+  if (kind === 'state' && contractSha !== undefined && isPlainObject(state)) {
+    const cmp = contractUnreadable
+      ? { ok: false, kind: 'unreadable' }
+      : compareContractSha({ recorded: st.contract_sha, actual: contractSha })
+    const n = contractCheckNotice(cmp, st.contract_sha)
+    if (n) out.push(n)
   }
 
   // M3u：花名册读坏、或者 project.json 有阻断时不发触达表的 JSON，说清为什么、什么时候会收到。花名册读坏时 computeReach
@@ -367,7 +380,8 @@ function chainIds(stages) {
   return isStageChain(stages) ? Object.keys(stages) : []
 }
 
-// M4b 第一轮复核（docs/36）：执行段「齐了」的回传末尾固定带这一句。执行角色在 S5 被写路径隔离拒绝时，要先写一份实现记录才停得下
+// M4b 第一轮复核（docs/36）：执行段「齐了」的回传末尾固定带这一句。执行角色在 S5 被写路径隔离拒绝时，照正文先写一份实现记录才停下
+// （M4c 起 H5b 也认冒泡：不写实现记录、回复第一行是「冒泡：」也停得下，那一份照旧算没交）
 // （H5b），被拒还没解决的那一份在门禁看来就是交了；门禁不读它写了什么，这一句把 PM 引到那一节上。H5a「全部齐备」那句同用。
 export const IMPL_RECORD_NOTE =
   '这一段的产物是各执行角色的实现记录：推进之前逐份读，有「被写路径隔离拒绝」一节、里面还有没标「已解决」的条目的，那一份不算交齐' +
@@ -387,4 +401,44 @@ const IMPL_RECORD_PEER_NOTE =
 function implRecordNote({ stage, writerIsPm, writer }) {
   if (writerIsPm) return IMPL_RECORD_NOTE
   return typeof writer === 'string' && stageRoles(stage).includes(writer) ? IMPL_RECORD_ROLE_NOTE : IMPL_RECORD_PEER_NOTE
+}
+
+// M4c（docs/37，全量审查第 37 条前半）：派发返回（H5a）与写 state.json 时的【契约】。与写契约那一刻的【契约】（buildLedgerNotices
+// 里 kind === 'contract' 那一支，带磁盘上的新值）不同：这里**不报磁盘上算出来的 sha**，也不说「改成与磁盘一致」——照着磁盘去改账，
+// 就把一次漂移洗成了合法。合法修订拿新值的路只有一条：写契约那一次的回传（手上没有就原样重写一次契约）。按 compareContractSha 的
+// kind 组措辞；收件人改不了 state.json 时，由调用方（gate.mjs 的 contractNoticeFor）接上冒泡的收尾。记录的值经 shaOrNote 才进文字。
+export function contractCheckNotice(cmp, recorded) {
+  if (!cmp || cmp.ok) return null
+  if (cmp.kind === 'pending') {
+    return (
+      '【契约】00-contract.md 在磁盘上，state.json 的 contract_sha 还是 PENDING。把写契约那一次【契约】回传给的 sha 原样记进' +
+      ' contract_sha；手上没有那个值（例如 state.json 是重建的），就原样重写一次 00-contract.md，从这一次的回传里拿——不要自己算' +
+      '（门禁先统一行尾再算，自己算的对不上）。'
+    )
+  }
+  if (cmp.kind === 'unreadable') {
+    return (
+      '【契约】这一次读不出 00-contract.md（文件在，可能正被别的程序占着），契约没核——过一会儿再看；不要据此重写契约，' +
+      '也不要改 contract_sha。'
+    )
+  }
+  if (cmp.kind === 'invalid') {
+    return (
+      '【契约】state.json 的 contract_sha 不是合法的 sha256（原值不回显），门禁拿它核不了契约。把它写成 PENDING，再原样重写一次' +
+      ' 00-contract.md、从这一次的回传里拿 sha——不要自己算（门禁先统一行尾再算，自己算的对不上）。'
+    )
+  }
+  if (cmp.kind === 'missing') {
+    return (
+      `【契约】state.json 记着 contract_sha ${shaOrNote(recorded)}，但磁盘上没有 00-contract.md：这趟 run 唯一的需求基线不在了，` +
+      '后面每一步都失去了对账的依据。不要凭记忆另写一份顶上（第 1 节是用户原话）——把这件事告诉用户，由用户定怎么补回。'
+    )
+  }
+  // 复核（docs/37 §3）：格式对、值不等，门禁分不出成因——不断言「契约被改过」，几种可能都列出来，各给各的出路。
+  return (
+    `【契约】磁盘上的 00-contract.md 与 state.json 记的 contract_sha（${shaOrNote(recorded)}）对不上。门禁分不出是哪一种，可能是：` +
+    '照 /agent-team:at 第 4 节修订之后没记新值——把那一次写契约收到的【契约】回传给的 sha 记进 contract_sha；记的是自己算的值——' +
+    '原样重写一次契约，从这一次的回传里拿；契约被人改过、不是第 4 节的修订——把契约恢复原样，告诉用户。不要自己算 sha——这一段也' +
+    '不报磁盘上算出来的值。'
+  )
 }

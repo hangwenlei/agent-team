@@ -25,7 +25,7 @@
 // CRLF → LF）对所有文本产物都是对的，同一份文件在 Windows 与 POSIX 之间来回时不该产生
 // 假漂移。两份逐字相同的哈希实现真的会分叉，这个仓库为此开过好几轮循环（见 path-norm.mjs
 // 头部）。
-import { sha256OfContract } from './contract-hash.mjs'
+import { CONTRACT_FILE, sha256OfContract } from './contract-hash.mjs'
 // isPlainObject 也走 stages.mjs 同一份（M2b 终审 A2）——它原来是这里的私有拷贝，与
 // reach.mjs / rework-guard.mjs / state.mjs / gate.mjs 共五份。理由与上面那段哈希实现
 // 一字不差：手写的多条件布尔表达式有变体空间，两份逐字相同的实现真的会分叉。
@@ -79,6 +79,12 @@ export function compareArtifacts({ artifacts, stages, artifactBytes, roster }) {
   // （stageRoles）的子集。于是宽的那个当唯一的遍历面，收窄退化成循环里的一个判定。
   const out = { drifted: [], missing: [], unrecorded: [] }
   for (const name of producedNames(stages)) {
+    // M4c（docs/37，全量审查第 37 条前半）：契约不在这里比。它的账只记在 state.json 的 contract_sha（写契约那一刻门禁只回传那一处），
+    // 原来这里只读 artifacts['00-contract.md']：照 /agent-team:at 记账的 run 每次派发返回都报「artifacts 里没记」，把 sha 抄进来的
+    // run 每次合法修订之后又报「记账之后被改过」，真漂移与这两句噪声逐字相同。契约由 H5a 与写 state.json 时的【契约】拿
+    // contract_sha 比磁盘（hooks/gate.mjs 的 contractNoticeFor、hooks/lib/ledger.mjs 的 contractCheckNotice）。旧 run 的 artifacts
+    // 里记着的契约 sha 一律不读。
+    if (name === CONTRACT_FILE) continue
     if (!Object.hasOwn(recorded, name)) {
       // 磁盘上有、账本里没记。磁盘上也没有的话什么都不是——那只是还没做到这一段。
       // 这一支**不看 roster**，就是上面那段的全部内容。

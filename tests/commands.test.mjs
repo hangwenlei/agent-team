@@ -5,7 +5,7 @@ import { CONTROL_FILES, GATE_FILES } from '../hooks/lib/control-files.mjs'
 import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { producedNames, expandProduces, stageRolesInRun, participantsOf } from '../hooks/lib/stages.mjs'
-import { isStageDone } from '../hooks/lib/state.mjs'
+import { isStageDone, ESCALATION_KINDS } from '../hooks/lib/state.mjs'
 import { COMMAND_NAMES } from './helpers/command-names.mjs'
 import { ROLES_WITHOUT_PATHS } from './helpers/roles-without-paths.mjs'
 
@@ -345,7 +345,7 @@ test('命令正文里出现的每个 .agent-team 路径都是控制文件、门�
 // 自己的顶层字段」的词，逐一核对过，显式豁免，不算进判定：
 //   - slug：run id 格式里的一段（YYYYMMDD-HHmm-<slug>），根本不是字段。
 //   - subagent_type：Agent 工具的参数名，跟 state.json 无关，只是说明写在同一段列表里。
-//   - kind：escalations[] 每条记录自己的字段（规格 §5.3 的五类取值），不是 state.json
+//   - kind：escalations[] 每条记录自己的字段（规格 §5.1 的那几类取值），不是 state.json
 //     的顶层字段——两者经常在同一句话里一起出现（「往 state.json 的 escalations 追加
 //     一条……kind 用上表里的取值」），位置上分不开，只能显式豁免。
 //   - produces：stages.json 每个阶段自己的字段，不是 state.json 的字段——「把
@@ -529,11 +529,18 @@ test('/at-resume 第 2 节写明「展开为空集不算齐了」，且 isStageD
   )
 })
 
-test('/at 写明了五类升级条件的 kind 取值', () => {
+// M4c（docs/37）：取值从 ESCALATION_KINDS 派生，不在这里另抄一份——加一类时 /at 第 4 节的表与 04-dispatch 模板一起红。
+test('/at 第 4 节的表与 04-dispatch 模板写全了升级条件的 kind 取值（从 ESCALATION_KINDS 派生）', () => {
   const t = textOf('at.md')
-  for (const k of ['sensitive', 'contract-conflict', 'tradeoff', 'contract-hole', 'budget-exhausted']) {
-    assert.ok(t.includes(k), `commands/at.md 没有写 escalations 的 kind 取值 ${k}`)
+  const tpl = readFileSync(new URL('../templates/04-dispatch.md', import.meta.url), 'utf8')
+  for (const k of ESCALATION_KINDS) {
+    assert.ok(t.includes(`| \`${k}\` |`), `commands/at.md 第 4 节的表里没有 ${k} 那一行`)
+    assert.ok(tpl.includes(k), `templates/04-dispatch.md 第 4 节没有列 ${k}`)
   }
+  // M4c 复核：反过来也要对上——表里多一行 ESCALATION_KINDS 没有的类别，PM 照表记它会被 validateState 拒。
+  const s4 = t.slice(t.indexOf('## 4. 什么时候必须停下来问用户'), t.indexOf('\n## 5.'))
+  const rows = [...s4.matchAll(/^\| `([a-z-]+)` \|/gm)].map((m) => m[1])
+  assert.deepEqual(rows, ESCALATION_KINDS, '第 4 节的表与 ESCALATION_KINDS 要一一对应、同序')
 })
 
 // ——— 命令之间的互相引用必须带插件命名空间 ———

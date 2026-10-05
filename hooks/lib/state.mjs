@@ -55,14 +55,18 @@ export function isNonNegativeInteger(v) {
   return Number.isInteger(v) && v >= 0
 }
 
-// 与规格 §5.1 的五类必须升级条件一一对应，顺序也照它：
-// 1 敏感与不可逆 / 2 契约冲突 / 3 取舍 / 4 契约有洞 / 5 预算耗尽。
+// 与规格 §5.1 的必须升级条件一一对应，顺序也照它：
+// 敏感与不可逆 / 契约冲突 / 取舍 / 契约有洞 / 预算耗尽 / 环境阻塞。
+// M4c（docs/37，全量审查第 37 条后半）：加 env-blocked——缺工具、服务或权限，构建或测试跑不起来，这一段交不出来或验证不了。收口门禁
+// 自己就把「测试跑不起来」指向 /agent-team:at 第 4 节，原来照做如实记它会被报成状态不合法。user-change（用户主动改需求）没加：
+// 记不记回退、吃不吃返工额度还没定（docs/37 §5）。正文与判据不写总数，从这里派生（tests/commands.test.mjs、tests/readme-sync.test.mjs）。
 export const ESCALATION_KINDS = [
   'sensitive',
   'contract-conflict',
   'tradeoff',
   'contract-hole',
   'budget-exhausted',
+  'env-blocked',
 ]
 
 function isStringArray(v) {
@@ -363,7 +367,7 @@ export function validateState(state, { stages, grants } = {}) {
         if (typeof e[k] !== 'string') p(`escalations[${i}].${k} 缺失或不是字符串`)
       }
       if (typeof e.kind === 'string' && !ESCALATION_KINDS.includes(e.kind)) {
-        p(`escalations[${i}].kind 是 ${quote(e.kind)}，必须是规格 §5.1 的五类之一：${ESCALATION_KINDS.join('、')}`)
+        p(`escalations[${i}].kind 是 ${quote(e.kind)}，必须是规格 §5.1 列的这几类之一：${ESCALATION_KINDS.join('、')}`)
       }
     })
   }
