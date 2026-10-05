@@ -17,7 +17,7 @@
 ## 特性
 
 - 🧭 **项目经理就是主会话**：你只跟项目经理对话。它把你的需求逐字冻结成契约，再分层派给产品、架构、实现、测试与验收各角色。
-- 🚦 **顺序由门禁强制**：六道 hook 门禁——派发白名单、前置就绪、写路径隔离、契约保护、交付物核验、返工预算——拦下越级派发与越界写入。
+- 🚦 **顺序由门禁强制**：六道 hook 门禁——派发白名单、前置就绪、写路径隔离、契约保护、交付物核验、返工预算——拦下越级派发、越界写入，以及跳段、没交齐就推进。
 - ✅ **业务验收独立成线**：测试之外，还有一道对着你的原话逐条核对的业务验收。
 - 👀 **过程看得见**：在桌面应用里，每个角色的完整过程都能单独查看；同一阶段的角色并行干活。
 - 📦 **零 npm 依赖**：纯插件，只要 PATH 上有 Node；不起服务、不监听端口。
@@ -122,15 +122,16 @@ flowchart TB
 
 ```text
 .agent-team/
-├── project.json        勘察结果：各角色能写的目录、可用角色、构建与测试命令
-├── reach.json          算上派发之后，各角色实际能写到的地方
-├── current-run         当前这一趟的 run id
+├── project.json         勘察结果：各角色能写的目录、可用角色、构建与测试命令
+├── reach.json           算上派发之后，各角色实际能写到的地方
+├── current-run          当前这一趟的 run id
 └── runs/<run_id>/
-    ├── 00-contract.md  契约：你的原话与修订记录
-    ├── …               各阶段的产物（实现阶段每个执行角色各一份）
-    ├── approvals.jsonl 你批准过的额外返工轮（门禁自己记）
-    ├── delivered.json  门禁记下的已交付产物快照
-    └── state.json      这一趟的账本
+    ├── 00-contract.md   契约：你的原话与修订记录
+    ├── …                各阶段的产物（实现阶段每个执行角色各一份）
+    ├── approvals.jsonl  你批准过的额外返工轮（门禁自己记）
+    ├── delivered.json   门禁记下的已交付产物快照
+    ├── dispatches.jsonl 门禁记下的派发：谁在哪一段被派出去、拦过它几回
+    └── state.json       这一趟的账本
 ```
 
 代码本身写进 `project.json` 分给各角色的目录里。
@@ -203,7 +204,7 @@ The project manager is your main session: it dispatches work through a layered h
 ## Features
 
 - 🧭 **The project manager is your main session.** You only talk to the project manager. It freezes your requirement word for word as the contract, then dispatches product, architecture, implementation, testing and acceptance roles layer by layer.
-- 🚦 **Gates enforce the order.** Six hook gates — dispatch whitelist, readiness, write-path isolation, contract protection, deliverable checks and rework budget — stop out-of-order dispatch and out-of-bounds writes.
+- 🚦 **Gates enforce the order.** Six hook gates — dispatch whitelist, readiness, write-path isolation, contract protection, deliverable checks and rework budget — stop out-of-order dispatch, out-of-bounds writes, and skipped or unfinished stages.
 - ✅ **Business acceptance is its own track.** Beyond testing, a separate acceptance pass checks the result against your original words, clause by clause.
 - 👀 **You can watch every role.** In the desktop app each role's full run can be viewed on its own, and roles in the same stage work in parallel.
 - 📦 **No npm dependencies.** A pure plugin that only needs Node on the PATH: no services, no open ports.
@@ -308,15 +309,16 @@ When rework runs out, only the option 「再返工一轮：回到 <stage>」 is 
 
 ```text
 .agent-team/
-├── project.json        the survey: writable directories per role, available roles, build and test commands
-├── reach.json          where each role can actually write once dispatch is taken into account
-├── current-run         the id of the current run
+├── project.json         the survey: writable directories per role, available roles, build and test commands
+├── reach.json           where each role can actually write once dispatch is taken into account
+├── current-run          the id of the current run
 └── runs/<run_id>/
-    ├── 00-contract.md  the contract: your words and its revisions
-    ├── …               each stage's deliverables (one per implementation role in the implementation stage)
-    ├── approvals.jsonl extra rework rounds you approved (recorded by the gates)
-    ├── delivered.json  the gates' snapshot of delivered artifacts
-    └── state.json      the run's ledger
+    ├── 00-contract.md   the contract: your words and its revisions
+    ├── …                each stage's deliverables (one per implementation role in the implementation stage)
+    ├── approvals.jsonl  extra rework rounds you approved (recorded by the gates)
+    ├── delivered.json   the gates' snapshot of delivered artifacts
+    ├── dispatches.jsonl the gates' record of dispatches: who was sent out in which stage, and how many times a stop was blocked
+    └── state.json       the run's ledger
 ```
 
 The code itself goes into the directories `project.json` assigns to each role.

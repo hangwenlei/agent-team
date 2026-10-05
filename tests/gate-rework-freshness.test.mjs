@@ -187,7 +187,8 @@ test('M3y H5a：PM 收件 → 说是上一轮的，出路有「标 accepted」',
     const c = contextOf(run('deliverable', returned('agent-team:at-backend'), GATE, fx.p))
     assert.match(c, /05-impl\/at-backend\.md 还是上一轮的/)
     assert.match(c, /改成 "accepted"/)
-    assert.match(c, /等 at-backend 写完/)
+    // M4d（docs/38，全量审查第 19 条）：前台派发跑完（status completed）它已经停下了，不再说「等它写完（异步派发时）」。
+    assert.doesNotMatch(c, /等 at-backend 写完/)
     assert.match(c, /重派它这一轮重写/)
     assert.doesNotMatch(c, /磁盘上还没有/, '在磁盘上的不能说成没有')
   })
@@ -334,7 +335,7 @@ test('M3y H5a：一份没写、一份是上一轮的 → PM 收到的回传两�
   const { ['02-ui-spec.md']: _gone, ...files } = R1
   using({ stage: 'S2', history: [...FIRST, ...H('S2')], reworkBase: atS2, files }, (fx) => {
     const c = contextOf(run('deliverable', returned('agent-team:at-ui'), GATE, fx.p))
-    assert.match(c, /02-ui-spec\.md，但磁盘上还没有/)
+    assert.match(c, /02-ui-spec\.md 还没有/)
     assert.match(c, /02-wireframe\.html 还是上一轮的/)
   })
 })

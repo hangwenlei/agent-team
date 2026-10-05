@@ -113,7 +113,7 @@ export function stageRolesInRun(stage, roster) {
   return roles.filter((r) => inRun.has(r))
 }
 
-/** 某一段**在这一趟里叫到了谁**——按段的消费方（isStageDone 的两处调用、decideCoverage、at-status 与 at-resume 的展开口径；
+/** 某一段**在这一趟里叫到了谁**——按段的消费方（isStageDone 的每一处调用、decideCoverage、at-status 与 at-resume 的展开口径；
  * at-qa 的自查在角色正文里照同一口径写）都从这里取（M3x，docs/32）。isStageDone 与 at-status、at-resume 再交给 stageRolesInRun
  * 与这一段的产者求交；decideCoverage 不经 stageRolesInRun，报的是这一段的产者减去这里给的人、再减去 trimmed 的全部键，
  * undefined 按空集算（coverage.mjs 那段「不学 stageRolesInRun」）。

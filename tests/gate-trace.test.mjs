@@ -377,6 +377,13 @@ const SCENARIOS = [
     setup: () => ({ ...fromRun({ runId: 'r1', stage: 'S2' }), input: { hook_event_name: 'UserPromptSubmit', prompt: '继续' } }),
     shape: { status: 0, stdout: 'empty', stderr: 'empty' },
   },
+  // M4d（docs/38，全量审查第 19 条）：完成核验。用户自己的话不是完成通知，静默。
+  {
+    name: 'completion：用户的话不是完成通知，静默',
+    check: 'completion',
+    setup: () => ({ ...fromRun({ runId: 'r1', stage: 'S2' }), input: { hook_event_name: 'UserPromptSubmit', prompt: '继续' } }),
+    shape: { status: 0, stdout: 'empty', stderr: 'empty' },
+  },
 ]
 
 function runBoth(sc) {

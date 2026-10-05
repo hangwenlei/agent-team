@@ -24,9 +24,22 @@ import { decideRework, decideReworkBase, parseStateText, replayEdit } from './li
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { isBlankText } from './lib/text-norm.mjs'
 import { normalizeText } from './lib/text-norm.mjs'
-import { decideDeliverable, isBubbleStop } from './lib/deliverable.mjs'
+import { decideDeliverable, isBubbleStop, bubbleReason, isKnownStage } from './lib/deliverable.mjs'
+import {
+  AGENT_ID_RE,
+  blockLine,
+  bubbleOf,
+  coordinatorProgress,
+  dispatchLine,
+  dispatchOf,
+  dispatchPhase,
+  explainMissing,
+  parseNotifications,
+  readDispatchLog,
+  reportTexts,
+} from './lib/completion.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
-import { APPROVALS_FILE, DELIVERED_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
+import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
 import { readGrants } from './lib/budget.mjs'
 import { askAnswers, promptAnswer, planApprovals, approvalLine, approvalNotices } from './lib/approvals.mjs'
 import { deliveredSnapshot, readSnapshot, makeDelivered, decideRedispatch, decideRedoWrite } from './lib/redo.mjs'
@@ -39,7 +52,7 @@ import { NO_PATHS_ROLES, validateProject } from './lib/project.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
 import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
-import { isPlainObject, participantsOf, isRolePatternStage } from './lib/stages.mjs'
+import { isPlainObject, participantsOf, isRolePatternStage, expandProduces, stageRoles } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
 import { GATE_CHECK_PATH, gateCheckReason, isGateCheck } from './lib/gate-check.mjs'
@@ -268,8 +281,7 @@ function looksUtf16(text) {
 // 「这个角色实际能写到哪」（reach.mjs 开头写明是审计产物、不是安全边界），两者问的不同。
 // 失效条件不是「有人派得到某个 producer 却派不到该段 role」（那就是被否掉的那种口径），
 // 而是：**某一段的真协调者派不到那一段的 role**。今天八段都不满足。完整裁定见 docs/11 §5.12。
-function isCoordinatorFor(ctx, role) {
-  const stageId = ctx.state?.stage
+function isCoordinatorFor(ctx, role, stageId = ctx.state?.stage) {
   const stages = ctx.stages
   if (!stages || typeof stages !== 'object') return false
   if (typeof stageId !== 'string' || !Object.hasOwn(stages, stageId)) return false
@@ -287,7 +299,7 @@ function isCoordinatorFor(ctx, role) {
 // 回传全丢（上一版的 emitLedger 不退出，靠每个调用点自己紧跟 exit）。要一起发的话在调用点并进同一次调用。
 // 不变式：fail closed 的检查项只经 denyAndExit 写 stdout，不调用这里（tests/gate-fail-open.test.mjs 按源码钉着）。
 function emitHookJson(event, parts) {
-  const { stdout, bug } = hookOutput(event, parts)
+  const { stdout, bug } = hookOutput(event, parts, CHECK)
   if (bug) process.stderr.write(bug)
   if (stdout) {
     DECIDED = 0
@@ -734,11 +746,14 @@ function writeDeliveredSnapshot(ctx) {
 
 // M3z：门禁专属文件的拒绝理由。路径是这次调用给的，过 inline。
 function gateFileReason(checked, exotic) {
-  const approvals = leafName(checked) === APPROVALS_FILE || (typeof checked === 'string' && leafName(norm(checked)) === APPROVALS_FILE)
+  const leafIs = (name) => leafName(checked) === name || (typeof checked === 'string' && leafName(norm(checked)) === name)
+  const approvals = leafIs(APPROVALS_FILE)
   const what = approvals
     ? '这是门禁自己记的返工批准。用户在 AskUserQuestion 里选了「再返工一轮：回到 <段>」、或者在对话里单独发了这一条，而这一轮真的' +
       '需要批准时，门禁自己记下它；照返工预算门禁拒绝理由里的问法去问用户。'
-    : '这是门禁自己拍的交付快照，PM 推进或回退之后由门禁照磁盘重拍，不用、也不许改。'
+    : leafIs(DISPATCHES_FILE)
+      ? '这是门禁自己记的派发记录（谁在哪一段被派出去、谁派的、交付物核验拦过它几回），子代理完成时门禁靠它核产物，不用、也不许改。'
+      : '这是门禁自己拍的交付快照，PM 推进或回退之后由门禁照磁盘重拍，不用、也不许改。'
   return (
     `agent-team 门禁：不得写 ${inline(checked)}——${exotic ? `${exotic}；它可能就是门禁专属文件。` : ''}${what}` +
     '任何人（包括项目经理与主线程）都不用 Edit/Write 写它。'
@@ -799,6 +814,96 @@ function withApprovalsLock(runDir, body) {
       } catch {}
     }
   }
+}
+
+// M4d（docs/38，全量审查第 19 条）：往当前 run 的派发记录（runs/<id>/dispatches.jsonl，门禁专属）追加一行。只追加、一次写一整行（O_APPEND）：
+// 并发的几个门禁进程各写各的，不读后判、不加锁。末字节不是换行（手改过、被截断）时先补一个。写不进只留痕——完成核验这一次少核。
+function appendDispatchLog(runDir, line, label) {
+  try {
+    const file = join(runDir, DISPATCHES_FILE)
+    let sep = ''
+    try {
+      const prev = readFileSync(file)
+      if (prev.length && prev[prev.length - 1] !== 0x0a) sep = '\n'
+    } catch {}
+    appendFileSync(file, `${sep}${line}\n`)
+  } catch (err) {
+    process.stderr.write(`agent-team ${label}：派发记录没有写成（${quote(err?.message ?? err, { max: 120 })}），完成核验这一次少核。\n`)
+  }
+}
+
+// M4d（docs/38，全量审查第 19 条）：产物没交时 H5a（前台派发跑完、认不出前台还是后台）与完成核验（后台派发完成）共用的那一段。why 为 null 是认不出
+// 派发是前台还是后台的那一格（tool_response 没有 status）：文案与改之前逐字相同。其余按 why 说成因（hooks/lib/completion.mjs 的
+// explainMissing）：冒泡了、门禁拦过它而平台静默放行、门禁没拦它、通知说它没正常结束。还旧那一段各格照旧带——知道它已经跑完的几格
+// 不再说「等它写完（异步派发时）」。
+function missingNotice({ ctx, r, role, recipientCanWriteState, why = null, redispatch = `再派 ${role} 一次` }) {
+  const wait = why === null
+  const { accept: staleAccept, redo: staleRedo } = splitByAccept(ctx.stages, r.stale)
+  const bothKinds = staleAccept.length && staleRedo.length
+  const acceptPart = !staleAccept.length
+    ? ''
+    : recipientCanWriteState
+      ? `${bothKinds ? `${staleAccept.join('、')}：` : ''}这一轮接受上一轮那份原样，就在 state.json 的 rework_base 里把它的值改成 "accepted"；` +
+        (wait ? `否则等 ${role} 写完（异步派发时），或者重派它这一轮重写。` : '否则重派它这一轮重写。')
+      : (wait
+          ? `rework_base 只有项目经理改得了：它这一轮还没重写，就等它写完（异步派发时），或者重派 ${role} 让它这一轮重写；`
+          : `rework_base 只有项目经理改得了：重派 ${role} 让它这一轮重写；`) +
+        `你判断上一轮那份${bothKinds ? `（${staleAccept.join('、')}）` : ''}这一轮不用改，就把这一点冒泡给派你的人，由项目经理标 "accepted"。`
+  const redoPart = !staleRedo.length
+    ? ''
+    : `${staleRedo.join('、')}：${VERIFY_REDO}——` + (wait ? `等 ${role} 重跑写完（异步派发时），或者重派它。` : '重派它。')
+  const staleOut =
+    acceptPart + redoPart + (recipientCanWriteState ? '推进出这一段时，H6 会拦住还是上一轮的产物。' : '')
+  const staleText = r.stale.length
+    ? `${r.stale.join('、')} 还是上一轮的（返工轮：磁盘内容与回退那一刻 rework_base 记的 sha 相同，这一轮还没有重写）`
+    : ''
+  // M4a 文档核对（docs/35）：空文件单列（r.blank），没有它时文案与原来逐字相同。
+  const blankList = Array.isArray(r.blank) ? r.blank : []
+  const blankText = blankList.length ? `${blankList.join('、')} 是空文件（空文件不算交了）` : ''
+  const tail = [blankText, staleText].filter(Boolean).join('；')
+  if (wait) {
+    return !r.stale.length && !blankList.length
+      ? `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，` +
+          `但磁盘上还没有。${SUBAGENT_STOP_RETRY_NOTE}` +
+          `。不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`
+      : (r.missing.length
+          ? `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，但磁盘上还没有；${tail}。`
+          : `⚠️ 交付物校验：${role} 在 ${r.stageId} 的 ${tail}。`) +
+          `${SUBAGENT_STOP_RETRY_NOTE}。不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实。` +
+          (r.stale.length ? staleOut : '')
+  }
+  const facts = [r.missing.length ? `${r.missing.join('、')} 还没有` : '', tail].filter(Boolean).join('；')
+  // 冒泡的理由是子代理写的文字：外部值，过 quote（一对引号里、截断、转义、消去受信前缀；docs/27 §2.1）。
+  const head =
+    why.kind === 'bubble'
+      ? `⚠️ 交付物校验：${role} 在 ${r.stageId} 冒泡了` +
+        (why.reason ? `：${quote(why.reason, { max: 160 })}。` : '（理由写在它回报的下文里）。') +
+        `它这一段该交的没交齐：${facts}。`
+      : `⚠️ 交付物校验：${role} 在 ${r.stageId} 没交齐：${facts}。`
+  return head + explainMissing(why, { recipientIsPm: recipientCanWriteState, redispatch }) + (r.stale.length ? staleOut : '')
+}
+
+// M4d（docs/38，全量审查第 19 条修法 3）：协调者返回、它协调的那一段还没齐时，列出门禁记着它（这一次运行，按 agent_id）在这一段派出去的执行角色与
+// 各自产物现在的样子。认不出协调者这次运行的 agent_id 时退回按角色名认（同一段里派过几次架构师，会并在一起）。
+function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, recipientIsPm }) {
+  const stage = ctx.stages?.[stageId]
+  if (!isPlainObject(stage)) return null
+  const producers = stageRoles(stage)
+  const byRole = new Map()
+  for (const d of log.dispatches) {
+    if (d.stage !== stageId || !producers.includes(d.role)) continue
+    if (coordinatorId ? d.caller_id !== coordinatorId : d.caller !== coordinator) continue
+    byRole.set(d.role, d.mode === 'foreground' ? 'foreground' : 'background')
+  }
+  const rows = [...byRole].map(([role, mode]) => ({
+    role,
+    mode,
+    items: expandProduces(stage, [role]).map((name) => ({
+      name,
+      state: !ctx.artifactExists(name) ? 'missing' : fresh.isBlank(name) ? 'blank' : fresh.isStale(name) ? 'stale' : 'ok',
+    })),
+  }))
+  return coordinatorProgress({ role: coordinator, stageId, rows, recipientIsPm })
 }
 
 function main() {
@@ -1708,6 +1813,92 @@ function main() {
     })
   }
 
+  if (CHECK === 'completion') {
+    // M4d（docs/38，全量审查第 19 条）：后台派发的子代理完成时，主会话收到一条 <task-notification>、UserPromptSubmit 随之触发。认出通知，按门禁记的
+    // 派发记录对回「谁、哪一段、谁派的」，核它这一段的产物；没交齐的说成因（冒泡了、门禁拦过它而平台静默放行、门禁没拦它、没正常结束），
+    // 协调者返回而那一段还没齐的报进度。交齐了的不出声（与 H5a 同一个口径）。
+    // 不认识的通知（别的 agent、后台 Bash、别的 run、门禁没记下的派发）不出声：门禁只对它记过的团队派发表态。
+    // 读不出运行状态只留痕：PM 派发那一刻 H5a 已经说过「交付物核验不会做」。这个事件上 exit 2 会把这条消息吞掉——这一项永不拒。
+    const notes = parseNotifications(input.prompt)
+    if (!notes.length) process.exit(0)
+    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    if (!ctx.ok) {
+      if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('完成核验', ctx))
+      process.exit(0)
+    }
+    const roster = loadRoster()
+    const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
+    const log = readDispatchLog(logBytes ? logBytes.toString('utf8') : null)
+    const recipientIsPm = isContractWriter(callerOf(input))
+    const fresh = makeFreshness({ artifactExists: ctx.artifactExists, artifactBytes: ctx.artifactBytes, reworkBase: ctx.state?.rework_base })
+    const pmCan = isPlainObject(roster?.['at-pm']) && Array.isArray(roster['at-pm'].can_delegate_to) ? roster['at-pm'].can_delegate_to : []
+    const contexts = []
+    const seen = new Set()
+    for (const n of notes) {
+      for (const taskId of n.taskIds) {
+        if (seen.has(taskId)) continue
+        seen.add(taskId)
+        const d = dispatchOf(log, taskId, n.toolUseId)
+        // 记录里的角色与段来自磁盘：只认花名册里的角色、阶段链上的段（之后原样拼进文字，是插件自己的名字）。
+        if (!d || !isPlainObject(roster) || !Object.hasOwn(roster, d.role) || !isKnownStage(ctx.stages, d.stage)) continue
+        if (closedAt(ctx.state) !== null) {
+          if (recipientIsPm) {
+            contexts.push(
+              `交付物核验：${d.role}（${d.stage}）在这一趟收口之后才完成——收口时它还在跑。门禁不再核它的产物，它这次写的东西不计入这一趟；` +
+                '要用，另起一趟（/agent-team:at）。',
+            )
+          }
+          continue
+        }
+        const r = decideDeliverable({
+          role: d.role,
+          stageId: d.stage,
+          stages: ctx.stages,
+          artifactExists: fresh.artifactCurrent,
+          artifactStale: fresh.isStale,
+          artifactBlank: fresh.isBlank,
+        })
+        if (r.ok) {
+          // 协调者的进度只在它协调的那一段还是当前段时报：PM 已经推进出去了的，那一段齐没齐归推进那一刻的判据（第 17 条）。
+          // 判齐照 tests/stage-done-call-site.test.mjs 的口径取当前段的参与者。
+          if (r.skipped === 'role-not-in-stage' && d.stage === ctx.state?.stage && isCoordinatorFor(ctx, d.role, d.stage)) {
+            const done = isStageDone({
+              stage: ctx.state?.stage,
+              stages: ctx.stages,
+              artifactExists: fresh.artifactCurrent,
+              roster: participantsOf(ctx.state, ctx.state?.stage),
+            })
+            if (!done) {
+              const p = progressOf({ ctx, fresh, log, coordinator: d.role, coordinatorId: taskId, stageId: d.stage, recipientIsPm })
+              if (p) contexts.push(p)
+            }
+          }
+          continue
+        }
+        const reason = n.result === null ? null : bubbleReason(n.result)
+        const blocks = log.blocks.get(taskId) ?? 0
+        const why =
+          n.status !== null && n.status !== 'completed'
+            ? { kind: 'status', status: n.status }
+            : reason !== null
+              ? { kind: 'bubble', reason }
+              : blocks > 0
+                ? { kind: 'cap', blocks }
+                : { kind: 'unblocked' }
+        const caller = typeof d.caller === 'string' && Object.hasOwn(roster, d.caller) && !isContractWriter(d.caller) ? d.caller : null
+        const direct = !recipientIsPm || pmCan.includes(d.role)
+        const redispatch = direct
+          ? `再派 ${d.role} 一次`
+          : caller
+            ? `经 ${caller} 再派 ${d.role} 一次（你派不到它）`
+            : `经派得到 ${d.role} 的那一层再派它一次（你派不到它）`
+        contexts.push(missingNotice({ ctx, r, role: d.role, recipientCanWriteState: recipientIsPm, why, redispatch }))
+      }
+    }
+    if (!contexts.length) process.exit(0)
+    emitHookJson(spec.event, { contexts })
+  }
+
   if (CHECK === 'stop-gate' || CHECK === 'deliverable') {
     // 两道 H5 共用这一整段，差别只有这个名字。同一句三元此前在下面相隔 16 行
     // 写了两遍（整理项 9），提到分支外算一次。
@@ -1817,6 +2008,38 @@ function main() {
       artifactStale: fresh.isStale,
       artifactBlank: fresh.isBlank,
     })
+
+    // M4d（docs/38，全量审查第 19 条）：H5a 这一刻是派发的哪一刻（tool_response.status）。launched：后台派发刚启动，子代理还没干活，不判产物（它完成时
+    // 由完成核验判）；completed：前台派发跑完了；unknown：tool_response 没有 status（旧版 CLI），照改之前的口径说。
+    // 团队角色的每一次派发记一行派发记录：完成核验按它对回角色与段，协调者的进度按 caller_id 认它派过谁。已收口的 run 不记。
+    const phase = CHECK === 'deliverable' ? dispatchPhase(input?.tool_response) : null
+    const launchedId = CHECK === 'deliverable' ? input?.tool_response?.agentId : null
+    if (
+      CHECK === 'deliverable' &&
+      phase !== 'unknown' &&
+      typeof launchedId === 'string' &&
+      AGENT_ID_RE.test(launchedId) &&
+      closedAt(ctx.state) === null &&
+      isKnownStage(ctx.stages, ctx.state?.stage)
+    ) {
+      const rosterNow = loadRoster()
+      if (isPlainObject(rosterNow) && Object.hasOwn(rosterNow, role)) {
+        appendDispatchLog(
+          ctx.runDir,
+          dispatchLine({
+            at: new Date().toISOString(),
+            agentId: launchedId,
+            toolUseId: typeof input.tool_use_id === 'string' ? input.tool_use_id : null,
+            role,
+            stage: ctx.state.stage,
+            caller: callerOf(input),
+            mode: phase === 'launched' ? 'background' : 'foreground',
+            callerId: typeof input.agent_id === 'string' && AGENT_ID_RE.test(input.agent_id) ? input.agent_id : null,
+          }),
+          label,
+        )
+      }
+    }
 
     // 账本比对（Task 4，规格 §6.2 的内容比对补偿）：排在 r.ok 分支判断之前算，因为不管
     // r 落进下面哪一支，比对结果都要并进**同一条** additionalContext——两份 JSON 写进
@@ -1992,6 +2215,22 @@ function main() {
               : `这次派发若是驳回之后的返工，记回退是项目经理的事：把这一条原样冒泡给派你的人。`)
         notices.push(notice)
       }
+      // M4d（docs/38，全量审查第 19 条修法 3）：协调者返回、当前段还没齐（S5 正路上架构师返回时，执行角色可能还在后台跑）——原来这一格整段静默。
+      // 现在报门禁记着它派出去的执行角色与各自产物的现状，只说事实、不下「缺」的断语（措辞在 hooks/lib/completion.mjs 的
+      // coordinatorProgress）。后台派发启动那一刻不报：它还没开始派。
+      if (CHECK === 'deliverable' && phase !== 'launched' && r.skipped === 'role-not-in-stage' && coordinator && !stageDone && closedAt(ctx.state) === null) {
+        const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
+        const p = progressOf({
+          ctx,
+          fresh,
+          log: readDispatchLog(logBytes ? logBytes.toString('utf8') : null),
+          coordinator: role,
+          coordinatorId: typeof launchedId === 'string' && AGENT_ID_RE.test(launchedId) ? launchedId : null,
+          stageId: ctx.state?.stage,
+          recipientIsPm: recipientCanWriteState,
+        })
+        if (p) notices.push(p)
+      }
       // 账本比对：不管上面那条哑火告警发不发，只要三个清单有一个非空就并进同一条——
       // 见上面 driftNotice 计算处的注释。emitHookJson 什么都没有时不写 stdout，两条
       // 告警都不适用时这里保持原来的完全沉默。账本比对不受这条静默表约束（docs/11
@@ -2013,6 +2252,11 @@ function main() {
       // （判定与理由在 ./lib/deliverable.mjs 的 isBubbleStop 上方）。放行走 exit 0、什么都不写：SubagentStop 上 stdout 与
       // additionalContext 都等于拦截。只在要拦的时候才读它——产物齐了的照上面 r.ok 那一支放行，与标记无关。
       if (isBubbleStop({ stopHookActive: input?.stop_hook_active, lastMessage: input?.last_assistant_message })) process.exit(0)
+      // M4d（docs/38，全量审查第 19 条）：拦之前记一行——完成时产物没交、又没冒泡、而这一行在，就是平台的续跑上限到了、静默放行了它。写不进只留痕，
+      // 照拦（拦不拦与记不记无关）。
+      if (typeof input?.agent_id === 'string' && AGENT_ID_RE.test(input.agent_id)) {
+        appendDispatchLog(ctx.runDir, blockLine({ at: new Date().toISOString(), agentId: input.agent_id, role, stage: ctx.state.stage }), label)
+      }
       denyAndExit(r.reason, spec.event)
     } else {
       // H5a：权威记录。不 block，只把事实留在会话里——不能被误读成"子代理正常返回
@@ -2036,37 +2280,20 @@ function main() {
       // 相同；有它时与「没有」分开说，出路按收件人分——改得了 state.json 的给「标 accepted」，改不了的冒泡。
       // M4a（docs/35）：还旧的按「能不能标 accepted」分开说——验证段的产物（问题 B 里异步派 at-qa 那一刻的 06-test.md）只给
       // 「重跑之后重写」，不给标 accepted。
-      const { accept: staleAccept, redo: staleRedo } = splitByAccept(ctx.stages, r.stale)
-      const bothKinds = staleAccept.length && staleRedo.length
-      const acceptPart = !staleAccept.length
-        ? ''
-        : recipientCanWriteState
-          ? `${bothKinds ? `${staleAccept.join('、')}：` : ''}这一轮接受上一轮那份原样，就在 state.json 的 rework_base 里把它的值改成 "accepted"；` +
-            `否则等 ${role} 写完（异步派发时），或者重派它这一轮重写。`
-          : `rework_base 只有项目经理改得了：它这一轮还没重写，就等它写完（异步派发时），或者重派 ${role} 让它这一轮重写；` +
-            `你判断上一轮那份${bothKinds ? `（${staleAccept.join('、')}）` : ''}这一轮不用改，就把这一点冒泡给派你的人，由项目经理标 "accepted"。`
-      const redoPart = !staleRedo.length
-        ? ''
-        : `${staleRedo.join('、')}：${VERIFY_REDO}——等 ${role} 重跑写完（异步派发时），或者重派它。`
-      const staleOut =
-        acceptPart + redoPart + (recipientCanWriteState ? '推进出这一段时，H6 会拦住还是上一轮的产物。' : '')
-      const staleText = r.stale.length
-        ? `${r.stale.join('、')} 还是上一轮的（返工轮：磁盘内容与回退那一刻 rework_base 记的 sha 相同，这一轮还没有重写）`
-        : ''
-      // M4a 文档核对（docs/35）：空文件单列（r.blank），没有它时文案与原来逐字相同。
-      const blankList = Array.isArray(r.blank) ? r.blank : []
-      const blankText = blankList.length ? `${blankList.join('、')} 是空文件（空文件不算交了）` : ''
-      const tail = [blankText, staleText].filter(Boolean).join('；')
-      const notice = !r.stale.length && !blankList.length
-        ? `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，` +
-          `但磁盘上还没有。${SUBAGENT_STOP_RETRY_NOTE}` +
-          `。不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实产物是否存在。`
-        : (r.missing.length
-            ? `⚠️ 交付物校验：${role} 在 ${r.stageId} 应当产出 ${r.missing.join('、')}，但磁盘上还没有；${tail}。`
-            : `⚠️ 交付物校验：${role} 在 ${r.stageId} 的 ${tail}。`) +
-          `${SUBAGENT_STOP_RETRY_NOTE}。不要仅凭"子代理正常返回"就判断这一段已经完成，去 run 目录核实。` +
-          (r.stale.length ? staleOut : '')
-      const notices = [notice]
+      // M4d（docs/38，全量审查第 19 条）：后台派发启动那一刻（launched）子代理才刚起来，产物当然还没有——不判、不说；它完成时由完成核验按派发记录核。
+      // 账本比对与【契约】审的是整趟 run、不是这个子代理，照发。前台派发跑完了（completed）：回报第一行是冒泡标记就说它冒泡了；不是的话，
+      // 门禁拦过它（派发记录里有它的拦截行）就是平台静默放行，没拦过就照实说门禁没核。认不出是哪一刻（unknown）：照改之前的口径。
+      const notices = []
+      if (phase !== 'launched') {
+        let why = null
+        if (phase === 'completed') {
+          const reason = bubbleOf(reportTexts(input.tool_response))
+          const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
+          const blocks = typeof launchedId === 'string' ? readDispatchLog(logBytes ? logBytes.toString('utf8') : null).blocks.get(launchedId) ?? 0 : 0
+          why = reason !== null ? { kind: 'bubble', reason } : blocks > 0 ? { kind: 'cap', blocks } : { kind: 'unblocked' }
+        }
+        notices.push(missingNotice({ ctx, r, role, recipientCanWriteState, why }))
+      }
       // 交付物本身还缺产物时，账本比对一样并进同一条——它审计的是全部阶段的
       // produces，不只是刚被判定缺失的这一段（比如更早的阶段被 Bash 绕过写过）。
       if (driftNotice) notices.push(driftNotice)
@@ -2135,7 +2362,8 @@ try {
   process.stderr.write(crashNotice(CHECK, err, spec?.recorder === true))
   try {
     const pm = isPlainObject(INPUT) && isContractWriter(INPUT.agent_type)
-    const context = crashContext(CHECK, err, pm)
+    const notification = isPlainObject(INPUT) && typeof INPUT.prompt === 'string' && INPUT.prompt.includes('<task-notification>')
+    const context = CHECK === 'completion' && !notification ? null : crashContext(CHECK, err, pm)
     emitHookJson(event, {
       contexts: context ? [context] : [],
       systemMessage: pm && userFacing(event) ? systemMessage('crash', { check: CHECK }) : null,

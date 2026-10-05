@@ -36,7 +36,7 @@
 // ⚠️ 本模块**不改 isStageDone**（设计 §5 明写排除）。isStageDone 按 roster 收窄是对的
 // ——它答的是「这一趟这一段齐了没」；形状 A 由这条判据接住，不是由它。
 // ⚠️ M3x（docs/32）订正上一句的前提：「按 roster 收窄」对多段角色不对——at-ui 在 S2 进过 roster，S5 就把它当成 S5 的产者。
-// 现在两边都按段：isStageDone 的两处调用与本模块都经 participantsOf 取「那一段叫到了谁」（state.json 的 stage_roles，
+// 现在两边都按段：isStageDone 的每一处调用与本模块都经 participantsOf 取「那一段叫到了谁」（state.json 的 stage_roles，
 // 旧 run 退回 roster）。分工没变：齐没齐归 isStageDone，谁没交代归这里。
 import { stageRoles, isPlainObject, participantsOf } from './stages.mjs'
 

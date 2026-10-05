@@ -165,11 +165,13 @@ function callSites(sources) {
 // deepEqual 一份清单：多一处调用、少一处调用、换个文件、搬到别的分支区，全都红。
 // `roster` 一起钉在同一个 deepEqual 里，**不拆成「先数调用点、再另写一条数参数」**
 // ——拆开的话「新增一处不传 roster 的调用」会只红一条，而它同时违反了两件事。
-test('docs/11 §5.33 / docs/32：hooks/ 下 isStageDone 只有两处调用，都在 hooks/gate.mjs，且两处都按段取参与者', () => {
+test('docs/11 §5.33 / docs/32：hooks/ 下 isStageDone 的调用就是清单上这几处，都在 hooks/gate.mjs，每一处都按段取参与者', () => {
   assert.deepEqual(
     callSites(hookSources()),
     [
       { file: 'hooks/gate.mjs', checks: ['ledger'], participants: true },
+      // M4d（docs/38，全量审查第 19 条）：完成核验判协调者那一段齐没齐——只在那一段还是当前段时判，取当前段的参与者（与另两处同一个口径）。
+      { file: 'hooks/gate.mjs', checks: ['completion'], participants: true },
       { file: 'hooks/gate.mjs', checks: ['stop-gate', 'deliverable'], participants: true },
     ],
     'isStageDone 的每一处调用都必须传 roster: participantsOf(ctx.state, ctx.state?.stage)（M3x，docs/32）。\n' +

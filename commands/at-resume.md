@@ -61,6 +61,8 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
   「被写路径隔离拒绝」一节、里面还有没标「已解决」的条目的，那一份不算交齐，照同一节 `S5` 那一条处理、在 `S5` 里重派。
 - **产物齐了**（不是最后一段） → 这一段其实已经做完，只是没记账。先 `Read` `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 的「逐段推进」一节（第 2–4 条，以及「各段的具体做法」里当前段那一条），照它用同一次 Write 记账（`stage`、`history`、`roster`、`stage_roles`、`trimmed`，下一段在 `history` 里已经出现过时还有 `rework`；两个字段方向相反：`stage_roles` 是 `{ 段: [角色] }`，`trimmed` 是 `{ 角色: 段 }`），
   然后从下一段继续。`state.json` 里没有 `stage_roles`（更早落盘的 run）就不要加，照旧只累加 `roster`。
+  推进被 H6 拒、理由说哪份缺或是空文件：照理由补——叫到的人没交的派它补交（你派不动的经这一段的协调者），确实不要的照
+  `/agent-team:at` 第 3 节写进 `trimmed`；不要为了过门禁从 `stage_roles` 里删人。
 - **产物不齐** → 从这一段继续，先看缺哪个产物、该派谁。
 - **`stage` 是阶段链最后一段、它的产物齐了**（而且不是上一轮的）→ 这一趟走完了、只是没写收口标记：照
   `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 6 节收口（同一次 Write 记 `never_invoked` 与 `closed_at`），没被 H6 拒就是收好了，告诉用户它已经交付；

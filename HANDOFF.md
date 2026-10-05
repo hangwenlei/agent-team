@@ -61,7 +61,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   与 `denyAndExit`；`tests/helpers/gate-runner.mjs` 对每一次门禁子进程核平台契约。修法按 runctx 的 `cause` 选、按命令分，
   新写一句修法要照着做一遍、看门禁放不放行。理由在 `docs/30`。
 - **问「这一段」的消费方按段取参与者，账本比对与 H2 有意整趟**：`state.json` 的 `stage_roles`（`{ 段: [角色] }`）是 `roster`
-  按段拆开、同一个「叫到」口径，PM 在推进出那一段的同一次 Write 里记；`isStageDone` 的两处调用、产者交代、at-qa/at-status/at-resume
+  按段拆开、同一个「叫到」口径，PM 在推进出那一段的同一次 Write 里记；`isStageDone` 的每一处调用、产者交代、at-qa/at-status/at-resume
   经 `hooks/lib/stages.mjs` 的 `participantsOf` 取（有字段、没这一段的键 = 还没记账 = 空集；没有字段的旧 run 退回 `roster`）。
   `compareArtifacts` 与 `decideReadiness` 仍传整趟 `roster`：当前段记账之前按段取是空集，前者漏报漂移、后者提前放行。理由在 `docs/32`。
 - **返工轮靠回退那一刻的快照认上一轮的产物**：`state.json` 的 `rework_base`（`{ 产物名: sha 或 "accepted" }`）由回退那一次写入照磁盘记，
@@ -90,9 +90,9 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   PM、at-resume、at-qa 按它判交没交齐，执行段「齐了」时门禁提醒先读它（`IMPL_RECORD_NOTE`）。理由在 `docs/36`。
 - **冒泡的出口由门禁认，不改「交没交」**：H5b 在子代理已经被拦过一回（`stop_hook_active`）、最后一条回复的第一行以「冒泡：」开头时放它停下
   （`hooks/lib/deliverable.mjs` 的 `isBubbleStop`，标记的单一真源是 `BUBBLE_MARK`）；这一段的产物照旧算没交：下一段的前置（H2）与收口照常判缺、
-  【阶段】不说齐了，但推进不核缺产物（第 17 条），不在任何前置里的那几份冒泡之后照样推得过去。
-  拒绝文案只许诺门禁认的出口（`BUBBLE_EXIT`）——一句给出路的文案，要先问门禁认不认它。`at-qa` 的没开跑是冒泡，不写 `06-test.md`。父级一侧认出冒泡
-  （第 19 条）没做，平台事实在 `docs/37` §1.2、§2.7。理由在 `docs/37`。
+  【阶段】不说齐了，推进那一次 H6 拒（M4d，`docs/38`）。
+  拒绝文案只许诺门禁认的出口（`BUBBLE_EXIT`）——一句给出路的文案，要先问门禁认不认它。`at-qa` 的没开跑是冒泡，不写 `06-test.md`。父级一侧
+  （前台派发跑完时 H5a、后台完成时完成核验）读同一个标记（`bubbleReason`，M4d）。理由在 `docs/37`、`docs/38`。
 - **契约的账只认 `contract_sha`**：账本比对不看契约（`compareArtifacts` 排除 `CONTRACT_FILE`）；派发返回（H5a）与 PM 写 `state.json` 时拿
   `contract_sha` 比磁盘，对不上出【契约】——不报磁盘上算出来的值、不说「改成与磁盘一致」（照着磁盘改账就把漂移洗成了合法），合法修订的新值
   只从写契约那一次的回传来。升级类别从 `ESCALATION_KINDS` 派生、正文不报总数。理由在 `docs/37`。

@@ -110,10 +110,10 @@ export function isKnownStage(stages, stageId) {
 //     子代理自己写的，门禁核不了真假，放行它也造不出进度：产物照旧算没交。
 //   - 只认第一个非空行，容许常见的包装：行首的 Markdown 装饰（#、>、*、_、`、-）、编号、照抄下来的「、【，「冒泡」两个字
 //     本身加粗（**冒泡**：）、冒号前的空白与半角冒号。夹在正文里的不认；「冒泡排序」这种不带冒号的不认（docs/37 §3 的复核）。
-//   - 冒泡不改「交没交」：这里只决定 H5b 放不放它停下。下一段的前置（H2）与收口照常判缺，【阶段】不说齐了；但推进本身
-//     不核缺产物（第 17 条）——不在任何前置里的那几份（02-*、03-alignment.md、05-impl/*），冒泡之后照样能被推进过去，
-//     与原来顶到平台上限被静默放行是同一个洞（docs/37 §5），靠 PM 读回复。父级那一侧不加机制——同步派发时工具结果、
-//     异步派发时完成通知里就是这条回复的原文（docs/37 §1），读它的是正文（/agent-team:at 第 3 节「核实」）。
+//   - 冒泡不改「交没交」：这里只决定 H5b 放不放它停下。下一段的前置（H2）与收口照常判缺，【阶段】不说齐了；推进那一次 H6
+//     核离开那一段叫到的产者交齐了没有（M4d，docs/38，第 17 条：hooks/lib/advance.mjs）——冒泡之后不补齐、也没照出路裁掉，就推不过去。
+//   - 父级那一侧（M4d，docs/38，第 19 条）：前台派发跑完时 H5a 读 tool_response.content、后台派发完成时完成核验读通知里的 <result>，
+//     认同一个标记（bubbleReason），说它冒泡了、引出它的理由；读它下文写的缺什么、要谁定的，仍是正文（/agent-team:at 第 3 节「核实」）。
 export const BUBBLE_MARK = '冒泡：'
 const BUBBLE_HEAD = new RegExp(`^[\\s#>*_\`\\-「【]*(?:\\d+[.)、]\\s*)?${BUBBLE_MARK.slice(0, -1)}[\\s*_\`」】]*[：:]`)
 
@@ -129,9 +129,20 @@ export const BUBBLE_EXIT =
 const IMPL_DENIAL_NOTE = '被写路径隔离拒了的，照你的正文把被拒的路径与拒绝原文写进实现记录的「被写路径隔离拒绝」一节——写了就能停。'
 
 export function isBubbleStop({ stopHookActive, lastMessage } = {}) {
-  if (stopHookActive !== true || typeof lastMessage !== 'string') return false
-  const first = lastMessage.split('\n').find((line) => line.trim() !== '')
-  return first !== undefined && BUBBLE_HEAD.test(first)
+  if (stopHookActive !== true) return false
+  return bubbleReason(lastMessage) !== null
+}
+
+// M4d（docs/38，全量审查第 19 条）：父级一侧（H5a 读前台派发的 tool_response.content、完成核验读通知里的 <result>）认同一个标记。第一个非空行以
+// 标记开头就返回标记之后那一行剩下的话（可能是空串），否则 null。与 isBubbleStop 共用这一份，不另写一个正则。
+export function bubbleReason(text) {
+  if (typeof text !== 'string') return null
+  const first = text.split('\n').find((line) => line.trim() !== '')
+  if (first === undefined) return null
+  const m = BUBBLE_HEAD.exec(first)
+  // 标记之后紧跟的强调收尾（`**冒泡：**理由` 里冒号后面那对星号）不算理由。只剥星号与下划线：理由本身常以行内代码开头
+  // （`冒泡：\`src/lib/auth.ts\` 不存在`，真实会话 M4），剥反引号会把它拆坏。
+  return m ? first.slice(m[0].length).replace(/^[\s*_]+/, '').trim() : null
 }
 
 // M3y（docs/33，全量审查第 15 条）：调用方把 artifactExists 换成 freshness 的 artifactCurrent（在、而且不是上一轮的），另传

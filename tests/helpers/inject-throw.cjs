@@ -26,6 +26,19 @@ for (const mode of modes) {
       if (String(this) === target) throw new Error('injected: startsWith')
       return original.apply(this, arguments)
     }
+  } else if (mode.startsWith('includes-once:')) {
+    // M4d（docs/38，全量审查第 19 条）：第一次以这个实参调 String.prototype.includes 就抛，之后照常——完成核验认通知时经过它，最外层 catch
+    // 判「这次是不是一条完成通知」时再调一次，要它照常回答。
+    const needle = mode.slice('includes-once:'.length)
+    const original = String.prototype.includes
+    let fired = false
+    String.prototype.includes = function (search) {
+      if (!fired && search === needle) {
+        fired = true
+        throw new Error('injected: includes')
+      }
+      return original.apply(this, arguments)
+    }
   } else if (mode.startsWith('read:')) {
     const suffix = mode.slice('read:'.length)
     const fs = require('fs')

@@ -104,6 +104,9 @@ test('M3y：hooks/ 下交没交、齐没齐的每一处调用都经 freshness（
     { file: 'hooks/gate.mjs', fn: 'isStageDone', checks: ['stop-gate', 'deliverable'], current: true, stale: null, made: true },
     { file: 'hooks/gate.mjs', fn: 'decideDeliverable', checks: ['stop-gate', 'deliverable'], current: true, stale: true, made: true },
     { file: 'hooks/gate.mjs', fn: 'decideReadiness', checks: ['readiness'], current: true, stale: true, made: true },
+    // M4d（docs/38，全量审查第 19 条）：完成核验（UserPromptSubmit）按派它时的那一段核产物、判协调者那一段齐没齐，同样经 freshness。
+    { file: 'hooks/gate.mjs', fn: 'decideDeliverable', checks: ['completion'], current: true, stale: true, made: true },
+    { file: 'hooks/gate.mjs', fn: 'isStageDone', checks: ['completion'], current: true, stale: null, made: true },
   ]
   const key = (s) => `${s.fn}|${s.checks}`
   assert.deepEqual(

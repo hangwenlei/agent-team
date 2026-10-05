@@ -120,9 +120,11 @@ export function outputContractViolations(check, { stdout, stderr, status }) {
   const out = []
   const spec = Object.hasOwn(CHECKS, check) ? CHECKS[check] : null
   const event = spec ? spec.event : 'PreToolUse'
+  // M4d（docs/38，全量审查第 19 条）：UserPromptSubmit 上只有标了 speaks 的检查项（completion）可以发 additionalContext，别的照旧不许写 stdout。
+  const speaks = event === 'UserPromptSubmit' && spec?.speaks === true
   const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
   if (stdout.trim() !== '') {
-    if (event !== 'PreToolUse' && event !== 'PostToolUse') out.push(`${event} 上 stdout 非空`)
+    if (event !== 'PreToolUse' && event !== 'PostToolUse' && !speaks) out.push(`${event} 上 stdout 非空`)
     if (status !== 0) out.push(`stdout 上有输出，退出码却是 ${status}`)
     let v
     try {
@@ -135,6 +137,7 @@ export function outputContractViolations(check, { stdout, stderr, status }) {
     if ('decision' in v) out.push('顶层有 decision')
     if ('continue' in v) out.push('顶层有 continue')
     if ('systemMessage' in v && typeof v.systemMessage !== 'string') out.push('systemMessage 不是字符串')
+    if (speaks && 'systemMessage' in v) out.push('UserPromptSubmit 上发了 systemMessage')
     const h = v.hookSpecificOutput
     if (h !== undefined) {
       if (!isObj(h)) {
@@ -144,7 +147,7 @@ export function outputContractViolations(check, { stdout, stderr, status }) {
         if ('permissionDecision' in h && h.permissionDecision !== 'deny') out.push(`permissionDecision 是 ${JSON.stringify(h.permissionDecision)}`)
         if ('additionalContext' in h) {
           if (typeof h.additionalContext !== 'string') out.push('additionalContext 不是字符串')
-          if (event !== 'PostToolUse') out.push(`${event} 上发了 additionalContext`)
+          if (event !== 'PostToolUse' && !speaks) out.push(`${event} 上发了 additionalContext`)
         }
       }
     }

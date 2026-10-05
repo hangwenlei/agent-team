@@ -23,6 +23,8 @@ import { SHA_RE } from './contract-hash.mjs'
 import { isValidRoster } from './decide.mjs'
 import { inline, quote } from './trusted.mjs'
 import { VERIFY_REDO } from './freshness.mjs'
+// M4d（全量审查第 17 条）：「叫过」与「整段裁掉」只留一份定义，推进判据（advance.mjs）与收口共用。
+import { calledIn, wholeStageTrimmed } from './advance.mjs'
 
 const isSha = (v) => typeof v === 'string' && SHA_RE.test(v)
 // 空内容（0 字节、只有 BOM）归一化之后的 sha：收口是单向门，空文件不算交了（复核 A-6）。写成常量，不在模块加载时算——加载期调
@@ -50,25 +52,15 @@ function stageIdOf(stages, name) {
   return null
 }
 
-// 这一趟在 sid 那一段叫到过的产者（participantsOf：有 stage_roles 看那一段，旧 run 看整趟 roster）。复核二（G2）：prior（写入前那一份）
-// 读得出时取并集——收口那一次挪走 stage_roles 里的人、或者旧 run 新加 stage_roles，都翻不成「没叫过」。
-function calledIn(stages, state, sid, prior) {
-  const set = new Set()
-  for (const s of [state, prior]) {
-    const who = isPlainObject(s) ? participantsOf(s, sid) : undefined
-    for (const r of Array.isArray(who) ? who : []) set.add(r)
-  }
-  return stageRoles(stages[sid]).filter((r) => set.has(r))
-}
+// 「这一趟在 sid 那一段叫到过的产者」（calledIn）在 advance.mjs：participantsOf（有 stage_roles 看那一段，旧 run 看整趟 roster），复核二（G2）：
+// prior（写入前那一份）读得出时取并集——收口那一次挪走 stage_roles 里的人、或者旧 run 新加 stage_roles，都翻不成「没叫过」。
 
 // 前置由整段裁掉的段产出：那一段的产者都在 trimmed 里、记的就是那一段（PM 照「班底裁剪自决」裁掉了 S6、S7 的人），而且这一趟在那一段
 // 一个都没叫过。复核（A-2）：原来只看 trimmed——叫过却没交的 at-qa，收口那一次补写 trimmed 就把一份没交的测试报告豁免了。
+// M4d：判定本身挪进 advance.mjs 的 wholeStageTrimmed（推进判据共用）。
 function trimmedAway(stages, state, name, prior) {
   const sid = stageIdOf(stages, name)
-  if (!sid) return false
-  const roles = stageRoles(stages[sid])
-  const trimmed = isPlainObject(state?.trimmed) ? state.trimmed : {}
-  return roles.length > 0 && roles.every((r) => Object.hasOwn(trimmed, r) && trimmed[r] === sid) && calledIn(stages, state, sid, prior).length === 0
+  return sid !== null && wholeStageTrimmed(stages, sid, state, prior)
 }
 
 /**
@@ -104,7 +96,7 @@ export function blockerLine(stages, b, state, prior) {
   if (b.why === 'missing' || b.why === 'empty') {
     const what = b.why === 'empty' ? '是空文件' : '缺'
     if (own) return `${b.name}（${what}：这是你自己的产物，你自己写）`
-    const called = sid ? calledIn(stages, state, sid, prior) : []
+    const called = sid ? calledIn(stages, sid, state, prior) : []
     if (b.require && called.length) {
       // 文档核对（PG-2）：原来给「要放弃这一段，照第 4 节问用户」——第 4 节的答复不碰收口条件，照做之后照样被拒。说实话。
       return `${b.name}（${what}：${called.join('、')} 在 ${sid} 被叫到过、却没交——派它补交（不用记回退），trimmed 不是出路；` +
