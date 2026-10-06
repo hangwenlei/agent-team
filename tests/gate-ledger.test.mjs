@@ -8,6 +8,7 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { run, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
+import { dispatchLine } from '../hooks/lib/completion.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 
@@ -1386,4 +1387,94 @@ test('M4b【阶段】执行段齐了、写者是非产者（架构师改 03-arch
     assert.ok(out.includes('都在磁盘上了'), `${agent}：${out}`)
     assert.match(out, /被写路径隔离拒绝[^。]*已解决[^。]*那一份不算交齐/, agent)
   }
+})
+
+// M4g（docs/42，docs/39 §3）：门禁的派发记录里有它在那一段被派出去过、state.json 没记——这不是漏派（下级派出去的也算叫到），出路只有补记。
+// 原来与真漏派报成同一句（「是漏了：把它派出去」），PM 把「叫到」读窄时会照着去重派一个已经交过产物的人。
+const LOGGED_HEAD = "【产者交代】下面这些角色在门禁的派发记录里、在那一段被派出去过，state.json 却没记着这一趟在那一段叫到过它们"
+const withDispatchLog = (opts, body) => {
+  const { projectDir, pluginDir } = makeRun(opts)
+  try {
+    const line = dispatchLine({ at: '2026-09-20T10:12:00Z', agentId: 'a-ui', toolUseId: 'u-ui', role: 'at-ui', stage: 'S2', caller: 'at-product', callerId: 'a-product', mode: 'background' })
+    writeFileSync(join(projectDir, '.agent-team', 'runs', 'r1', 'dispatches.jsonl'), line + '\n')
+    return body(projectDir)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+}
+test('M4g：S2 的 at-ui 在门禁的派发记录里、state.json 没记——产者交代单列成漏记，叫 PM 补记、不重派；不说「是漏了」', () => {
+  for (const shape of [{ stage_roles: { S2: ['at-product'] } }, {}]) {
+    withDispatchLog({ ...WALKED_S2, ...shape }, (projectDir) => {
+      const ctx = ctxOf(writeState(projectDir).stdout)
+      assert.ok(ctx.includes(LOGGED_HEAD), ctx)
+      assert.match(ctx, /S2 的 at-ui/)
+      assert.ok(ctx.includes('不用重派，也不要写进 trimmed'), ctx)
+      assert.ok(!ctx.includes('不是裁剪，是漏了'), ctx)
+      // M4g 复核：「这不是漏派」那一句（K28）、补记之前看磁盘（低-3）；旧 run 只补 roster，不叫它加 stage_roles（K27——at.md 明令旧 run 不加）。
+      assert.ok(ctx.includes('这不是漏派：门禁记着它在那一段被派出去过，只是没记账（下级派出去的也算叫到）。'), ctx)
+      assert.ok(ctx.includes('补记之前去磁盘看一眼它那一段的产物：在，就把它们并进'), ctx)
+      assert.ok(ctx.includes('不在（派了没交），照真漏派处理：派它补交，或者照「回退」回到那一段。'), ctx)
+      if (shape.stage_roles) assert.ok(ctx.includes('并进 state.json 的 stage_roles 那一段，roster 里没有就一起累加'), ctx)
+      else assert.ok(ctx.includes('并进 state.json 的 roster——') && !ctx.includes('stage_roles 那一段'), ctx)
+    })
+  }
+})
+
+test('M4g：收件人不是 PM 时，漏记那一段说补记是 PM 的动作、原样冒泡', () => {
+  withDispatchLog({ ...WALKED_S2, stage_roles: { S2: ['at-product'] } }, (projectDir) => {
+    const ctx = ctxOf(writeState(projectDir, 'at-architect').stdout)
+    assert.ok(ctx.includes(LOGGED_HEAD), ctx)
+    assert.ok(ctx.includes('补记是 PM 的动作') && ctx.includes('原样冒泡给派你的人'), ctx)
+  })
+})
+
+// M4g 复核（K30、K26、低-6）：真漏派与漏记同时有时两段都出；最后一段「派不出去」那一支只算真漏派（漏记的不用派）；收口之后补记连 never_invoked 重算。
+const S8_HISTORY = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'].map((stage, i) => ({ stage, at: `2026-09-20T10:${String(10 + i).padStart(2, '0')}:00Z` }))
+const AT_S8 = {
+  runId: 'r1', stage: 'S8', history: S8_HISTORY,
+  roster: ['at-product', 'at-ui', 'at-architect', 'at-qa', 'at-acceptance'],
+  stage_roles: { S2: ['at-product', 'at-ui'], S3: ['at-architect'], S5: ['at-architect'], S6: ['at-qa'], S7: ['at-acceptance'] },
+  project: { available_roles: M2B_AVAILABLE, paths: {} },
+}
+const withBackendLogged = (opts, body, closed = false) => {
+  const { projectDir, pluginDir } = makeRun(opts)
+  try {
+    const runDir = join(projectDir, '.agent-team', 'runs', 'r1')
+    const line = dispatchLine({ at: '2026-09-20T10:14:00Z', agentId: 'a-be', toolUseId: 'u-be', role: 'at-backend', stage: 'S5', caller: 'at-architect', callerId: 'a-ar', mode: 'background' })
+    writeFileSync(join(runDir, 'dispatches.jsonl'), line + '\n')
+    if (closed) {
+      const st = JSON.parse(readFileSync(join(runDir, 'state.json'), 'utf8'))
+      st.closed_at = '2026-09-20T10:30:00Z'
+      writeFileSync(join(runDir, 'state.json'), JSON.stringify(st))
+    }
+    return body(projectDir)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+}
+test('M4g 复核：真漏派与漏记同时有——两段都出，各列各的；最后一段「派不出去」那一句只点真漏派的', () => {
+  withBackendLogged(AT_S8, (projectDir) => {
+    const ctx = ctxOf(writeState(projectDir).stdout)
+    const real = ctx.indexOf('下面这些角色是**已经走过的阶段**的产者')
+    const logged = ctx.indexOf(LOGGED_HEAD)
+    assert.ok(real >= 0 && logged > real, ctx)
+    assert.ok(ctx.slice(real, logged).includes('S5 的 at-frontend'), ctx)
+    assert.ok(!ctx.slice(real, logged).includes('S5 的 at-backend'), ctx)
+    assert.ok(ctx.slice(logged).includes('S5 的 at-backend'), ctx)
+    const two = ctx.split('\n').find((l) => l.startsWith('  ② '))
+    assert.ok(two && two.includes('在最后一段派不出去') && two.includes('at-frontend'), two)
+    assert.ok(!two.includes('at-backend'), `漏记的 at-backend 不用派：${two}`)
+  })
+})
+test('M4g 复核：收口之后才报出来的漏记——补进 roster 时连 never_invoked 一起重算', () => {
+  withBackendLogged(AT_S8, (projectDir) => {
+    const ctx = ctxOf(writeState(projectDir).stdout)
+    assert.ok(ctx.includes(LOGGED_HEAD), ctx)
+    assert.ok(ctx.includes('这一趟已经收口：补进 roster 时连 never_invoked 一起重算。'), ctx)
+  }, true)
+  withBackendLogged(AT_S8, (projectDir) => {
+    assert.ok(!ctxOf(writeState(projectDir).stdout).includes('连 never_invoked 一起重算'))
+  })
 })

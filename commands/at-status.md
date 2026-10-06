@@ -25,7 +25,7 @@ description: 显示当前 run 的阶段、产物、返工计数、主动裁掉�
 
 ⚠️ **不要直接拿 `produces` 字段当文件名清单用。** 它有两种形式（数组 / 对象），而且数组
 形式里可能是**模式**（含 `<role>` 占位符）而不是字面文件名——照字面 `Glob` 会对着一个
-永远不存在的名字报 ✗。正确的口径是 `hooks/lib/stages.mjs` 的
+永远不存在的名字报 ✗。正确的口径是 `${CLAUDE_PLUGIN_ROOT}/hooks/lib/stages.mjs` 的
 `expandProduces(stage, stageRolesInRun(stage, participantsOf(state, stage)))`——`participantsOf` 取的是
 `state.json` 的 `stage_roles` 在那一段记着的人（这一段叫到了谁）；没有 `stage_roles` 的旧 run 退回 `roster`。
 别拿整趟 `roster` 展开：`at-ui` 在 S2 干过活，S5 就会去等一份它根本没被派去写的实现记录。
@@ -36,6 +36,10 @@ description: 显示当前 run 的阶段、产物、返工计数、主动裁掉�
 才记它）：S5 按 `04-dispatch.md` 的分工、S2 按磁盘上已有的报，并在这一段后面标「本段未记账」，不要报成「这一段没有产物该在」。
 展开不为空的段（产物固定、与参与者无关的段，以及 PM 自己做、从来不写键的段）照常按展开结果报 ✓ / ✗，不标。
 
+`S5` 的实现记录在磁盘上不等于交齐：逐份读，有「被写路径隔离拒绝」一节、里面还有没标「已解决」的条目的，只写了冒泡原因、没写做了什么的，
+或者「测试」一节缺了、有新行为没有测试又不属于那两种情形的（做法见 `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 3 节 `S5` 那一条），
+标「未交齐」并写一句原因，不标 ✓。
+
 `trimmed` 里记着它、值就是那一段的（叫到之后又不要了），它在那一段的那几份标「已裁」，不报 ✗——只限 `S2`、`S5` 这类按叫到的人
 展开产物的段里、不在任何前置里的那几份（`02-*`、`05-impl/*`）；别的照常报 ✗（推进时门禁不认这种裁法）。
 
@@ -43,15 +47,15 @@ description: 显示当前 run 的阶段、产物、返工计数、主动裁掉�
 
 ```
 run:        <run_id>
-当前阶段:    <stage>（<该阶段的执行角色>）；closed_at 是一个时间（不是 null）就写「<stage>，已收口（closed_at <值>）」
-契约:        <contract_sha 的前 12 位>，磁盘上<在/不在>
-产物:        逐阶段列，每个后面标 ✓ / ✗（按磁盘）
+当前阶段:    <stage>（<这一段谁在干：有 producers 的段（S2、S5）推进出去之前 stage_roles 里还没有这一段、返工轮里记的是上一轮的人——S5 照 04-dispatch.md 的分工写，S2 写 at-product 与磁盘上已有产物的 at-ui，都标「本段未记账」；没有 stage_roles 的旧 run 看 roster；其余写那一段的 role>）；closed_at 是一个时间（不是 null）就写「<stage>，已收口（closed_at <值>）」
+契约:        <contract_sha 里 `sha256:` 之后的前 12 位；是 PENDING 就写 PENDING>，磁盘上<在/不在>
+产物:        逐阶段列，每个后面标 ✓ / ✗（按磁盘）；当前段之后、还没走到的段整段写「未到」，不标 ✗
 返工:        <rework 逐阶段；全 0 就写「无」>
-返工基线:    <rework_base 逐条「<产物>：<sha 前 12 位> 或 accepted」；没有这个字段或为空就写「无」>
+返工基线:    <rework_base 逐条「<产物>：<sha256: 之后的前 12 位> 或 accepted」；没有这个字段或为空就写「无」>
 返工批准:    <.agent-team/runs/<run_id>/approvals.jsonl 逐行「回到 <rework_to>，覆盖 <covers>（<at>）」；文件不在或为空就写「无」>
 主动裁掉:    <trimmed 逐条「<角色> @ <它被裁掉的那一段>」；空就写「无」>
 没被叫过:    <never_invoked；在「主动裁掉」里出现过的，后面标「（已声明裁剪）」；空就写「暂无，本趟还没走完」，已收口的 run 写「无」>
-待办升级:    <escalations 里 answer 为空的；没有就写「无」>
+待办升级:    <escalations 里 answer 是空串的（问了、用户还没答）；没有就写「无」>
 ```
 
 ⚠️ **「主动裁掉」与「没被叫过」不是一回事，别合成一行报。** `state.json` 的 `trimmed`

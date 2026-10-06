@@ -19,6 +19,8 @@ import { run, decisionOf, hermeticEnv } from './helpers/gate-runner.mjs'
 import { brokenProjectNotice, buildLedgerNotices, pluginNotice, projectNotice } from '../hooks/lib/ledger.mjs'
 import { NO_PATHS_ROLES } from '../hooks/lib/project.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
+import { computeReach } from '../hooks/lib/reach.mjs'
+import { safeJson } from '../hooks/lib/trusted.mjs'
 
 const TEMPLATE = JSON.parse(readFileSync(new URL('../templates/project.json', import.meta.url), 'utf8'))
 const posted = (file_path, agent_type = 'agent-team:at-pm') => ({ hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type, tool_input: { file_path } })
@@ -608,4 +610,93 @@ test('写 state.json：只报阻断——只有要改或请确认的问题时不
       assert.ok(!ctx.includes('【project.json】'), ctx)
     })
   }
+})
+
+// M4g（docs/42，审查第 28 条）：PM 写完 .agent-team/reach.json，门禁按当前 project.json 与花名册重算一遍——没有 run（/agent-team:at-init
+// 的正路）与 run 进行中（S4、S5 补了 paths 之后）两条路都核。对得上不吭声；手抄错了、照旧的 project.json 算的、写坏了，给出正确的那一份。
+const REAL_ROSTER = JSON.parse(readFileSync(new URL('../roster.json', import.meta.url), 'utf8'))
+test('M4g 第 28 条：写完 reach.json，门禁重算——对得上（含 BOM、CRLF）不吭声，对不上、不是合法 JSON 都给出正确的那一份；有没有 run 都核', () => {
+  const right = computeReach({ roster: REAL_ROSTER, paths: TEMPLATE.paths })
+  const wrongPm = { ...right, 'at-pm': { ...right['at-pm'], unrestricted: false } }
+  const check = (p, mode) => {
+    const reachFile = join(p, '.agent-team', 'reach.json')
+    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE))
+    for (const ok of [safeJson(right) + '\n', Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(safeJson(right).split('\n').join('\r\n'))])]) {
+      writeFileSync(reachFile, ok)
+      const ctx = ctxOf(run('ledger', posted(reachFile), undefined, p))
+      assert.ok(!ctx.includes('【触达表】'), `${mode}：对得上却说了话：${ctx}`)
+    }
+    for (const bad of [JSON.stringify(wrongPm), '{', '{}']) {
+      writeFileSync(reachFile, bad)
+      const ctx = ctxOf(run('ledger', posted(reachFile), undefined, p))
+      assert.ok(ctx.includes('【触达表】刚写进 .agent-team/reach.json 的'), `${mode} ${bad.slice(0, 12)}：${ctx}`)
+      assert.ok(ctx.includes(safeJson(right)), `${mode}：没给出正确的那一份：${ctx}`)
+    }
+  }
+  withoutRun((p) => check(p, '没有 run'))
+  withRun(TEMPLATE, (p) => check(p, 'run 进行中'))
+})
+
+test('M4g：project.json 有阻断时不核 reach.json——那时【触达表】本来就叫你先别写，核出来的「正确那一份」照整条作废的条目算', () => {
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(BLOCKED))
+    const reachFile = join(p, '.agent-team', 'reach.json')
+    writeFileSync(reachFile, '{}')
+    assert.ok(!ctxOf(run('ledger', posted(reachFile), undefined, p)).includes('【触达表】刚写进'))
+  })
+})
+
+// M4g 复核（K10a、K16、K11、低-8）：花名册读坏时不核（拿空花名册算的「正确那一份」是 {}，docs/29 实测过 PM 用它覆盖正确的 reach.json）；
+// run 读不出时核了照样往 stderr 留痕；reach.json 读不出时不核（不说它「不是合法 JSON」）；非 PM 写的（没有 run 时 H3 对谁都放行）原样冒泡。
+test('M4g 复核：花名册读坏时不核 reach.json', () => {
+  const REPO = new URL('..', import.meta.url)
+  const plugin = realpathSync(mkdtempSync(join(tmpdir(), 'agent-team-lp-plug-')))
+  try {
+    cpSync(new URL('hooks', REPO), join(plugin, 'hooks'), { recursive: true })
+    cpSync(new URL('stages.json', REPO), join(plugin, 'stages.json'))
+    const gate = join(plugin, 'hooks', 'boot.mjs')
+    for (const bad of ['{', '[]']) {
+      writeFileSync(join(plugin, 'roster.json'), bad)
+      withoutRun((p) => {
+        writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE))
+        writeFileSync(join(p, '.agent-team', 'reach.json'), JSON.stringify({ 'at-pm': { own: [] } }))
+        const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'reach.json')), gate, p))
+        assert.ok(!ctx.includes('【触达表】刚写进'), `${bad}：${ctx}`)
+      })
+    }
+  } finally {
+    rmSync(plugin, { recursive: true, force: true })
+  }
+})
+
+test('M4g 复核：run 读不出（current-run 指向不存在的 run）时照样核，并往 stderr 留痕', () => {
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE))
+    writeFileSync(join(p, '.agent-team', 'current-run'), 'nope')
+    writeFileSync(join(p, '.agent-team', 'reach.json'), '{}')
+    const r = run('ledger', posted(join(p, '.agent-team', 'reach.json')), undefined, p)
+    assert.ok(ctxOf(r).includes('【触达表】刚写进 .agent-team/reach.json 的'), ctxOf(r))
+    assert.ok(r.stderr.includes('ledger 回传'), r.stderr)
+  })
+})
+
+test('M4g 复核：reach.json 读不出（是个目录）时不核，也不说它不是合法 JSON', () => {
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE))
+    mkdirSync(join(p, '.agent-team', 'reach.json'))
+    const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'reach.json')), undefined, p))
+    assert.ok(!ctx.includes('【触达表】刚写进'), ctx)
+  })
+})
+
+test('M4g 复核：非 PM 写坏 reach.json（没有 run 时 H3 对谁都放行）——收到的那一段叫它原样冒泡，不叫它自己重写', () => {
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE))
+    writeFileSync(join(p, '.agent-team', 'reach.json'), '{}')
+    const other = ctxOf(run('ledger', posted(join(p, '.agent-team', 'reach.json'), 'agent-team:at-backend'), undefined, p))
+    assert.ok(other.includes('【触达表】刚写进'), other)
+    assert.ok(other.includes('reach.json 是编排层的控制文件，只有项目经理该改它：把这一段原样冒泡给派你的人，不要自己重写。'), other)
+    const pm = ctxOf(run('ledger', posted(join(p, '.agent-team', 'reach.json')), undefined, p))
+    assert.ok(pm.includes('【触达表】刚写进') && !pm.includes('只有项目经理该改它'), pm)
+  })
 })

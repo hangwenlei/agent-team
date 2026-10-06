@@ -15,6 +15,8 @@
 //   drifted     记录了、磁盘上也有，但内容变了 —— 产物在记账之后被改过
 //   missing     记录了、磁盘上没有         —— 产物被删了或从没写成
 //   unrecorded  磁盘上有、账本里没有       —— **Bash 绕过 H3 的直接表征**
+// M4g（docs/42，审查第 28 条）：unrecorded 每一条是 { name, actual }——带门禁按磁盘算出来的值，与 drifted 的 actual、【产物】回传、
+// rework_base 同一个算法。PM 照这个值记，不自己算：带 BOM、CRLF 的产物上自己算的对不上，记进去就成了一条假漂移。
 //
 // 真要伪造的人可以连 artifacts 一起改（任何持有 Bash 的角色都写得了——state.json 对
 // Edit/Write 只对 PM 开，但 Bash 不经任何 hook；本轮 at-backend/at-frontend 也拿到了
@@ -88,7 +90,8 @@ export function compareArtifacts({ artifacts, stages, artifactBytes, roster }) {
     if (!Object.hasOwn(recorded, name)) {
       // 磁盘上有、账本里没记。磁盘上也没有的话什么都不是——那只是还没做到这一段。
       // 这一支**不看 roster**，就是上面那段的全部内容。
-      if (artifactBytes(name) !== null) out.unrecorded.push(name)
+      const found = artifactBytes(name)
+      if (found !== null) out.unrecorded.push({ name, actual: sha256OfContract(found) })
       continue
     }
     // 记了。下面两支是 drifted / missing，**roster 口径在这里没变**：账本里记着一份

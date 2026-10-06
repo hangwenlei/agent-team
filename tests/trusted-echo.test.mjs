@@ -458,6 +458,16 @@ const SCENARIOS = [
     ],
   },
   {
+    // M4g 复核（K14）：写完 reach.json 门禁重算核对，给出的「正确那一份」里有 project.json 的前缀——原样落盘的 JSON 只许走 safeJson
+    // （docs/27 §2.1）。带冒号的载荷（shaHead）让 project.json 判阻断，那时门禁本来就不核 reach.json，锚点对它放行。
+    name: 'project.paths 的元素（写完 reach.json 之后的【触达表】核对）',
+    disk: true,
+    project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, 'at-backend': ['src/server/', P] } }),
+    raw: { 'reach.json': () => '{}' },
+    calls: ({ p }) => [['ledger', posted('at-pm', join(p, '.agent-team', 'reach.json'))]],
+    anchor: (all, P) => P.includes(':') || reached(all, P),
+  },
+  {
     // M4b 第二轮复核：「没人认领」与「归 X」两支会把调用者自己条目里「要改」档的前缀说出来（own.fix）。载荷末尾加一个空格，
     // 落进「首尾有空白」那一档；同一份 project.json 写一次，【project.json】的要改档也喂到。
     name: 'project.paths 的元素落在要改档（H3「没人认领」那一支的 own.fix 与【project.json】）',

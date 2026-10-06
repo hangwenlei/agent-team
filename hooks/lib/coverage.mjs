@@ -39,6 +39,7 @@
 // 现在两边都按段：isStageDone 的每一处调用与本模块都经 participantsOf 取「那一段叫到了谁」（state.json 的 stage_roles，
 // 旧 run 退回 roster）。分工没变：齐没齐归 isStageDone，谁没交代归这里。
 import { stageRoles, isPlainObject, participantsOf } from './stages.mjs'
+import { dispatchedIn } from './advance.mjs'
 
 /**
  * 「已经走过的阶段」里，有没有哪个**这个项目用得上**的产者，既不在那一段叫到的人里（participantsOf：带 stage_roles
@@ -142,7 +143,12 @@ import { stageRoles, isPlainObject, participantsOf } from './stages.mjs'
  * stages / state 形状不对时返回空 gaps，不抛——与本仓库其余纯函数同一口径
  * （「没有可判定的输入」不表态）。
  */
-export function decideCoverage({ stages, state, availableRoles } = {}) {
+// M4g（docs/42，docs/39 §3「产者交代不并派发记录」）：dispatched 是门禁派发记录按段归的角色（{ 段: [角色] }，可选）。H6 判「叫过」时
+// 早就并上了它，这里原来只看 stage_roles（旧 run 是 roster）与 trimmed：PM 把「叫到」读窄（只记自己亲手派的）时，被下级派出去、真交了
+// 产物的角色报出来的话与真漏派逐字相同（docs/11 §5.24）。派发记录里有它在那一段被派出去过的，gap 标 dispatched: true——它被叫到过，
+// 只是没记账，调用方单列成「漏记」，出路只有补记；别的段派过不算。不并进 invoked 一声不吭：那样 stage_roles 永远记窄，
+// /agent-team:at-status 与 at-qa 按它展开产物时就漏了这个人。
+export function decideCoverage({ stages, state, availableRoles, dispatched = null } = {}) {
   const gaps = []
   const perStage = isPlainObject(state) && isPlainObject(state.stage_roles)
   const usable = Array.isArray(availableRoles)
@@ -175,12 +181,13 @@ export function decideCoverage({ stages, state, availableRoles } = {}) {
     if (currentAt >= 0 && ids.indexOf(id) > currentAt) continue
     seen.add(id)
     const invoked = invokedIn(id)
+    const logged = new Set(dispatchedIn(id, dispatched))
     // stages[id] 不存在时 stageRoles 返回空数组（它自己有 isPlainObject 守卫），
     // 这一段就不产生 gap——history 里有个不存在的阶段 id 这件事由 validateState 报。
     for (const role of stageRoles(stages[id])) {
       if (universe && !universe.has(role)) continue
       if (invoked.has(role) || declared.has(role)) continue
-      gaps.push({ stage: id, role })
+      gaps.push(logged.has(role) ? { stage: id, role, dispatched: true } : { stage: id, role })
     }
   }
 

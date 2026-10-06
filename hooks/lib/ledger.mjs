@@ -22,6 +22,8 @@ import { isPlainObject, isStageChain, productsOfStage, stageRoles, isRolePattern
 import { VERIFY_REDO, splitByAccept } from './freshness.mjs'
 import { closedAt, blockerLine } from './closing.mjs'
 import { MAIN } from './decide.mjs'
+import { normalizeText } from './text-norm.mjs'
+import { isDeepStrictEqual } from 'node:util'
 
 // 「这个动作只能由 PM 执行、非 PM 请回报上级」——stageDone 与 produce 两个分支都要
 // 说这句话：推进/收口 state.stage 与把哈希写进 artifacts，改的都是同一份控制文件
@@ -97,6 +99,26 @@ export function projectNotice(report) {
 export function pluginNotice(report) {
   const items = Array.isArray(report?.plugin) ? report.plugin : []
   return items.length ? items.map((s) => `【插件】${s}。`).join('\n') : null
+}
+
+// M4g（docs/42，审查第 28 条）：PM 照【触达表】把 JSON 手抄进 .agent-team/reach.json，原来没有任何东西核它（/agent-team:at-status 照它报，
+// 抄错了就报错）。写完之后门禁按当前 project.json 与花名册重算、与写进去的比：语义上相同（键序、BOM、CRLF 不算不同）不吭声；不同、或者
+// 写进去的不是合法 JSON，给出正确的那一份。expected 是门禁算的，原样落盘的 JSON 走 safeJson（docs/27 §2.1）。
+export function reachCheckNotice({ writtenText, expected }) {
+  let parsed
+  try {
+    parsed = JSON.parse(normalizeText(writtenText ?? ''))
+  } catch {
+    parsed = undefined
+  }
+  if (parsed !== undefined && isDeepStrictEqual(parsed, expected)) return null
+  return (
+    '【触达表】刚写进 .agent-team/reach.json 的' +
+    (parsed === undefined
+      ? '不是一份合法的 JSON（写坏了，或者被截断了）。'
+      : '与门禁按当前 project.json 与花名册算出来的不一样（手抄出错，或者是照旧的 project.json 算的）。') +
+    `把下面这份 JSON 原样重写进 .agent-team/reach.json：\n${safeJson(expected)}`
+  )
 }
 
 /**
@@ -379,7 +401,7 @@ export function buildLedgerNotices({
         ? `【阶段】${st.stage} 的产物已经齐了。这一段如果确实结束了，需要把 state.stage 推进到 ` +
           `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "<ISO 时间>" }${again}——用同一次 Write 把这一段的账一起记掉：` +
           `叫到的人累加进 roster（state.json 里有 stage_roles 的，同一批人并进它的这一段），决定不叫的产出角色写进 trimmed。` +
-          `分两次写，推进那一次会被产者交代当成漏派。` +
+          `分两次写，推进那一次产者交代会把刚走完那一段的产者点名报出来（门禁记过派发的报成漏记，没记过的报成漏派）。` +
           (implStage ? implRecordNote({ stage: stages?.[st.stage], writerIsPm, writer }) : '') +
           `${who}${tail}${over}`
         : Array.isArray(closeBlockers) && closeBlockers.length

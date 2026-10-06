@@ -55,7 +55,8 @@ function recordedIn(sid, state, prior) {
   return set
 }
 
-function dispatchedIn(sid, dispatched) {
+// 门禁派发记录里在 sid 那一段派出去过的角色（读坏的记录按空集算）。推进、收口与产者交代（coverage.mjs，M4g）共用这一份。
+export function dispatchedIn(sid, dispatched) {
   const who = isPlainObject(dispatched) && Object.hasOwn(dispatched, sid) ? dispatched[sid] : null
   return Array.isArray(who) ? who.filter((r) => typeof r === 'string') : []
 }

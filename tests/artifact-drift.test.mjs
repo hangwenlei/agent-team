@@ -63,7 +63,7 @@ test('磁盘上有、artifacts 里没记 → unrecorded（Bash 绕过 H3 的表�
   const r = compareArtifacts({
     artifacts: {}, stages: STAGES, artifactBytes: bytesOf({ '01-prd.md': '甲\n' }),
   })
-  assert.deepEqual(r.unrecorded, ['01-prd.md'])
+  assert.deepEqual(r.unrecorded.map((u) => u.name), ['01-prd.md'])
 })
 
 test('只看 stages 的 produces，不管 run 目录下别的文件', () => {
@@ -210,7 +210,7 @@ test('roster 里没有的角色，它写在磁盘上的文件照样进 unrecorde
     artifacts: {}, stages: STAGES_M2A, roster: ['at-backend'],
     artifactBytes: bytesOf({ '05-impl/at-frontend.md': '甲\n' }),
   })
-  assert.deepEqual(r.unrecorded, ['05-impl/at-frontend.md'])
+  assert.deepEqual(r.unrecorded.map((u) => u.name), ['05-impl/at-frontend.md'])
 })
 
 test('同样的磁盘内容与账本，roster 缺省（退回全部 producers）时 unrecorded 一模一样——换 roster 不改变这个清单', () => {
@@ -218,7 +218,7 @@ test('同样的磁盘内容与账本，roster 缺省（退回全部 producers）
     artifacts: {}, stages: STAGES_M2A,
     artifactBytes: bytesOf({ '05-impl/at-frontend.md': '甲\n' }),
   })
-  assert.deepEqual(r.unrecorded, ['05-impl/at-frontend.md'])
+  assert.deepEqual(r.unrecorded.map((u) => u.name), ['05-impl/at-frontend.md'])
 })
 
 // ---- M3a Task 3：unrecorded 脱离 roster 收窄（设计 §1 形状 B、§3.3）----
@@ -236,7 +236,7 @@ test('形状 B：产物已经落盘而写它的角色还没进 roster（roster �
     artifacts: {}, stages: STAGES_M2A, roster: [],
     artifactBytes: bytesOf({ '05-impl/at-backend.md': '甲\n', '05-impl/at-frontend.md': '甲\n' }),
   })
-  assert.deepEqual(r.unrecorded, ['05-impl/at-backend.md', '05-impl/at-frontend.md'])
+  assert.deepEqual(r.unrecorded.map((u) => u.name), ['05-impl/at-backend.md', '05-impl/at-frontend.md'])
 })
 
 // M4c（docs/37，审查第 37 条前半）：契约不进账本比对——它的账只在 state.json 的 contract_sha，派发返回（H5a）与写 state.json 时
@@ -248,4 +248,13 @@ test('M4c 契约不在任何一个清单里：artifacts 记旧值、记新值、
     assert.deepEqual(compareArtifacts({ artifacts, stages: STAGES, artifactBytes: disk }), { drifted: [], missing: [], unrecorded: [] }, JSON.stringify(artifacts))
   }
   assert.deepEqual(compareArtifacts({ artifacts: { '00-contract.md': A }, stages: STAGES, artifactBytes: bytesOf({}) }), { drifted: [], missing: [], unrecorded: [] })
+})
+
+// M4g（docs/42，审查第 28 条）：「没记」那一条带门禁按磁盘算出来的值——PM 照它记，不自己算。值与【产物】回传、rework_base 同一个算法
+// （sha256OfContract：先剥 BOM、把 CRLF 折成 LF）；带 BOM、CRLF 的文件上自己算的会对不上，记进去就成了一条假漂移（docs/39 §3，M5f）。
+test('M4g 第 28 条：unrecorded 每一条带门禁按磁盘算出来的值，与【产物】回传同一个算法（剥 BOM、折 CRLF）', () => {
+  const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('# PRD\r\n甲\r\n', 'utf8')])
+  const r = compareArtifacts({ artifacts: {}, stages: STAGES, artifactBytes: (rel) => (rel === '01-prd.md' ? bytes : null) })
+  assert.deepEqual(r.unrecorded, [{ name: '01-prd.md', actual: sha256OfContract(bytes) }])
+  assert.equal(r.unrecorded[0].actual, sha256OfContract('# PRD\n甲\n'))
 })

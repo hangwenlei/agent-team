@@ -14,7 +14,8 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { run, hermeticEnv, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
-import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
+import { TRUSTED_PREFIX, safeJson } from '../hooks/lib/trusted.mjs'
+import { computeReach } from '../hooks/lib/reach.mjs'
 import { GATE_CHECK_ONLINE, GATE_CHECK_PATH } from '../hooks/lib/gate-check.mjs'
 import {
   SECOND_WRITE_NOTE,
@@ -27,6 +28,8 @@ import {
 
 const REPO = new URL('../', import.meta.url)
 const TEMPLATE = JSON.parse(readFileSync(new URL('templates/project.json', REPO), 'utf8'))
+// M4g（docs/42）：正路上 PM 照【触达表】写进 reach.json 的那一份——门禁写完会重算核对，占位的 {} 现在会被核出来。
+const REACH_RIGHT = safeJson(computeReach({ roster: JSON.parse(readFileSync(new URL('roster.json', REPO), 'utf8')), paths: TEMPLATE.paths }))
 const INJECT = fileURLToPath(new URL('./helpers/inject-throw.cjs', import.meta.url))
 const PM = 'agent-team:at-pm'
 const MARK = '【门禁】'
@@ -325,7 +328,7 @@ test('正路：at-init 与第一趟建 run（先建目录 / 不先建目录）�
         const state = { ...JSON.parse(readFileSync(new URL('templates/state.json', REPO), 'utf8')), run_id: id, stage: 'S1', history: [{ stage: 'S1', at: '2026-09-30T09:00:00Z' }] }
         const steps = [
           [join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE, null, 2), 'project'],
-          [join(p, '.agent-team', 'reach.json'), '{}', null],
+          [join(p, '.agent-team', 'reach.json'), REACH_RIGHT, null],
           ['mkdir', null, null],
           [join(runDir, 'state.json'), JSON.stringify(state, null, 2), null],
           [join(p, '.agent-team', 'current-run'), id, null],
