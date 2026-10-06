@@ -20,6 +20,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
    - 有的话就是丢了指针，不是没有 run：只有一趟就把它的目录名写回 `.agent-team/current-run`；不止一趟时，
      指针原本指向最后建的那一趟（run id 以日期时刻开头），读各自的 `state.json` 核实，拿不准就问用户——
      不要把较早、没走完的那一趟当成当前 run。开头自检的「另外，」那一句说的往往就是这件事。
+     写回指针那一次的回传里有【派发】一段的，照它办。
 2. 读 `.agent-team/runs/<run_id>/state.json`。
 3. 读 `.agent-team/project.json`（路径归属）。
 
@@ -55,7 +56,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
   还没推进出去：`history` 里有它只说明进过，`artifacts` 里有哈希只说明产物交过。S5 去看 `04-dispatch.md` 的分工；
   S2 先看 `01-prd.md` 在不在，在就不要重派 `at-product`——`at-ui` 那两份（`02-ui-spec.md`、`02-wireframe.html`）只在这一趟要用 `at-ui` 时才算缺，
   用不用按磁盘判（契约、`01-prd.md`、`project.json` 的 `available_roles`），不凭记忆；不用，就在记账那次 Write 里把它写进
-  `trimmed`（不在 `available_roles` 里的不用写）。已经在磁盘上、内容是做完了的不要重派，该有而没在的从这一段继续派；都齐了就先照下一条核，核过了再照「产物齐了」那一条记账。
+  `trimmed`（不在 `available_roles` 里的也写——`trimmed` 记的是你裁过谁，不是那条回传点不点名）。已经在磁盘上、内容是做完了的不要重派，该有而没在的从这一段继续派；都齐了就先照下一条核，核过了再照「产物齐了」那一条记账。
   「全部都在磁盘上」对空集是真命题，照字面判会把整段跳过。判「齐了」的口径只在 `hooks/lib/state.mjs` 的 `isStageDone` 一处，
   它对空集答「没齐」。run 目录下的产物用 `.agent-team/runs/<run_id>/` 开头的路径去 `Glob`。
 - **不管展开出来是不是空集**，停在下面这几段的，先核这几样，核不过就不算齐、不要记账推进：停在 `S3` 的，`03-arch.md` 要有

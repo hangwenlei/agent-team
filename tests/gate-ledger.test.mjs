@@ -4,12 +4,11 @@
 // stages.json（S1 归 at-pm、produces 是 00-contract.md），夹具改不了它。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { run, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { dispatchLine, stopLine } from '../hooks/lib/completion.mjs'
-import { mkdirSync } from 'node:fs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 
@@ -1517,6 +1516,58 @@ test('M4h 第 24-1 条：写 current-run 时，别的没收口的 run 里门禁�
     assert.ok(!ctx.includes('at-qa（S6）'), `这一趟自己的派发不列：${ctx}`)
     writeOld('2026-09-20T10:30:00Z')
     assert.ok(!pointer().includes('【派发】'))
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+})
+
+// M4h 复核（docs/43 §8）：【派发】的几处边角。中-1：角色与段各自核——只伪造一边的行同样不回显（原来的判据只造了两边都伪造的那一种，
+// 去掉任一道检查全套不红）。低-1：停下行按 agent_id 在所有 run 的派发记录里认（指针切走之后，停下行记进当时指针指着的那一趟），
+// 别的 run 里见过它停下的不列。低-5：state.json 读不出的那一趟照样列（判不出收没收口，宁可多报）；closed_at 不是 ISO 时间的不算收口。
+// 低-6：runs 下的链接（Windows 上的 junction）与 runctx 一样算一个 run，同一个目录的别名只列一次。「这一趟自己」按规范化之后的路径认：指向
+// 这一趟的链接不当成别的 run（它的名字排在 r1 前面——按目录去重会先跳过排在后面的别名，排在后面就测不到「按字面比」）。
+test('M4h 复核：【派发】——只伪造角色或段的行不回显；停下行记在别的 run 里的不列；state.json 读不出的照列、closed_at 不是时间的不算收口；runs 下的链接算 run、指向这一趟的不算别的', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S1' })
+  try {
+    const NL = String.fromCharCode(10)
+    const at = join(projectDir, '.agent-team')
+    const runs = join(at, 'runs')
+    const d = (agentId, role, stage) => dispatchLine({ at: 't', agentId, toolUseId: null, role, stage, caller: 'at-architect', callerId: null, mode: 'background' })
+    const s = (agentId, role, stage, outcome) => stopLine({ at: 't', agentId, role, stage, outcome })
+    const mk = (dir, state, lines) => {
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(join(dir, 'state.json'), state)
+      writeFileSync(join(dir, 'dispatches.jsonl'), lines.join(NL) + NL)
+    }
+    const open = JSON.stringify({ run_id: 'x', stage: 'S5', closed_at: null })
+    // r0：只伪造一边的两行；c03 的停下行记在这一趟（r1）里，c04 的记在已收口的 r2 里。
+    mk(join(runs, 'r0'), open, [
+      d('a0000000000000c01', 'at-evil', 'S5'),
+      d('a0000000000000c02', 'at-backend', 'S9'),
+      d('a0000000000000c03', 'at-frontend', 'S5'),
+      d('a0000000000000c04', 'at-ios', 'S5'),
+    ])
+    writeFileSync(join(runs, 'r1', 'dispatches.jsonl'), [d('a0000000000000c09', 'at-qa', 'S6'), s('a0000000000000c03', 'at-frontend', 'S5', 'pass')].join(NL) + NL)
+    mk(join(runs, 'r2'), JSON.stringify({ run_id: 'r2', stage: 'S8', closed_at: '2026-09-20T10:30:00Z' }), [s('a0000000000000c04', 'at-ios', 'S5', 'bubble')])
+    // r3：state.json 读不出；r4：closed_at 不是 ISO 时间。
+    mk(join(runs, 'r3'), '{坏', [d('a0000000000000c05', 'at-android', 'S5')])
+    mk(join(runs, 'r4'), JSON.stringify({ run_id: 'r4', stage: 'S5', closed_at: 'yes' }), [d('a0000000000000c06', 'at-ui', 'S5')])
+    // r5、r6：runs 下的两个链接，指向 runs 之外同一个没收口的 run；alias-r1：指向这一趟（r1）的链接。
+    mk(join(at, 'elsewhere'), open, [d('a0000000000000c07', 'at-backend', 'S5')])
+    symlinkSync(join(at, 'elsewhere'), join(runs, 'r5'), 'junction')
+    symlinkSync(join(at, 'elsewhere'), join(runs, 'r6'), 'junction')
+    symlinkSync(join(runs, 'r1'), join(runs, 'alias-r1'), 'junction')
+    const ctx = ctxOf(run('ledger', { tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: join(at, 'current-run') } }, GATE, projectDir).stdout)
+    assert.ok(ctx.includes(INFLIGHT_HEAD), ctx)
+    assert.equal(ctx.split('  - "r0"：一条认不出角色或段的派发').length - 1, 2, ctx)
+    assert.ok(!ctx.includes('at-evil') && !ctx.includes('S9'), ctx)
+    assert.ok(!ctx.includes('at-frontend（S5）') && !ctx.includes('at-ios（S5）'), `停下行记在别的 run 里的，门禁见过它停下：${ctx}`)
+    assert.ok(ctx.includes('  - "r3"：at-android（S5）'), `state.json 读不出的那一趟照样列：${ctx}`)
+    assert.ok(ctx.includes('  - "r4"：at-ui（S5）'), `closed_at 不是 ISO 时间，不算收口：${ctx}`)
+    assert.ok(ctx.includes('  - "r5"：at-backend（S5）'), `runs 下的链接算一个 run：${ctx}`)
+    assert.equal(ctx.split('at-backend（S5）').length - 1, 1, `同一个目录的两个链接只列一次：${ctx}`)
+    assert.ok(!ctx.includes('at-qa（S6）') && !ctx.includes('alias-r1'), `指向这一趟的链接不算别的 run：${ctx}`)
   } finally {
     rmSync(projectDir, { recursive: true, force: true })
     rmSync(pluginDir, { recursive: true, force: true })

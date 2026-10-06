@@ -56,6 +56,37 @@ const AT_ABANDON =
   '改 `current-run` 之前先确认那一趟没有还在跑的派发（它派出去的人的完成通知都到了）：还在跑的，它们停下时门禁按新的这一趟判、' +
   '那一趟的产物没人核；写 `current-run` 那一次的回传里有【派发】一段的，照它办。'
 test('M4h 第 24-1 条：/agent-team:at 第 1 节「放弃」那一支——改 current-run 之前先确认没有还在跑的派发', () => {
-  const s1 = AT.slice(AT.indexOf('**先看 `.agent-team/current-run` 指着的那一趟**'), AT.indexOf('- run id：'))
-  assert.ok(has(s1, AT_ABANDON))
+  // 复核（docs/43 §8，低-4）：只切「停在更早的段」那一条（到下一条「- 」为止）——原来切的是整个第 1 节那一段，挪到「已收口」那一支也绿。
+  const start = AT.indexOf('- `stage` 停在更早的段、没收口')
+  assert.ok(start >= 0, '/agent-team:at 第 1 节没有「stage 停在更早的段」那一条')
+  const end = AT.slice(start + 2).search(/\r?\n(\r?\n)?- /)
+  const branch = AT.slice(start, end < 0 ? undefined : start + 2 + end)
+  assert.ok(has(branch, AT_ABANDON), branch)
+})
+
+// ---- 复核（docs/43 §8） ----
+
+// 低-2：at-resume 原来写「不在 available_roles 里的不用写」，与 /agent-team:at 第 3 节（凡是决定不叫的都写进 trimmed）、at-pm 正文（判据是
+// 「你真裁过没有」）相反；照它做，整段不做的 S2 只记了 at-product，H2、推进、收口都认不出是整段裁掉。
+const RESUME_TRIM = '`trimmed`（不在 `available_roles` 里的也写——`trimmed` 记的是你裁过谁，不是那条回传点不点名）。'
+test('M4h 复核：at-resume 的 S2 那一条——不用 at-ui 的写进 trimmed，不在 available_roles 里的也写', () => {
+  assert.ok(has(RESUME, RESUME_TRIM))
+  assert.ok(!RESUME.includes('里的不用写'), '还留着「不在 available_roles 里的不用写」')
+})
+
+// 疑点：at-resume 第 1 节丢了指针时写回 current-run，那一次同样会出【派发】（别的 run 里有门禁没见它停下的派发）。
+const RESUME_POINTER = '写回指针那一次的回传里有【派发】一段的，照它办。'
+test('M4h 复核：at-resume 第 1 节写回 current-run——回传里有【派发】的照它办', () => {
+  const s1 = RESUME.slice(RESUME.indexOf('## 1. 读回位置'), RESUME.indexOf('## 2. '))
+  assert.ok(has(s1, RESUME_POINTER))
+})
+
+// 疑点：stages.README.md 讲协调者进度的那一节只讲 S5；S2 的 at-product 这一种（第 14 条）补一句。
+const STAGES_S2 =
+  'M4h（`docs/43`，审查第 14 条）起 S2 也报：`at-product` 既是 S2 的协调者又是它的产者，它返回时自己那份交了、S2 却没齐（它派的 `at-ui`' +
+  ' 还没交），同样报 `at-ui` 的进度——头一句说「它自己的那几份交了」，不是执行段的不提实现记录。'
+test('M4h 复核：stages.README.md 的协调者进度那一节——S2 的 at-product 这一种也写上', () => {
+  const r = read('stages.README.md')
+  const sec = r.slice(r.indexOf('⚠️ **S5 那一行的「静默」'), r.indexOf('## 另一条相关的缺口'))
+  assert.ok(has(sec, STAGES_S2))
 })

@@ -236,6 +236,8 @@ test('19-13 协调者返回（S5 正路）：报它派出去的执行角色与�
     writeFileSync(join(dirs.runDir, '05-impl', 'at-backend.md'), '# 实现记录\n做了。\n')
     const c = contextOf(run('completion', prompt(note('a00000000000000a1', { toolUseId: 'toolu_01ARCH', result: '已派出 at-backend、at-frontend。' })), GATE, dirs.projectDir))
     assert.match(c, /S5 进度/)
+    // M4h 复核（docs/43 §8，低-3）：S5 的协调者在这一段没有自己的产物——头一句不许说「它自己的那几份交了」（S2 那一种）。
+    assert.ok(c.includes('刚返回的 at-architect 是 S5 的协调者，这一段没有它自己的产物；'), c)
     assert.match(c, /at-backend（后台派发）：05-impl\/at-backend\.md 在磁盘上/)
     assert.match(c, /at-frontend（后台派发）：05-impl\/at-frontend\.md 还没有——门禁还没见它停下：可能还在跑/)
     assert.ok(!c.includes('完成通知到 PM 那里'), c)
@@ -479,6 +481,7 @@ test('19-33 前台派发的协调者跑完（H5a）：进度列它这一次运�
     run('deliverable', post('agent-team:at-backend', completed('a00000000000000b6', '没写完。'), { caller: ARCH, callerId: 'a00000000000000a6', toolUseId: 'toolu_01B6' }), GATE, dirs.projectDir)
     const c = contextOf(run('deliverable', post(ARCH, completed('a00000000000000a6', '回报。'), { toolUseId: 'toolu_01A6' }), GATE, dirs.projectDir))
     assert.match(c, /S5 进度/)
+    assert.ok(c.includes('刚返回的 at-architect 是 S5 的协调者，这一段没有它自己的产物；'), c)
     assert.match(c, /at-backend（前台派发）：05-impl\/at-backend\.md 还没有——门禁最后一回拦了它/)
   })
 })

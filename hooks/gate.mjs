@@ -199,26 +199,27 @@ function isReachJson(filePath, agentTeamDir) {
 // 这一趟判它们（停下行记进这一趟的派发记录、交付物核验按这一趟的段判），那一趟的产物没人核。按派发记录认：最后一回停下是「拦」的也算没停
 // （拦了它会接着跑）；门禁没见它停下的，可能还在跑，也可能早就被中断了、平台没报——两种都照实说，不按时间猜。角色与段只在花名册、阶段链认得
 // 它们时说出来（派发记录 Bash 写得进），run 目录名加引号（docs/27 §2.1）。按 agent_id 把停下认回派它的那一趟是另一件事（M，docs/39 往后放）。
+// 复核（docs/43 §8）：停下行按 agent_id 在所有 run 的派发记录里认——这一趟、收了口的也算（指针切走之后，停下行记进当时指针指着的那一趟；
+// agent_id 本身唯一），见过它不是「拦」的停下就算停了。runs 下的链接与 runctx 认 run 的口径一样算一个 run，同一个目录的别名只算一次，
+// 「这一趟自己」按规范化之后的路径认。state.json 读不出的那一趟照样列：判不出收没收口，宁可多报。
 function inflightElsewhere(ctx) {
   if (typeof ctx.agentTeamDir !== 'string' || typeof ctx.runDir !== 'string') return []
   const runsDir = join(ctx.agentTeamDir, 'runs')
   let ids
   try {
-    ids = readdirSync(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+    ids = readdirSync(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory() || e.isSymbolicLink()).map((e) => e.name)
   } catch {
     return []
   }
   const here = norm(ctx.runDir)
-  const roster = loadRoster()
-  const out = []
+  const seen = new Set()
+  const finished = new Set()
+  const runs = []
   for (const id of ids.sort()) {
     const dir = join(runsDir, id)
-    if (norm(dir) === here) continue
-    let state = null
-    try {
-      state = parseStateText(readFileSync(join(dir, 'state.json'), 'utf8'))
-    } catch {}
-    if (state && closedAt(state) !== null) continue
+    const key = norm(dir)
+    if (seen.has(key)) continue
+    seen.add(key)
     let text
     try {
       text = readFileSync(join(dir, DISPATCHES_FILE), 'utf8')
@@ -226,9 +227,19 @@ function inflightElsewhere(ctx) {
       continue
     }
     const log = readDispatchLog(text)
+    for (const [agentId, outcomes] of log.stops) if (outcomes.some((o) => o !== 'block')) finished.add(agentId)
+    if (key !== here) runs.push({ id, dir, log })
+  }
+  const roster = loadRoster()
+  const out = []
+  for (const { id, dir, log } of runs) {
+    let state = null
+    try {
+      state = parseStateText(readFileSync(join(dir, 'state.json'), 'utf8'))
+    } catch {}
+    if (state && closedAt(state) !== null) continue
     for (const d of log.dispatches) {
-      const last = lastStop(log, d.agent_id)
-      if (last !== null && last !== 'block') continue
+      if (finished.has(d.agent_id)) continue
       const known = isPlainObject(roster) && Object.hasOwn(roster, d.role) && isKnownStage(ctx.stages, d.stage)
       out.push({ runId: id, role: known ? d.role : null, stage: known ? d.stage : null })
     }

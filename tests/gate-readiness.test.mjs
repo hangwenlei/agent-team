@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, decisionOf } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
+import { reworkFromHistory } from '../hooks/lib/state.mjs'
 
 test('readiness：ctx.ok 为 false 时 fail open 且在 stderr 留痕说明（不是静默放行）', () => {
   // 干净的临时目录当 cwd：这里必然没有 .agent-team，readRunContext 必然
@@ -313,6 +314,44 @@ test('M4h 第 38 条：门禁子进程——S2 整段裁掉之后在 S3 派架�
     const again = decisionOf(run('readiness', input, undefined, dirs.projectDir).stdout)
     assert.equal(again?.permissionDecision, 'deny')
     assert.ok(!again.permissionDecisionReason.includes('整段裁掉') && again.permissionDecisionReason.includes('先把产出这些产物的阶段跑完再回来'), again.permissionDecisionReason)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// M4h 复核（docs/43 §8，中-2）：H2 给的第一条路要走得通。照「回退」记回到整段裁掉的那一段（history 追加、rework 照派生量、rework_base 照磁盘，
+// 同一次写入里把产者从 trimmed 里拿掉），H6 放行；在那一段派它，H2 放行；它跑完、产物交了，H5a 不说「不是当前阶段的执行者」。原来那条路
+// （不记回退、直接派它补交）走下去，H5a 会说这次派发本身不该发生、叫 PM 记回退。
+test('M4h 复核：整段裁掉之后照 H2 给的第一条路回退到那一段——H6 放行、在那一段派产者 H2 放行、它跑完之后 H5a 不说它不该发生', () => {
+  const dirs = makeRun({
+    runId: 'r1', stage: 'S3', artifacts: ['00-contract.md'], roster: [],
+    history: [{ stage: 'S1', at: 't' }, { stage: 'S2', at: 't' }, { stage: 'S3', at: 't' }],
+    trimmed: { 'at-product': 'S2', 'at-ui': 'S2' }, stage_roles: { S2: [] },
+  })
+  try {
+    const runDir = join(dirs.projectDir, '.agent-team', 'runs', 'r1')
+    const statePath = join(runDir, 'state.json')
+    const first = decisionOf(run('readiness', { tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-architect' } }, undefined, dirs.projectDir).stdout)
+    assert.ok(first?.permissionDecisionReason.includes('要么回退到要补的那一段把它补回来（照 /agent-team:at 第 3 节的「回退」记'), first?.permissionDecisionReason)
+    const before = JSON.parse(readFileSync(statePath, 'utf8'))
+    const history = [...before.history, { stage: 'S2', at: 't' }]
+    const after = { ...before, stage: 'S2', history, rework: reworkFromHistory(history), rework_base: {}, trimmed: { 'at-ui': 'S2' } }
+    const write = { hook_event_name: 'PreToolUse', tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: statePath, content: JSON.stringify(after, null, 2) } }
+    const h6 = run('rework', write, undefined, dirs.projectDir)
+    assert.notEqual(decisionOf(h6.stdout)?.permissionDecision, 'deny', h6.stdout)
+    writeFileSync(statePath, JSON.stringify(after, null, 2))
+    const h2 = decisionOf(run('readiness', { tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-product' } }, undefined, dirs.projectDir).stdout)
+    assert.notEqual(h2?.permissionDecision, 'deny', JSON.stringify(h2))
+    writeFileSync(join(runDir, '01-prd.md'), '# PRD 产品需求')
+    const done = {
+      hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_use_id: 'toolu_01M4HR', agent_type: 'at-pm',
+      tool_input: { subagent_type: 'agent-team:at-product', description: 'x', prompt: 'y' },
+      tool_response: { status: 'completed', prompt: 'y', agentId: 'a00000000000000f1', agentType: 'agent-team:at-product', content: [{ type: 'text', text: '交了。' }], totalDurationMs: 1 },
+    }
+    const h5a = run('deliverable', done, undefined, dirs.projectDir)
+    const ctx = h5a.stdout ? JSON.parse(h5a.stdout).hookSpecificOutput?.additionalContext ?? '' : ''
+    assert.ok(!ctx.includes('不是当前阶段') && !ctx.includes('不该发生'), ctx)
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })

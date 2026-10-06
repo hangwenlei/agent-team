@@ -527,7 +527,9 @@ test('M4a 复核 H2 前置还旧两类都有：accept 那一句点名 01-prd.md�
 // M4h（docs/43，审查第 38 条）：S2 整段裁掉（at-product、at-ui 都记在 trimmed 里、这一趟在 S2 谁都没叫过）之后，S3 派 at-architect 被 H2 拒，理由原来
 // 只说「先把产出这些产物的阶段跑完再回来」——那一段是 PM 自己裁掉的，跑不完。现在说清是整段裁掉，给出两条路。整段裁掉的判定由调用方给
 // （trimmedAway，与推进、收口共用 advance.mjs 的 wholeStageTrimmed）。
-const AWAY_PM = "S2 整段裁掉了（那一段的产者都记在 trimmed 里、这一趟在那一段谁都没叫过），它的产物不会有了：要么把那一段补回来（把它的产者从 trimmed 里拿掉、派它补交，叫到的人补记进 stage_roles 那一段），要么把要它当前置的段也整段裁掉、交付文档里写明少了哪几段（/agent-team:at 第 3 节第 4 条）。"
+// M4h 复核（docs/43 §8，中-2）：第一条路是「回退」——不记回退、直接派它补交，H5a 会说这次派发不该发生、叫 PM 记回退。
+const AWAY_PATHS = "要么回退到要补的那一段把它补回来（照 /agent-team:at 第 3 节的「回退」记，同一次写入里把它的产者从 trimmed 里拿掉，再在那一段派它），要么把要它当前置的段也整段裁掉、交付文档里写明少了哪几段（/agent-team:at 第 3 节第 4 条）。"
+const AWAY_PM = "S2 整段裁掉了（那一段的产者都记在 trimmed 里、这一趟在那一段谁都没叫过），它的产物不会有了：" + AWAY_PATHS
 const AWAY_OTHER = "S2 整段裁掉了（那一段的产者都记在 trimmed 里、这一趟在那一段谁都没叫过），它的产物不会有了：这要项目经理定，把这一点写进你的回报冒泡给派你的人。"
 test('M4h 第 38 条：缺的前置是整段裁掉的那一段的产物——拒绝理由说清是整段裁掉、给两条路；不说「先跑完那一段」', () => {
   const base = { targetRole: 'at-architect', stages: REAL_STAGES, artifactExists: have('00-contract.md'), roster: ['at-pm'] }
@@ -544,4 +546,14 @@ test('M4h 第 38 条：缺的前置是整段裁掉的那一段的产物——拒
   const mixed = decideReadiness({ ...base, artifactExists: have(), callerCanWriteState: true, trimmedAway: (sid) => sid === 'S2' })
   assert.ok(mixed.reason.includes('先把产出这些产物的阶段跑完再回来') && mixed.reason.includes(AWAY_PM), mixed.reason)
   assert.ok(!mixed.reason.includes('S1 整段裁掉'), mixed.reason)
+})
+
+// M4h 复核（docs/43 §8，低-7）：几段同时整段裁掉时说「这几段」「它们」；缺的前置里同时有还是上一轮的（走 stale 那一支）时，整段裁掉那一句照样说。
+test('M4h 复核：两段都整段裁掉时用复数；混着还是上一轮的前置时整段裁掉那一句也在', () => {
+  // S7 的前置：01-prd.md（S2）、06-test.md（S6）。
+  const both = decideReadiness({ targetRole: 'at-acceptance', stages: REAL_STAGES, artifactExists: have('00-contract.md'), roster: ['at-pm'], callerCanWriteState: true, trimmedAway: (sid) => sid === 'S2' || sid === 'S6' })
+  assert.ok(both.reason.includes('S2、S6 整段裁掉了（这几段的产者都记在 trimmed 里、这一趟在这几段谁都没叫过），它们的产物不会有了：' + AWAY_PATHS), both.reason)
+  assert.ok(!both.reason.includes('先把产出这些产物的阶段跑完再回来'), both.reason)
+  const withStale = decideReadiness({ targetRole: 'at-acceptance', stages: REAL_STAGES, ...fresh({ current: ['00-contract.md'], stale: ['06-test.md'] }), roster: ['at-pm'], callerCanWriteState: true, trimmedAway: (sid) => sid === 'S2' })
+  assert.ok(withStale.reason.includes('还是上一轮的') && withStale.reason.includes(AWAY_PM), withStale.reason)
 })
