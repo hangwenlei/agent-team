@@ -44,6 +44,18 @@ import {
 import { mayWaive, dispatchedIn, wholeStageTrimmed } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
+import {
+  CONTRACT_BASE_FILE,
+  DRIFT_FIX,
+  decideContractBase,
+  driftHead,
+  initialBase,
+  outdatedFix,
+  readContractBase,
+  revisedBase,
+  section1Drift,
+  verifyShasOf,
+} from './lib/contract-base.mjs'
 import { readGrants } from './lib/budget.mjs'
 import { askAnswers, promptAnswer, planApprovals, approvalLine, approvalNotices } from './lib/approvals.mjs'
 import { deliveredSnapshot, readSnapshot, makeDelivered, decideRedispatch, decideRedoWrite } from './lib/redo.mjs'
@@ -56,7 +68,7 @@ import { validateProject } from './lib/project.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
 import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
-import { isPlainObject, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName } from './lib/stages.mjs'
+import { isPlainObject, isStageChain, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
 import { GATE_CHECK_PATH, gateCheckReason, isGateCheck, selfCheckIdentity } from './lib/gate-check.mjs'
@@ -892,6 +904,47 @@ function writeDeliveredSnapshot(ctx) {
 }
 
 // M3z：门禁专属文件的拒绝理由。路径是这次调用给的，过 inline。
+// M4j（docs/45，审查第 20 条）：契约基线（hooks/lib/contract-base.mjs）。推进出第一段之后门禁第一次见到 state.json 时记下第 1 节与整份
+// 契约的 sha；已经有了就不动。写不进、读不出都只是少拦，留一行痕。
+function ensureContractBase(ctx) {
+  try {
+    if (!isStageChain(ctx.stages) || !isPlainObject(ctx.state) || ctx.artifactExists(CONTRACT_BASE_FILE)) return
+    if (Object.keys(ctx.stages).indexOf(ctx.state.stage) <= 0) return
+    const base = initialBase(ctx.artifactBytes(CONTRACT_FILE))
+    if (!base) return
+    writeFileSync(join(ctx.runDir, CONTRACT_BASE_FILE), `${JSON.stringify(base, null, 2)}\n`)
+  } catch (e) {
+    process.stderr.write(`agent-team ledger：契约基线写不进（${e?.message ?? e}），这一次不记，下一次写 state.json 时再试。\n`)
+  }
+}
+
+// 写契约之后：整份 sha 变了（一次修订）就重拍验证段的快照；第 1 节变了、有对着上一版契约的结论，各说一段【契约】。没有基线（还在第一段、
+// 或者读不出来）不说。
+function contractBaseNotices(ctx) {
+  const out = []
+  try {
+    const base = readContractBase(ctx.artifactBytes(CONTRACT_BASE_FILE))
+    const bytes = ctx.artifactBytes(CONTRACT_FILE)
+    if (!base || !bytes) return out
+    const next = revisedBase(base, bytes, verifyShasOf({ stages: ctx.stages, artifactExists: ctx.artifactExists, artifactBytes: ctx.artifactBytes }))
+    if (next) writeFileSync(join(ctx.runDir, CONTRACT_BASE_FILE), `${JSON.stringify(next, null, 2)}\n`)
+    if (section1Drift(base, bytes)) {
+      out.push(`【契约】${driftHead(ctx.stages)}；这次写入之后磁盘上的第 1 节跟它不一样。${DRIFT_FIX}。改回去之前，推进与收口都会被拒。`)
+    }
+    const outdated = next ? Object.keys(next.verify_base) : []
+    if (outdated.length) {
+      const fix = outdatedFix(ctx.stages, outdated)
+      out.push(
+        `【契约】契约改了：验证段已经写成的 ${outdated.join('、')} 对着的是上一版契约（门禁记下了它们这一刻的样子）。` +
+          `推进出验证段与收口之前，它们要对着这一版重出——${fix.text}${fix.rollback ? '，再派人重出' : ''}。`,
+      )
+    }
+  } catch (e) {
+    process.stderr.write(`agent-team ledger：契约基线读写出错（${e?.message ?? e}），这一次不核第 1 节与验证段的新旧。\n`)
+  }
+  return out
+}
+
 function gateFileReason(checked, exotic) {
   const leafIs = (name) => leafName(checked) === name || (typeof checked === 'string' && leafName(norm(checked)) === name)
   const approvals = leafIs(APPROVALS_FILE)
@@ -900,7 +953,9 @@ function gateFileReason(checked, exotic) {
       '需要批准时，门禁自己记下它；照返工预算门禁拒绝理由里的问法去问用户。'
     : leafIs(DISPATCHES_FILE)
       ? '这是门禁自己记的派发记录（谁在哪一段被派出去、谁派的、交付物核验拦过它几回），子代理完成时门禁靠它核产物，不用、也不许改。'
-      : '这是门禁自己拍的交付快照，PM 推进或回退之后由门禁照磁盘重拍，不用、也不许改。'
+      : leafIs(CONTRACT_BASE_FILE)
+        ? '这是门禁记下的契约基线（推进出第一段时契约第 1 节的原文，契约每修订一次那一刻验证段各份结论的样子），门禁自己维护，不用、也不许改。'
+        : '这是门禁自己拍的交付快照，PM 推进或回退之后由门禁照磁盘重拍，不用、也不许改。'
   return (
     `agent-team 门禁：不得写 ${inline(checked)}——${exotic ? `${exotic}；它可能就是门禁专属文件。` : ''}${what}` +
     '任何人（包括项目经理与主线程）都不用 Edit/Write 写它。'
@@ -1558,6 +1613,19 @@ function main() {
       const rb = decideReworkBase({ before, after, stages: stagesForRework, diskSha, dispatched })
       if (!rb.ok) denyAndExit(rb.reason, spec.event)
       for (const note of rb.notes) process.stderr.write(`agent-team H6 返工预算：${note}\n`)
+
+      // M4j（docs/45，审查第 20 条）：契约基线（门禁专属的 contract-base.json，hooks/lib/contract-base.mjs）——推进与收口时，契约第 1 节
+      // 跟推进出第一段时记下的不同、验证段的结论对着上一版契约，拒。排在最后：缺、空、上一轮的、返工预算这些先说。读不出来当没有基线。
+      let contractBase = null
+      let contractBytes = null
+      try {
+        contractBase = readContractBase(readFileSync(join(runDir, CONTRACT_BASE_FILE)))
+      } catch {}
+      try {
+        contractBytes = readFileSync(join(runDir, CONTRACT_FILE))
+      } catch {}
+      const cb = decideContractBase({ before, after, stages: stagesForRework, base: contractBase, contractBytes, diskSha })
+      if (!cb.ok) denyAndExit(cb.reason, spec.event)
     }
   }
 
@@ -1776,6 +1844,9 @@ function main() {
     // H2、H3 拿它分辨「交过」——不依赖 PM 把 sha 记进 artifacts（那条回传只发给写者，第 28 条）。写不进、读不出都只是少拦，
     // 留一行痕。内容没变就不写。
     if (kind === 'state') writeDeliveredSnapshot(ctx)
+    // M4j（docs/45）：契约基线——推进出第一段之后第一次见到 state.json 时记下（contract-base.mjs）；写契约之后按它说【契约】。
+    if (kind === 'state') ensureContractBase(ctx)
+    const contractBaseLines = kind === 'contract' ? contractBaseNotices(ctx) : []
 
     // M3u（docs/29）：project.json 的形状问题只有 PM 改得了，在它写控制文件的几个时机说出来——写 project.json
     // 本身（三档全报）；每趟 run 开头写 current-run（三档全报，已装用户的旧配置在 S1 就露面，不等 S5 撞上拒绝）；
@@ -1886,6 +1957,7 @@ function main() {
       const reachNotice = reachNoticeFor(filePath, ctx.project, isContractWriter(input.agent_type))
       if (reachNotice) notices.push(reachNotice)
     }
+    for (const line of contractBaseLines) notices.push(line)
     // M4h（docs/43，审查第 24-1 条）：写 current-run 时，别的、没收口的 run 里门禁还没见它停下的派发（inflightElsewhere 上方）。
     if (isPointer) {
       const inflight = inflightNotice(inflightElsewhere(ctx))

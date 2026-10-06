@@ -142,7 +142,7 @@ Windows（平台只给 PowerShell），或者设置、启动参数禁了 `Bash`�
   在 `S5` 里重派）；`S2` 里被拒的不补 `paths`。
 - **契约的第 1 节逐字照抄用户原话。** 不改写、不顺一顺、不补全（完整格式见
   `${CLAUDE_PLUGIN_ROOT}/skills/at-contract-format/SKILL.md`——同上，你是主会话，
-  需要时自己 `Read`）。
+  需要时自己 `Read`）。推进出 S1 之后它就定了：门禁记下了它，之后改了它，推进与收口都会被拒。
 - **不得声称做完了没做的事。** 产物没写出来就如实说。
 - **S8 交付收口要写收口标记 `closed_at`。** 写完 `08-delivery.md`，用同一次 Write 记 `never_invoked` 与 `closed_at`（做法见
   `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 6 节）；验收没过不收口。收口之后这一趟就冻结了：不派人、不记回退、不重开，

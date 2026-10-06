@@ -30,7 +30,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/44` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/45` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，下一轮从 `docs/39` §5 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -139,6 +139,10 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （`malformedCaller`）H1、H3 共用一个判断。主会话被设置里别的 agent 或启动时的 `--agent` 换掉时（实测：`agent_type` 是那个名字、没有 `agent_id`），
   自检与 H1、H3、H4 的拒绝理由末尾都说清身份与出路（`selfCheckIdentity`）；还没有 run 时 H3 对谁都放行，那是 at-init 自举的既有设计。`state.json`
   里的角色名写裸名，`validateState` 报带前缀的、`roster` ∩ `never_invoked`、项目经理进了 `roster`（只报、不拦）。理由在 `docs/44`。
+- **契约的账由门禁记**：推进出第一段之后门禁第一次见到 `state.json` 时，把契约第 1 节的原文与整份 sha 记进门禁专属的 `contract-base.json`；
+  之后契约每修订一次，记下那一刻验证段各份结论的样子。第 1 节变了、验证段的结论跟修订那一刻一样（对着上一版契约），写契约时【契约】当场说，
+  H6 不放行推进与收口（`hooks/lib/contract-base.mjs` 的 `decideContractBase`，排在 H6 别的判据之后）；回退之后 `rework_base` 接手，不另起一套
+  新鲜度口径。推进出第一段之前不核（S1 里转写错了可以改）。理由在 `docs/45`。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。
