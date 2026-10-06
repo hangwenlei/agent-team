@@ -101,21 +101,6 @@ export function pluginNotice(report) {
   return items.length ? items.map((s) => `【插件】${s}。`).join('\n') : null
 }
 
-/**
- * project.json 解析不出、或者不是对象。不回显文件内容（docs/27）。
- * - justWritten：这次写的正是它（写 project.json 那条缝）；否则是它在别处被弄坏（用户在两趟 run 之间手改，加了
- *   注释或尾逗号），PM 写 .agent-team 下别的文件时撞上。run 进行中时，那一刻契约与产物的哈希也回传不了，改好之后
- *   要原样重写一次刚才那个文件才拿得到（契约这一格 commands/at.md §2 另有兜底，这句管的是其余产物与记账）；没有
- *   run 时没有哈希可拿，改好 project.json 本身就会收到报告与【触达表】那一段。
- * - utf16：门禁认出它是 UTF-16 编码（Windows PowerShell 5.1 的 Out-File、> 的默认编码；gate.mjs 的 looksUtf16）。只说
- *   「注释和尾逗号」会把 PM 引开。实测（CLI 2.1.283）：Read 看到的是开头两个 U+FFFD、每个字后跟一个 NUL 的乱码；
- *   Write 第一次去掉 BOM、仍写成 UTF-16LE，第二次才是 UTF-8。PM 自己核字节、看到第一次写完仍是 UTF-16 时，会不信
- *   「再写一次」有用、改去写探测文件或删文件重建（6 次里 2 次）——所以把这个可观测的现象与兜底都说出来。修 UTF-16
- *   要连写两次 project.json，run 进行中时，早先那条「在别处被弄坏」回传末尾的「修好后原样重写刚才那个文件」隔着两段
- *   回传，实测多半被丢掉（7 次里 1 次照做）；所以写的正是它、UTF-16、run 进行中这一格，把那个提醒挂在修好之前的最后
- *   一条回传上。兜底（删掉重建）按 project.json 的写入次数计：run 进行中时 PM 写 state.json 已经收到过一次同样的句子，
- *   只说「第二次写完仍收到」会被数成第二次，第一次写完就删文件（合并前复测 8 次里 1 次）。
- */
 // M4g（docs/42，审查第 28 条）：PM 照【触达表】把 JSON 手抄进 .agent-team/reach.json，原来没有任何东西核它（/agent-team:at-status 照它报，
 // 抄错了就报错）。写完之后门禁按当前 project.json 与花名册重算、与写进去的比：语义上相同（键序、BOM、CRLF 不算不同）不吭声；不同、或者
 // 写进去的不是合法 JSON，给出正确的那一份。expected 是门禁算的，原样落盘的 JSON 走 safeJson（docs/27 §2.1）。
@@ -136,6 +121,21 @@ export function reachCheckNotice({ writtenText, expected }) {
   )
 }
 
+/**
+ * project.json 解析不出、或者不是对象。不回显文件内容（docs/27）。
+ * - justWritten：这次写的正是它（写 project.json 那条缝）；否则是它在别处被弄坏（用户在两趟 run 之间手改，加了
+ *   注释或尾逗号），PM 写 .agent-team 下别的文件时撞上。run 进行中时，那一刻契约与产物的哈希也回传不了，改好之后
+ *   要原样重写一次刚才那个文件才拿得到（契约这一格 commands/at.md §2 另有兜底，这句管的是其余产物与记账）；没有
+ *   run 时没有哈希可拿，改好 project.json 本身就会收到报告与【触达表】那一段。
+ * - utf16：门禁认出它是 UTF-16 编码（Windows PowerShell 5.1 的 Out-File、> 的默认编码；gate.mjs 的 looksUtf16）。只说
+ *   「注释和尾逗号」会把 PM 引开。实测（CLI 2.1.283）：Read 看到的是开头两个 U+FFFD、每个字后跟一个 NUL 的乱码；
+ *   Write 第一次去掉 BOM、仍写成 UTF-16LE，第二次才是 UTF-8。PM 自己核字节、看到第一次写完仍是 UTF-16 时，会不信
+ *   「再写一次」有用、改去写探测文件或删文件重建（6 次里 2 次）——所以把这个可观测的现象与兜底都说出来。修 UTF-16
+ *   要连写两次 project.json，run 进行中时，早先那条「在别处被弄坏」回传末尾的「修好后原样重写刚才那个文件」隔着两段
+ *   回传，实测多半被丢掉（7 次里 1 次照做）；所以写的正是它、UTF-16、run 进行中这一格，把那个提醒挂在修好之前的最后
+ *   一条回传上。兜底（删掉重建）按 project.json 的写入次数计：run 进行中时 PM 写 state.json 已经收到过一次同样的句子，
+ *   只说「第二次写完仍收到」会被数成第二次，第一次写完就删文件（合并前复测 8 次里 1 次）。
+ */
 export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 = false }) {
   const why = utf16 ? '（文件是 UTF-16 编码，门禁只读 UTF-8）' : '（常见原因：注释、尾逗号、文件不是 UTF-8 编码）'
   const how = justWritten
@@ -401,7 +401,7 @@ export function buildLedgerNotices({
         ? `【阶段】${st.stage} 的产物已经齐了。这一段如果确实结束了，需要把 state.stage 推进到 ` +
           `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "<ISO 时间>" }${again}——用同一次 Write 把这一段的账一起记掉：` +
           `叫到的人累加进 roster（state.json 里有 stage_roles 的，同一批人并进它的这一段），决定不叫的产出角色写进 trimmed。` +
-          `分两次写，推进那一次会被产者交代当成漏派。` +
+          `分两次写，推进那一次产者交代会把刚走完那一段的产者点名报出来（门禁记过派发的报成漏记，没记过的报成漏派）。` +
           (implStage ? implRecordNote({ stage: stages?.[st.stage], writerIsPm, writer }) : '') +
           `${who}${tail}${over}`
         : Array.isArray(closeBlockers) && closeBlockers.length

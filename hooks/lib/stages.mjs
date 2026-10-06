@@ -173,6 +173,16 @@ export function isStageChain(v) {
   return values.length > 0 && values.every(isPlainObject)
 }
 
+/** 产物名 → 产出它的那一段与角色（链上第一个命中的；按全部 producers 展开）。不是任何一段的产物、阶段链读不出来：null。
+ * 账本比对的「没记」那一行拿它认写者（M4g 复核，docs/42 §8）。 */
+export function producerOfName(stages, name) {
+  if (!isStageChain(stages) || typeof name !== 'string') return null
+  for (const id of Object.keys(stages)) {
+    for (const role of stageRoles(stages[id])) if (expandProduces(stages[id], [role]).includes(name)) return { stageId: id, role }
+  }
+  return null
+}
+
 /** 这一段**可能有**的全部产物：按全部 producers 展开，不按这一趟叫到了谁（M3y，docs/33）。回退那一刻的快照与「离开这一段时
  * 还有没有上一轮的产物」都问它——上一轮叫过、这一轮没叫的人留下的那份，同样是上一轮的。 */
 export function productsOfStage(stage) {

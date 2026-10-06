@@ -87,7 +87,8 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 （连同那条 escalation 与新的 `contract_sha`，上一个会话里记过的就带着）。
 
 **问了没答的**（`escalations` 里有 `answer` 是空串的：上一个会话问了用户、还没等到答复）：先照 `${CLAUDE_PLUGIN_ROOT}/commands/at.md`
-第 4 节把那一问重新问一遍，答复补进那一条的 `answer`，再往下走。
+第 4 节把那一问重新问一遍——不要再追加一条，答复补进那一条的 `answer`，再往下走。`budget-exhausted` 那一条、门禁已经记下了批准的
+（`/agent-team:at-status` 的「返工批准」一行列得出），不用重问：把批准的那个规范标签补进 `answer`。
 
 契约那一段（`00-contract.md`）**不要重写**。它是这趟 run 的需求基线，S1 之后就冻结了；
 要改只能走升级流程（见 `/agent-team:at` 的第 4 节，`${CLAUDE_PLUGIN_ROOT}/commands/at.md`）。
@@ -103,7 +104,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 `project.json` 修不好它——停下，告诉用户重装或更新 agent-team 插件。
 
 `artifacts` 里某份产物的 sha 跟不上磁盘（上一个会话里重写过、没收到【产物】回传）时，不要为了拿回传去重派，也不要自己算：
-下一次派发时的【账本比对】会给出磁盘上算出来的 sha，照它改。契约除外：它不进 `artifacts`，对不上的照【契约】那一段做。
+下一次派发时的【账本比对】会带着门禁算出来的值报它，照那一条的收尾做——不要为了消掉它照着磁盘改账。契约除外：它不进 `artifacts`，对不上的照【契约】那一段做。
 
 ## 4. 接着跑
 

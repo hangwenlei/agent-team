@@ -645,3 +645,58 @@ test('M4g：project.json 有阻断时不核 reach.json——那时【触达表�
     assert.ok(!ctxOf(run('ledger', posted(reachFile), undefined, p)).includes('【触达表】刚写进'))
   })
 })
+
+// M4g 复核（K10a、K16、K11、低-8）：花名册读坏时不核（拿空花名册算的「正确那一份」是 {}，docs/29 实测过 PM 用它覆盖正确的 reach.json）；
+// run 读不出时核了照样往 stderr 留痕；reach.json 读不出时不核（不说它「不是合法 JSON」）；非 PM 写的（没有 run 时 H3 对谁都放行）原样冒泡。
+test('M4g 复核：花名册读坏时不核 reach.json', () => {
+  const REPO = new URL('..', import.meta.url)
+  const plugin = realpathSync(mkdtempSync(join(tmpdir(), 'agent-team-lp-plug-')))
+  try {
+    cpSync(new URL('hooks', REPO), join(plugin, 'hooks'), { recursive: true })
+    cpSync(new URL('stages.json', REPO), join(plugin, 'stages.json'))
+    const gate = join(plugin, 'hooks', 'boot.mjs')
+    for (const bad of ['{', '[]']) {
+      writeFileSync(join(plugin, 'roster.json'), bad)
+      withoutRun((p) => {
+        writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE))
+        writeFileSync(join(p, '.agent-team', 'reach.json'), JSON.stringify({ 'at-pm': { own: [] } }))
+        const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'reach.json')), gate, p))
+        assert.ok(!ctx.includes('【触达表】刚写进'), `${bad}：${ctx}`)
+      })
+    }
+  } finally {
+    rmSync(plugin, { recursive: true, force: true })
+  }
+})
+
+test('M4g 复核：run 读不出（current-run 指向不存在的 run）时照样核，并往 stderr 留痕', () => {
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE))
+    writeFileSync(join(p, '.agent-team', 'current-run'), 'nope')
+    writeFileSync(join(p, '.agent-team', 'reach.json'), '{}')
+    const r = run('ledger', posted(join(p, '.agent-team', 'reach.json')), undefined, p)
+    assert.ok(ctxOf(r).includes('【触达表】刚写进 .agent-team/reach.json 的'), ctxOf(r))
+    assert.ok(r.stderr.includes('ledger 回传'), r.stderr)
+  })
+})
+
+test('M4g 复核：reach.json 读不出（是个目录）时不核，也不说它不是合法 JSON', () => {
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE))
+    mkdirSync(join(p, '.agent-team', 'reach.json'))
+    const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'reach.json')), undefined, p))
+    assert.ok(!ctx.includes('【触达表】刚写进'), ctx)
+  })
+})
+
+test('M4g 复核：非 PM 写坏 reach.json（没有 run 时 H3 对谁都放行）——收到的那一段叫它原样冒泡，不叫它自己重写', () => {
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE))
+    writeFileSync(join(p, '.agent-team', 'reach.json'), '{}')
+    const other = ctxOf(run('ledger', posted(join(p, '.agent-team', 'reach.json'), 'agent-team:at-backend'), undefined, p))
+    assert.ok(other.includes('【触达表】刚写进'), other)
+    assert.ok(other.includes('reach.json 是编排层的控制文件，只有项目经理该改它：把这一段原样冒泡给派你的人，不要自己重写。'), other)
+    const pm = ctxOf(run('ledger', posted(join(p, '.agent-team', 'reach.json')), undefined, p))
+    assert.ok(pm.includes('【触达表】刚写进') && !pm.includes('只有项目经理该改它'), pm)
+  })
+})

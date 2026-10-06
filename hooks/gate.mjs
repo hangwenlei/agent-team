@@ -41,7 +41,7 @@ import {
   reportTexts,
   stopLine,
 } from './lib/completion.mjs'
-import { mayWaive } from './lib/advance.mjs'
+import { mayWaive, dispatchedIn } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
 import { readGrants } from './lib/budget.mjs'
@@ -56,7 +56,7 @@ import { validateProject } from './lib/project.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
 import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
-import { isPlainObject, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles } from './lib/stages.mjs'
+import { isPlainObject, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
 import { GATE_CHECK_PATH, gateCheckReason, isGateCheck } from './lib/gate-check.mjs'
@@ -195,7 +195,8 @@ function isReachJson(filePath, agentTeamDir) {
 // M4g（docs/42，审查第 28 条）：PM 写完 .agent-team/reach.json，按当前 project.json 与花名册重算一遍、与写进去的比（措辞在
 // hooks/lib/ledger.mjs 的 reachCheckNotice）。project.json 不在、有阻断或插件问题（花名册读不出）时不核：那时【触达表】本来就叫 PM
 // 先别写，「正确的那一份」也算不准。写进去的文件读不出来（被删、被占用）也不核。
-function reachNoticeFor(filePath, project) {
+// 写的人不是 PM（没有 run 时 H3 对谁都放行）：那一段改成叫它原样冒泡——reach.json 是控制文件，只有 PM 该改它（M4g 复核，低-8）。
+function reachNoticeFor(filePath, project, writerIsPm = true) {
   if (!isPlainObject(project)) return null
   const roster = loadRoster()
   const report = validateProject(project, { roster })
@@ -206,7 +207,8 @@ function reachNoticeFor(filePath, project) {
   } catch {
     return null
   }
-  return reachCheckNotice({ writtenText: text, expected: computeReach({ roster, paths: project.paths }) })
+  const notice = reachCheckNotice({ writtenText: text, expected: computeReach({ roster, paths: project.paths }) })
+  return notice && !writerIsPm ? `${notice}\nreach.json 是编排层的控制文件，只有项目经理该改它：把这一段原样冒泡给派你的人，不要自己重写。` : notice
 }
 
 // ledger 那两处「project.json 是不是写坏了」要读它的原文（M3u）。最多读 3 次，两次之间停 25ms：Windows 上杀毒软件、
@@ -466,7 +468,19 @@ function misroutedNotice(label, channel, recipient, holds = '它要动的东西�
 //
 // ⚠️ 参数缺省（判不出收件人）时落**改不了**那一支：多一次转述的代价，远小于再一次
 // 指挥一个改不了它的人去改——那正是这一轮要修的形状。
-function buildDriftNotice(cmp, recipientCanWriteState) {
+// M4g 复核（docs/42 §8，中-2）：「没记」那一行注明门禁知道的写者——派发记录里写它的那个角色在那一段被派出去过，或者它是项目经理自己的
+// 产物。收尾按注明的分开说：原来只认「写它的人回报里报过同一个值」，下级的下级写的（值报给的是协调者）照字面只能去问用户或者一直不记。
+// 产物名、段名、角色名都来自插件自己的 stages.json；派发记录（Bash 写得进）只拿来判「在不在里面」，不往文字里拼。
+function driftNoteFor(stages, dispatched) {
+  return (name) => {
+    const p = producerOfName(stages, name)
+    if (!p) return ''
+    if (isContractWriter(p.role)) return '项目经理自己的产物'
+    return dispatchedIn(p.stageId, dispatched).includes(p.role) ? `门禁的派发记录里 ${p.role} 在 ${p.stageId} 被派出去过` : ''
+  }
+}
+
+function buildDriftNotice(cmp, recipientCanWriteState, noteFor = () => '') {
   if (!cmp) return null
   const { drifted, missing, unrecorded } = cmp
   if (!drifted.length && !missing.length && !unrecorded.length) return null
@@ -480,7 +494,8 @@ function buildDriftNotice(cmp, recipientCanWriteState) {
   }
   // M4g（docs/42，审查第 28 条）：两种行都带门禁按磁盘算出来的值，PM 照它记、不自己算（收尾那一句）。
   for (const u of unrecorded) {
-    lines.push(`  - ${u.name}：磁盘上有这份文件，但 artifacts 里没记（门禁按磁盘算出来是 ${u.actual}）`)
+    const note = noteFor(u.name)
+    lines.push(`  - ${u.name}：磁盘上有这份文件，但 artifacts 里没记（门禁按磁盘算出来是 ${u.actual}${note ? `；${note}` : ''}）`)
   }
 
   // 两支收尾。前面那一整段（审计边界）两支共用，一个字不改：它对谁都成立。
@@ -488,9 +503,10 @@ function buildDriftNotice(cmp, recipientCanWriteState) {
   // 自己算 sha（M5f 里 haiku 版 PM 真的去调了 Get-FileHash），带 BOM、CRLF 的产物上造出假漂移；照着磁盘改账还会把一次真漂移洗成合法
   // （与契约那一条同一个理由，contractCheckNotice 上方）。现在先弄清是谁写的、照上面给的值记、不自己算。
   const tail = recipientCanWriteState
-    ? '记账之前先弄清是谁、什么时候写的或改的：写它的人回报里报过同一个值（它写的时候收到过【产物】回传），或者是返工、同一段里重派重写的，' +
-      '照上面门禁算出来的值记进 artifacts；对不上、又说不清的，告诉用户，不要为了消掉这一条照着磁盘改账。值一律用上面给的，不要自己算——' +
-      '门禁先剥 BOM、把 CRLF 折成 LF 再算，自己算的会对不上。'
+    ? '「没记」的：注明了「门禁的派发记录里……被派出去过」的，是那一段派出去的人交的，照上面的值记（它的回报里报过值的，两个应当相同；不同就先弄清' +
+      '是谁改过）；注明「项目经理自己的产物」的，照上面的值记；什么都没注明的（门禁没见过谁被派去写它），先弄清是谁写的，再决定记不记。' +
+      '「记账之后被改过」的：你自己改过的、返工与同一段里重派重写的，照上面的值改记；说不清的，告诉用户，不要为了消掉这一条照着磁盘改账。' +
+      '值一律用上面给的，不要自己算——门禁先剥 BOM、把 CRLF 折成 LF 再算，自己算的会对不上。'
     : relayTail('artifacts 住在 state.json 里，它是编排层的控制文件，H3 写路径门禁在 PreToolUse 上把非 PM 对它的 Edit/Write 拒掉')
 
   return (
@@ -656,15 +672,20 @@ const isDriverRole = (role) => isContractWriter(role)
 // M4a 复核（P7）：viaCoordinator 是最后一段、没收口时 PM 派不到的缺口角色——② 补一句它只能经协调者派、最后一段不再派协调者。
 // M4g（docs/42，docs/39 §3）：门禁的派发记录里有它在那一段被派出去过、state.json 却没记的（decideCoverage 标 dispatched）——不是漏派
 // （下级派出去的也算叫到），出路只有补记。原来与真漏派报成同一句「是漏了：把它派出去」，PM 把「叫到」读窄时会去重派一个已经交过产物的人。
-function loggedCoverageNotice(logged, perStage, recipientCanWriteState) {
+// M4g 复核（docs/42 §8，低-3、低-6）：补记之前看一眼磁盘——派发记录被加过一行、或者推进那一刻派发记录读不出时，真漏派也会落到这一段；
+// 「下级派出去的也算叫到」对你亲手派、只是忘了记的段（S3、S6）不对题，改说门禁记着它被派出去过；收口之后补记连 never_invoked 一起重算。
+function loggedCoverageNotice(logged, perStage, recipientCanWriteState, closed = false) {
   const where = perStage ? 'stage_roles' : 'roster'
   return (
     `【产者交代】下面这些角色在门禁的派发记录里、在那一段被派出去过，state.json 却没记着这一趟在那一段叫到过它们（${where}）：\n` +
     `${logged.map((g) => `  - ${g.stage} 的 ${g.role}`).join('\n')}\n` +
-    `这不是漏派：下级派出去的也算叫到（/agent-team:at 第 3 节第 4 条）。` +
+    `这不是漏派：门禁记着它在那一段被派出去过，只是没记账（下级派出去的也算叫到）。` +
     (recipientCanWriteState
-      ? `把它们并进 state.json 的 ${perStage ? 'stage_roles 那一段，roster 里没有就一起累加' : 'roster'}——不用重派，也不要写进 trimmed。这条只报不拦。`
-      : `补记是 PM 的动作（${where} 住在 state.json，H3 写路径门禁把非 PM 对它的 Edit/Write 拒掉）——不用重派，也不要建议写进 trimmed。` +
+      ? `补记之前去磁盘看一眼它那一段的产物：在，就把它们并进 state.json 的 ${perStage ? 'stage_roles 那一段，roster 里没有就一起累加' : 'roster'}` +
+        `——不用重派，也不要写进 trimmed；不在（派了没交），照真漏派处理：派它补交，或者照「回退」回到那一段。` +
+        (closed ? '这一趟已经收口：补进 roster 时连 never_invoked 一起重算。' : '') +
+        '这条只报不拦。'
+      : `补记是 PM 的动作（${where} 住在 state.json，H3 写路径门禁把非 PM 对它的 Edit/Write 拒掉）——带上它那一段的产物在不在；不用重派，也不要建议写进 trimmed。` +
         `**把上面这几行原样冒泡给派你的人**，让它继续往上带到 PM；**不要自己把它咽掉**——咽掉之后没有任何人会再看见它。`)
   )
 }
@@ -673,7 +694,7 @@ function buildCoverageNotice({ gaps, narrowed, perStage } = {}, recipientCanWrit
   if (!Array.isArray(gaps) || !gaps.length) return null
   // M4g：派发记录里有的单列（loggedCoverageNotice），下面这一整段只说真没叫到、也没声明裁掉的。
   const logged = gaps.filter((g) => g.dispatched === true)
-  const loggedOut = logged.length ? loggedCoverageNotice(logged, perStage, recipientCanWriteState) : ''
+  const loggedOut = logged.length ? loggedCoverageNotice(logged, perStage, recipientCanWriteState, closed) : ''
   gaps = gaps.filter((g) => g.dispatched !== true)
   if (!gaps.length) return loggedOut
   const lines = gaps.map((g) => `  - ${g.stage} 的 ${g.role}`)
@@ -1532,7 +1553,7 @@ function main() {
       // run 无关，照上面 project.json 那条缝的理由核它（对不上才说话）。project.json 读不出时落到下面那条缝（它在别处被弄坏）。
       if (isReachJson(filePath, ctx.agentTeamDir)) {
         const project = readProjectConfig(ROOT_PROJECT)
-        const reachNotice = project.ok ? reachNoticeFor(filePath, project.value) : null
+        const reachNotice = project.ok ? reachNoticeFor(filePath, project.value, isContractWriter(input.agent_type)) : null
         if (reachNotice) {
           if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
           emitHookJson(spec.event, { contexts: [reachNotice] })
@@ -1775,7 +1796,7 @@ function main() {
     })
     // M4g（docs/42，审查第 28 条）：run 进行中 PM 补了 paths、照【触达表】重写 reach.json 时也核（没有 run 的那条缝在上面）。
     if (kind === 'reach') {
-      const reachNotice = reachNoticeFor(filePath, ctx.project)
+      const reachNotice = reachNoticeFor(filePath, ctx.project, isContractWriter(input.agent_type))
       if (reachNotice) notices.push(reachNotice)
     }
 
@@ -2194,6 +2215,11 @@ function main() {
               roster: Array.isArray(ctx.state?.roster) ? ctx.state.roster : undefined,
             }), ownFresh),
             recipientCanWriteState,
+            // M4g 复核：「没记」那一行注明门禁知道的写者（driftNoteFor 上方）。
+            driftNoteFor(ctx.stages, (() => {
+              const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
+              return logBytes ? dispatchedByStage(readDispatchLog(logBytes.toString('utf8'))) : null
+            })()),
           )
         : null
 

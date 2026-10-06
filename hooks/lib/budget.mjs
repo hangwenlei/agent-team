@@ -101,10 +101,10 @@ export function grantsSummary(grants) {
 export function askUserText(target, grants, then) {
   const label = approvalLabel(target)
   return [
-    `先用 AskUserQuestion 问用户：一道单选题（multiSelect 设 false），两个选项的标签逐字写「${label}」与「${STOP_LABEL}」——` +
+    `先往 escalations 记一条 budget-exhausted（answer 先写空串），再用 AskUserQuestion 问用户：一道单选题（multiSelect 设 false），两个选项的标签逐字写「${label}」与「${STOP_LABEL}」——` +
       '推荐写在问题正文或选项说明里，不要加进标签。用户选了前者，门禁会记下这条批准（回传里会说记没记下）。之后照 ' +
       `/agent-team:at 第 4 节：契约追加修订块（回传给你新的 contract_sha），${then}`,
-    `用户选「${STOP_LABEL}」：不回退也不推进，往 escalations 记一条 budget-exhausted（用户原话照记），` +
+    `用户选「${STOP_LABEL}」：不回退也不推进，把那一条的 answer 写成用户原话，` +
       '把现状、run id 与续跑的办法告诉用户，停下等用户。',
     `问不了用户（工具面里没有 AskUserQuestion，例如不带权限提示工具的 -p、--bg）：停下，告诉用户在对话里单独发一条消息、整条只写「${label}」也算批准。`,
     `门禁这一趟记下的返工批准：${grantsSummary(grants)}。`,
