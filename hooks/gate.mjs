@@ -10,7 +10,7 @@
 // 入口只做「该检查项声明的前置校验」，不做统一校验——H1–H5 分布在三种
 // hook 事件上，输入形状不同（规格 §6 注记）。
 
-import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
@@ -41,7 +41,7 @@ import {
   reportTexts,
   stopLine,
 } from './lib/completion.mjs'
-import { mayWaive, dispatchedIn } from './lib/advance.mjs'
+import { mayWaive, dispatchedIn, wholeStageTrimmed } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
 import { readGrants } from './lib/budget.mjs'
@@ -195,6 +195,57 @@ function isReachJson(filePath, agentTeamDir) {
 // M4g（docs/42，审查第 28 条）：PM 写完 .agent-team/reach.json，按当前 project.json 与花名册重算一遍、与写进去的比（措辞在
 // hooks/lib/ledger.mjs 的 reachCheckNotice）。project.json 不在、有阻断或插件问题（花名册读不出）时不核：那时【触达表】本来就叫 PM
 // 先别写，「正确的那一份」也算不准。写进去的文件读不出来（被删、被占用）也不核。
+// M4h（docs/43，审查第 24-1 条）：PM 写 current-run 时，别的、没收口的 run 里「派出去了、门禁还没见它停下」的派发——指针一改，门禁就按新的
+// 这一趟判它们（停下行记进这一趟的派发记录、交付物核验按这一趟的段判），那一趟的产物没人核。按派发记录认：最后一回停下是「拦」的也算没停
+// （拦了它会接着跑）；门禁没见它停下的，可能还在跑，也可能早就被中断了、平台没报——两种都照实说，不按时间猜。角色与段只在花名册、阶段链认得
+// 它们时说出来（派发记录 Bash 写得进），run 目录名加引号（docs/27 §2.1）。按 agent_id 把停下认回派它的那一趟是另一件事（M，docs/39 往后放）。
+function inflightElsewhere(ctx) {
+  if (typeof ctx.agentTeamDir !== 'string' || typeof ctx.runDir !== 'string') return []
+  const runsDir = join(ctx.agentTeamDir, 'runs')
+  let ids
+  try {
+    ids = readdirSync(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+  } catch {
+    return []
+  }
+  const here = norm(ctx.runDir)
+  const roster = loadRoster()
+  const out = []
+  for (const id of ids.sort()) {
+    const dir = join(runsDir, id)
+    if (norm(dir) === here) continue
+    let state = null
+    try {
+      state = parseStateText(readFileSync(join(dir, 'state.json'), 'utf8'))
+    } catch {}
+    if (state && closedAt(state) !== null) continue
+    let text
+    try {
+      text = readFileSync(join(dir, DISPATCHES_FILE), 'utf8')
+    } catch {
+      continue
+    }
+    const log = readDispatchLog(text)
+    for (const d of log.dispatches) {
+      const last = lastStop(log, d.agent_id)
+      if (last !== null && last !== 'block') continue
+      const known = isPlainObject(roster) && Object.hasOwn(roster, d.role) && isKnownStage(ctx.stages, d.stage)
+      out.push({ runId: id, role: known ? d.role : null, stage: known ? d.stage : null })
+    }
+  }
+  return out
+}
+
+function inflightNotice(list) {
+  if (!list.length) return null
+  const lines = list.map((x) => `  - ${quote(x.runId)}：${x.role ? `${x.role}（${x.stage}）` : '一条认不出角色或段的派发'}`)
+  return (
+    `【派发】current-run 指向这一趟之前，下面这些派发门禁还没见它们停下：\n${lines.join('\n')}\n` +
+    '指针一改，门禁就按这一趟判它们：它们停下时，停下行记进这一趟的派发记录、交付物核验按这一趟的段判，那一趟的产物没人核。还在跑的，先等它们停下' +
+    '（完成通知到了）再在这一趟里派人；门禁没见它停下、其实早已中断的（会话断过、被停掉），照实告诉用户那一趟哪几份没人核。'
+  )
+}
+
 // 写的人不是 PM（没有 run 时 H3 对谁都放行）：那一段改成叫它原样冒泡——reach.json 是控制文件，只有 PM 该改它（M4g 复核，低-8）。
 function reachNoticeFor(filePath, project, writerIsPm = true) {
   if (!isPlainObject(project)) return null
@@ -319,6 +370,15 @@ function isCoordinatorFor(ctx, role, stageId = ctx.state?.stage) {
   if (typeof stageRole !== 'string' || !stageRole) return false
   const reach = computeReach({ roster: loadRoster(), paths: {} })
   return (reach[role]?.reachableRoles ?? []).includes(stageRole)
+}
+// M4h（docs/43，审查第 14 条）：自己也是这一段产者的协调者——能派到这一段别的产者（S2 的 at-product 派 at-ui）。isCoordinatorFor 认的是
+// 「能派到这一段的 role」，at-product 本身就是 S2 的 role，那一条认不出它；这一个只给协调者进度用，不改 isCoordinatorFor 的口径。
+function dispatchesOtherProducers(ctx, role, stageId = ctx.state?.stage) {
+  const stage = ctx.stages?.[stageId]
+  if (!isPlainObject(stage)) return false
+  const reach = computeReach({ roster: loadRoster(), paths: {} })
+  const producers = stageRoles(stage)
+  return (reach[role]?.reachableRoles ?? []).some((r) => r !== role && producers.includes(r))
 }
 // ⚠️ M3w（docs/31）：H2 按派发者给多段角色选段（hooks/lib/readiness.mjs 的 candidateStages）用的是同一个口径——「是那一段的
 // role、或能传递派到它」，读 stages[X].role 单数。两处都靠 docs/11 §5.12 的口径甲；改一处要连另一处。
@@ -985,7 +1045,8 @@ function withoutOwn(cmp, own) {
   return { ...cmp, unrecorded: cmp.unrecorded.filter((u) => !own.includes(u.name)) }
 }
 
-function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, recipientIsPm }) {
+// M4h（docs/43，审查第 14 条的 S2 进度）：selfDone——返回的协调者自己也是这一段的产者、它那几份交了（S2 的 at-product）。
+function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, recipientIsPm, selfDone = false }) {
   const stage = ctx.stages?.[stageId]
   if (!isPlainObject(stage) || !coordinatorId) return null
   const producers = stageRoles(stage)
@@ -1003,7 +1064,7 @@ function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, reci
       state: !ctx.artifactExists(name) ? 'missing' : fresh.isBlank(name) ? 'blank' : fresh.isStale(name) ? 'stale' : 'ok',
     })),
   }))
-  return coordinatorProgress({ role: coordinator, stageId, rows, recipientIsPm })
+  return coordinatorProgress({ role: coordinator, stageId, rows, recipientIsPm, selfDone, impl: isRolePatternStage(stage) })
 }
 
 function main() {
@@ -1101,6 +1162,11 @@ function main() {
     // 相同的产物是上一轮的，不让一段判齐、不算前置在。还是上一轮的前置单独说，出口按派发者分（写得了 state.json 的给
     // 「标 accepted」，别的叫它冒泡；谓词与 H3 同一个 isContractWriter）。
     const fresh = makeFreshness({ artifactExists: ctx.artifactExists, artifactBytes: ctx.artifactBytes, reworkBase: ctx.state?.rework_base })
+    // M4h（docs/43，审查第 38 条）：整段裁掉的段——与推进、收口同一份 wholeStageTrimmed，「叫过」并上门禁的派发记录。
+    const readinessDispatched = (() => {
+      const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
+      return logBytes ? dispatchedByStage(readDispatchLog(logBytes.toString('utf8'))) : null
+    })()
     const r = decideReadiness({
       targetRole: target,
       stages: ctx.stages,
@@ -1116,6 +1182,7 @@ function main() {
       caller,
       callerReach: Object.hasOwn(reach, caller) ? reach[caller].reachableRoles : null,
       callerCanWriteState: isContractWriter(input?.agent_type),
+      trimmedAway: (sid) => wholeStageTrimmed(ctx.stages, sid, ctx.state, null, readinessDispatched),
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
 
@@ -1799,6 +1866,11 @@ function main() {
       const reachNotice = reachNoticeFor(filePath, ctx.project, isContractWriter(input.agent_type))
       if (reachNotice) notices.push(reachNotice)
     }
+    // M4h（docs/43，审查第 24-1 条）：写 current-run 时，别的、没收口的 run 里门禁还没见它停下的派发（inflightElsewhere 上方）。
+    if (isPointer) {
+      const inflight = inflightNotice(inflightElsewhere(ctx))
+      if (inflight) notices.push(inflight)
+    }
 
     // M3a Task 2：产者交代判据的触发点是「state.stage 推进出去时」（设计 §3.2），
     // 而推进这个动作落盘的形式就是写 runs/*/state.json —— kind === 'state' 就是它，
@@ -1990,7 +2062,10 @@ function main() {
         if (r.ok) {
           // 协调者的进度只在它协调的那一段还是当前段时报：PM 已经推进出去了的，那一段齐没齐归推进那一刻的判据（第 17 条）。
           // 判齐照 tests/stage-done-call-site.test.mjs 的口径取当前段的参与者。
-          if (r.skipped === 'role-not-in-stage' && d.stage === ctx.state?.stage && isCoordinatorFor(ctx, d.role, d.stage)) {
+          // M4h（docs/43，审查第 14 条）：自己也是这一段产者的协调者（S2 的 at-product），它那几份交了（r.ok 而不是跳过）也报进度。
+          const coordinates =
+            r.skipped === 'role-not-in-stage' ? isCoordinatorFor(ctx, d.role, d.stage) : r.skipped === undefined && dispatchesOtherProducers(ctx, d.role, d.stage)
+          if (d.stage === ctx.state?.stage && coordinates) {
             const done = isStageDone({
               stage: ctx.state?.stage,
               stages: ctx.stages,
@@ -1998,7 +2073,7 @@ function main() {
               roster: participantsOf(ctx.state, ctx.state?.stage),
             })
             if (!done) {
-              const p = progressOf({ ctx, fresh, log, coordinator: d.role, coordinatorId: taskId, stageId: d.stage, recipientIsPm })
+              const p = progressOf({ ctx, fresh, log, coordinator: d.role, coordinatorId: taskId, stageId: d.stage, recipientIsPm, selfDone: r.skipped === undefined })
               if (p) contexts.push(p)
             }
           }
@@ -2371,7 +2446,9 @@ function main() {
       // M4d（docs/38，全量审查第 19 条修法 3）：协调者返回、当前段还没齐（S5 正路上架构师返回时，执行角色可能还在后台跑）——原来这一格整段静默。
       // 现在报门禁记着它派出去的执行角色与各自产物的现状，只说事实、不下「缺」的断语（措辞在 hooks/lib/completion.mjs 的
       // coordinatorProgress）。后台派发启动那一刻不报：它还没开始派。
-      if (CHECK === 'deliverable' && phase !== 'launched' && r.skipped === 'role-not-in-stage' && coordinator && !stageDone && closedAt(ctx.state) === null) {
+      // M4h（docs/43，审查第 14 条）：自己也是这一段产者的协调者（S2 的 at-product），它那几份交了（r.skipped 为 undefined）也报进度。
+      const coordinates = r.skipped === 'role-not-in-stage' ? coordinator : r.skipped === undefined && dispatchesOtherProducers(ctx, role)
+      if (CHECK === 'deliverable' && phase !== 'launched' && coordinates && !stageDone && closedAt(ctx.state) === null) {
         const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
         const p = progressOf({
           ctx,
@@ -2381,6 +2458,7 @@ function main() {
           coordinatorId: typeof launchedId === 'string' && AGENT_ID_RE.test(launchedId) ? launchedId : null,
           stageId: ctx.state?.stage,
           recipientIsPm: recipientCanWriteState,
+          selfDone: r.skipped === undefined,
         })
         if (p) notices.push(p)
       }

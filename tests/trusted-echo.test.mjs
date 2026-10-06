@@ -458,6 +458,23 @@ const SCENARIOS = [
     ],
   },
   {
+    // M4h（docs/43，第 24-1 条）：写 current-run 时列别的 run 里还没停下的派发——派发记录（Bash 写得进）里的角色与段不认得就不回显。
+    // 那一趟的目录与派发记录在 calls 里建（它们不在当前 run 目录下）。
+    name: '别的 run 的派发记录里的角色与段（写 current-run 时的【派发】）',
+    disk: true,
+    calls: ({ p }, P) => {
+      const old = join(p, '.agent-team', 'runs', 'r0')
+      mkdirSync(old, { recursive: true })
+      writeFileSync(join(old, 'state.json'), JSON.stringify({ run_id: 'r0', stage: 'S5', closed_at: null }))
+      writeFileSync(
+        join(old, 'dispatches.jsonl'),
+        JSON.stringify({ kind: 'dispatch', at: 't', agent_id: 'a0000000000000009', tool_use_id: null, role: P, stage: P, caller: P, caller_id: null, mode: 'background' }) + '\n',
+      )
+      return [['ledger', posted('at-pm', join(p, '.agent-team', 'current-run'))]]
+    },
+    anchor: (all) => all.includes('一条认不出角色或段的派发'),
+  },
+  {
     // M4g 复核（K14）：写完 reach.json 门禁重算核对，给出的「正确那一份」里有 project.json 的前缀——原样落盘的 JSON 只许走 safeJson
     // （docs/27 §2.1）。带冒号的载荷（shaHead）让 project.json 判阻断，那时门禁本来就不核 reach.json，锚点对它放行。
     name: 'project.paths 的元素（写完 reach.json 之后的【触达表】核对）',

@@ -523,3 +523,25 @@ test('M4a 复核 H2 前置还旧两类都有：accept 那一句点名 01-prd.md�
   assert.match(other.reason, /（01-prd\.md[^）]*）这一轮不用重写/)
   assert.match(other.reason, /冒泡给派你的人/)
 })
+
+// M4h（docs/43，审查第 38 条）：S2 整段裁掉（at-product、at-ui 都记在 trimmed 里、这一趟在 S2 谁都没叫过）之后，S3 派 at-architect 被 H2 拒，理由原来
+// 只说「先把产出这些产物的阶段跑完再回来」——那一段是 PM 自己裁掉的，跑不完。现在说清是整段裁掉，给出两条路。整段裁掉的判定由调用方给
+// （trimmedAway，与推进、收口共用 advance.mjs 的 wholeStageTrimmed）。
+const AWAY_PM = "S2 整段裁掉了（那一段的产者都记在 trimmed 里、这一趟在那一段谁都没叫过），它的产物不会有了：要么把那一段补回来（把它的产者从 trimmed 里拿掉、派它补交，叫到的人补记进 stage_roles 那一段），要么把要它当前置的段也整段裁掉、交付文档里写明少了哪几段（/agent-team:at 第 3 节第 4 条）。"
+const AWAY_OTHER = "S2 整段裁掉了（那一段的产者都记在 trimmed 里、这一趟在那一段谁都没叫过），它的产物不会有了：这要项目经理定，把这一点写进你的回报冒泡给派你的人。"
+test('M4h 第 38 条：缺的前置是整段裁掉的那一段的产物——拒绝理由说清是整段裁掉、给两条路；不说「先跑完那一段」', () => {
+  const base = { targetRole: 'at-architect', stages: REAL_STAGES, artifactExists: have('00-contract.md'), roster: ['at-pm'] }
+  const pm = decideReadiness({ ...base, callerCanWriteState: true, trimmedAway: (sid) => sid === 'S2' })
+  assert.equal(pm.decision, 'deny')
+  assert.ok(pm.reason.includes(AWAY_PM), pm.reason)
+  assert.ok(!pm.reason.includes('先把产出这些产物的阶段跑完再回来'), pm.reason)
+  const other = decideReadiness({ ...base, callerCanWriteState: false, trimmedAway: (sid) => sid === 'S2' })
+  assert.ok(other.reason.includes(AWAY_OTHER), other.reason)
+  // 没有整段裁掉：照旧那一句，不提裁剪。
+  const plain = decideReadiness({ ...base, callerCanWriteState: true })
+  assert.ok(plain.reason.includes('先把产出这些产物的阶段跑完再回来') && !plain.reason.includes('整段裁掉'), plain.reason)
+  // 缺的里面还有别的段的（00-contract.md 归 S1，S1 没裁）：照旧那一句也说，整段裁掉那一句只点 S2。
+  const mixed = decideReadiness({ ...base, artifactExists: have(), callerCanWriteState: true, trimmedAway: (sid) => sid === 'S2' })
+  assert.ok(mixed.reason.includes('先把产出这些产物的阶段跑完再回来') && mixed.reason.includes(AWAY_PM), mixed.reason)
+  assert.ok(!mixed.reason.includes('S1 整段裁掉'), mixed.reason)
+})

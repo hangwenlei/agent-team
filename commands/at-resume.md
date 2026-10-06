@@ -25,6 +25,9 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 ## 2. 核实磁盘，不要相信状态文件说的一切
 
+**先读规矩**：上下文可能已经压缩掉了 `/agent-team:at` 的正文——动手之前先 `Read` `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 3–6 节
+（逐段推进、回退、问用户、收尾），下面说「照 /agent-team:at 第几节」的地方照它办，不凭记忆。
+
 **先看收没收口。** `state.json` 的 `closed_at` 是一个时间（不是 null）：这一趟已经收口，不续跑——告诉用户它已经交付（run id、收口时间），
 交付之后的新改动用 `/agent-team:at <改动>` 另起一趟（或者照 `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 0–2 节自己建）。
 下面的都不用做。

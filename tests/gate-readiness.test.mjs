@@ -294,3 +294,27 @@ test('readiness（M3x）：S5 还没记账、at-ui 在 S2 干过、at-backend �
     assert.equal(decisionOf(stdout)?.permissionDecision, 'deny', stdout)
   })
 })
+
+// M4h（docs/43，审查第 38 条）：接线——PM 在 S3 派 at-architect，S2 整段裁掉了（trimmed 里记着 at-product、at-ui 都在 S2，stage_roles 的 S2 是空的）。
+test('M4h 第 38 条：门禁子进程——S2 整段裁掉之后在 S3 派架构师，H2 的拒绝理由说清是整段裁掉', () => {
+  const dirs = makeRun({
+    runId: 'r1', stage: 'S3', artifacts: ['00-contract.md'], roster: [],
+    history: [{ stage: 'S1', at: 't' }, { stage: 'S2', at: 't' }, { stage: 'S3', at: 't' }],
+    trimmed: { 'at-product': 'S2', 'at-ui': 'S2' }, stage_roles: { S2: [] },
+  })
+  try {
+    const input = { tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-architect' } }
+    const d = decisionOf(run('readiness', input, undefined, dirs.projectDir).stdout)
+    assert.equal(d?.permissionDecision, 'deny', JSON.stringify(d))
+    assert.ok(d.permissionDecisionReason.includes('S2 整段裁掉了（那一段的产者都记在 trimmed 里、这一趟在那一段谁都没叫过）'), d.permissionDecisionReason)
+    // 门禁的派发记录里有人在 S2 被派出去过：不算整段裁掉（与推进、收口同一个口径），照旧那一句。
+    const runDir = join(dirs.projectDir, '.agent-team', 'runs', 'r1')
+    writeFileSync(join(runDir, 'dispatches.jsonl'), JSON.stringify({ kind: 'dispatch', at: 't', agent_id: 'a0000000000000b01', tool_use_id: null, role: 'at-product', stage: 'S2', caller: 'at-pm', caller_id: null, mode: 'background' }) + '\n')
+    const again = decisionOf(run('readiness', input, undefined, dirs.projectDir).stdout)
+    assert.equal(again?.permissionDecision, 'deny')
+    assert.ok(!again.permissionDecisionReason.includes('整段裁掉') && again.permissionDecisionReason.includes('先把产出这些产物的阶段跑完再回来'), again.permissionDecisionReason)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
