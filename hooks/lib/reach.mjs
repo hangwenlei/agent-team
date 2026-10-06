@@ -19,6 +19,9 @@
 // 「活过了自己的更正」的旧话（本分支为这个形状开过六轮）。换来的性质没有变：
 // stages.mjs 自己不 import 任何东西、也不碰文件系统，这里仍然是纯数据推导。
 import { isPlainObject } from './stages.mjs'
+// M4f（审查第 27 条）：「谁不受 paths 管」与写路径隔离第 1 步是同一个判断，从 decide.mjs 取（它只 import trusted.mjs，
+// 两个都不碰文件系统，这里仍然是纯数据推导）。不从 contract-guard.mjs 取：那边 import 了 path-norm。
+import { exemptFromPaths } from './decide.mjs'
 
 export function computeReach({ roster, paths }) {
   const out = {}
@@ -78,6 +81,8 @@ export function computeReach({ roster, paths }) {
       reach: [...reach],
       widenedBy,
       widened: Object.keys(widenedBy).length > 0,
+      // 在 run 目录之外不受 paths 管（项目经理）：它写哪都放行，上面那几个前缀不是它的边界（M4f，审查第 27 条）。
+      unrestricted: exemptFromPaths(role),
     }
   }
   return out

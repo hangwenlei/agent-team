@@ -73,7 +73,8 @@ run:        <run_id>
 
 读 `.agent-team/reach.json`，按角色列出：**它自己认领的路径**，以及**它实际能写到的
 地方**。凡是后者超出前者的，标出来，并写明是经哪条派发链扩大的（`reach.json` 的
-`widenedBy` 里有）。
+`widenedBy` 里有）。标了 `unrestricted: true` 的（项目经理）单列一行：它在 run 目录之外不受 `paths` 管、写哪都放行，不按前缀报。
+`reach.json` 里一个角色都没有这个字段的，是旧快照：照前缀报，并提示用户重跑 `/agent-team:at-init` 刷新。
 
 措辞用「当前配置下，`at-product` 实际还能写到 `docs/ui/`（经 at-product → at-ui）」，
 **不要**说成「限制」或者「越权」。**这不是一道闸，它不拦任何东西：写路径隔离只挡**

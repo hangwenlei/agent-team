@@ -101,6 +101,8 @@ flowchart TB
 
 实现阶段的角色由架构师分发，项目经理不越级派发；同一阶段的角色并行干活。谁能派谁以 `roster.json` 为准，每一段谁来做、交什么以 `stages.json` 为准。
 
+实现角色为每一条新行为写自动化测试；测试角色只跑、不写，缺测试判不通过，退回实现阶段补。不写测试只有两种情形：这一次没有新行为，或者你说过不要（在需求原话里，或者之后答复的问题里）。
+
 交付之后这一趟就收口了：不再回退，也不再派人。接着要改动或修复，用 `/agent-team:at <改动>` 另起一趟（新的契约、新的返工预算）。返工时，测试、验收与交付报告一律重新出，不沿用上一轮的。
 
 ### 什么时候会问你
@@ -154,7 +156,7 @@ flowchart TB
 ## 已知边界
 
 > [!WARNING]
-> **这不是沙箱。** 写路径隔离按 `project.json` 的 `paths` 管项目经理以外的各个角色：在 run 目录之外，只能写划给自己的前缀，没有条目就哪都写不了；例外是 `at-qa` 与 `at-acceptance`——它们按设计不认领目录，这道检查对它们在 run 目录之外整段放行。`Bash` 没有任何门禁看着，而执行角色保留它来构建和测试。项目经理在实现之前（实现中有角色被拒时也会）照架构方案往 `paths` 里补前缀（只加不删；落在 `.claude/`、CI/CD、凭据这类位置的先问你；补了什么会告诉你），这些前缀留给以后各趟。
+> **这不是沙箱。** 写路径隔离按 `project.json` 的 `paths` 管项目经理以外的各个角色：在 run 目录之外，只能写划给自己的前缀，没有条目就哪都写不了——按设计不认领目录的 `at-qa` 与 `at-acceptance` 也一样，它们只写 run 目录里自己那份产物。`Bash` 没有任何门禁看着，而执行角色保留它来构建和测试。项目经理在实现之前（实现中有角色被拒时也会）照架构方案往 `paths` 里补前缀（只加不删；落在 `.claude/`、CI/CD、凭据这类位置的先问你；补了什么会告诉你），这些前缀留给以后各趟。
 
 > [!WARNING]
 > **主会话会被接管成 `at-pm`。** 它的工具面是 `Agent(...)`（受派发白名单约束）、`AskUserQuestion`、`Bash`、`Read`、`Glob`、`Grep`、`Write`、`Edit`——能改动的范围与普通会话相当，把它限制在目标项目里的是角色说明，不是工具权限。它拿不到你在普通会话里能用的 MCP 工具与网页搜索、抓取（WebSearch、WebFetch），团队里其余角色也拿不到——每个角色只拿自己清单里的工具。按上面的方式安装，影响范围只在安装它的那个项目目录；也不要用 `--agent`、或在你自己的设置里设 `agent` 键，把主会话换成别的角色，门禁按主会话的身份判定。
@@ -299,6 +301,8 @@ flowchart TB
 
 Implementation roles are dispatched by the architect — the project manager does not skip levels — and roles in the same stage work in parallel. Who may dispatch whom is defined in `roster.json`; which role does each stage and what it hands over, in `stages.json`.
 
+Implementation roles write automated tests for every new behavior; the testing role runs them but never writes them, and missing tests fail the testing stage and send the run back to implementation. Tests are skipped only when a run adds no new behavior or when you said so — in your original request or in an answer you gave later.
+
 Once delivered, the run is closed: no more rollbacks and no more dispatches. For further changes or fixes, start a new run with `/agent-team:at <change>` (a new contract and a fresh rework budget). During rework, the test, acceptance and delivery reports are always produced anew rather than carried over from the previous round.
 
 ### When it asks you
@@ -352,7 +356,7 @@ You can watch a role but not talk to it: roles report their questions to the pro
 ## Known Limitations
 
 > [!WARNING]
-> **This is not a sandbox.** Write-path isolation governs every team role except the project manager by the `paths` in `project.json`: outside the run directory a role may write only its own prefixes, and nothing at all without an entry; the exception is `at-qa` and `at-acceptance`, which claim no directories by design, so outside the run directory the check lets them through entirely. `Bash` is not watched by any gate, and implementation roles keep it to build and test. Before implementation (and during it, when a role is refused) the project manager adds prefixes to `paths` from the architecture plan (it only adds; it asks you first for `.claude/`, CI/CD or credential locations; it tells you what it added); they stay for later runs.
+> **This is not a sandbox.** Write-path isolation governs every team role except the project manager by the `paths` in `project.json`: outside the run directory a role may write only its own prefixes, and nothing at all without an entry — including `at-qa` and `at-acceptance`, which claim no directories by design and write only their own deliverable in the run directory. `Bash` is not watched by any gate, and implementation roles keep it to build and test. Before implementation (and during it, when a role is refused) the project manager adds prefixes to `paths` from the architecture plan (it only adds; it asks you first for `.claude/`, CI/CD or credential locations; it tells you what it added); they stay for later runs.
 
 > [!WARNING]
 > **The main session is taken over as `at-pm`.** Its tool surface is `Agent(...)` (bound by the dispatch whitelist), `AskUserQuestion`, `Bash`, `Read`, `Glob`, `Grep`, `Write` and `Edit` — it can change anything an ordinary session can, and what keeps it inside the target project is its role definition, not its permissions. It does not get the MCP tools or the web search and fetch tools (WebSearch, WebFetch) that an ordinary session has, and no other role on the team gets them either: each role gets only the tools on its own list. Installed as above, its reach is limited to the one project directory that declares it. Don't swap the main session for another role with `--agent` or an `agent` key in your own settings either: the gates judge by the main session's identity.

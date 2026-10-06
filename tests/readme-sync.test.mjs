@@ -673,8 +673,8 @@ for (const f of [README_EN, README_ZH]) {
 // 五、「不认领路径的那些角色」—— 真源是 templates/project.json
 // ---------------------------------------------------------------------------
 //
-// 已知边界第一段写着 at-qa、at-acceptance 按设计不认领目录，这道检查对它们在 run 目录之外
-// 整段放行。这半句是 M2b 才写下来的事实（`docs/11` §5.14：
+// 已知边界第一段写着 at-qa、at-acceptance 按设计不认领目录。M4f（docs/41，审查第 34 条）之前这一句接着说「这道检查对它们在
+// run 目录之外整段放行」——那是 M2b 才写下来的事实（`docs/11` §5.14：
 // `decideWritePath` 对这两个按设计不认领路径的角色在没有条目时早退放行——M3u 起只对它们，
 // 其余角色没有条目会被拒（docs/29）——而 `at-qa` 还
 // 持有 `Bash`），M0 的 README 里没有它——**旧那句「写路径隔离对 Edit/Write 是硬
@@ -698,7 +698,7 @@ for (const f of [README_EN, README_ZH]) {
       assert.ok(
         block.includes(role),
         `${f} 的已知边界没提 ${role}，而它在 templates/project.json 里一个 project.paths 都不认领` +
-          '——写路径隔离对它（按设计不认领路径的角色）在 run 目录之外整段早退放行（docs/11 §5.14）。' +
+          '——它按设计不认领路径，写路径隔离在 run 目录之外拒它（M4f；此前整段放行）。' +
           '这是陌生人判断「装上它安不安全」要用的事实，不能只留在 docs 里',
       )
     }
@@ -1831,4 +1831,45 @@ test('M4e 第 49 条：英文那一半的安装一节说明插件运行时是中
     ),
     '英文安装一节缺语言说明（整句）',
   )
+})
+
+// M4f（docs/41，审查第 34 条）：没有 paths 条目的 at-qa、at-acceptance 在 run 目录之外被拒，「这不是沙箱」那一段两半照实写，整句钉——
+// 只核角色名的那条（第五节）挡不住把结论说回「整段放行」。
+const NOT_SANDBOX_NO_PATHS = [
+  'outside the run directory a role may write only its own prefixes, and nothing at all without an entry — including `at-qa` and `at-acceptance`, which claim no directories by design and write only their own deliverable in the run directory.',
+  '在 run 目录之外，只能写划给自己的前缀，没有条目就哪都写不了——按设计不认领目录的 `at-qa` 与 `at-acceptance` 也一样，它们只写 run 目录里自己那份产物。',
+]
+test('M4f 第 34 条：两半的「这不是沙箱」都写明 at-qa、at-acceptance 在 run 目录之外也写不了，不再说整段放行', () => {
+  for (const [half, k] of HALVES) {
+    const s = blockUnder(read(half), pairOf('## Known Limitations')[k])
+    assert.ok(hasSentence(s, NOT_SANDBOX_NO_PATHS[k]), `${half} 的已知边界缺这一句（整句）`)
+    assert.ok(!/整段放行|lets them through entirely/.test(s), `${half} 还在说整段放行`)
+  }
+})
+
+// M4f 复核（docs/41 §8）：「这不是沙箱」那一条整条钉——只钉其中一句时，复核在那一句后面追加「at-qa 仍可写测试文件」，全套不红。
+const NOT_SANDBOX_WHOLE = [
+  "> **This is not a sandbox.** Write-path isolation governs every team role except the project manager by the `paths` in `project.json`: outside the run directory a role may write only its own prefixes, and nothing at all without an entry — including `at-qa` and `at-acceptance`, which claim no directories by design and write only their own deliverable in the run directory. `Bash` is not watched by any gate, and implementation roles keep it to build and test. Before implementation (and during it, when a role is refused) the project manager adds prefixes to `paths` from the architecture plan (it only adds; it asks you first for `.claude/`, CI/CD or credential locations; it tells you what it added); they stay for later runs.",
+  "> **这不是沙箱。** 写路径隔离按 `project.json` 的 `paths` 管项目经理以外的各个角色：在 run 目录之外，只能写划给自己的前缀，没有条目就哪都写不了——按设计不认领目录的 `at-qa` 与 `at-acceptance` 也一样，它们只写 run 目录里自己那份产物。`Bash` 没有任何门禁看着，而执行角色保留它来构建和测试。项目经理在实现之前（实现中有角色被拒时也会）照架构方案往 `paths` 里补前缀（只加不删；落在 `.claude/`、CI/CD、凭据这类位置的先问你；补了什么会告诉你），这些前缀留给以后各趟。",
+]
+test('M4f 复核：两半「这不是沙箱」那一条整条就是这样，不多不少', () => {
+  for (const [half, k] of HALVES) {
+    const s = blockUnder(read(half), pairOf('## Known Limitations')[k])
+    const head = NOT_SANDBOX_WHOLE[k].slice(0, NOT_SANDBOX_WHOLE[k].indexOf('**', 4) + 2)
+    const line = s.split(/\r?\n/).find((l) => l.startsWith(head))
+    assert.ok(line, `${half} 的已知边界里找不到以「${head}」开头的那一条`)
+    assert.equal(stripWs(line), stripWs(NOT_SANDBOX_WHOLE[k]), `${half} 的「这不是沙箱」那一条变了（整条比对，空白不计）`)
+  }
+})
+
+// M4f 复核（docs/41 §8，审查低-12）：用户要知道的用法——新行为由实现角色写测试，缺测试退回实现阶段；只有两种情形不写。
+const README_TESTS = [
+  "Implementation roles write automated tests for every new behavior; the testing role runs them but never writes them, and missing tests fail the testing stage and send the run back to implementation. Tests are skipped only when a run adds no new behavior or when you said so — in your original request or in an answer you gave later.",
+  "实现角色为每一条新行为写自动化测试；测试角色只跑、不写，缺测试判不通过，退回实现阶段补。不写测试只有两种情形：这一次没有新行为，或者你说过不要（在需求原话里，或者之后答复的问题里）。",
+]
+test('M4f 复核：两半「一趟 run 怎么走」都写明测试由实现角色写、缺测试退回实现阶段、只有两种情形不写', () => {
+  for (const [half, k] of HALVES) {
+    const s = blockUnder(read(half), pairOf('### How a run flows')[k])
+    assert.ok(hasSentence(s, README_TESTS[k]), `${half} 的「一趟 run 怎么走」缺这一段（整句）`)
+  }
 })

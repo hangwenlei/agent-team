@@ -28,7 +28,7 @@
 // 是安全洞不是噪音。完整论证见 hooks/lib/path-norm.mjs 头部。
 import { resolve } from 'node:path'
 import { exoticPath, norm } from './path-norm.mjs'
-import { MAIN, callerOf } from './decide.mjs'
+import { exemptFromPaths } from './decide.mjs'
 import { inline } from './trusted.mjs'
 import { CONTRACT_FILE } from './contract-hash.mjs'
 
@@ -90,10 +90,11 @@ const CONTRACT = CONTRACT_FILE
 // allow）就是这样测的，不经过 gate.mjs 的短路——所以内部这次调用不是
 // 摆设，是这个函数自身对"不管谁调用我都要给对答案"的契约，两处调用点
 // 各自服务不同的调用面（gate.mjs 入口路径 vs. 直接单测/未来的其它调用方）。
-export function isContractWriter(agentType) {
-  const caller = callerOf({ agent_type: agentType })
-  return caller === MAIN || caller === 'at-pm'
-}
+//
+// M4f 复核（docs/41 §8，审查低-6）：函数体只有一份，是 decide.mjs 的 exemptFromPaths（写路径隔离第 1 步与触达表的 unrestricted
+// 用它）——契约写者与不受 paths 管的身份是同一个身份（项目经理）。M4f 照抄过一份同体实现，今天等价、没有判据钉着，下一次只改
+// 一份就分叉。这里只留旧名给既有的调用方，上面关于安全性依赖与 callerOf 的论证照旧适用；tests/reach.test.mjs 钉着两个名字是同一个函数。
+export const isContractWriter = exemptFromPaths
 
 export function decideContractGuard({ agentType, filePath, runDir }) {
   // 没有 runDir 就没有"契约在哪"这件事可言，不表态——正常情况下 gate.mjs

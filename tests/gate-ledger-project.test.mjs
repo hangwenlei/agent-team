@@ -573,11 +573,12 @@ test('写 current-run：project.json 有问题就整份报一次；没有问题�
   })
 })
 
-test('写 current-run：run 已经建起来而 project.json 不在——报出来，指向 /agent-team:at-init；点名不受影响的 NO_PATHS_ROLES', () => {
+test('写 current-run：run 已经建起来而 project.json 不在——报出来，指向 /agent-team:at-init；不再把 NO_PATHS_ROLES 说成例外（M4f）', () => {
   withRun(null, (p) => {
     const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'current-run')), undefined, p))
     assert.ok(ctx.includes('【project.json】') && ctx.includes('不在') && ctx.includes('/agent-team:at-init'), ctx)
-    for (const role of NO_PATHS_ROLES) assert.ok(ctx.includes(role), `${role}：${ctx}`)
+    assert.ok(ctx.includes('执行角色写 run 目录之外的任何地方都会被拒'), ctx)
+    for (const role of NO_PATHS_ROLES) assert.ok(!ctx.includes(role), `${role}：${ctx}`)
   })
 })
 

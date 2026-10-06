@@ -10,12 +10,21 @@ import { dirname, resolve } from 'node:path'
 import { exoticPath, norm, underDir } from './path-norm.mjs'
 import { isControlFile } from './control-files.mjs'
 import { isContractWriter } from './contract-guard.mjs'
-import { stageRoles, expandProduces, isPlainObject } from './stages.mjs'
+import { stageRoles, expandProduces, isPlainObject, isStageChain } from './stages.mjs'
 // 拒绝理由会被模型读到；角色名（hook 输入的 agent_type）、路径（tool_input）、project.json 的键与值
 // 一律过 inline / quote（M3s，docs/27）。
 import { inline, quote } from './trusted.mjs'
 import { NO_PATHS_ROLES, entryProblems, usablePrefixes } from './project.mjs'
-import { isValidRoster } from './decide.mjs'
+import { exemptFromPaths, isValidRoster } from './decide.mjs'
+
+// 一个角色在阶段链上自己那几份产物（第 2 步的拒绝理由点名它，M4f 复核，docs/41 §8）。阶段链读不出、链上没有它：答空，理由泛说
+// 「自己那份产物」。产物名来自插件自己的 stages.json，原样写进理由。
+function ownProductsOf(stages, role) {
+  if (!isStageChain(stages)) return []
+  const out = []
+  for (const id of Object.keys(stages)) if (stageRoles(stages[id]).includes(role)) out.push(...expandProduces(stages[id], [role]))
+  return out
+}
 
 function underAny(target, prefixes, base) {
   // 评审三轮 Minor 3：prefixes 理论上总是数组（project.paths 的值），但
@@ -106,8 +115,8 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   //   - runs/<id>/state.json 在 runDir 里，落到下面那块会被「不是你这个阶段的
   //     produces」**无条件**拒掉，连 PM 也拒（M1a 记的 I3 死锁）；
   //   - .agent-team/project.json 与 current-run 不在 runDir 里，落到下面按角色隔离那段时，
-  //     没有键的 at-qa、at-acceptance 与花名册外的调用者会被**静默放行**——它们都能重写
-  //     项目配置（M3u 之前是任何不在 paths 里登记的角色，docs/29）。
+  //     花名册外的调用者会被**静默放行**——它能重写项目配置（M4f 之前还有没有键的 at-qa、
+  //     at-acceptance，docs/41；M3u 之前是任何不在 paths 里登记的角色，docs/29）。
   // 一个太紧、一个太松，所以这不是「在某一段里加个 if」能解决的，必须自成一段。
   //
   // 「谁算 PM」复用 isContractWriter，不另写一遍 role === 'at-pm'：M1a 评审在 H4
@@ -142,9 +151,9 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 证明一件自己没在守的事。缺席路径的覆盖见 tests/writepath.test.mjs 里
   // "project 为 null 时，run 目录下…"那三条，以及 tests/gate-contract.test.mjs
   // 的子进程级对照。
-  // M3u（docs/29）起排序照样要紧，理由换了：按角色隔离那段对 PM、没有键的 at-qa/at-acceptance、
-  // 花名册外的调用者放行，对 project.json 不在的情形拒——排到这块前面，run 里别人的产物就能被
-  // PM、at-qa 写到，执行角色自己的产物反而在 project.json 不在时被拒。
+  // M3u（docs/29）起排序照样要紧，理由换了：按角色隔离那段对 PM、花名册外的调用者放行，对没有键的
+  // at-qa/at-acceptance（M4f 起，docs/41）与 project.json 不在的情形拒——排到这块前面，run 里别人的产物
+  // 就能被 PM 写到，at-qa、at-acceptance 与执行角色自己的产物反而被拒。
   if (runDir) {
     const rd = norm(runDir)
     // 评审 I-2：这条判定与 hooks/gate.mjs 的 ledger 分支曾经各写一份逐字符相同的
@@ -197,14 +206,26 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 被删掉、run 进行中整份文件不在，效果都是按角色隔离静默全开。现在逐步判；形状问题只让本检查项看，不把整趟
   // run 判成读不出来（那样 H2、H5 会跟着一起降级，一个键名拼错就让交付物校验停摆）。
   //
-  // 1. PM 不参与路径认领：放行（给 at-pm 错建了键时这个键不起作用，ledger 会报）。
-  if (isContractWriter(role)) return { decision: 'allow' }
+  // 1. PM 不参与路径认领：放行（给 at-pm 错建了键时这个键不起作用，ledger 会报）。判断与触达表的 unrestricted 共用
+  //    decide.mjs 的 exemptFromPaths（M4f，审查第 27 条）。
+  if (exemptFromPaths(role)) return { decision: 'allow' }
 
-  // 2. 按设计不认领路径的角色（at-qa、at-acceptance）没有键时放行，不看 project.json 其余部分——它们的权限
-  //    本来就不看它，它们的正文也照此写（审查第 34 条另论）。
+  // 2. 按设计不认领路径的角色（at-qa、at-acceptance）没有键时：run 目录之外一律拒，不看 project.json 其余部分——它们只写 run 目录里
+  //    自己那份产物（M4f，docs/41，审查第 34 条）。原来这一步整段放行：能写 CLAUDE.md、.claude/、插件自己的门禁代码，也能改别人认领的
+  //    实现代码与测试（at-qa 发现缺测试顺手自己写，就是这一格）。拒绝理由不提 paths、不提键：对正想写别人代码的角色说怎么开口子，
+  //    等于告诉它怎么绕过去。出路是把问题照实写进它自己那份产物的结论、不用冒泡（M4f 复核）：at-qa 的正文说缺测试判「不通过：
+  //    缺测试」、不冒泡，理由若叫它冒泡，它就会不交 06-test.md 停下，PM 当成产物没交，绕开那条路。
   const paths = project && typeof project === 'object' ? project.paths : undefined
   const pathsOk = isPlainObject(paths)
-  if (NO_PATHS_ROLES.includes(role) && !(pathsOk && Object.hasOwn(paths, role))) return { decision: 'allow' }
+  if (NO_PATHS_ROLES.includes(role) && !(pathsOk && Object.hasOwn(paths, role))) {
+    const own = ownProductsOf(stages, role).join('、')
+    return {
+      decision: 'deny',
+      reason:
+        `${who} 不得写 ${fp}——你只写 run 目录里自己那份${own ? ` ${own}` : '产物'}，run 目录之外的文件不是你的活。` +
+        `要改实现、补测试或改配置的，不要自己动手：把看到的问题照实写进${own ? ` ${own} ` : '你那份产物'}的结论，不用为这个冒泡。`,
+    }
+  }
 
   // 3. 花名册读坏：判不出谁归不归本插件管。不能落成下一步的「不在花名册里就放行」——loadRoster 读坏时
   //    退回 {}，那样对所有人全开。H1 此时也拒一切派发。
@@ -262,8 +283,8 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 7b. 建了键的 at-qa、at-acceptance（M4b 第二轮复核，docs/36）：写在自己合法的前缀下照旧放行（判据钉着这一格）；别的
   //     一律说同一句——它不写 run 目录之外的文件，这次写入不是它的活，键本不该有、由 PM 删掉。原来这一格分三路说：第 8 步
   //     叫 PM「改 project.json」，「没人认领」那一支叫 PM「划给某个角色」，只有「归 X」那一支说键不该有——前两路都会把
-  //     PM 引去往一个账本说「不要建」的键上加前缀。不说「删了之后就能写」：删键之后它确实整段放行（第 2 步），对正想写
-  //     别人代码的 at-qa 说这句，等于告诉它怎么绕过去。
+  //     PM 引去往一个账本说「不要建」的键上加前缀。M4f 起删了键第 2 步照样拒；此前删键之后它整段放行，所以这里从来不说
+  //     「删了之后就能写」——对正想写别人代码的 at-qa 说这句，等于告诉它怎么绕过去。
   if (NO_PATHS_ROLES.includes(role)) {
     if (!own.block.length && underAny(target, paths[role], base)) return { decision: 'allow' }
     return {

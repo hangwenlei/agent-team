@@ -15,9 +15,9 @@ import { quote } from './trusted.mjs'
 import { isPlainObject } from './stages.mjs'
 import { isValidRoster } from './decide.mjs'
 
-// 按设计不认领路径的角色：H3 对它们在 run 目录之外放行（审查第 34 条另论）。与 templates/project.json 的
-// available_roles 减去 paths 的键逐一对账（tests/project.test.mjs）；/agent-team:at-init 明令不给它们建键，
-// 它们的正文也照此写着「写路径隔离连拒都不会拒你」。
+// 按设计不认领路径的角色：它们只写 run 目录里自己那份产物，没有键时 H3 在 run 目录之外拒它们（M4f，docs/41，审查第 34 条；
+// 此前整段放行）。与 templates/project.json 的 available_roles 减去 paths 的键逐一对账（tests/project.test.mjs）；
+// /agent-team:at-init 明令不给它们建键——建了键，H3 就照键放行它们写那几个前缀，等于在 run 目录之外给它们开了口子。
 export const NO_PATHS_ROLES = ['at-qa', 'at-acceptance']
 
 // 花名册里、但不是执行角色的：驱动者 PM、主线程（callerOf 对它的判定值）、测试替身。available_roles 里不该有它们。
@@ -74,8 +74,8 @@ export function prefixProblems(prefix, { platform = process.platform, label = '�
   } else {
     const where = landing(prefix, platform)
     // 改法要说全：只说「前缀要留在项目里」时，实测 PM 会把 '../shared/' 换成项目里并不存在的 'shared/'——多半是
-    // 另一个地方，这个角色凭空多认领了一个目录。理由不说「这个角色写不到项目外」：PM、没有键的 at-qa、at-acceptance
-    // 写得到，这句还会随降档出现在 at-pm 的键上；说的是门禁不会按这条前缀放行任何写入（第 8 步整条作废、认领者
+    // 另一个地方，这个角色凭空多认领了一个目录。理由不说「这个角色写不到项目外」：PM 写得到（M4f 之前没有键的 at-qa、
+    // at-acceptance 也写得到，docs/41），这句还会随降档出现在 at-pm 的键上；说的是门禁不会按这条前缀放行任何写入（第 8 步整条作废、认领者
     // 查找跳过它、H3 不拿不判人的键判人），这对每一种持有者都成立。
     if (where === 'outside') {
       out.block.push(
@@ -163,11 +163,11 @@ export function validateProject(project, { roster, platform = process.platform }
   }
   const rosterOk = isValidRoster(roster)
   if (!rosterOk) {
-    // H1 拒一切派发、H3 拒 PM 与没有键的 at-qa、at-acceptance 以外的角色写 run 目录之外：不可能是有意的。改
+    // H1 拒一切派发、H3 拒 PM 以外的角色写 run 目录之外：不可能是有意的。改
     // project.json 修不好它，单列一档（ledger 的【插件】），这一条自己说清出路（/agent-team:at-init 第 3 节照此写）。
     out.plugin.push(
       'roster.json 读不出来（插件安装不完整）——这不是 project.json 的问题，改它修不好：派发一律被拒，' +
-        `除 PM 与没有键的 ${NO_PATHS_ROLES.join('、')} 外写 run 目录之外也一律被拒。停下，告诉用户重装或更新 agent-team 插件`,
+        '除 PM 外写 run 目录之外也一律被拒。停下，告诉用户重装或更新 agent-team 插件',
     )
   }
   const known = (name) => rosterOk && Object.hasOwn(roster, name)
@@ -175,10 +175,8 @@ export function validateProject(project, { roster, platform = process.platform }
   const paths = project.paths
   if (!isPlainObject(paths)) {
     const what = paths === undefined ? '缺失' : `不是对象（是 ${quote(paths)}）`
-    // H3 的第 2 步排在这之前：没有键的 at-qa、at-acceptance 照样放行（commands/at.md §0 同一口径）。
-    out.block.push(
-      `paths ${what}——写路径隔离没有判据，除按设计不认领路径的 ${NO_PATHS_ROLES.join('、')} 外，执行角色写 run 目录外会被拒`,
-    )
+    // H3 的第 2 步排在这之前：没有键的 at-qa、at-acceptance 在那一步就被拒（M4f），不是例外（commands/at.md §0 同一口径）。
+    out.block.push(`paths ${what}——写路径隔离没有判据，执行角色写 run 目录外会被拒`)
   } else {
     // H3 真会拿来判人、而且整条没作废的键：嵌套提醒只在它们之间比（「X 也能写进这一块」对别的键是假话）。
     const judged = new Set()

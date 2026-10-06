@@ -2,6 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { computeReach } from '../hooks/lib/reach.mjs'
+import { decideWritePath } from '../hooks/lib/writepath.mjs'
+import { exemptFromPaths } from '../hooks/lib/decide.mjs'
+import { isContractWriter } from '../hooks/lib/contract-guard.mjs'
 
 const ROSTER = {
   'at-pm': { can_delegate_to: ['at-product', 'at-architect'] },
@@ -217,4 +220,32 @@ test('花名册的派发边拓扑没有变——变了就必须回来确认触�
       '更新这里。顺带：H4 契约保护的 at-pm 豁免也依赖这份拓扑，见 tests/roster-closure.test.mjs；' +
       'H2 按派发者给多段角色选段、H5a 的协调者集合也依赖它，见 tests/readiness.test.mjs 的「M3w 前提」与 stages.README.md。',
   )
+})
+
+// M4f（docs/41，审查第 27 条）：触达表原来把项目经理报成「只够得到别人认领的那几个前缀」，可写路径隔离第 1 步对它在 run 目录之外
+// 整段放行——最宽的身份被报成了最窄。现在标 unrestricted；判断与写路径隔离第 1 步共用 decide.mjs 的 exemptFromPaths，两处各写一份会分叉。
+const REAL_ROSTER = JSON.parse(readFileSync(new URL('../roster.json', import.meta.url), 'utf8'))
+const TEMPLATE = JSON.parse(readFileSync(new URL('../templates/project.json', import.meta.url), 'utf8'))
+
+test('M4f：项目经理与主线程标 unrestricted: true，其余角色（含按设计不认领路径的 at-qa、at-acceptance）都是 false', () => {
+  const r = computeReach({ roster: REAL_ROSTER, paths: TEMPLATE.paths })
+  assert.ok(Object.keys(r).includes('at-pm') && Object.keys(r).includes('__main__'), Object.keys(r).join('、'))
+  for (const [role, v] of Object.entries(r)) assert.equal(v.unrestricted, role === 'at-pm' || role === '__main__', role)
+})
+
+test('M4f：unrestricted 与写路径隔离第 1 步是同一个判断——标了的在 run 目录外写没人认领的地方放行，没标的都被拒', () => {
+  const r = computeReach({ roster: REAL_ROSTER, paths: TEMPLATE.paths })
+  const stages = { S1: { role: 'at-pm', requires: [], produces: ['00-contract.md'] } }
+  for (const [role, v] of Object.entries(r)) {
+    const d = decideWritePath({ role, filePath: '/proj/nobody-claims/x.ts', project: TEMPLATE, runDir: '/proj/.agent-team/runs/r1', stages, agentTeamDir: '/proj/.agent-team', roster: REAL_ROSTER })
+    assert.equal(d.decision, v.unrestricted ? 'allow' : 'deny', `${role}：${JSON.stringify(d)}`)
+  }
+})
+
+// M4f 复核（docs/41 §8，审查低-6）：「谁算项目经理」只有一份函数体——契约守卫的 isContractWriter 就是 decide.mjs 的 exemptFromPaths。
+// 两份同体实现今天等价，可没有判据钉着，下一次只改一份就分叉（M4f 自己的理由正是「两处各写一份会分叉」）。
+test('M4f 复核：isContractWriter 与 exemptFromPaths 是同一个函数；空串、别的名字、别的插件前缀都不算项目经理', () => {
+  assert.equal(isContractWriter, exemptFromPaths)
+  for (const r of [undefined, null, '__main__', 'at-pm', 'agent-team:at-pm']) assert.equal(exemptFromPaths(r), true, String(r))
+  for (const r of ['', ' ', 'agent-team:', 'at-qa', 'agent-team:at-qa', 'AT-PM', 'other:at-pm', 'at-pm ', 0, {}]) assert.equal(exemptFromPaths(r), false, JSON.stringify(r))
 })
