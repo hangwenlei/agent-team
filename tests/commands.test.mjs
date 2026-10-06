@@ -742,10 +742,9 @@ test('描述触达表的命令正文必须两半都在：禁令**和**理由—�
 //
 // 为什么这条规则本身重要（docs/11 §5.14）：hooks/lib/writepath.mjs 的 decideWritePath
 // 对**按设计不认领路径**的这两个角色（hooks/lib/project.mjs 的 NO_PATHS_ROLES），在没有 paths
-// 条目时于 run 目录之外整段早退放行（M3u 起其余角色没有条目会被拒，docs/29）。agents/at-qa.md 与 agents/at-acceptance.md
-// 的红线据此如实写着「写路径隔离连拒都不会拒你，那里只剩你自己的克制」。某个项目一旦给
-// 它们建了 paths 键，那句话对那一趟当场变假——**而正文是插件自带的，改不了那一趟的
-// project.json**。「允许但要求同步改正文」在结构上不可能执行，所以裁定是硬禁止。
+// 条目时于 run 目录之外一律拒（M4f，docs/41；此前整段早退放行）。某个项目一旦给它们建了 paths 键，门禁就照键放行它们
+// 写那几个前缀——等于在 run 目录之外给它们开了口子，而它们的正文红线写着「在 run 目录之外拒你的每一次写入」。正文是
+// 插件自带的，改不了那一趟的 project.json，所以裁定是硬禁止。
 //
 // ⚠️ 清单**从数据派生，不在这里硬编码角色名**：templates/project.json 的 available_roles
 // 减去 paths 的键，就是「故意不认领路径」的那几个（tests/templates.test.mjs 已有一条钉住
@@ -813,8 +812,8 @@ test('commands/at-init.md 必须逐个点名禁止给「不认领路径的角色
         `${JSON.stringify([...banned].sort())}，应当覆盖 ` +
         `${JSON.stringify(ROLES_FORBIDDEN_AS_PATH_KEYS)}（= templates/project.json 的 ` +
         'available_roles 减去 paths 的键，再加上 at-pm）。给一个「故意不认领路径」的角色' +
-        '建了 paths 键，会让 agents/ 下那份正文里「写路径隔离连拒都不会拒你」当场变假，' +
-        '而正文是插件自带的、改不了那一趟的 project.json（docs/11 §5.14；裁定「paths 禁令要有守卫」）。',
+        '建了 paths 键，门禁就照键放行它写那几个前缀，等于在 run 目录之外给它开了口子——而 agents/ 下那份正文写着' +
+        '「在 run 目录之外拒你的每一次写入」，正文是插件自带的、改不了那一趟的 project.json（裁定「paths 禁令要有守卫」）。',
     )
   }
 })

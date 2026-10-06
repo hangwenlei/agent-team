@@ -25,7 +25,7 @@ const INIT = read('commands/at-init.md')
 const AT = read('commands/at.md')
 const RESUME = read('commands/at-resume.md')
 
-test('at-init §2：早退放行在执行角色里只对按设计不认领路径的那几个，并逐个点名；at-pm 另行放行，不被说成「没键就拒」', () => {
+test('at-init §2：建键禁令只对按设计不认领路径的那几个，并逐个点名；at-pm 另行放行，不被说成「没键就拒」', () => {
   const s = flat(sectionOf(INIT, '## 2.'))
   assert.match(s, /执行角色里只对它们/)
   assert.match(s, /`at-pm` 不参与路径认领，另行放行/)
@@ -123,10 +123,11 @@ test('/agent-team:at-resume §3：【插件】是「先修它」的例外——�
   assert.ok(s.includes('【插件】（roster.json 读不出来）是例外') && s.includes('修不好它——停下，告诉用户重装或更新 agent-team 插件'), s)
 })
 
-test('/agent-team:at §0：不再说「每个执行角色都会被拒」——按设计不认领路径的那几个不会', () => {
+// M4f（docs/41，审查第 34 条）：没有键的 at-qa、at-acceptance 在 run 目录外也被拒，§0 不再把它们说成例外。
+test('/agent-team:at §0：project.json 不在时，执行角色写 run 目录之外一律被拒——不再把按设计不认领路径的那几个说成例外', () => {
   const s = flat(sectionOf(AT, '## 0.'))
-  assert.ok(!s.includes('每个执行角色都会被拒'))
-  for (const role of NO_PATHS_ROLES) assert.ok(s.includes(role), role)
+  assert.ok(s.includes('执行角色写 run 目录之外的任何地方都会被拒'), s)
+  for (const role of NO_PATHS_ROLES) assert.ok(!s.includes(role), role)
 })
 
 test('/agent-team:at §1：写完 current-run 收到【project.json】就先改完阻断与要改，再进 S2；「会被拒」只挂在阻断上', () => {
@@ -150,11 +151,14 @@ test('/agent-team:at §2：没收到契约回传时，先排除 project.json 读
   assert.ok(s.includes('逐字不动'), s)
 })
 
-test('README 两半的已知边界：项目经理以外的角色在 run 目录之外只能写自己的前缀、没有条目哪都写不了，at-qa 与 at-acceptance 是例外', () => {
+// M4f（docs/41，审查第 34 条）：at-qa 与 at-acceptance 不再是例外——没有条目时在 run 目录之外同样被拒。
+test('README 两半的已知边界：项目经理以外的角色在 run 目录之外只能写自己的前缀、没有条目哪都写不了，at-qa 与 at-acceptance 也一样', () => {
   const text = read('README.md')
   const [zh, en] = text.split('<a id="english"></a>')
-  for (const k of ['管项目经理以外的各个角色', '没有条目就哪都写不了', '例外是 `at-qa` 与 `at-acceptance`']) assert.ok(zh.includes(k), k)
-  for (const k of ['every team role except the project manager', 'nothing at all without an entry', 'the exception is `at-qa` and `at-acceptance`']) assert.ok(en.includes(k), k)
+  for (const k of ['管项目经理以外的各个角色', '没有条目就哪都写不了', '按设计不认领目录的 `at-qa` 与 `at-acceptance` 也一样']) assert.ok(zh.includes(k), k)
+  for (const k of ['every team role except the project manager', 'nothing at all without an entry', 'including `at-qa` and `at-acceptance`']) assert.ok(en.includes(k), k)
+  assert.ok(!zh.includes('例外是 `at-qa` 与 `at-acceptance`'), '中文半边还把 at-qa、at-acceptance 说成例外')
+  assert.ok(!en.includes('the exception is `at-qa` and `at-acceptance`'), '英文半边还把 at-qa、at-acceptance 说成例外')
   // 英文 README 里 implementation roles 指 S5 那几个，at-product、at-architect 同样受 paths 管。
   assert.ok(!en.includes("governs the team's implementation roles"))
   assert.ok(!zh.includes('只约束在 `project.json` 里认领了目录的角色'))

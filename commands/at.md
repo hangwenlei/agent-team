@@ -13,8 +13,7 @@ $ARGUMENTS
 照那一节告诉用户。
 
 若 `.agent-team/project.json` 不存在，**停下**，让用户先跑 `/agent-team:at-init`——没有它，
-写路径隔离没有判据：run 进行中时，除了按设计不认领路径的 `at-qa` 与 `at-acceptance`，
-执行角色写 run 目录之外的任何地方都会被拒。
+写路径隔离没有判据：run 进行中时，执行角色写 run 目录之外的任何地方都会被拒。
 
 本文里带 `${CLAUDE_PLUGIN_ROOT}` 前缀的路径都在**插件目录**里，用 `Read` 连着这个
 前缀一起读；以 `.agent-team/` 开头的路径才在用户项目里。两者不是同一个目录树——

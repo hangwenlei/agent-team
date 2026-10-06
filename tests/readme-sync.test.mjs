@@ -673,8 +673,8 @@ for (const f of [README_EN, README_ZH]) {
 // 五、「不认领路径的那些角色」—— 真源是 templates/project.json
 // ---------------------------------------------------------------------------
 //
-// 已知边界第一段写着 at-qa、at-acceptance 按设计不认领目录，这道检查对它们在 run 目录之外
-// 整段放行。这半句是 M2b 才写下来的事实（`docs/11` §5.14：
+// 已知边界第一段写着 at-qa、at-acceptance 按设计不认领目录。M4f（docs/41，审查第 34 条）之前这一句接着说「这道检查对它们在
+// run 目录之外整段放行」——那是 M2b 才写下来的事实（`docs/11` §5.14：
 // `decideWritePath` 对这两个按设计不认领路径的角色在没有条目时早退放行——M3u 起只对它们，
 // 其余角色没有条目会被拒（docs/29）——而 `at-qa` 还
 // 持有 `Bash`），M0 的 README 里没有它——**旧那句「写路径隔离对 Edit/Write 是硬
@@ -698,7 +698,7 @@ for (const f of [README_EN, README_ZH]) {
       assert.ok(
         block.includes(role),
         `${f} 的已知边界没提 ${role}，而它在 templates/project.json 里一个 project.paths 都不认领` +
-          '——写路径隔离对它（按设计不认领路径的角色）在 run 目录之外整段早退放行（docs/11 §5.14）。' +
+          '——它按设计不认领路径，写路径隔离在 run 目录之外拒它（M4f；此前整段放行）。' +
           '这是陌生人判断「装上它安不安全」要用的事实，不能只留在 docs 里',
       )
     }
@@ -1831,4 +1831,18 @@ test('M4e 第 49 条：英文那一半的安装一节说明插件运行时是中
     ),
     '英文安装一节缺语言说明（整句）',
   )
+})
+
+// M4f（docs/41，审查第 34 条）：没有 paths 条目的 at-qa、at-acceptance 在 run 目录之外被拒，「这不是沙箱」那一段两半照实写，整句钉——
+// 只核角色名的那条（第五节）挡不住把结论说回「整段放行」。
+const NOT_SANDBOX_NO_PATHS = [
+  'outside the run directory a role may write only its own prefixes, and nothing at all without an entry — including `at-qa` and `at-acceptance`, which claim no directories by design and write only their own deliverable in the run directory.',
+  '在 run 目录之外，只能写划给自己的前缀，没有条目就哪都写不了——按设计不认领目录的 `at-qa` 与 `at-acceptance` 也一样，它们只写 run 目录里自己那份产物。',
+]
+test('M4f 第 34 条：两半的「这不是沙箱」都写明 at-qa、at-acceptance 在 run 目录之外也写不了，不再说整段放行', () => {
+  for (const [half, k] of HALVES) {
+    const s = blockUnder(read(half), pairOf('## Known Limitations')[k])
+    assert.ok(hasSentence(s, NOT_SANDBOX_NO_PATHS[k]), `${half} 的已知边界缺这一句（整句）`)
+    assert.ok(!/整段放行|lets them through entirely/.test(s), `${half} 还在说整段放行`)
+  }
 })

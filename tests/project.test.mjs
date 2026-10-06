@@ -32,14 +32,15 @@ test('模板本身：没有阻断、没有要改、没有请确认', () => {
 
 // ---- 阻断 ----
 
-test('阻断：paths 缺失、不是普通对象——理由点名不受影响的 NO_PATHS_ROLES，不说成「执行角色都会被拒」', () => {
+// M4f（docs/41，审查第 34 条）：没有键的 at-qa、at-acceptance 在 H3 第 2 步就被拒，不再是例外——理由不许再点名它们「不受影响」。
+test('阻断：paths 缺失、不是普通对象——理由说执行角色写 run 目录外会被拒，不再把 NO_PATHS_ROLES 说成例外', () => {
   for (const paths of [undefined, null, [], 'src/', 0, true]) {
     const project = { ...TEMPLATE, paths }
     if (paths === undefined) delete project.paths
     const r = v(project)
     assert.ok(r.block.length > 0, JSON.stringify(paths))
-    // H3 的第 2 步排在「paths 缺失」之前：没有键的 at-qa、at-acceptance 照样放行（commands/at.md §0 同一口径）。
-    for (const role of NO_PATHS_ROLES) assert.ok(r.block.join('\n').includes(role), `${role}：${all(r)}`)
+    assert.ok(r.block.join('\n').includes('执行角色写 run 目录外会被拒'), all(r))
+    for (const role of NO_PATHS_ROLES) assert.ok(!r.block.join('\n').includes(role), `${role}：${all(r)}`)
   }
 })
 
@@ -142,7 +143,7 @@ test('H3 不拿来判人的键（at-pm、__main__、认不出的键）上的坏�
     assert.ok(r.confirm.some((s) => s.includes('"/lib2/"')), `${key}：${all(r)}`)
     assert.ok(!r.fix.some((s) => s.includes('"/lib2/"')), `${key}：${all(r)}`)
   }
-  // H3 会拿键去判的，照旧阻断——包括建了键的 at-qa、at-acceptance（建了键就不再早退放行）与 at-outsider。
+  // H3 会拿键去判的，照旧阻断——包括建了键的 at-qa、at-acceptance（M4f 起没有键也被拒；建了键就只能写那几个前缀）与 at-outsider。
   for (const key of [...NO_PATHS_ROLES, 'at-outsider', 'at-backend']) {
     const r = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, [key]: ['../'] } })
     assert.ok(r.block.length > 0, `${key}：${all(r)}`)
@@ -307,14 +308,14 @@ test('花名册读坏时：单列一条插件问题——不是 project.json 的
   for (const roster of [{}, [], null, ['at-backend']]) {
     const r = v({ ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-fronted': ['x/'] } }, roster)
     assert.ok(!all(r).includes('at-fronted'), JSON.stringify(roster))
-    // H1 拒一切派发、H3 拒 PM 与没有键的 at-qa、at-acceptance 以外的角色：不可能是「有意的」；改 project.json
+    // H1 拒一切派发、H3 拒 PM 以外的角色写 run 目录之外：不可能是「有意的」；改 project.json
     // 又修不好它，所以不进三档（【project.json】那一段的首句叫人整份重写、结尾叫人改到没有为止）。
     assert.equal(r.plugin.length, 1, JSON.stringify(r))
     const p = r.plugin[0]
-    for (const k of ['roster.json', '这不是 project.json 的问题', '改它修不好', '没有键的', '派发一律被拒', '停下']) assert.ok(p.includes(k), `${k}：${p}`)
+    for (const k of ['roster.json', '这不是 project.json 的问题', '改它修不好', '除 PM 外', '派发一律被拒', '停下']) assert.ok(p.includes(k), `${k}：${p}`)
     assert.match(p, /重装|更新/)
-    // H3 的第 2 步排在第 3 步之前：没有键的 at-qa、at-acceptance 在花名册读坏时照样放行。
-    for (const role of NO_PATHS_ROLES) assert.ok(p.includes(role), `${role}：${p}`)
+    // M4f：H3 的第 2 步排在第 3 步之前，没有键的 at-qa、at-acceptance 在那一步就被拒——不再是例外。
+    for (const role of NO_PATHS_ROLES) assert.ok(!p.includes(role), `${role}：${p}`)
     assert.ok(!all(r).includes('roster.json'), all(r))
     // 花名册读坏时 available_roles 里的名字没法核对，也不该被报成「不是花名册里的角色名」。
     assert.deepEqual([r.block, r.fix, r.confirm], [[], [], []], all(r))

@@ -200,11 +200,20 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 1. PM 不参与路径认领：放行（给 at-pm 错建了键时这个键不起作用，ledger 会报）。
   if (isContractWriter(role)) return { decision: 'allow' }
 
-  // 2. 按设计不认领路径的角色（at-qa、at-acceptance）没有键时放行，不看 project.json 其余部分——它们的权限
-  //    本来就不看它，它们的正文也照此写（审查第 34 条另论）。
+  // 2. 按设计不认领路径的角色（at-qa、at-acceptance）没有键时：run 目录之外一律拒，不看 project.json 其余部分——它们只写 run 目录里
+  //    自己那份产物（M4f，docs/41，审查第 34 条）。原来这一步整段放行：能写 CLAUDE.md、.claude/、插件自己的门禁代码，也能改别人认领的
+  //    实现代码与测试（at-qa 发现缺测试顺手自己写，就是这一格）。拒绝理由不提 paths、不提键：对正想写别人代码的角色说怎么开口子，
+  //    等于告诉它怎么绕过去。
   const paths = project && typeof project === 'object' ? project.paths : undefined
   const pathsOk = isPlainObject(paths)
-  if (NO_PATHS_ROLES.includes(role) && !(pathsOk && Object.hasOwn(paths, role))) return { decision: 'allow' }
+  if (NO_PATHS_ROLES.includes(role) && !(pathsOk && Object.hasOwn(paths, role))) {
+    return {
+      decision: 'deny',
+      reason:
+        `${who} 不得写 ${fp}——你只写 run 目录里自己那份产物，run 目录之外的文件不是你的活。` +
+        '要改实现、补测试或改配置，写进你的报告，冒泡给派你的人。',
+    }
+  }
 
   // 3. 花名册读坏：判不出谁归不归本插件管。不能落成下一步的「不在花名册里就放行」——loadRoster 读坏时
   //    退回 {}，那样对所有人全开。H1 此时也拒一切派发。
@@ -262,8 +271,8 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 7b. 建了键的 at-qa、at-acceptance（M4b 第二轮复核，docs/36）：写在自己合法的前缀下照旧放行（判据钉着这一格）；别的
   //     一律说同一句——它不写 run 目录之外的文件，这次写入不是它的活，键本不该有、由 PM 删掉。原来这一格分三路说：第 8 步
   //     叫 PM「改 project.json」，「没人认领」那一支叫 PM「划给某个角色」，只有「归 X」那一支说键不该有——前两路都会把
-  //     PM 引去往一个账本说「不要建」的键上加前缀。不说「删了之后就能写」：删键之后它确实整段放行（第 2 步），对正想写
-  //     别人代码的 at-qa 说这句，等于告诉它怎么绕过去。
+  //     PM 引去往一个账本说「不要建」的键上加前缀。M4f 起删了键第 2 步照样拒；此前删键之后它整段放行，所以这里从来不说
+  //     「删了之后就能写」——对正想写别人代码的 at-qa 说这句，等于告诉它怎么绕过去。
   if (NO_PATHS_ROLES.includes(role)) {
     if (!own.block.length && underAny(target, paths[role], base)) return { decision: 'allow' }
     return {

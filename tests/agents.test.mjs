@@ -17,6 +17,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { isContractWriter } from '../hooks/lib/contract-guard.mjs'
+import { decideWritePath } from '../hooks/lib/writepath.mjs'
 import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 import { EXPECTED_AGENTS } from './helpers/expected-agents.mjs'
 // stageRoles 在本文件下半段已经有一个同名的局部常量（那是「所有 stage.role 的集合」，
@@ -335,7 +336,7 @@ test('前置条件：hasPathScopeLine() 认得出「被改松」的样本，也�
   )
   // ③ 意思**相反**的那一句不能喂饱判据——at-qa / at-acceptance 正文里写的正是这一句。
   assert.ok(
-    !hasPathScopeLine('⚠️ **`paths` 里没有你的条目，意味着写路径隔离在 run 目录之外对你整段早退放行**'),
+    !hasPathScopeLine('⚠️ **`paths` 里没有你的条目，意味着写路径隔离在 run 目录之外拒你的每一次写入**'),
     '「paths 里没有你的条目」是反面那一句，不该被当成这条限定',
   )
   // ④ 两半分在两行——**故意判为不通过**，与 hasContractRedLine 同一个取舍：
@@ -1097,7 +1098,8 @@ test('十一份 agent 的 model: 与预期逐份一致——占位符的 haiku �
 //
 // `tests/commands.test.mjs` 强制 `commands/at-init.md` 保留「不要给 at-qa / at-acceptance
 // 建 paths 键」这条禁令，它的失败文案里白纸黑字写着理由是「会让 agents/ 下那份正文里
-// 『写路径隔离连拒都不会拒你』当场变假」——**可是没有任何东西强制那份正文保留那句话**。
+// 『写路径隔离连拒都不会拒你』当场变假」（M4f 起那句改成了「在 run 目录之外拒你的每一次写入」）——**可是没有任何东西强制
+// 那份正文保留那句话**。
 // 评审实测：把 agents/at-qa.md 与 agents/at-acceptance.md 里那一段整段删掉，裸
 // `node --test` 仍然 558 / 0，**零红**（两份各验一次）。两边可以静默分叉成
 // **禁令留着，它的依据消失**——而这两个角色恰恰是全仓**唯一**两个写路径隔离对其完全
@@ -1110,11 +1112,12 @@ test('十一份 agent 的 model: 与预期逐份一致——占位符的 haiku �
 // 不在这里自己再算一次 available_roles − paths：一边动，另一边必然跟着动。
 //
 // 判据两半都要，且两半都只出现在这一段里（不是共享红线里的措辞）：
-//   前提「paths 里没有你的条目」 + 结论「早退放行」。
-// 保留前提、把结论说反（「写路径隔离照样挡得住你」）不会同时具备这两半——下面第二条
-// 自检拿一个这样的样本钉住这件事。主判据与两条自检调的是**同一个函数**。
+//   前提「paths 里没有你的条目」 + 结论「在 run 目录之外拒你的每一次写入」。
+// M4f（docs/41，审查第 34 条）：结论翻了——原来这两个角色没有条目时在 run 目录之外整段早退放行，正文照实写着「早退放行」；现在
+// 一律拒。只核正文会让两边静默分叉（门禁改了、正文没改，判据照绿——这一轮改代码那一刻就是这样），所以主判据里同时核
+// decideWritePath 的行为：正文说拒，门禁就得真拒。
 function statesPathsEscape(body) {
-  return /`?paths`?\s*里没有你的条目/.test(body) && /早退放行/.test(body)
+  return /`?paths`?\s*里没有你的条目/.test(body) && /在 run 目录之外拒你的每一次写入/.test(body)
 }
 
 // ⭐ 正向锚一：钉的是**判据真正迭代的那个集合**。ROLES_WITHOUT_PATHS 是派生出来的，
@@ -1123,30 +1126,33 @@ test('锚：templates/project.json 里真的有「故意不认领 paths」的角
   assert.ok(
     ROLES_WITHOUT_PATHS.length > 0,
     'templates/project.json 的 available_roles 减去 paths 的键算出来是空集合——下面那条' +
-      '「正文必须写明 H3 对它早退放行」一圈都不会跑，它是恒绿的，没有检查任何东西',
+      '「正文必须写明 H3 在 run 目录之外拒它」一圈都不会跑，它是恒绿的，没有检查任何东西',
   )
 })
 
 // ⭐ 正向锚二：判据认得出「保留前提、把结论说反」这一类违规。没有它，判据被放宽成
 // 只查前提（或只查某个高频词）时，主判据会恒绿——而那正是这条不变量要防的失效方向。
 test('自检：statesPathsEscape() 认得出一个已知违规样本——保留「paths 里没有你的条目」但把结论说反后不应判定为通过', () => {
-  const flipped = '`paths` 里没有你的条目，但写路径隔离照样会挡住你写别人的代码目录。'
+  const flipped = '`paths` 里没有你的条目，写路径隔离在 run 目录之外对你整段早退放行，连 `Write` 都不会被拒。'
   assert.ok(
     !statesPathsEscape(flipped),
-    'statesPathsEscape() 对着一个已知违规样本（保留前提、把「早退放行」的结论说反）算出了' +
+    'statesPathsEscape() 对着一个已知违规样本（保留前提、把「拒你」的结论说反成「早退放行」）算出了' +
       '「通过」——说明判据认不出这类违规，回去检查它本身',
   )
 })
 
-test('故意不认领 project.paths 的角色，正文里必须写明写路径隔离对它早退放行这件事', () => {
+test('故意不认领 project.paths 的角色，正文里必须写明写路径隔离在 run 目录之外拒它——而且门禁真的拒', () => {
+  const project = JSON.parse(readFileSync(url('templates/project.json'), 'utf8'))
   for (const role of ROLES_WITHOUT_PATHS) {
+    const r = decideWritePath({ role, filePath: '/proj/src/server/a.ts', project, runDir: '/proj/.agent-team/runs/r1', stages, agentTeamDir: '/proj/.agent-team', roster })
+    assert.equal(r.decision, 'deny', `${role} 写 run 目录之外没被拒——正文那一句与门禁对不上：${JSON.stringify(r)}`)
     assert.ok(
       statesPathsEscape(bodyOf(`${role}.md`)),
       `agents/${role}.md 是 templates/project.json 里故意不认领 paths 的角色（available_roles ` +
         '减去 paths 的键），而 hooks/lib/writepath.mjs 的 decideWritePath 对这几个按设计不认领路径' +
-        '的角色（hooks/lib/project.mjs 的 NO_PATHS_ROLES，执行角色里只对它们）在没有 paths 条目时于 run 目录' +
-        '之外整段早退放行——它的正文必须如实写出这件事（前提「paths 里没有你' +
-        '的条目」+ 结论「早退放行」两半都要）。commands/at-init.md 那条禁令的理由正是这句话，' +
+        '的角色（hooks/lib/project.mjs 的 NO_PATHS_ROLES）在没有 paths 条目时于 run 目录之外一律拒（M4f）' +
+        '——它的正文必须如实写出这件事（前提「paths 里没有你' +
+        '的条目」+ 结论「在 run 目录之外拒你的每一次写入」两半都要）。commands/at-init.md 那条禁令的理由跟着它，' +
         '两边由同一个派生数组驱动，不能只剩禁令而依据消失（docs/11 §5.14）。',
     )
   }

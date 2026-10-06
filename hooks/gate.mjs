@@ -52,7 +52,7 @@ import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone } from './lib/state.mjs'
 import { CONTRACT_FILE, compareContractSha, sha256OfContract, shaOrNote } from './lib/contract-hash.mjs'
 import { buildLedgerNotices, brokenProjectNotice, contractCheckNotice, IMPL_RECORD_NOTE } from './lib/ledger.mjs'
-import { NO_PATHS_ROLES, validateProject } from './lib/project.mjs'
+import { validateProject } from './lib/project.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
 import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
@@ -1617,8 +1617,7 @@ function main() {
       if (!ctx.project) {
         projectReport = {
           block: [
-            `.agent-team/project.json 不在——run 已经建起来，除按设计不认领路径的 ${NO_PATHS_ROLES.join('、')} 外，` +
-              '执行角色写 run 目录之外的任何地方都会被拒；先跑 /agent-team:at-init 写好它',
+            '.agent-team/project.json 不在——run 已经建起来，执行角色写 run 目录之外的任何地方都会被拒；先跑 /agent-team:at-init 写好它',
           ],
         }
       } else {

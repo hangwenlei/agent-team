@@ -3,7 +3,7 @@
 // 此前只要 project.json 是个合法对象，调用者在 paths 里「没有键」就静默放行：paths 缺失、键名拼错、带插件
 // 前缀、被删掉、run 进行中整份 project.json 不在，效果都一样——按角色隔离全开，不留痕迹。现在（控制文件与
 // run 目录保护两段照旧在前）：
-//   1. PM → 放行；2. 按设计不认领路径的角色（at-qa、at-acceptance）没有键 → 放行，不看 project.json 其余部分；
+//   1. PM → 放行；2. 按设计不认领路径的角色（at-qa、at-acceptance）没有键 → 拒（M4f，审查第 34 条；此前放行），不看 project.json 其余部分；
 //   3. 花名册读坏 → 拒；4. 不在花名册里的调用者 → 放行（不归本插件管）；5. run 进行中 project.json 不在 → 拒；
 //   6. paths 缺失或不是对象 → 拒；7. 调用者没有键 → 拒；8. 调用者自己的条目有阻断问题 → 拒，只拒它；
 //   9. 其余照旧（认领了放行、别人的拒、没人认领拒），认领者查找只看合法的前缀。
@@ -43,7 +43,7 @@ test('基线：模板配置下，执行角色写自己的地盘放行、写别�
   assert.equal(decide('at-backend', IOS, TEMPLATE).decision, 'deny')
 })
 
-// ---- 5、6：没有整份判据时拒 NO_PATHS_ROLES 以外的执行角色（它们在第 2 步已经放行）----
+// ---- 5、6：没有整份判据时拒 NO_PATHS_ROLES 以外的执行角色（它们在第 2 步已经被拒，M4f）----
 
 test('run 进行中 project.json 不在：执行角色写 run 目录外被拒，理由说「不在」、给出 /agent-team:at-init', () => {
   assertConfigDeny(decide('at-backend', OWN, null), '不在', '/agent-team:at-init')
@@ -144,13 +144,22 @@ test('认领者查找只看合法的前缀：别人条目里阻断的前缀（�
 
 // ---- 2：按设计不认领路径的角色 ----
 
-test('at-qa、at-acceptance 没有键：不管 project.json 在不在、形状对不对，run 目录外都放行——它们的正文照此写', () => {
+// M4f（docs/39 §2.2，审查第 34 条）：原来这两个角色没有键时在 run 目录外整段放行——能写 CLAUDE.md、.claude/、插件自己的门禁代码，
+// 也能改别人认领的实现代码与测试（at-qa 发现缺测试顺手自己写，就是这一格）。它们只写 run 目录里自己那份产物，run 目录外一律拒；
+// 拒绝理由给冒泡这条出路，不给绕路的提示（不说 paths、不说删键、不说整段放行）。
+test('at-qa、at-acceptance 没有键：不管 project.json 在不在、形状对不对，run 目录外都拒——它们只写 run 目录里自己那份产物', () => {
   for (const role of NO_PATHS_ROLES) {
     for (const project of [TEMPLATE, null, { ...TEMPLATE, paths: [] }, withPaths({ ...TEMPLATE.paths, 'at-ios': '../' })]) {
-      assert.equal(decide(role, '/proj/tests/x.test.ts', project).decision, 'allow', `${role}：${JSON.stringify(project)?.slice(0, 60)}`)
+      for (const target of ['/proj/tests/x.test.ts', '/proj/src/server/a.ts', '/proj/CLAUDE.md', '/proj/.claude/settings.json']) {
+        const r = decide(role, target, project)
+        assert.equal(r.decision, 'deny', `${role} ${target}：${JSON.stringify(project)?.slice(0, 60)}`)
+        assert.match(r.reason, /只写 run 目录里自己那份产物/, r.reason)
+        assert.match(r.reason, /冒泡/, r.reason)
+        for (const s of ['paths', '删', '整段放行', 'project.json']) assert.ok(!r.reason.includes(s), `${role} 的拒绝理由不该有「${s}」：${r.reason}`)
+      }
     }
     // 花名册读坏也一样：它们的权限本来就不看花名册。
-    assert.equal(decide(role, '/proj/tests/x.test.ts', TEMPLATE, {}).decision, 'allow')
+    assert.equal(decide(role, '/proj/tests/x.test.ts', TEMPLATE, {}).decision, 'deny')
   }
 })
 
