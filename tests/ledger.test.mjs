@@ -387,3 +387,30 @@ test('M4b 执行段的提醒按形状认：自定义链里叫 IMPL 的执行段�
   const design = buildLedgerNotices({ ...base, kind: 'state', stages, state: st('DESIGN'), stageDone: true }).join('\n')
   assert.doesNotMatch(design, /被写路径隔离拒绝/)
 })
+
+// M4f（docs/41，审查第 27 条）：不受 paths 管的身份（reach 里 unrestricted 的，即项目经理）单列在前，不再把它们「还能写到」的前缀
+// 逐条列成被放大——它们在 run 目录之外写哪都放行，逐条列等于把最宽的身份报成最窄。
+test('M4f 第 27 条：触达表先单列不受 paths 管的身份，不逐条列它们的「还能写到」；别的角色照旧列', () => {
+  const reach = {
+    'at-pm': { own: [], reachableRoles: ['at-backend'], reach: ['src/server/'], widenedBy: { 'src/server/': 'at-pm → at-backend' }, widened: true, unrestricted: true },
+    'at-product': { own: ['docs/'], reachableRoles: ['at-backend'], reach: ['docs/', 'src/server/'], widenedBy: { 'src/server/': 'at-product → at-backend' }, widened: true, unrestricted: false },
+    'at-backend': { own: ['src/server/'], reachableRoles: [], reach: ['src/server/'], widenedBy: {}, widened: false, unrestricted: false },
+  }
+  const s = joined({ kind: 'project', reach })
+  assert.ok(s.includes('不受 paths 管：at-pm'), s)
+  assert.ok(!s.includes('at-pm 还能写到'), s)
+  assert.ok(s.includes('at-product 还能写到'), s)
+  assert.ok(s.indexOf('不受 paths 管') < s.indexOf('at-product 还能写到'), s)
+  assert.doesNotMatch(s, /限制/)
+})
+
+test('M4f：只有不受 paths 管的身份、没有别的角色被放大时，说「其余角色的触达都没有超出」，不说「没有角色」', () => {
+  const reach = {
+    'at-pm': { own: [], reachableRoles: [], reach: [], widenedBy: {}, widened: false, unrestricted: true },
+    a: { own: ['p/'], reachableRoles: [], reach: ['p/'], widenedBy: {}, widened: false, unrestricted: false },
+  }
+  const s = joined({ kind: 'project', reach })
+  assert.ok(s.includes('不受 paths 管：at-pm'), s)
+  assert.ok(s.includes('其余角色的触达都没有超出'), s)
+  assert.ok(!s.includes('没有角色的触达超出'), s)
+})

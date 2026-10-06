@@ -188,8 +188,16 @@ export function buildLedgerNotices({
     )
   } else if (kind === 'project' && reach && typeof reach === 'object') {
     const lines = []
+    const free = []
     for (const [role, r] of Object.entries(reach)) {
-      if (!r || !r.widened) continue
+      if (!r) continue
+      // M4f（docs/41，审查第 27 条）：不受 paths 管的身份（reach.mjs 的 unrestricted，即项目经理）单列一行——它在 run 目录之外写哪都
+      // 放行，逐条列它「还能写到」的前缀，等于把最宽的身份报成最窄。
+      if (r.unrestricted === true) {
+        free.push(inline(role))
+        continue
+      }
+      if (!r.widened) continue
       for (const [prefix, via] of Object.entries(r.widenedBy ?? {})) {
         // 角色与经由链来自 roster.json（插件自己的名字）；前缀来自 project.json，谁都写得进，加引号。
         lines.push(`  ${inline(role)} 还能写到 ${quote(prefix)}（经 ${inline(via)}）`)
@@ -202,11 +210,18 @@ export function buildLedgerNotices({
     // 实现代码违反了 brief 自己写的规则（Task 6 落地时发现，不在简报明确列出的
     // 「已经过时的地方」里）。换成「门禁」——本文件头部注释与 reach.mjs 头部注释
     // 已经在用这个词表达同一个意思（"这不是门禁""不是安全边界"），不是新造的说法。
-    const body = lines.length
-      ? `当前配置下，下面这些角色实际能写到的地方超出了它自己认领的路径：\n${lines.join('\n')}\n` +
-        `这不是门禁也不是告警，是一份审计事实：写路径隔离只挡 Edit/Write 的直接写入，` +
-        `一个角色把写入转手派发给路径的合法拥有者就绕过去了（规格 §6.4）。`
-      : '当前配置下，没有角色的触达超出它自己认领的路径。'
+    const freeLine = free.length
+      ? `不受 paths 管：${free.join('、')}——项目经理在 run 目录之外写哪都放行，写路径隔离不看它的前缀。\n`
+      : ''
+    const body =
+      freeLine +
+      (lines.length
+        ? `当前配置下，下面这些角色实际能写到的地方超出了它自己认领的路径：\n${lines.join('\n')}\n` +
+          `这不是门禁也不是告警，是一份审计事实：写路径隔离只挡 Edit/Write 的直接写入，` +
+          `一个角色把写入转手派发给路径的合法拥有者就绕过去了（规格 §6.4）。`
+        : free.length
+          ? '当前配置下，其余角色的触达都没有超出它自己认领的路径。'
+          : '当前配置下，没有角色的触达超出它自己认领的路径。')
     out.push(
       `【触达表】${body}\n` +
         `把下面这份 JSON 原样写进 .agent-team/reach.json：\n` +
@@ -386,8 +401,9 @@ function chainIds(stages) {
 // （M4c 起 H5b 也认冒泡：不写实现记录、回复第一行是「冒泡：」也停得下，那一份照旧算没交）
 // （H5b），被拒还没解决的那一份在门禁看来就是交了；门禁不读它写了什么，这一句把 PM 引到那一节上。H5a「全部齐备」那句同用。
 export const IMPL_RECORD_NOTE =
-  '这一段的产物是各执行角色的实现记录：推进之前逐份读，有「被写路径隔离拒绝」一节、里面还有没标「已解决」的条目的，那一份不算交齐' +
-  '（门禁看不出这一点；做法见 /agent-team:at 第 3 节「各段的具体做法」里这一段那一条）。'
+  '这一段的产物是各执行角色的实现记录：推进之前逐份读，有「被写路径隔离拒绝」一节、里面还有没标「已解决」的条目的，那一份不算交齐；' +
+  '「测试」一节缺了、或者新行为没有测试也没写明为什么的，同样不算（门禁看不出这两点；做法见 /agent-team:at 第 3 节「各段的具体做法」' +
+  '里这一段那一条）。'
 
 // 第二轮复核：同一条回传发给执行角色时用这一句——上面那句叫读者去逐份读、去照 /agent-team:at 做，它都做不了。
 const IMPL_RECORD_ROLE_NOTE =

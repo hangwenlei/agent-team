@@ -15,7 +15,7 @@ import { stageRoles, expandProduces, isPlainObject } from './stages.mjs'
 // 一律过 inline / quote（M3s，docs/27）。
 import { inline, quote } from './trusted.mjs'
 import { NO_PATHS_ROLES, entryProblems, usablePrefixes } from './project.mjs'
-import { isValidRoster } from './decide.mjs'
+import { exemptFromPaths, isValidRoster } from './decide.mjs'
 
 function underAny(target, prefixes, base) {
   // 评审三轮 Minor 3：prefixes 理论上总是数组（project.paths 的值），但
@@ -197,8 +197,9 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   // 被删掉、run 进行中整份文件不在，效果都是按角色隔离静默全开。现在逐步判；形状问题只让本检查项看，不把整趟
   // run 判成读不出来（那样 H2、H5 会跟着一起降级，一个键名拼错就让交付物校验停摆）。
   //
-  // 1. PM 不参与路径认领：放行（给 at-pm 错建了键时这个键不起作用，ledger 会报）。
-  if (isContractWriter(role)) return { decision: 'allow' }
+  // 1. PM 不参与路径认领：放行（给 at-pm 错建了键时这个键不起作用，ledger 会报）。判断与触达表的 unrestricted 共用
+  //    decide.mjs 的 exemptFromPaths（M4f，审查第 27 条）。
+  if (exemptFromPaths(role)) return { decision: 'allow' }
 
   // 2. 按设计不认领路径的角色（at-qa、at-acceptance）没有键时：run 目录之外一律拒，不看 project.json 其余部分——它们只写 run 目录里
   //    自己那份产物（M4f，docs/41，审查第 34 条）。原来这一步整段放行：能写 CLAUDE.md、.claude/、插件自己的门禁代码，也能改别人认领的

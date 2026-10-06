@@ -30,7 +30,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/40` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/41` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，下一轮从 `docs/39` §5 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -114,6 +114,12 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   结尾、首尾没有空白、不是会被读成 null/布尔/数字的那几种，行里没有制表符与 `---`。挡的是已经核过、会让平台的 YAML 解析器与按行读的判据
   读出不同东西的写法——解析失败会让平台把整份当空（Windows 上装下来的副本是 CRLF，平台的退路在那里不起作用），折行能授出判据看不见的
   工具，值里的 `---` 会被平台当成收尾。不声称封闭。`tests/frontmatter-subset.test.mjs` 钉着；理由在 `docs/40` §1.8。
+- **按设计不认领路径的 `at-qa`、`at-acceptance` 只写 run 目录里自己那份产物**：没有 `paths` 键时写路径隔离在 run 目录之外拒（M4f；此前整段
+  放行），拒绝理由不提怎么开口子；建了键的照键（`/agent-team:at-init` 禁止、账本报）。不受 `paths` 管的只剩项目经理与主线程——写路径隔离
+  第 1 步与触达表的 `unrestricted` 共用 `hooks/lib/decide.mjs` 的 `exemptFromPaths`。正文那条判据同时核门禁行为（正文说拒，门禁就得真拒）。
+  理由在 `docs/41`。
+- **新行为的自动化测试归 S5 的产者写**：照落盘清单定的位置写，实现记录带「测试」一节，PM 推进出 S5 之前读；`at-qa` 核缺测试、判「不通过：
+  缺测试」、不写不冒泡；缺测试的回退回 S5，验收因为缺测试判不了的也回 S5。门禁不读内容。理由在 `docs/41`。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。
