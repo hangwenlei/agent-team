@@ -59,7 +59,7 @@ import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
 import { isPlainObject, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
-import { GATE_CHECK_PATH, gateCheckReason, isGateCheck } from './lib/gate-check.mjs'
+import { GATE_CHECK_PATH, gateCheckReason, isGateCheck, selfCheckIdentity } from './lib/gate-check.mjs'
 import {
   SECOND_WRITE_NOTE,
   crashContext,
@@ -1218,7 +1218,7 @@ function main() {
     // .agent-team 的项目里、坏掉的 run 里、由主线程发起时都拿得到回答。协议在 agents/at-pm.md。
     // M3v：调用者是 PM 时，理由末尾可能追加一句运行状态的说明（selfCheckTail）。
     const checked = input.tool_name === 'NotebookEdit' ? input?.tool_input?.notebook_path : input?.tool_input?.file_path
-    if (isGateCheck(checked)) denyAndExit(gateCheckReason() + selfCheckTail(input, checked), spec.event)
+    if (isGateCheck(checked)) denyAndExit(gateCheckReason() + selfCheckTail(input, checked) + selfCheckIdentity(input), spec.event)
 
     // M3z（docs/34，全量审查第 16 条）：门禁专属文件（返工批准记录、交付快照）任何人都不用 Edit/Write 改，PM 与主线程也不行——
     // 排在主线程豁免与读运行上下文之前，与门禁自检同一个位置。按路径形状认任何项目的 runs/<id>/ 下的这两个名字；写法认不出

@@ -17,6 +17,9 @@ export const MAIN = '__main__'
 // 「一律拒绝」，而所有测试仍然是绿的。
 export const PLUGIN_PREFIX = 'agent-team:'
 
+// 项目经理的裸名：主会话（插件 settings.json 的 agent），也是唯一的契约写者（exemptFromPaths）。
+const PM_ROLE = 'at-pm'
+
 export function stripPluginPrefix(name) {
   if (typeof name !== 'string' || !name.startsWith(PLUGIN_PREFIX)) return name
   const bare = name.slice(PLUGIN_PREFIX.length)
@@ -50,7 +53,7 @@ function fmt(list) {
 // 函数，M4f 复核）：契约写者与不受 paths 管的是同一个身份；这条豁免的安全性依赖什么，论证在 contract-guard.mjs 那段注释里。
 export function exemptFromPaths(role) {
   const caller = callerOf({ agent_type: role })
-  return caller === MAIN || caller === 'at-pm'
+  return caller === MAIN || caller === PM_ROLE
 }
 
 // 花名册有没有用：null、不是对象、数组、空对象都算坏。H1 与 H3（M3u）共用这一份——H3 拿到一个坏花名册
@@ -75,6 +78,27 @@ export function decideDelegation(input, roster) {
     return deny(
       'agent-team 的 roster.json 不是有效的花名册对象' +
         '（应为至少含一个条目的 JSON 对象），无法判定派发权限，按安全边界拒绝。',
+    )
+  }
+
+  // M4i（docs/44，审查第 35 条）：agent_type 在、却不是非空字符串——callerOf 会把它原样当名字，花名册里查不到，走下面「未登记的调用者
+  // 放行」，一个畸形字段就绕过了整个 H1。认不出是谁在派就按安全边界拒；缺失与 null 照旧是主线程（callerOf）。
+  const rawCaller = input?.agent_type
+  if (rawCaller !== undefined && rawCaller !== null && (typeof rawCaller !== 'string' || rawCaller === '')) {
+    return deny(
+      '门禁认不出发起这次派发的是谁：hook 输入里的 agent_type 在，却不是非空字符串，按安全边界拒绝。' +
+        '这不是改派发参数能解决的——停下来把这一条原样告诉用户（多半是 Claude Code 改了 hook 输入的形状，或者别的插件改写了它）。',
+    )
+  }
+
+  // M4i（docs/44，审查第 22 条）：项目经理只能是主会话。任何调用者派 at-pm 一律拒，花名册外的也拒——主会话被设置里别的 agent 盖住时，
+  // 它就是花名册外的调用者；子代理里的 at-pm 带着项目经理的写权限（契约、控制文件），却不是主会话。裸名也拒：门禁按剥前缀的名字认
+  // 项目经理，起出来的子代理同样会被当成它。别的插件的同名 agent（带别的前缀）不归本门禁管。
+  if (stripPluginPrefix(input?.tool_input?.subagent_type) === PM_ROLE) {
+    return deny(
+      `项目经理只能是主会话，${PM_ROLE} 不能被派成子代理：子代理里的项目经理带着写契约与控制文件的权限，却不是主会话。` +
+        `要跑这支团队，主会话本身得是 ${PLUGIN_PREFIX}${PM_ROLE}——插件的 settings.json 这样设，用户、项目或本地设置里写了别的 agent 会盖掉它` +
+        `（也可以用 claude --agent ${PLUGIN_PREFIX}${PM_ROLE} 起会话）。停下来把这一条告诉用户。`,
     )
   }
 
@@ -134,7 +158,28 @@ export function decideDelegation(input, roster) {
           `或者换成前台会话；不要自己去改设置。`,
       )
     }
+    // M4i（docs/44，审查第 42 条）：开了 agent teams 时，带 name 的 Agent 调用起的是 teammate，不是子代理——H5a 把它当旧版 CLI 那一格
+    // （派出去那一刻就报缺、不记派发记录），它停下时门禁也看不见。与 isolation 同形：排在白名单之后，花名册外的调用者不管。
+    const name = input?.tool_input?.name
+    if (name !== undefined && name !== null && name !== '') {
+      return deny(
+        `角色 ${caller} 派发 ${target} 时带了 name: ${inline(name)}。开了 agent teams 时，带 name 的派发起的是 teammate，不是子代理：` +
+          `门禁按子代理的返回与停下核它交没交、记派发记录，teammate 不走这一条，它停下时门禁看不见。去掉 name 参数重新派发。`,
+      )
+    }
     return allow()
+  }
+
+  // M4i（docs/44，审查第 35 条）：项目经理（与主线程）没有上级，「冒泡给上级」对它不成立——说这个角色由谁派（从花名册现算）。
+  if (caller === MAIN || caller === PM_ROLE) {
+    const by = Object.keys(roster).filter(
+      (k) => k !== MAIN && k !== caller && Array.isArray(roster[k]?.can_delegate_to) && roster[k].can_delegate_to.includes(target),
+    )
+    const how = !by.length
+      ? `花名册里没有哪个角色能派 ${inline(target)}，它不是这支团队里干活的人。`
+      : `${inline(target)} 由 ${by.join('、')} 派：要它干活，派${by.length > 1 ? '其中一个' : ` ${by[0]}`}，在派发提示里写明要 ${inline(target)} 做什么；` +
+        '不要绕过花名册。'
+    return deny(`角色 ${caller} 不得派发给 ${inline(target)}。它可以派发的角色是：${fmt(allowed)}。${how}`)
   }
 
   return deny(

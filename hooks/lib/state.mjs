@@ -20,6 +20,7 @@
 import { producedNames, expandProduces, stageRoles, stageRolesInRun, isPlainObject } from './stages.mjs'
 import { SHA_RE } from './contract-hash.mjs'
 import { quote } from './trusted.mjs'
+import { PLUGIN_PREFIX, stripPluginPrefix } from './decide.mjs'
 // M3z（docs/34）：上限的单一真源挪到 budget.mjs（limitOf 要它，留在这里就成了环）；这里原样再导出，既有的 import 不用改。
 import { REWORK_LIMIT, limitOf } from './budget.mjs'
 import { closedAt, lastStageId } from './closing.mjs'
@@ -224,6 +225,26 @@ export function validateState(state, { stages, grants } = {}) {
   }
   if (!isStringArray(state.roster)) p('roster 不是字符串数组')
   if (!isStringArray(state.never_invoked)) p('never_invoked 不是字符串数组')
+  // M4i（docs/44，审查第 36 条）：交集——同一个角色不能既算叫到了、又算没被叫过（/agent-team:at 第 6 节叫 PM 写完自查，此前门禁不核）。
+  if (isStringArray(state.roster) && isStringArray(state.never_invoked)) {
+    const both = [...new Set(state.never_invoked.filter((r) => state.roster.includes(r)))]
+    if (both.length) {
+      p(`roster 与 never_invoked 都有 ${both.map((r) => quote(r)).join('、')}：同一个角色不能既算叫到了、又算没被叫过——never_invoked 收口时才算（/agent-team:at 第 6 节）`)
+    }
+  }
+  // M4i（docs/44，审查第 36 条）：state.json 里的角色名写裸名。带插件前缀的（agent-team:at-backend）对不上 stages.json 的产者名——按段的
+  // 判据认不出它，没有派发记录时缺产物的推进会被放过、【阶段】哑掉。roster、stage_roles、trimmed 的键、never_invoked 都看，同一个名字只报一次。
+  {
+    const prefixed = new Set()
+    const scan = (list) => list.forEach((r) => typeof r === 'string' && r.startsWith(PLUGIN_PREFIX) && prefixed.add(r))
+    if (isStringArray(state.roster)) scan(state.roster)
+    if (isStringArray(state.never_invoked)) scan(state.never_invoked)
+    if (isPlainObject(state.stage_roles)) Object.values(state.stage_roles).forEach((roles) => isStringArray(roles) && scan(roles))
+    if (isPlainObject(state.trimmed)) scan(Object.keys(state.trimmed))
+    for (const r of prefixed) {
+      p(`${quote(r)} 带着插件前缀：state.json 里的角色名（roster、stage_roles、trimmed、never_invoked）写裸名 ${quote(stripPluginPrefix(r))}——带前缀的对不上 stages.json 里的产者名，按段的判据认不出它`)
+    }
+  }
 
   // ——— trimmed（M3a 新加的字段，与 roster 是一对）———
   //
@@ -269,7 +290,8 @@ export function validateState(state, { stages, grants } = {}) {
         } else if (isPlainObject(stages) && !Object.hasOwn(stages, stage)) {
           p(`trimmed[${quote(role)}] 是 ${quote(stage)}，但 stages.json 里没有这个阶段`)
         }
-        if (trimmable && !trimmable.has(role)) {
+        // 带插件前缀、裸名是产者的，上面「带着插件前缀」那一条已经说清（M4i），这里不再说它不是产者。
+        if (trimmable && !trimmable.has(role) && !trimmable.has(stripPluginPrefix(role))) {
           p(`trimmed 里有 ${quote(role)}，但它不是任何阶段的产者——裁掉一个本来就什么都不产出的角色不构成交代`)
         }
       }

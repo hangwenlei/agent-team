@@ -161,6 +161,9 @@ flowchart TB
 > [!WARNING]
 > **主会话会被接管成 `at-pm`。** 它的工具面是 `Agent(...)`（受派发白名单约束）、`AskUserQuestion`、`Bash`、`Read`、`Glob`、`Grep`、`Write`、`Edit`——能改动的范围与普通会话相当，把它限制在目标项目里的是角色说明，不是工具权限。它拿不到你在普通会话里能用的 MCP 工具与网页搜索、抓取（WebSearch、WebFetch），团队里其余角色也拿不到——每个角色只拿自己清单里的工具。按上面的方式安装，影响范围只在安装它的那个项目目录；也不要用 `--agent`、或在你自己的设置里设 `agent` 键，把主会话换成别的角色，门禁按主会话的身份判定。
 
+> [!NOTE]
+> **设置里的 `agent` 会盖掉项目经理。** 用户、项目或本地设置里写了别的 `agent`，主会话就不是 `agent-team:at-pm`，团队跑不起来（门禁自检会说出来）：去掉那一项设置，或者起会话时加 `--agent agent-team:at-pm`。
+
 > [!IMPORTANT]
 > **续会话要带上 `--plugin-dir`。** `claude --resume` 不会继承这个参数；忘了带，CLI 会打印 `Continuing with the default tools and system prompt — the agent's tool restrictions no longer apply.`，插件命令与全部角色限制随即失效。按 local 作用域安装时同理：只在安装它的项目目录里续会话。
 
@@ -169,6 +172,9 @@ flowchart TB
 
 > [!NOTE]
 > **在 git 仓库里用后台会话**（`claude --bg`、agent view）跑团队，先在项目的 `.claude/settings.local.json` 里设 `"worktree": {"bgIsolation": "none"}`（只对你自己生效；写进 `.claude/settings.json` 会改到所有协作者）。不设的话，平台会拦下后台会话对项目目录的写入，项目经理第一步自检就停下来告诉你。前台会话与桌面端不受影响；团队不进 worktree。
+
+> [!NOTE]
+> **不支持 agent teams 的 teammate。** 开了 agent teams（实验功能）时，团队角色仍要作为子代理派出去：带 `name` 的派发会起成 teammate，门禁看不见它停下，派发白名单会拒掉这类派发。
 
 > [!NOTE]
 > 在用着这支团队的项目里，门禁会拒绝它认不出指向哪个文件的写法：网络路径（项目不在同一个共享上时）、带流后缀或以点、空格结尾的 Windows 路径、不带盘符的设备路径；项目放在网络共享上时，写本地盘路径同样被拒。需要写这些位置时由你自己来写。
@@ -361,6 +367,9 @@ You can watch a role but not talk to it: roles report their questions to the pro
 > [!WARNING]
 > **The main session is taken over as `at-pm`.** Its tool surface is `Agent(...)` (bound by the dispatch whitelist), `AskUserQuestion`, `Bash`, `Read`, `Glob`, `Grep`, `Write` and `Edit` — it can change anything an ordinary session can, and what keeps it inside the target project is its role definition, not its permissions. It does not get the MCP tools or the web search and fetch tools (WebSearch, WebFetch) that an ordinary session has, and no other role on the team gets them either: each role gets only the tools on its own list. Installed as above, its reach is limited to the one project directory that declares it. Don't swap the main session for another role with `--agent` or an `agent` key in your own settings either: the gates judge by the main session's identity.
 
+> [!NOTE]
+> **An `agent` in your settings overrides the project manager.** If user, project or local settings name another `agent`, the main session is not `agent-team:at-pm` and the team cannot run (the gate self-check says so): remove that setting, or start the session with `--agent agent-team:at-pm`.
+
 > [!IMPORTANT]
 > **Pass `--plugin-dir` every time you resume.** `claude --resume` does not inherit it; forget it and the CLI prints `Continuing with the default tools and system prompt — the agent's tool restrictions no longer apply.`, after which the plugin's commands and every role restriction are gone. With a local-scope install the same holds for directories: resume only in the project directory that holds the install.
 
@@ -369,6 +378,9 @@ You can watch a role but not talk to it: roles report their questions to the pro
 
 > [!NOTE]
 > **Background sessions in a git repository** (`claude --bg`, agent view): set `"worktree": {"bgIsolation": "none"}` in the project's `.claude/settings.local.json` first (it applies to you only; putting it in `.claude/settings.json` changes it for every collaborator). Otherwise the platform blocks the background session's writes to the project directory, and the project manager stops at its first self-check and tells you. Foreground sessions and the desktop app are unaffected; the team does not work in worktrees.
+
+> [!NOTE]
+> **Agent teams teammates are not supported.** With agent teams (experimental) on, team roles must still be dispatched as subagents: a dispatch with a `name` starts a teammate, whose stop the gates cannot see, so the dispatch whitelist refuses it.
 
 > [!NOTE]
 > In a project that uses the team, the gates refuse writes whose target they cannot pin down: network paths (unless the project sits on that same share), Windows paths with a stream suffix or a segment ending in a dot or space, and device paths without a drive letter; with the project on a network share, local-drive paths are refused too. Write to such locations yourself.

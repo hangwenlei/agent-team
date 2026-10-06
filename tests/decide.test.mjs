@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { callerOf, decideDelegation } from '../hooks/lib/decide.mjs'
 
 const ROSTER = {
@@ -257,4 +258,68 @@ test('目标不在白名单时仍然报白名单那条理由——isolation 不�
     ROSTER,
   )
   assert.match(r.reason, /不得派发给 at-outsider/)
+})
+
+// ---- M4i（docs/44，审查第 35、42、22 条）----
+
+const REAL = JSON.parse(readFileSync(new URL('../roster.json', import.meta.url), 'utf8'))
+
+// 第 35 条：agent_type 在、却不是非空字符串（空串、数字、对象……）——callerOf 把它原样当名字，花名册里查不到，走「未登记的调用者放行」，
+// 一个畸形字段就绕过了整个 H1。认不出调用者就按安全边界拒。缺失与 null 照旧是主线程。
+test('M4i 第 35 条：agent_type 在却不是非空字符串时拒——认不出是谁在派', () => {
+  for (const bad of ['', 0, 1, {}, [], true]) {
+    const r = decideDelegation({ agent_type: bad, tool_input: { subagent_type: 'agent-team:at-backend' } }, REAL)
+    assert.equal(r.decision, 'deny', JSON.stringify(bad))
+    assert.ok(r.reason.includes('门禁认不出发起这次派发的是谁'), r.reason)
+  }
+  assert.equal(decideDelegation({ tool_input: { subagent_type: 'agent-team:at-product' } }, REAL).decision, 'allow')
+  assert.equal(decideDelegation({ agent_type: null, tool_input: { subagent_type: 'agent-team:at-product' } }, REAL).decision, 'allow')
+})
+
+// 第 35 条：项目经理（与主线程）被拒时，原来叫它「冒泡给上级」——它没有上级。改成说那个角色由谁派（从花名册现算）。不是项目经理的照旧冒泡。
+test('M4i 第 35 条：项目经理派花名册外的角色被拒——说它由谁派，不说冒泡给上级', () => {
+  const pm = decideDelegation({ agent_type: 'agent-team:at-pm', tool_input: { subagent_type: 'agent-team:at-backend' } }, REAL)
+  assert.equal(pm.decision, 'deny')
+  assert.ok(pm.reason.includes('at-backend 由 at-architect 派：要它干活，派 at-architect，在派发提示里写明要 at-backend 做什么；不要绕过花名册。'), pm.reason)
+  assert.ok(!pm.reason.includes('冒泡给上级'), pm.reason)
+  const ui = decideDelegation({ tool_input: { subagent_type: 'agent-team:at-ui' } }, REAL)
+  assert.ok(ui.reason.includes('at-ui 由 at-product、at-architect 派：要它干活，派其中一个，在派发提示里写明要 at-ui 做什么；不要绕过花名册。'), ui.reason)
+  const out = decideDelegation({ agent_type: 'agent-team:at-pm', tool_input: { subagent_type: 'agent-team:at-outsider' } }, REAL)
+  assert.ok(out.reason.includes('花名册里没有哪个角色能派 at-outsider，它不是这支团队里干活的人。'), out.reason)
+  const product = decideDelegation({ agent_type: 'agent-team:at-product', tool_input: { subagent_type: 'agent-team:at-backend' } }, REAL)
+  assert.ok(product.reason.includes('冒泡给上级') && !product.reason.includes('由 at-architect 派'), product.reason)
+})
+
+// 第 42 条：开了 agent teams 时，带 name 的 Agent 调用起的是 teammate，不是子代理——H5a 把它当旧版 CLI 那一格（派出去那一刻就报缺、不记
+// 派发记录），它停下时门禁也看不见。受管辖的派发带非空 name 一律拒，与 isolation 同形：排在白名单之后，花名册外的调用者不管。
+test('M4i 第 42 条：受管辖的派发带非空 name 拒——起的是 teammate、不是子代理，去掉 name 重派', () => {
+  const r = decideDelegation({ agent_type: 'agent-team:at-pm', tool_input: { subagent_type: 'agent-team:at-product', name: 'prd' } }, REAL)
+  assert.equal(r.decision, 'deny')
+  assert.ok(r.reason.includes('teammate') && r.reason.includes('去掉 name 参数重新派发'), r.reason)
+  assert.equal(decideDelegation({ agent_type: 'agent-team:at-pm', tool_input: { subagent_type: 'agent-team:at-product', name: '' } }, REAL).decision, 'allow')
+  assert.equal(decideDelegation({ agent_type: 'someone-else', tool_input: { subagent_type: 'Explore', name: 'x' } }, REAL).decision, 'allow')
+  assert.ok(decideDelegation({ agent_type: 'agent-team:at-pm', tool_input: { subagent_type: 'agent-team:at-backend', name: 'x' } }, REAL).reason.includes('不得派发给'))
+})
+
+// 第 22 条：项目经理只能是主会话。任何调用者派 at-pm 一律拒，花名册外的也拒（主会话被设置里别的 agent 盖住时，它就是花名册外的调用者）：
+// 子代理里的 at-pm 带着项目经理的写权限（契约、控制文件），却不是主会话。裸名 at-pm 也拒——门禁按剥前缀的名字认项目经理，起出来的
+// 子代理同样会被当成它。别的插件的同名 agent 不归本门禁管。
+test('M4i 第 22 条：任何调用者派 at-pm 一律拒，花名册外的也拒', () => {
+  for (const caller of [undefined, 'agent-team:at-pm', 'agent-team:at-architect', 'my-main', 'general-purpose']) {
+    for (const target of ['agent-team:at-pm', 'at-pm']) {
+      const r = decideDelegation({ ...(caller === undefined ? {} : { agent_type: caller }), tool_input: { subagent_type: target } }, REAL)
+      assert.equal(r.decision, 'deny', `${caller} → ${target}`)
+      assert.ok(r.reason.includes('项目经理只能是主会话'), r.reason)
+    }
+  }
+  assert.equal(decideDelegation({ agent_type: 'my-main', tool_input: { subagent_type: 'other-plugin:at-pm' } }, REAL).decision, 'allow')
+})
+
+// M4i 复核变异：「由谁派」从花名册现算，不点名门禁内部的哨兵 __main__，也不点名调用者自己——今天的花名册上这两种不会撞上（主线程与
+// 项目经理派得动的一样），换一份主线程多派一个角色的花名册就撞上。
+test('M4i 第 35 条：由谁派不点名 __main__ 与调用者自己', () => {
+  const roster = { __main__: { can_delegate_to: ['x-role'] }, 'at-pm': { can_delegate_to: ['at-product'] }, 'at-product': { can_delegate_to: [] } }
+  const r = decideDelegation({ agent_type: 'agent-team:at-pm', tool_input: { subagent_type: 'x-role' } }, roster)
+  assert.equal(r.decision, 'deny')
+  assert.ok(r.reason.includes('花名册里没有哪个角色能派 x-role') && !r.reason.includes('__main__'), r.reason)
 })

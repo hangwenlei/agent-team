@@ -613,3 +613,44 @@ test('M4a 复核二 closed_at：形状不对时引出原值', () => {
   const r = validateState(good({ closed_at: '2026-10-01 15:00:00' }), { stages: STAGES })
   assert.ok(r.problems.some((m) => m.includes('"2026-10-01 15:00:00"')), r.problems.join('\n'))
 })
+
+// M4i（docs/44，审查第 36 条）：state.json 里的角色名写裸名。带插件前缀的（agent-team:at-backend）对不上 stages.json 的产者名——按段的判据
+// 认不出它，没有派发记录时缺产物的推进会被放过、【阶段】哑掉。roster、stage_roles、trimmed 的键、never_invoked 里的都报，同一个名字只报一次。
+test('M4i 第 36 条：state.json 里带插件前缀的角色名——四处都报、同一个名字只报一次，说写裸名', () => {
+  const r = validateState(
+    good({ roster: ['agent-team:at-product'], stage_roles: { S2: ['agent-team:at-product'] }, trimmed: { 'agent-team:at-architect': 'S3' }, never_invoked: ['agent-team:at-qa'] }),
+    { stages: STAGES },
+  )
+  const pre = (n) => r.problems.filter((x) => x.startsWith(`"${n}" 带着插件前缀`))
+  for (const n of ['agent-team:at-product', 'agent-team:at-architect', 'agent-team:at-qa']) assert.equal(pre(n).length, 1, r.problems.join(' / '))
+  assert.ok(pre('agent-team:at-product')[0].includes('写裸名 "at-product"'), pre('agent-team:at-product')[0])
+  assert.ok(!r.problems.some((x) => x.includes('trimmed 里有 "agent-team:at-architect"')), '前缀那一条说清了，不再说它不是任何阶段的产者')
+  assert.ok(!validateState(good(), { stages: STAGES }).problems.some((x) => x.includes('插件前缀')))
+})
+
+// M4i（docs/44，审查第 36 条）：roster 与 never_invoked 的交集——同一个角色不能既算叫到了、又算没被叫过；/agent-team:at 第 6 节叫 PM 写完自查，
+// 门禁此前不核。
+test('M4i 第 36 条：roster 与 never_invoked 有交集——报出来，说 never_invoked 收口时才算', () => {
+  const r = validateState(good({ roster: ['at-product'], never_invoked: ['at-product', 'at-frontend'] }), { stages: STAGES })
+  assert.ok(
+    r.problems.includes('roster 与 never_invoked 都有 "at-product"：同一个角色不能既算叫到了、又算没被叫过——never_invoked 收口时才算（/agent-team:at 第 6 节）'),
+    r.problems.join(' / '),
+  )
+  assert.ok(!validateState(good(), { stages: STAGES }).problems.some((x) => x.includes('never_invoked 都有')))
+})
+
+// M4i 复核变异：四处各用不同的名字——同一个名字只报一次，四处共用一个名字时，少看哪一处都测不出来。
+test('M4i 第 36 条：带前缀的名字只出现在某一处也报（roster、stage_roles、trimmed、never_invoked 各自一个）', () => {
+  const r = validateState(
+    good({
+      roster: ['agent-team:at-product', 'at-architect'],
+      stage_roles: { S2: ['agent-team:at-product'], S3: ['at-architect', 'agent-team:at-frontend'] },
+      trimmed: { 'agent-team:at-ui': 'S2' },
+      never_invoked: ['agent-team:at-ios'],
+    }),
+    { stages: STAGES },
+  )
+  for (const n of ['agent-team:at-product', 'agent-team:at-frontend', 'agent-team:at-ui', 'agent-team:at-ios']) {
+    assert.ok(r.problems.some((x) => x.startsWith(`"${n}" 带着插件前缀`)), `${n}：${r.problems.join(' / ')}`)
+  }
+})

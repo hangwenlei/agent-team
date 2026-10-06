@@ -12,7 +12,8 @@
 // ⚠️ 它不是控制文件。CONTROL_FILES 的语义是「只有 PM 能写」，这里是「谁都不许写」。
 import { resolve, sep } from 'node:path'
 import { norm } from './path-norm.mjs'
-import { inline } from './trusted.mjs'
+import { inline, quote } from './trusted.mjs'
+import { PLUGIN_PREFIX, exemptFromPaths } from './decide.mjs'
 
 export const GATE_CHECK_PATH = '.agent-team/gate-check'
 export const GATE_CHECK_ONLINE = 'agent-team 门禁自检：在线'
@@ -49,6 +50,22 @@ export function gateCheckReason({ version = process.version, execPath = process.
     `门禁用的 node 是 ${inline(version)}（${inline(execPath)}）。` +
     '这个结果只管到这一轮用户消息结束：之后的每一轮——包括用户说「继续」、续会话之后——在第一次派发或写 ' +
     '.agent-team 之前都要重新自检，不能引用这一条。接着往下做。'
+  )
+}
+
+/**
+ * M4i（docs/44，审查第 22 条）：主会话被设置里别的 agent 盖住时——hook 输入带 agent_type、不是项目经理、没有 agent_id（子代理才带
+ * agent_id）——自检照样回「在线」，可这样跑不了团队：H1 不管它的派发（花名册外的调用者），第一次写 state.json 就被拒。接在自检的
+ * 拒绝理由后面，说清身份与出路；别的调用者返回空串。agent_type 来自设置里的名字，磁盘上谁都写得进，过 quote（docs/27 §2.1）。
+ */
+export function selfCheckIdentity(input) {
+  const raw = input?.agent_type
+  if (typeof raw !== 'string' || raw === '' || exemptFromPaths(raw)) return ''
+  if (typeof input?.agent_id === 'string' && input.agent_id !== '') return ''
+  return (
+    `另外：发起这次自检的是 ${quote(raw)}，不是 agent-team 的项目经理（${PLUGIN_PREFIX}at-pm）——主会话被设置里别的 agent 盖住了` +
+    '（用户、项目或本地设置里写的 agent 会盖掉插件设的那一个）。这样跑不了这支团队：你的派发不归花名册管，第一次写 state.json 就会被拒。' +
+    `停下来告诉用户：去掉设置里的 agent，或者用 claude --agent ${PLUGIN_PREFIX}at-pm 起会话。`
   )
 }
 

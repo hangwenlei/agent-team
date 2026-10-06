@@ -30,7 +30,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/43` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/44` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，下一轮从 `docs/39` §5 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -134,6 +134,10 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   补交，H5a 会说这次派发不该发生），或者把要它当前置的段也整段裁掉。「整段裁掉」在 H2、推进、收口三处同一个口径（`advance.mjs` 的
   `wholeStageTrimmed`），所以不在 `available_roles` 里的产者也要写进 `trimmed`。PM 写 `current-run` 时门禁列出别的、没收口的 run 里没停下的派发
   （【派发】，停下行按 `agent_id` 在所有 run 里认）；按 `agent_id` 把停下认回派它的那一趟照旧没做。理由在 `docs/43`。
+- **项目经理只能是主会话、调用者认不出就拒**：H1 对 `agent_type` 在却不是非空字符串的拒；任何调用者派 `at-pm` 一律拒（花名册外的、裸名也拒）；
+  受管辖的派发带非空 `name`（agent teams 的 teammate）拒，与 `isolation` 同形；项目经理被拒时说那个角色由谁派（从花名册现算）。主会话被设置里
+  别的 agent 盖住时（实测：`agent_type` 是那个名字、没有 `agent_id`），自检的「在线」后面说清身份与出路。`state.json` 里的角色名写裸名，
+  `validateState` 报带前缀的与 `roster` ∩ `never_invoked`（只报、不拦）。理由在 `docs/44`。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。
