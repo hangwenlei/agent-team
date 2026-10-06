@@ -120,7 +120,9 @@ export function dispatchNoRunNotice() {
     '【门禁】这次派发没有做前置就绪校验，交付物核验也不会做——当前没有进行中的 run（找不到 .agent-team/current-run，' +
     'runs/ 下也没有 run）。这是有意的放行：没有 run 时，团队角色写文件不受写路径隔离、契约保护与交付物核验约束。' +
     '用户只是要一次临时派发的话照常做完，并把这一点告诉用户；要按团队流程走，告诉用户可以用 /agent-team:at 起一趟 run。' +
-    '你以为这里有进行中的 run 的话：门禁从会话当前目录往上找 .agent-team，核对当前目录在不在那个项目里。'
+    '你以为这里有进行中的 run 的话：门禁从会话当前目录往上找 .agent-team，核对当前目录在不在那个项目里；在的话，看 .agent-team/current-run ' +
+    '与 .agent-team/runs/ 还在不在——没进版本库的这几份会被 git clean、git stash -u 这类命令一起清掉或藏起：告诉用户（藏起的他能用 ' +
+    'git stash pop 找回，清掉的找不回），这些 git 命令你不要自己跑。'
   )
 }
 

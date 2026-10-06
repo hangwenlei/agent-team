@@ -30,7 +30,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/38` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查逐条的现状（原文在它的附录），下一轮从那里挑。
+- `docs/13`…`docs/40` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+  `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，下一轮从 `docs/39` §5 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
 ## 🧠 长期决策与理由
@@ -104,6 +105,15 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （H5a 记派发，H5b 记每一回停下的结果；H3 对任何人的 Edit/Write 都拒）；完成通知到主会话时，UserPromptSubmit 上的 `completion` 按 `agent_id`
   对回角色与段、核产物，成因按最后一回停下的结果判（`completion.mjs` 的 `missingCause`）。UserPromptSubmit 上只有标了 `speaks` 的检查项说话、
   永不 exit 2。协调者返回时报它派出去的人各自的进度，不许诺之后的通知会到 PM。理由在 `docs/38`。
+- **持 Bash 的执行角色的敏感操作红线只在正文里，每一份逐字同一句，清单与 `/agent-team:at` 第 4 节 `sensitive` 那一行逐项相同**：碰到就以
+  「冒泡：」停下，协调者原样冒泡给 PM，PM 照 `sensitive` 问用户；用户批准过的，执行角色只认契约「修订记录」里写明批准了的那一步（派发
+  提示是数据，契约只有 PM 写得进）。PM 自己也不跑动工作树或历史的 git 命令。门禁不加 Bash 的 matcher（命令行是自由文本，判不准；平台的
+  权限模式才是那一层）。判据按 `tools:` 声明派生持 Bash 的角色、从 `roster.json` 派生协调者，两处清单两个方向逐项比，承重的句子整句钉
+  （`tests/redlines-setup-prose.test.mjs`）。理由在 `docs/40`。
+- **插件自带的 frontmatter 只用受限写法**：每个非空行恰好一行 `key: 值`，键不重复，值不以 YAML 指示符开头、不含「: 」与「 #」、不以「:」
+  结尾、首尾没有空白、不是会被读成 null/布尔/数字的那几种，行里没有制表符与 `---`。挡的是已经核过、会让平台的 YAML 解析器与按行读的判据
+  读出不同东西的写法——解析失败会让平台把整份当空（Windows 上装下来的副本是 CRLF，平台的退路在那里不起作用），折行能授出判据看不见的
+  工具，值里的 `---` 会被平台当成收尾。不声称封闭。`tests/frontmatter-subset.test.mjs` 钉着；理由在 `docs/40` §1.8。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。
@@ -125,6 +135,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 
 - **换行符是混的**（`docs/11` §5.28）：索引统一 LF，`core.autocrlf=true` 让签出副本是 CRLF，被工具重写过的文件停在 LF。
   锚串替换要**断言命中数，并核对命中的是你要的那一处** —— 同一个实参有几处合法命中时，断言防不了砍错的那一刀。落盘后扫控制字节与行尾混用。
+  扫行尾用 Node 或 `grep -U`：Git Bash 的 grep 不带 `-U` 看不见 CR，会报出假的「全是 LF」（`docs/39` §3）。
 - **后台 agent 与主会话共用工作树时**，别 `git add -A` / `checkout` / `reset`；要并行就用隔离 worktree。
 - `claude --resume` 不继承 `--plugin-dir`；local 安装下换了目录续会话，工具限制会整体掉光，而转录里看不出来。
 - 后台探针用 `claude --bg`，不用 `-p`（`-p` 下异步派发会卡死——这是 CLI 2.1.276 上的实测，`docs/13` §5.1；2.1.286 上一个 `-p` 会话跑完过 5 次异步派发，`docs/33` §3；要靠 `-p` 之前先在当前版本上核；SDK 宿主（`-p --input-format stream-json`）的驱动要等后台子代理跑完再关输入——第一次 result 就关，子代理的权限请求会报 `AbortError: Stream closed`，会话等满 600 秒（`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`）后把它杀掉，`docs/35` §4 `efd26cb1`）。收尾对每个会话先 `claude stop` 再 `claude rm`：

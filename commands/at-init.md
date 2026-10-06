@@ -120,4 +120,14 @@ description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json
 - 放 run 的 `runs` 目录读不出来：告诉用户去看一眼，由用户处理；
 - `project.json` 读不出来：例外——这条命令本来就会重写它。
 
+项目在 git 仓库里的话（`git rev-parse --show-toplevel` 成功），收尾再提两件事：
+- `.agent-team/` 的去处。`git check-ignore -q .agent-team` 成功（已经忽略了）的，不提；`git ls-files .agent-team` 有输出（已经入了库）的，
+  照实告诉用户：要忽略它得先 `git rm -r --cached .agent-team` 再加进 `.gitignore`，由用户自己做；其余的建议把 `.agent-team/` 加进
+  `.gitignore`——改 `.gitignore` 是动用户的文件，先问，用户点头再加。理由照实说：既不进版本库也不忽略，`git clean -fd`、`git stash -u`
+  会把进行中的 run 一起清掉或藏起，门禁随之失效；提交进了版本库，`git stash`、`git checkout -- .` 会把 `state.json` 倒回提交时那一版，
+  返工计数一起清零。
+- 要在这个仓库里用后台会话（`claude --bg`、agent view）跑团队，得先在项目的 `.claude/settings.local.json` 里设
+  `"worktree": {"bgIsolation": "none"}`（只对用户自己生效）：不设的话平台会拦下后台会话对项目目录的写入，开头的自检就停。前台会话、
+  桌面端不受影响。这一条只告诉用户，不替用户改设置。
+
 **不要**在这条命令里建 run、写 `state.json` 或 `current-run`——那是 `/agent-team:at` 的事。
