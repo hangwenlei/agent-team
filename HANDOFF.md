@@ -146,6 +146,11 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   列它（`hooks/lib/contract-base.mjs` 的 `decideContractBase`，排在 H6 别的判据之后）。出路看当前段（`outdatedFix`：早于当前段的回退、当前段的同段
   重派、后面的段走到时照常重出）。改第 1 节不算修订；回退之后 `rework_base` 接手，不另起一套新鲜度口径。推进出第一段之前不核（S1 里转写错了
   可以改）。理由在 `docs/45`。
+- **收口读验收结论，照现状交付由门禁记**：`07-acceptance.md` 的第一个非空行固定写「结论：通过」「结论：不通过」「结论：判不了」之一（`hooks/lib/verdict.mjs`
+  的 `acceptanceVerdict`：不通过、判不了按前缀认，通过严格）；推进出验收那一段与收口时 H6 读它（`decideAcceptance`，排在 H6 最后），【阶段】在 S7 齐了时与
+  S8 的收口阻碍里用同一份 `acceptanceBlock`。没过的只有用户经规范标签「照现状交付」批准过才放行：两个记录器也认它（标签与返工批准的同在 `budget.mjs`），
+  记进 `approvals.jsonl`（`kind: deliver-as-is`），按 sha 绑在那一刻的验收结论上；它之后的第一次改契约不算改需求（契约基线的 `deliver_used`，一条批准只盖
+  一次修订）——不靠修订块标题里的标记（漏写会绕圈、冒充只要一行字）。理由在 `docs/46`。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。

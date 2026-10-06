@@ -60,7 +60,8 @@ import {
   verifyShasOf,
 } from './lib/contract-base.mjs'
 import { readGrants } from './lib/budget.mjs'
-import { askAnswers, promptAnswer, planApprovals, approvalLine, approvalNotices } from './lib/approvals.mjs'
+import { askAnswers, promptAnswer, promptDeliver, planApprovals, approvalLine, approvalNotices } from './lib/approvals.mjs'
+import { acceptanceBlock, acceptanceOf, acceptanceVerdict, decideAcceptance, deliverLine, readDeliverApprovalEntries, readDeliverApprovals, verdictBlockerText, verdictStageNote } from './lib/verdict.mjs'
 import { deliveredSnapshot, readSnapshot, makeDelivered, decideRedispatch, decideRedoWrite } from './lib/redo.mjs'
 import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispatch } from './lib/closing.mjs'
 import { computeReach } from './lib/reach.mjs'
@@ -933,6 +934,19 @@ function ensureContractBase(ctx) {
   }
 }
 
+// M4k（docs/46，评审 F1、F2）：approvals.jsonl 里绑着验收结论现在这份、契约基线还没记成用过的照现状交付批准（第一条的 at）；没有给 null。
+function unusedDeliverApproval(ctx, base) {
+  const acc = acceptanceOf(ctx.stages)
+  if (!acc) return null
+  const accBytes = ctx.artifactExists(acc.name) ? ctx.artifactBytes(acc.name) : null
+  const ab = ctx.artifactBytes(APPROVALS_FILE)
+  if (!accBytes || !ab) return null
+  const now = sha256OfContract(accBytes)
+  const used = new Set(Array.isArray(base.deliver_used) ? base.deliver_used : [])
+  const hit = readDeliverApprovalEntries(ab.toString('utf8'), acc.name).find((e) => e.sha === now && e.at !== null && !used.has(e.at))
+  return hit ? hit.at : null
+}
+
 // 修订那一刻还在跑的验证段角色（复核 F4）：这一趟派发记录里，验证段的派发、门禁没见它停下（最后一回是「拦」也算没停）的。角色与段只认
 // 花名册与阶段链认得的（派发记录 Bash 写得进），说出来的都是插件自己的名字。
 function runningVerifiers(ctx) {
@@ -973,8 +987,15 @@ function contractBaseNotices(ctx) {
       return out
     }
     const shas = verifyShasOf({ stages: ctx.stages, artifactExists: ctx.artifactExists, artifactBytes: ctx.artifactBytes })
-    const rev = revisedBase(base, bytes, shas, new Date().toISOString())
+    // M4k（docs/46，评审 F1、F2）：门禁记下的、绑着验收结论现在这份、还没用过的照现状交付批准——有它，这次修订就是记那条答复的那一次，不算改需求。
+    const rev = revisedBase(base, bytes, shas, new Date().toISOString(), unusedDeliverApproval(ctx, base))
     if (rev) writeFileSync(join(ctx.runDir, CONTRACT_BASE_FILE), `${JSON.stringify(rev.base, null, 2)}\n`)
+    if (rev && rev.deliver) {
+      out.push(
+        '【契约】这次修订记的是用户照现状交付的答复：门禁用掉了那条批准（一条批准只盖一次修订），这次不算改需求，验证段的结论不用重出。' +
+          '之后再改需求，照常重拍。',
+      )
+    }
     if (section1Drift(base, bytes)) {
       out.push(`【契约】${driftHead(ctx.stages)}；这次写入之后磁盘上的第 1 节跟它不一样。${DRIFT_FIX}。改回去之前，推进与收口都会被拒。`)
     }
@@ -997,16 +1018,40 @@ function contractBaseNotices(ctx) {
   return out
 }
 
+// M4k（docs/46）：记录器判「照现状交付要不要记」时读的验收结论——在不在、空不空、sha、首行（approvals.mjs 的 planApprovals 那一支）；评审 F3：
+// 对不对着上一版契约（与 H6 的契约判据同一份 outdatedProducts）。契约基线读不出来就当不对着（少拦）。
+function acceptanceOnDisk(ctx, name) {
+  const bytes = ctx.artifactExists(name) ? ctx.artifactBytes(name) : null
+  let outdated = false
+  try {
+    const base = readContractBase(ctx.artifactBytes(CONTRACT_BASE_FILE))
+    if (base && bytes) {
+      const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
+      const log = logBytes ? readDispatchLog(logBytes.toString('utf8')) : null
+      const diskSha = (n) => (n === name ? { exists: true, sha: sha256OfContract(bytes) } : { exists: false, sha: null })
+      outdated = outdatedProducts({ stages: ctx.stages, base, diskSha, lastDispatchAt: lastDispatchAtOf(ctx.stages, log) }).includes(name)
+    }
+  } catch {}
+  return {
+    name,
+    exists: Boolean(bytes),
+    blank: bytes ? isBlankText(bytes) : false,
+    sha: bytes ? sha256OfContract(bytes) : null,
+    verdict: bytes ? acceptanceVerdict(bytes) : null,
+    outdated,
+  }
+}
+
 function gateFileReason(checked, exotic) {
   const leafIs = (name) => leafName(checked) === name || (typeof checked === 'string' && leafName(norm(checked)) === name)
   const approvals = leafIs(APPROVALS_FILE)
   const what = approvals
-    ? '这是门禁自己记的返工批准。用户在 AskUserQuestion 里选了「再返工一轮：回到 <段>」、或者在对话里单独发了这一条，而这一轮真的' +
-      '需要批准时，门禁自己记下它；照返工预算门禁拒绝理由里的问法去问用户。'
+    ? '这是门禁自己记的用户批准：返工批准（用户在 AskUserQuestion 里选了「再返工一轮：回到 <段>」、或者在对话里单独发了这一条，而这一轮真的' +
+      '需要批准时）与照现状交付的批准（用户选了「照现状交付」、或者单独发了这一条，而验收结论没过时），门禁自己记下它；照门禁拒绝理由里的问法去问用户。'
     : leafIs(DISPATCHES_FILE)
       ? '这是门禁自己记的派发记录（谁在哪一段被派出去、谁派的、交付物核验拦过它几回），子代理完成时门禁靠它核产物，不用、也不许改。'
       : leafIs(CONTRACT_BASE_FILE)
-        ? '这是门禁记下的契约基线（推进出第一段时契约第 1 节的原文，契约每修订一次那一刻验证段各份结论的样子），门禁自己维护，不用、也不许改。'
+        ? '这是门禁记下的契约基线（推进出第一段时契约第 1 节的原文，每一次改需求的修订那一刻验证段各份结论的样子），门禁自己维护，不用、也不许改。'
         : '这是门禁自己拍的交付快照，PM 推进或回退之后由门禁照磁盘重拍，不用、也不许改。'
   return (
     `agent-team 门禁：不得写 ${inline(checked)}——${exotic ? `${exotic}；它可能就是门禁专属文件。` : ''}${what}` +
@@ -1692,6 +1737,29 @@ function main() {
         lastDispatchAt: lastDispatchAtOf(stagesForRework, dispatchLog),
       })
       if (!cb.ok) denyAndExit(cb.reason, spec.event)
+
+      // M4k（docs/46，docs/35 §5「收口不读验收结论」）：验收结论首行——推进出验收那一段与收口时，不是「结论：通过」、又没有门禁记下的
+      // 照现状交付批准（approvals.jsonl 里 sha 等于它现在的 sha），拒（hooks/lib/verdict.mjs）。排在最后：对着上一版契约的结论先重出，
+      // 读它的首行才有意义。批准读同一个目录下的 approvals.jsonl（上面读过；读不出来当一条都没有——更严的一侧）。
+      const acceptanceDef = acceptanceOf(stagesForRework)
+      // 评审 F11：阶段链读得出、却认不出验收那一段（插件的 stages.json 改坏了）：这一次不读验收结论，留一行痕。
+      if (isStageChain(stagesForRework) && !acceptanceDef) process.stderr.write('agent-team H6 验收结论：阶段链上认不出验收那一段，这一次不读验收结论。\n')
+      const ac = decideAcceptance({
+        before,
+        after,
+        stages: stagesForRework,
+        bytesOf: (name) => {
+          try {
+            return readFileSync(join(runDir, name))
+          } catch {
+            return null
+          }
+        },
+        approvedShas: acceptanceDef ? readDeliverApprovals(approvalsText, acceptanceDef.name) : [],
+        dispatched,
+      })
+      // 评审 F10：照理由问用户之前，补一句批准会不会记不下（与返工预算那一支同一份诊断）。
+      if (!ac.ok) denyAndExit(ac.reason + approvalDiagnostic(filePath), spec.event)
     }
   }
 
@@ -2013,11 +2081,53 @@ function main() {
             },
           })
         : null
+    // M4k（docs/46）：验收结论首行没过、又没有门禁记下的照现状交付批准，也是收口阻碍——与 H6 的 decideAcceptance 同一份 acceptanceBlock，
+    // 出路同一份（verdictBlockerText）。验收结论已经因为缺、空、上一轮的、对着上一版契约列在阻碍里的，不重复列。
+    const verdictNow = (() => {
+      try {
+        const acc = acceptanceOf(ctx.stages)
+        if (!acc) return null
+        const ab = ctx.artifactBytes(APPROVALS_FILE)
+        return acceptanceBlock({
+          stages: ctx.stages,
+          state: ctx.state,
+          prior: undefined,
+          bytesOf: (n) => (ctx.artifactExists(n) ? ctx.artifactBytes(n) : null),
+          approvedShas: readDeliverApprovals(ab ? ab.toString('utf8') : null, acc.name),
+          dispatched: dispatchedNow,
+        })
+      } catch {
+        return null
+      }
+    })()
+    // M4k 评审 F5：验收那一段齐了、首行没过或读不出——【阶段】那一句补上（与 H6 同一份 acceptanceBlock）。写者分验收角色与别人。
+    const acceptanceNote = (() => {
+      try {
+        const acc = acceptanceOf(ctx.stages)
+        if (!acc || !stageDone || ctx.state?.stage !== acc.stageId || closedAt(ctx.state) !== null) return null
+        const ab = ctx.artifactBytes(APPROVALS_FILE)
+        const block = acceptanceBlock({
+          stages: ctx.stages,
+          state: ctx.state,
+          prior: undefined,
+          bytesOf: (n) => (ctx.artifactExists(n) ? ctx.artifactBytes(n) : null),
+          approvedShas: readDeliverApprovals(ab ? ab.toString('utf8') : null, acc.name),
+          dispatched: dispatchedNow,
+        })
+        return block ? verdictStageNote({ stages: ctx.stages, block, writer: callerOf(input) }) || null : null
+      } catch {
+        return null
+      }
+    })()
     const blockers = (() => {
-      const od = Array.isArray(blockers0) ? blockers0.filter((b) => b.why === 'outdated').map((b) => b.name) : []
-      if (!od.length) return blockers0
-      const fix = outdatedFix(ctx.stages, od, ctx.state?.stage).text
-      return blockers0.map((b) => (b.why === 'outdated' ? { ...b, fix } : b))
+      if (!Array.isArray(blockers0)) return blockers0
+      const od = blockers0.filter((b) => b.why === 'outdated').map((b) => b.name)
+      const fix = od.length ? outdatedFix(ctx.stages, od, ctx.state?.stage).text : null
+      const list = blockers0.map((b) => (b.why === 'outdated' ? { ...b, fix } : b))
+      if (verdictNow && !list.some((b) => b.name === verdictNow.name)) {
+        list.push({ name: verdictNow.name, why: 'verdict', require: true, fix: verdictBlockerText({ stages: ctx.stages, verdict: verdictNow.verdict, current: ctx.state?.stage }) })
+      }
+      return list
     })()
 
     const notices = buildLedgerNotices({
@@ -2033,6 +2143,7 @@ function main() {
       projectReport,
       reworkStale,
       closeBlockers: blockers,
+      acceptanceNote,
       budget: validation ? validation.budget : [],
       grants,
       // M4b 第二轮复核：执行段「齐了」那句按写者分（谓词与 H3 同一个 isContractWriter）。
@@ -2137,20 +2248,23 @@ function main() {
     // approval-ask 在 PostToolUse 上：记下了、没记下（像批准却不记）都回一段【门禁】，给用户一行；一个像批准的回答都没有时不出声。
     // approval-prompt 在 UserPromptSubmit 上：stdout 会进模型上下文，一个字都不写（hookOutput 对这个事件恒给空），只往 stderr 留痕。
     const ask = CHECK === 'approval-ask'
-    const found = ask ? askAnswers(input.tool_response) : { excluded: null, items: promptAnswer(input.prompt) ? [{ stage: promptAnswer(input.prompt) }] : [] }
+    // M4k（docs/46）：两个记录器也认「照现状交付」（候选 { deliver: true }，按 sha 绑在那一刻的验收结论上）。
+    const found = ask
+      ? askAnswers(input.tool_response)
+      : { excluded: null, items: promptAnswer(input.prompt) ? [{ stage: promptAnswer(input.prompt) }] : promptDeliver(input.prompt) ? [{ deliver: true }] : [] }
     if (!found.excluded && !found.items.length) process.exit(0)
     let results
     let total = 0
     let cause = null
     let stages = null
     if (found.excluded) {
-      results = [{ why: found.excluded }]
+      results = [{ why: found.excluded, ...(found.deliver ? { deliver: true } : {}) }]
     } else {
       const ctx = readRunContext(ROOT_PROJECT, ROOT)
       if (!ctx.ok) {
         cause = ctx.cause ?? null
         const why = ctx.kind === 'no-run' ? 'no-run' : 'unreadable'
-        results = found.items.map((item) => (item.stage ? { stage: item.stage, why } : item))
+        results = found.items.map((item) => (item.stage ? { stage: item.stage, why } : item.deliver && !item.why ? { deliver: true, why } : item))
       } else {
         stages = ctx.stages
         // 复核（platform-3）：读批准、判需不需要、追加，三步在一把锁里做——插件被加载了两份时，同一个事件上会并行起几个记录器，
@@ -2163,7 +2277,19 @@ function main() {
           // 复核（platform-2）：末行没有换行（手改过、echo -n 写过）时先补一个，否则新的一行会和它粘在一起、两条一起失效。
           let sep = bytes && bytes.length && bytes[bytes.length - 1] !== 0x0a ? '\n' : ''
           const out = []
-          for (const p of planApprovals({ items: found.items, state: ctx.state, stages: ctx.stages, grants })) {
+          const acceptanceDef = acceptanceOf(ctx.stages)
+          const acceptance = acceptanceDef ? acceptanceOnDisk(ctx, acceptanceDef.name) : null
+          for (const p of planApprovals({ items: found.items, state: ctx.state, stages: ctx.stages, grants, acceptance })) {
+            if (p.deliver && typeof p.sha === 'string') {
+              try {
+                appendFileSync(file, sep + deliverLine({ at: new Date().toISOString(), source: ask ? 'ask' : 'prompt', product: p.name, sha: p.sha }) + '\n')
+                sep = ''
+                out.push(p)
+              } catch {
+                out.push({ deliver: true, why: 'write-failed' })
+              }
+              continue
+            }
             if (!p.covers) {
               out.push(p)
               continue
@@ -2181,7 +2307,11 @@ function main() {
         })
       }
     }
-    for (const r of results) {
+    // M4k：照现状交付那几条的留痕（返工批准那一句在下面）。
+    for (const r of results.filter((x) => x.deliver)) {
+      process.stderr.write('agent-team ' + CHECK + '：' + (r.sha ? '已记下照现状交付的批准（' + r.name + '）。' : '没有记成照现状交付的批准（' + r.why + '）。') + '\n')
+    }
+    for (const r of results.filter((x) => !x.deliver)) {
       process.stderr.write(
         `agent-team ${CHECK}：` +
           (r.covers ? `已记下返工批准：回到 ${r.stage}（覆盖 ${r.covers.join('、')}）。` : `没有记成返工批准（${r.why}${r.stage ? `，${quote(r.stage)}` : ''}）。`) +
@@ -2191,7 +2321,9 @@ function main() {
     if (!ask) process.exit(0)
     emitHookJson(spec.event, {
       contexts: approvalNotices({ results, total, cause, stages }),
-      systemMessage: systemMessage(results.some((r) => r.covers) ? 'approval-recorded' : 'approval-skipped'),
+      systemMessage: systemMessage(
+        results.some((r) => r.covers) ? 'approval-recorded' : results.some((r) => r.deliver && r.sha) ? 'deliver-recorded' : results.some((r) => r.deliver) ? 'deliver-skipped' : 'approval-skipped',
+      ),
     })
   }
 

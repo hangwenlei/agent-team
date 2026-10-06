@@ -114,6 +114,7 @@ export function readContractBase(bytes) {
     revisions: Array.isArray(v.revisions) ? v.revisions.filter((h) => typeof h === 'string') : [],
     verify_base,
     revised_at: typeof rev === 'string' && ISO_RE.test(rev) && !Number.isNaN(Date.parse(rev)) ? rev : null,
+    deliver_used: Array.isArray(v.deliver_used) ? v.deliver_used.filter((a) => typeof a === 'string') : [],
   }
 }
 
@@ -145,20 +146,28 @@ export function verifyShasOf({ stages, artifactExists, artifactBytes }) {
 export function initialBase(contractBytes) {
   if (!contractBytes) return null
   const text = contractBytes.toString('utf8')
-  return { section1: section1Of(text), body_sha: bodyShaOf(text), revisions: revisionHeadingsOf(text), verify_base: {}, revised_at: null }
+  return { section1: section1Of(text), body_sha: bodyShaOf(text), revisions: revisionHeadingsOf(text), verify_base: {}, revised_at: null, deliver_used: [] }
 }
 
 /**
  * 一次契约写入之后：修订指纹没变回 null（不用重写）。变了——新加的修订块全是不改需求的答复：只换指纹与标题（requirement: false）；
  * 别的（含没有新块却改了别的节、认不出类别的新块）：verify_base 换成 verifyShas、revised_at 记 now（requirement: true）。第 1 节不动。
- * @returns {{ base: object, requirement: boolean } | null}
+ * M4k（docs/46，评审 F1、F2）：deliverAt 是门禁记下的、绑着验收结论现在这份、还没用过的照现状交付批准的 at——有它，这次修订就是记那条答复的那一次：
+ * 不算改需求，只换指纹与标题，把它记进 deliver_used（一条批准只盖一次修订，之后真改需求照常重拍）。照现状交付接受没过的现状、不改需求；照标题分
+ * 会把它算成改需求（它多半是在 contract-conflict 那一问里、或者用户主动说的），刚批准的那份验收结论成了「对着上一版契约」，重出之后 sha 变了、
+ * 批准跟着作废，绕不出来。不靠 PM 在标题里写标记：漏写会绕圈，冒充只要一行字（设计评审 F1、F2）。
+ * @returns {{ base: object, requirement: boolean, deliver?: string } | null}
  */
-export function revisedBase(base, contractBytes, verifyShas, now) {
+export function revisedBase(base, contractBytes, verifyShas, now, deliverAt = null) {
   if (!base || !contractBytes) return null
   const text = contractBytes.toString('utf8')
   const body = bodyShaOf(text)
   if (body === base.body_sha) return null
   const headings = revisionHeadingsOf(text)
+  if (typeof deliverAt === 'string') {
+    const used = Array.isArray(base.deliver_used) ? base.deliver_used : []
+    return { base: { ...base, body_sha: body, revisions: headings, deliver_used: [...used, deliverAt] }, requirement: false, deliver: deliverAt }
+  }
   const known = new Set(Array.isArray(base.revisions) ? base.revisions : [])
   const added = headings.filter((h) => !known.has(h))
   if (added.length > 0 && added.every((h) => ADMIN_KINDS.includes(headingKind(h)))) {

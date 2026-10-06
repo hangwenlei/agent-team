@@ -11,11 +11,14 @@
 //    「只选了这一项」。
 // ⚠️ prompt 只认整条：UserPromptSubmit 也对 task-notification（子代理回报、后台 Bash 的说明）触发，那里的文字是模型写的（P1）；
 //    用户贴回 PM 的问题原文也会带上标签（O7）。整条规范化之后等于标签，才是用户自己发的那一条批准。
+// M4k（docs/46）：同一套认法也认「照现状交付」（verdict.mjs 的 deliverIntent）——候选是 { deliver: true }，需不需要记看验收结论
+//    （planApprovals 的 acceptance），记下的一行绑着那一刻验收结论的 sha。一个回答先按返工批准认，认不出再按照现状交付认。
 import { approvalIntent, parseApprovalLabel, needOf } from './budget.mjs'
 import { isPlainObject, isStageChain } from './stages.mjs'
 import { quote } from './trusted.mjs'
 import { runContextFix } from './fail-open.mjs'
 import { closedAt } from './closing.mjs'
+import { DELIVER_LABEL, deliverIntent } from './verdict.mjs'
 
 /**
  * PostToolUse:AskUserQuestion 的 tool_response 里有没有批准。items 里每一项是 { stage }（认出来的标签，还没核在不在链上）或
@@ -30,20 +33,28 @@ export function askAnswers(toolResponse) {
     const q = questions.find((x) => isPlainObject(x) && x.question === text)
     if (Array.isArray(answer)) {
       if (answer.some((a) => approvalIntent(a))) items.push({ why: 'array' })
+      else if (answer.some((a) => deliverIntent(a))) items.push({ deliver: true, why: 'array' })
       continue
     }
     const intent = approvalIntent(answer)
-    if (!intent) continue
-    if (q && q.multiSelect === true) items.push({ why: 'multi' })
-    else if (intent.stage) items.push({ stage: intent.stage })
-    else items.push({ why: 'malformed' })
+    if (intent) {
+      if (q && q.multiSelect === true) items.push({ why: 'multi' })
+      else if (intent.stage) items.push({ stage: intent.stage })
+      else items.push({ why: 'malformed' })
+      continue
+    }
+    const deliver = deliverIntent(answer)
+    if (!deliver) continue
+    if (q && q.multiSelect === true) items.push({ deliver: true, why: 'multi' })
+    else if (deliver.deliver) items.push({ deliver: true })
+    else items.push({ deliver: true, why: 'malformed' })
   }
   if (!items.length) return none
   const tr = toolResponse
   // 复核（docs/34 §3，platform-7）：用户在批准那道题的选项旁写了备注（annotations[题].notes），模型看得到它；门禁不能比模型看到的更宽。
   const notes = Object.entries(tr.answers).some(
     ([text, answer]) =>
-      approvalIntent(answer) &&
+      (approvalIntent(answer) || deliverIntent(answer)) &&
       isPlainObject(tr.annotations) &&
       isPlainObject(tr.annotations[text]) &&
       typeof tr.annotations[text].notes === 'string' &&
@@ -55,7 +66,9 @@ export function askAnswers(toolResponse) {
         : typeof tr.response === 'string' && tr.response.trim() !== '' ? 'response'
           : notes ? 'notes'
             : null
-  return excluded ? { excluded, items: [] } : { excluded: null, items }
+  if (!excluded) return { excluded: null, items }
+  // 被排除时回传要说重问哪一个标签：候选全是照现状交付的，标上 deliver。
+  return items.every((i) => i.deliver) ? { excluded, items: [], deliver: true } : { excluded, items: [] }
 }
 
 /** UserPromptSubmit 的整条 prompt 是不是规范标签：是就给段，否则 null。 */
@@ -63,14 +76,25 @@ export function promptAnswer(prompt) {
   return parseApprovalLabel(prompt)
 }
 
+/** UserPromptSubmit 的整条 prompt 是不是「照现状交付」（M4k）。 */
+export function promptDeliver(prompt) {
+  return deliverIntent(prompt)?.deliver === true
+}
+
 /**
  * 逐条判需不需要：前一条记下之后（grants 跟着长）再判下一条。返回每一项 { stage, covers }（要记）或 { stage?, why }（不记）。
  * state、stages 是当前 run 读出来的；读不出来的情形由调用方处理（不调这里）。
+ * M4k：照现状交付的候选 { deliver: true } 看 acceptance（调用方照磁盘读的验收结论：{ name, exists, blank, sha, verdict }，阶段链上没有验收
+ * 那一段给 null）——没过（不通过、判不了、首行读不出）就记 { deliver: true, name, sha }；已收口、没有结论、还是上一轮的、通过的不记。
  */
-export function planApprovals({ items, state, stages, grants }) {
+export function planApprovals({ items, state, stages, grants, acceptance = null }) {
   const known = [...(Array.isArray(grants) ? grants : [])]
   const out = []
   for (const item of Array.isArray(items) ? items : []) {
+    if (item.deliver) {
+      out.push(item.why ? item : planDeliver(state, acceptance))
+      continue
+    }
     if (!item.stage) {
       out.push(item)
       continue
@@ -95,6 +119,18 @@ export function planApprovals({ items, state, stages, grants }) {
   return out
 }
 
+function planDeliver(state, acceptance) {
+  if (closedAt(state) !== null) return { deliver: true, why: 'closed' }
+  const a = isPlainObject(acceptance) ? acceptance : null
+  if (!a || !a.exists || a.blank || typeof a.sha !== 'string') return { deliver: true, why: 'no-acceptance' }
+  const rb = isPlainObject(state?.rework_base) ? state.rework_base : {}
+  if (rb[a.name] === a.sha) return { deliver: true, why: 'stale-acceptance' }
+  // 评审 F3：对着上一版契约的验收结论（契约基线记着），H6 的契约判据会先拒——批准了也推进不了、收不了口，重出之后 sha 一变批准就作废。排在「通过」之前。
+  if (a.outdated === true) return { deliver: true, why: 'outdated-acceptance' }
+  if (a.verdict === 'pass') return { deliver: true, why: 'deliver-not-needed' }
+  return { deliver: true, name: a.name, sha: a.sha }
+}
+
 /** approvals.jsonl 的一行（不带换行）。 */
 export function approvalLine({ at, source, stage, covers }) {
   return JSON.stringify({ at, source, rework_to: stage, covers })
@@ -104,23 +140,51 @@ const ASK_AGAIN =
   '要批准就重新问一次：一道单选题（multiSelect 设 false），两个选项的标签逐字写「再返工一轮：回到 <段>」与「停在这里」，' +
   '推荐写在问题正文或选项说明里，不写进标签。'
 
-function whyText(why, name, cause) {
+// M4k：照现状交付那几种没记下的原因（与返工批准共用的原因走 whyText，重问的标签换成照现状交付的）。
+const ASK_DELIVER =
+  `要照现状交付就重新问一次：一道单选题（multiSelect 设 false），交付那一项的标签逐字写「${DELIVER_LABEL}」，推荐写在问题正文或选项说明里，不写进标签。`
+
+function deliverWhyText(why, cause) {
+  switch (why) {
+    case 'closed':
+      return '这一趟已经收口，批准记不进去，也用不上。交付之后的新改动或修复另起一趟（/agent-team:at）。'
+    case 'no-acceptance':
+      return (
+        '还没有验收结论（验收结论不在，或者是空的）：照现状交付的批准要对着一份写成的验收结论记（按它那一刻的样子绑定）。' +
+        `等验收结论写成、你读过之后再问。${ASK_DELIVER}`
+      )
+    case 'stale-acceptance':
+      return `验收结论还是上一轮的（与回退那一刻 rework_base 记的一样）：等这一轮的写成、你读过之后再问。${ASK_DELIVER}`
+    case 'outdated-acceptance':
+      return (
+        '验收结论对着上一版契约（契约在它写成之后改过，门禁记着）：照写契约那一次的【契约】、或者 H6 拒绝理由给的出路先让它对着这一版重出，' +
+        `读过之后再问。${ASK_DELIVER}`
+      )
+    case 'deliver-not-needed':
+      return '验收结论第一行是「结论：通过」，不需要批准：照常推进或收口。'
+    default:
+      return whyText(why, '', cause, ASK_DELIVER, DELIVER_LABEL)
+  }
+}
+
+// ask：重问时说的那一句（返工批准与照现状交付各一句）；what：回答「像是要」做的那件事。
+function whyText(why, name, cause, ask = ASK_AGAIN, what = '再返工一轮') {
   switch (why) {
     case 'afk':
-      return `用户离开了键盘、对话框超时自动提交了（不算用户确认过的回答）。用户回来之后${ASK_AGAIN}`
+      return `用户离开了键盘、对话框超时自动提交了（不算用户确认过的回答）。用户回来之后${ask}`
     case 'follow-up':
-      return `用户要追问，没有确认。先回答用户的追问，${ASK_AGAIN}`
+      return `用户要追问，没有确认。先回答用户的追问，${ask}`
     case 'response':
-      return `用户另写了一段话（以那段话为准，照原话办，它不算批准）。用户要再返工一轮的话，${ASK_AGAIN}`
+      return `用户另写了一段话（以那段话为准，照原话办，它不算批准）。用户要${what}的话，${ask}`
     case 'notes':
-      return `用户在选项旁写了备注（以备注为准，照它办，这一次不算批准）。用户确认要再返工一轮的话，${ASK_AGAIN}请用户不写备注直接选。`
+      return `用户在选项旁写了备注（以备注为准，照它办，这一次不算批准）。用户确认要${what}的话，${ask}请用户不写备注直接选。`
     case 'multi':
     case 'array':
-      return `这是一道多选题（或者答案是多选的形状），一个勾选不等于只选了这一项。${ASK_AGAIN}`
+      return `这是一道多选题（或者答案是多选的形状），一个勾选不等于只选了这一项。${ask}`
     case 'malformed':
-      return `回答像是要再返工一轮，但标签认不出（带了别的后缀，或者夹了别的话）。${ASK_AGAIN}`
+      return `回答像是要${what}，但标签认不出（带了别的后缀，或者夹了别的话）。${ask}`
     case 'off-chain':
-      return `标签里的段 ${name} 不在阶段链上。${ASK_AGAIN}`
+      return `标签里的段 ${name} 不在阶段链上。${ask}`
     case 'not-needed':
       return (
         `现在回到 ${name} 不需要批准：它不是一次回退，或者这一轮走完不超过返工上限（上限内问的不记）。照常记回退就行；` +
@@ -138,7 +202,7 @@ function whyText(why, name, cause) {
         '磁盘满没满），修好之后再问一次——对话里单独发标签那一路写的是同一个文件，同样记不下。'
       )
     default:
-      return ASK_AGAIN
+      return ask
   }
 }
 
@@ -150,6 +214,16 @@ function whyText(why, name, cause) {
 export function approvalNotices({ results, total, cause, stages } = {}) {
   const out = []
   for (const r of Array.isArray(results) ? results : []) {
+    if (r.deliver) {
+      out.push(
+        typeof r.sha === 'string'
+          ? `【门禁】已记下照现状交付的批准：只对现在这份 ${r.name} 有效——它再改一个字，这条批准就不算了。照 /agent-team:at 第 4 节：` +
+              'escalation 那一条的 answer 补上用户的原话；答复写进修订块（标题照模板写，kind 照问的那一类）——门禁记着这条批准，它之后的第一次' +
+              '改契约算记这条答复，不算改需求、验证段的结论不用重出（一条批准只盖一次修订）；交付文档里写明哪些没过、哪些没验证；再推进或收口。'
+          : `【门禁】这次的回答没有记成照现状交付的批准：${deliverWhyText(r.why, cause)}`,
+      )
+      continue
+    }
     if (Array.isArray(r.covers)) {
       out.push(
         `【门禁】已记下返工批准：回到 ${r.stage}（覆盖 ${r.covers.join('、')}；这一趟共 ${total} 条）。` +

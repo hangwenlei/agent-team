@@ -122,6 +122,8 @@ flowchart TB
 
 另外，上一趟还没走完你又起了一趟新的，它会先问你接着跑哪一趟；项目在 git 仓库里时，初始化还会问一次要不要把 `.agent-team/` 加进 `.gitignore`。
 
+验收没过时，只有选项「照现状交付」会被门禁记成照现状交付的批准，在对话里单独发一条只写这一句的消息也算；批准只对那一刻的验收结论有效。
+
 返工用尽时，只有选项「再返工一轮：回到 <段>」会被门禁记成再来一轮的批准；在对话里单独发一条只写这一句的消息也算——会话问不了你时（后台会话、不带权限提示的 `-p`），这是唯一的路。
 
 ### 产物在哪
@@ -134,7 +136,7 @@ flowchart TB
 └── runs/<run_id>/
     ├── 00-contract.md   契约：你的原话与修订记录
     ├── …                各阶段的产物（实现阶段每个执行角色各一份）
-    ├── approvals.jsonl  你批准过的额外返工轮（门禁自己记）
+    ├── approvals.jsonl  你批准过的额外返工轮与照现状交付（门禁自己记）
     ├── contract-base.json 门禁记下的契约基线：你的原话，每次改需求时验证段结论的样子
     ├── delivered.json   门禁记下的已交付产物快照
     ├── dispatches.jsonl 门禁记下的派发：谁在哪一段被派出去、拦过它几回
@@ -329,6 +331,8 @@ Each question quotes the contract and offers two to four concrete options with t
 
 Also, if you start a new run while the previous one is unfinished, it first asks which one to continue; in a git repository, setup also asks once whether to add `.agent-team/` to `.gitignore`.
 
+When acceptance did not pass, only the option 「照现状交付」 is recorded by the gates as approval to deliver as is, and a message containing just that line counts too; the approval only covers the acceptance conclusion as it was at that moment.
+
 When rework runs out, only the option 「再返工一轮：回到 <stage>」 is recorded by the gates as approval for another round; a message containing just that line counts too — in a session that cannot ask you (a background session, `-p` without a permission prompt), it is the only way.
 
 ### Where things land
@@ -341,7 +345,7 @@ When rework runs out, only the option 「再返工一轮：回到 <stage>」 is 
 └── runs/<run_id>/
     ├── 00-contract.md   the contract: your words and its revisions
     ├── …                each stage's deliverables (one per implementation role in the implementation stage)
-    ├── approvals.jsonl  extra rework rounds you approved (recorded by the gates)
+    ├── approvals.jsonl  extra rework rounds and deliveries as is you approved (recorded by the gates)
     ├── contract-base.json the gates' contract baseline: your words, and the verification conclusions at each requirement change
     ├── delivered.json   the gates' snapshot of delivered artifacts
     ├── dispatches.jsonl the gates' record of dispatches: who was sent out in which stage, and how many times a stop was blocked

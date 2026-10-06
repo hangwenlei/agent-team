@@ -9,7 +9,7 @@
 //   - prompt 只认整条规范化之后等于标签（task-notification 里模型写的文字、带说明的话都不算，P1、O7）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { askAnswers, promptAnswer, planApprovals, approvalLine, approvalNotices } from '../hooks/lib/approvals.mjs'
+import { askAnswers, promptAnswer, promptDeliver, planApprovals, approvalLine, approvalNotices } from '../hooks/lib/approvals.mjs'
 import { approvalLabel } from '../hooks/lib/budget.mjs'
 
 const STAGES = {
@@ -177,4 +177,76 @@ test('复核 approvalNotices：写不进批准记录时，叫用户检查那个�
   assert.match(s, /approvals\.jsonl/)
   assert.match(s, /检查/)
   assert.doesNotMatch(s, /单独发一条/)
+})
+
+// ============================================================================ M4k：照现状交付的批准（docs/46）
+
+const NL = String.fromCharCode(10)
+const D = '照现状交付'
+const QD = (question, multiSelect = false) => ({ question, header: 'h', multiSelect, options: [{ label: D, description: '' }, { label: '回退重做', description: '' }] })
+const respD = (answers, extra = {}) => ({ questions: Object.keys(answers).map((q) => QD(q)), answers, ...extra })
+
+test('M4k askAnswers：单选题选了「照现状交付」（含推荐后缀）→ 候选；多选、数组、夹了别的话 → 不记，各给原因', () => {
+  assert.deepEqual(askAnswers(respD({ q: D })), { excluded: null, items: [{ deliver: true }] })
+  assert.deepEqual(askAnswers(respD({ q: `${D} (Recommended)` })).items, [{ deliver: true }])
+  assert.deepEqual(askAnswers({ questions: [QD('q', true)], answers: { q: D } }).items, [{ deliver: true, why: 'multi' }])
+  assert.deepEqual(askAnswers(respD({ q: [D] })).items, [{ deliver: true, why: 'array' }])
+  assert.deepEqual(askAnswers(respD({ q: `${D}吧` })).items, [{ deliver: true, why: 'malformed' }])
+  assert.deepEqual(askAnswers(respD({ q: '回退重做' })), { excluded: null, items: [] })
+})
+
+test('M4k askAnswers：带 afkTimeoutMs、追问、另写了话、备注 → 整次不记，标明是照现状交付那一种；返工批准被排除时形状照旧', () => {
+  assert.deepEqual(askAnswers(respD({ q: D }, { afkTimeoutMs: 60000 })), { excluded: 'afk', items: [], deliver: true })
+  assert.equal(askAnswers(respD({ q: D }, { followUp: true })).excluded, 'follow-up')
+  assert.equal(askAnswers(respD({ q: D }, { response: '再想想' })).excluded, 'response')
+  assert.equal(askAnswers({ questions: [QD('q')], answers: { q: D }, annotations: { q: { notes: '先别' } } }).excluded, 'notes')
+  assert.deepEqual(askAnswers(resp({ q: L5 }, { afkTimeoutMs: 60000 })), { excluded: 'afk', items: [] })
+})
+
+test('M4k promptDeliver：整条 prompt 规范化之后等于「照现状交付」才算', () => {
+  assert.equal(promptDeliver(D), true)
+  assert.equal(promptDeliver(`  ${D}` + NL), true)
+  assert.equal(promptDeliver(`好的，${D}`), false)
+  assert.equal(promptDeliver('<task-notification>' + NL + `<summary>${D}</summary>` + NL + '</task-notification>'), false)
+  assert.equal(promptDeliver(42), false)
+})
+
+const ACC = (over = {}) => ({ name: '07-acceptance.md', exists: true, blank: false, sha: 'sha256:' + 'a'.repeat(64), verdict: 'fail', ...over })
+const AT_S8 = { stage: 'S8', history: H('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'), closed_at: null }
+
+test('M4k planApprovals：照现状交付——验收结论没过（不通过、判不了、读不出）就记，带产物名与 sha；已收口、没有结论、还是上一轮的、通过的不记，各给原因', () => {
+  const p = (state, acceptance) => planApprovals({ items: [{ deliver: true }], state, stages: STAGES, grants: [], acceptance })
+  const rec = [{ deliver: true, name: '07-acceptance.md', sha: ACC().sha }]
+  assert.deepEqual(p(AT_S8, ACC()), rec)
+  assert.deepEqual(p(AT_S8, ACC({ verdict: 'unknown' })), rec)
+  assert.deepEqual(p(AT_S8, ACC({ verdict: null })), rec)
+  assert.deepEqual(p({ ...AT_S8, closed_at: '2026-10-06T12:00:00Z' }, ACC()), [{ deliver: true, why: 'closed' }])
+  assert.deepEqual(p(AT_S8, null), [{ deliver: true, why: 'no-acceptance' }])
+  assert.deepEqual(p(AT_S8, ACC({ exists: false, sha: null })), [{ deliver: true, why: 'no-acceptance' }])
+  assert.deepEqual(p(AT_S8, ACC({ blank: true })), [{ deliver: true, why: 'no-acceptance' }])
+  assert.deepEqual(p({ ...AT_S8, rework_base: { '07-acceptance.md': ACC().sha } }, ACC()), [{ deliver: true, why: 'stale-acceptance' }])
+  assert.deepEqual(p(AT_S8, ACC({ verdict: 'pass' })), [{ deliver: true, why: 'deliver-not-needed' }])
+  // 评审 F3：验收结论对着上一版契约（契约基线记着）——不记，先重出；排在「通过」之前（对着上一版契约的通过同样不算数）。
+  assert.deepEqual(p(AT_S8, ACC({ outdated: true })), [{ deliver: true, why: 'outdated-acceptance' }])
+  assert.deepEqual(p(AT_S8, ACC({ outdated: true, verdict: 'pass' })), [{ deliver: true, why: 'outdated-acceptance' }])
+  assert.deepEqual(planApprovals({ items: [{ deliver: true, why: 'multi' }], state: AT_S8, stages: STAGES, grants: [], acceptance: ACC() }), [{ deliver: true, why: 'multi' }])
+  // 返工批准与照现状交付混在一次里：各判各的。
+  assert.deepEqual(planApprovals({ items: [{ stage: 'S9' }, { deliver: true }], state: AT_S8, stages: STAGES, grants: [], acceptance: ACC() }), [{ stage: 'S9', why: 'off-chain' }, ...rec])
+})
+
+test('M4k approvalNotices：照现状交付记下了——只对现在这份验收结论有效、修订块标题带标记；没记下的各给原因，重问说的是照现状交付的标签', () => {
+  const s = approvalNotices({ results: [{ deliver: true, name: '07-acceptance.md', sha: ACC().sha }], total: 1 }).join(NL)
+  assert.match(s, /^【门禁】已记下照现状交付的批准/)
+  assert.match(s, /只对现在这份 07-acceptance\.md 有效/)
+  assert.match(s, /一条批准只盖一次修订/)
+  assert.doesNotMatch(s, /· 照现状交付/)
+  const cases = { closed: /已经收口/, 'no-acceptance': /还没有验收结论/, 'stale-acceptance': /上一轮/, 'outdated-acceptance': /对着上一版契约/, 'deliver-not-needed': /结论：通过/, malformed: /认不出/, multi: /多选/, array: /多选/, afk: /离开/, 'follow-up': /追问/, response: /另写了一段话/, notes: /备注/, 'no-run': /没有进行中的 run/, unreadable: /读不到/, 'write-failed': /写不进/ }
+  for (const [why, re] of Object.entries(cases)) {
+    const t = approvalNotices({ results: [{ deliver: true, why }], total: 0, cause: 'state' }).join(NL)
+    assert.match(t, /^【门禁】这次的回答没有记成照现状交付的批准/, why)
+    assert.match(t, re, why)
+  }
+  const again = approvalNotices({ results: [{ deliver: true, why: 'malformed' }], total: 0 }).join(NL)
+  assert.match(again, /「照现状交付」/)
+  assert.doesNotMatch(again, /再返工一轮/)
 })

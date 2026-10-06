@@ -24,6 +24,8 @@ export const REWORK_LIMIT = 3
 
 export const APPROVAL_PREFIX = '再返工一轮：回到 '
 export const STOP_LABEL = '停在这里'
+// M4k（docs/46）：照现状交付的规范标签（验收结论没过时，用户批准带着它交付；verdict.mjs 原样再导出，记录器与 H6 从那边用）。
+export const DELIVER_LABEL = '照现状交付'
 
 /** 规范标签。stageId 是阶段链上的 id（插件自己的名字），原样。 */
 export function approvalLabel(stageId) {
@@ -34,7 +36,8 @@ const RECOMMENDED_RE = /\((?:recommended|推荐)\)$/i
 // 段 id 只认字母、数字、下划线与连字符（stages.json 的键都是这个形状）：写宽了，「回到 S5（不推荐）」会被认成段「S5(不推荐)」。
 const LABEL_RE = /^再返工一轮:回到([A-Za-z0-9_-]+)$/
 
-function normalizeAnswer(s) {
+// 规范标签的归一化（M4k 起「照现状交付」也用它，verdict.mjs 的 deliverIntent）：两个标签一套认法。
+export function normalizeLabel(s) {
   return s.normalize('NFKC').replace(/\s+/g, '').replace(RECOMMENDED_RE, '')
 }
 
@@ -44,7 +47,7 @@ function normalizeAnswer(s) {
  */
 export function approvalIntent(answer) {
   if (typeof answer !== 'string') return null
-  const n = normalizeAnswer(answer)
+  const n = normalizeLabel(answer)
   const m = LABEL_RE.exec(n)
   if (m) return { stage: m[1] }
   return n.includes('再返工一轮') ? { malformed: true } : null
@@ -104,6 +107,9 @@ export function askUserText(target, grants, then) {
     `先往 escalations 记一条 budget-exhausted（answer 先写空串），再用 AskUserQuestion 问用户：一道单选题（multiSelect 设 false），两个选项的标签逐字写「${label}」与「${STOP_LABEL}」——` +
       '推荐写在问题正文或选项说明里，不要加进标签。用户选了前者，门禁会记下这条批准（回传里会说记没记下）。之后照 ' +
       `/agent-team:at 第 4 节：契约追加修订块（回传给你新的 contract_sha），${then}`,
+    // M4k（docs/46，评审 F4）：验收没过而返工用尽，用户可能要照现状交付——这三处门禁文字原来只给两个选项，PM 照它问，用户得自己知道要打那几个字。
+    `验收结论已经写成、第一行不是「结论：通过」的（验收没过），可以加第三个选项，标签逐字写「${DELIVER_LABEL}」：用户选了它，门禁记下照现状交付的` +
+      '批准，不再回退，照 /agent-team:at 第 4 节「照现状交付」那一段往下走。',
     `用户选「${STOP_LABEL}」：不回退也不推进，把那一条的 answer 写成用户原话，` +
       '把现状、run id 与续跑的办法告诉用户，停下等用户。',
     `问不了用户（工具面里没有 AskUserQuestion，例如不带权限提示工具的 -p、--bg）：停下，告诉用户在对话里单独发一条消息、整条只写「${label}」也算批准。`,

@@ -56,7 +56,7 @@ test('M4j 账本：推进出第一段之后第一次见到 state.json 记基线�
     assert.ok(!existsSync(join(runDir, 'contract-base.json')), '复核（K03）：契约还不在——不记，下一次再记')
     writeFileSync(join(runDir, '00-contract.md'), V1)
     run('ledger', posted(join(runDir, 'state.json')), GATE, projectDir)
-    assert.deepEqual(baseOf(runDir), { section1: '> 做一个待办清单。', body_sha: bodyShaOf(V1), revisions: [], verify_base: {}, revised_at: null })
+    assert.deepEqual(baseOf(runDir), { section1: '> 做一个待办清单。', body_sha: bodyShaOf(V1), revisions: [], verify_base: {}, revised_at: null, deliver_used: [] })
     writeFileSync(join(runDir, '00-contract.md'), DRIFTED)
     run('ledger', posted(join(runDir, 'state.json')), GATE, projectDir)
     assert.equal(baseOf(runDir).section1, '> 做一个待办清单。', '记下之后，再写 state.json 不改基线')
