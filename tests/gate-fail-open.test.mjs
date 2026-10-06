@@ -483,9 +483,10 @@ test('门禁自检反例：没有 run、run 正常、子代理发起、自检写
   using(noRun, (fx) => assert.doesNotMatch(selfCheck(fx), /另外，/))
   using(() => healthy(), (fx) => assert.doesNotMatch(selfCheck(fx), /另外，/))
   using(UNREADABLE['pointer（丢了）'][1], (fx) => {
-    const sub = selfCheck(fx, 'agent-team:at-backend')
+    // M4i 复核（docs/44 §8，低-4）：子代理带 agent_id（今天 CLI 的形状）；身份那一句（「注意：」开头）也不该出现。
+    const sub = reasonOf(run('writepath', { ...writing('PreToolUse', 'agent-team:at-backend', join(fx.p, GATE_CHECK_PATH)), agent_id: 'a0000000000000e01' }, fx.gate, fx.p))
     assert.ok(sub.startsWith(GATE_CHECK_ONLINE))
-    assert.doesNotMatch(sub, /另外，/)
+    assert.doesNotMatch(sub, /另外，|注意：发起这次/)
     const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), 'agent-team-fo-else-')))
     try {
       const reason = selfCheck(fx, PM, elsewhere)
