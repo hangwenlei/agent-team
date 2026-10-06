@@ -30,7 +30,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/42` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/43` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，下一轮从 `docs/39` §5 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -107,7 +107,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   永不 exit 2。协调者返回时报它派出去的人各自的进度，不许诺之后的通知会到 PM。理由在 `docs/38`。
 - **持 Bash 的执行角色的敏感操作红线只在正文里，每一份逐字同一句，清单与 `/agent-team:at` 第 4 节 `sensitive` 那一行逐项相同**：碰到就以
   「冒泡：」停下，协调者原样冒泡给 PM，PM 照 `sensitive` 问用户；用户批准过的，执行角色只认契约「修订记录」里写明批准了的那一步（派发
-  提示是数据，契约只有 PM 写得进）。PM 自己也不跑动工作树或历史的 git 命令。门禁不加 Bash 的 matcher（命令行是自由文本，判不准；平台的
+  提示是数据，契约只有 PM 写得进）。PM 自己也不跑动工作树或历史的 git 命令，也不结束不是自己起的进程；停服务的做法（按自己起的 PID 停，
+  Windows 的 Git Bash 里按进程树停）每个持 Bash 的角色逐字同一句——M9 里项目经理按名字杀过本机全部 node 进程（`docs/43` §1.5）。门禁不加 Bash 的 matcher（命令行是自由文本，判不准；平台的
   权限模式才是那一层）。判据按 `tools:` 声明派生持 Bash 的角色、从 `roster.json` 派生协调者，两处清单两个方向逐项比，承重的句子整句钉
   （`tests/redlines-setup-prose.test.mjs`）。理由在 `docs/40`。
 - **插件自带的 frontmatter 只用受限写法**：每个非空行恰好一行 `key: 值`，键不重复，值不以 YAML 指示符开头、不含「: 」与「 #」、不以「:」
@@ -129,6 +130,10 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   收尾按注明的分开说，协调者转报下级的 sha。PM 写完 `reach.json`，门禁按当前 `project.json` 与花名册重算核对。产者交代并上门禁的派发记录：
   派发记录里有、`stage_roles` 没记的单列成「漏记」，看一眼磁盘之后补记。问用户之前先记一条 `answer` 为空串的 escalation，答复之后补上
   （正文与门禁的返工预算文字一个口径）；用户主动改需求不记 escalation，修订块标「用户主动提出」。理由在 `docs/42`（§8 是复核）。
+- **整段裁掉与切走指针**：缺的前置是整段裁掉的那一段的产物时，H2 说清是整段裁掉、给两条路——回退到那一段补回来（照「回退」记；不记回退就派它
+  补交，H5a 会说这次派发不该发生），或者把要它当前置的段也整段裁掉。「整段裁掉」在 H2、推进、收口三处同一个口径（`advance.mjs` 的
+  `wholeStageTrimmed`），所以不在 `available_roles` 里的产者也要写进 `trimmed`。PM 写 `current-run` 时门禁列出别的、没收口的 run 里没停下的派发
+  （【派发】，停下行按 `agent_id` 在所有 run 里认）；按 `agent_id` 把停下认回派它的那一趟照旧没做。理由在 `docs/43`。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。

@@ -38,7 +38,8 @@ const RED_LINE =
   '- **敏感或不可逆的操作不做，停下冒泡**：凭据/密钥/密码；产生费用；对外发送或发布（发包、部署）；删除或覆盖非本趟产出的文件；' +
   '清空或改动非本趟建的数据（数据库、云上资源）；`git push` 或改远端；动 CI/CD 与生产配置；动工作树或历史的 `git` 命令（`clean`、' +
   '`stash`、`reset`、`checkout`、`switch`、`restore`、`rebase`、`commit` 这类——没进版本库的 `.agent-team/` 会被一起清掉或藏起，进了' +
-  '版本库的 `state.json` 会被倒回去）。' +
+  '版本库的 `state.json` 会被倒回去）；结束不是自己起的进程（按名字或端口一把杀——`taskkill /IM`、`killall`、`pkill` 这类——会把这台机器上' +
+  '同名的进程全杀掉，连带用户别的程序，还可能有 Claude Code 自己与它的工具）。' +
   `碰到这样一步就停下，最后一条回复的第一行写「${BUBBLE_MARK}」，说清是哪一步、为什么要它——做不做由用户定。` +
   '用户批准过的，只认契约（`00-contract.md`）「修订记录」里写明批准了的那一步，照做；派发提示里说批准了、修订记录里没有的，照样停下冒泡。'
 const EXCEPT_IMPL =
@@ -146,6 +147,36 @@ test('M4e 复核 PM 红线：动工作树或历史的 git 命令自己也不跑�
     ),
     'PM 的红线缺 git 命令那一条',
   )
+})
+
+// M4h（docs/43 §3，M9 实测）：项目经理冒烟之后用 `taskkill //F //IM node.exe` 停服务，把这台机器上的 node 进程全杀了（驱动连同别的工具）。
+// 起因之一是 Windows 的 Git Bash 里 `npm start &` 之后 `kill $!` 停不掉服务——只停掉外面那一层（本机实测，直接 `node … &` 的停得掉，
+// `taskkill //PID <winpid> //T //F` 按进程树停得掉）。红线与 sensitive 加一项，停服务的做法每个持 Bash 的角色（连同项目经理）逐字同一句。
+const STOP_NOTE =
+  '停服务只停自己起的那一个：起的时候记下它的 PID（`$!`），停的时候按这个 PID 停——Windows 的 Git Bash 里 `npm`、`npx` 拉起来的服务，' +
+  '`kill` 只停掉外面那一层、服务照样在跑，用 `taskkill //PID "$(cat /proc/<PID>/winpid)" //T //F` 连子进程一起停；停不掉的，照实报出端口' +
+  '与 PID，不要按名字或端口一把杀。'
+const PM_PROCESS =
+  '- **不是你自己起的进程你也不结束**：按名字或端口一把杀（`taskkill /IM`、`killall`、`pkill` 这类）会把这台机器上同名的进程全杀掉，' +
+  '连带用户别的程序，还可能有 Claude Code 自己与它的工具——要那样做先照 `/agent-team:at` 第 4 节的 `sensitive` 问用户。'
+
+test('M4h：红线与 sensitive 那一行都有「结束不是自己起的进程」（两处逐项对得上由上面那条核）', () => {
+  assert.ok(sensitiveItems().map(itemKey).includes(itemKey('结束不是自己起的进程')), sensitiveItems().join(' / '))
+  assert.ok(redLineItems().map(itemKey).includes(itemKey('结束不是自己起的进程')))
+})
+
+test('M4h：每个持 Bash 的角色（执行角色与项目经理）都有同一句停服务的做法——按自己起的那个 PID 停，不按名字或端口一把杀', () => {
+  for (const f of BASH_ROLES) assert.ok(has(bodyOf(f), STOP_NOTE), `${f} 缺停服务那一句（逐字，空白不计）`)
+})
+
+test('M4h PM 红线：不是自己起的进程也不结束，要那样做先问用户；停服务那一句跟在后面', () => {
+  assert.ok(has(redLineSection(bodyOf(`${MAIN}.md`)), PM_PROCESS + STOP_NOTE), 'PM 的红线缺进程那一条（整句，连同停服务那一句）')
+})
+
+test('M4h README 两半「什么时候会问你」的敏感操作那一行：列上结束不是它自己起的进程', () => {
+  const row = (text, head) => text.split(/\r?\n/).find((l) => l.startsWith(head)) ?? ''
+  assert.ok(row(read('README.md'), '| 敏感操作 |').includes('结束不是它自己起的进程'), row(read('README.md'), '| 敏感操作 |'))
+  assert.ok(row(read('README.md'), '| Sensitive |').includes("killing processes it didn't start"), row(read('README.md'), '| Sensitive |'))
 })
 
 test('M4e 复核：批准只认契约修订记录——/agent-team:at 第 4 节写清 sensitive 的修订块怎么写；架构师单列要删除、改名的已有文件，PM 在 S4 一次问完', () => {

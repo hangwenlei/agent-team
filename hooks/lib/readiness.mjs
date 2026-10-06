@@ -74,6 +74,8 @@ export function decideReadiness({
   caller,
   callerReach,
   callerCanWriteState = false,
+  // M4h（docs/43，审查第 38 条）：这一段是不是整段裁掉了（调用方用 advance.mjs 的 wholeStageTrimmed 判）。缺的前置是它的产物时，拒绝理由说清。
+  trimmedAway = () => false,
 }) {
   if (!stages || typeof stages !== 'object') return { decision: 'allow' }
 
@@ -166,12 +168,28 @@ export function decideReadiness({
         })
         .join('、')
 
+    // M4h（docs/43，审查第 38 条）：缺的前置是整段裁掉的那一段的产物（例：S2 整段裁掉之后在 S3 派架构师，缺 01-prd.md）——那一段是 PM 自己
+    // 裁掉的，「先跑完」走不通。说清是整段裁掉，给两条路（回退到那一段补回来，或者把要它当前置的段一起裁掉）；派发者改不了 state.json 的冒泡。
+    // 复核（docs/43 §8）：第一条路是「回退」——不记回退、直接派它补交，H5a 会说这次派发不该发生、叫 PM 记回退（门禁自己给的路，下一步自己
+    // 说它不对）；几段同时整段裁掉时说「这几段」；缺的里面同时有还是上一轮的（下面 stale 那一支），这一句照样说。
+    const away = [...new Set(missing.map((m) => producerOf(stages, m)).filter((sid) => sid && trimmedAway(sid)))]
+    const rest = missing.filter((m) => !away.includes(producerOf(stages, m)))
+    const seg = away.length > 1 ? '这几段' : '那一段'
+    const awayOut = away.length
+      ? `${away.join('、')} 整段裁掉了（${seg}的产者都记在 trimmed 里、这一趟在${seg}谁都没叫过），${away.length > 1 ? '它们' : '它'}的产物不会有了：` +
+        (callerCanWriteState
+          ? '要么回退到要补的那一段把它补回来（照 /agent-team:at 第 3 节的「回退」记，同一次写入里把它的产者从 trimmed 里拿掉，再在那一段派它），' +
+            '要么把要它当前置的段也整段裁掉、交付文档里写明少了哪几段（/agent-team:at 第 3 节第 4 条）。'
+          : '这要项目经理定，把这一点写进你的回报冒泡给派你的人。')
+      : ''
+
     if (stale.length === 0) {
       return {
         decision: 'deny',
         reason:
           `${targetRole} 现在要做的是 ${stageId}，但它的前置产物还缺：${named(missing)}。` +
-          `先把产出这些产物的阶段跑完再回来，不要跳过。`,
+          (rest.length ? `先把产出这些产物的阶段跑完再回来，不要跳过。` : '') +
+          awayOut,
       }
     }
 
@@ -196,7 +214,7 @@ export function decideReadiness({
     const out = acceptOut + redoOut
     return {
       decision: 'deny',
-      reason: `${targetRole} 现在要做的是 ${stageId}，但它的前置产物${what}。先把产出这些产物的阶段跑完再回来，不要跳过。${out}`,
+      reason: `${targetRole} 现在要做的是 ${stageId}，但它的前置产物${what}。先把产出这些产物的阶段跑完再回来，不要跳过。${out}${awayOut}`,
     }
   }
 

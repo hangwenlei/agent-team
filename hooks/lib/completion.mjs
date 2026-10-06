@@ -265,7 +265,8 @@ const STOP_TAIL = {
  * 复核（docs/38 §3）：不许诺「它完成时，完成通知到 PM 那里，门禁会单独核它」——交互模式下、-p 下协调者还在跑时，那条通知都不到 PM；
  * 收尾那一句按各行的状态说，不再无条件说「名单上的都交了」。
  */
-export function coordinatorProgress({ role, stageId, rows, recipientIsPm }) {
+// M4h（docs/43，审查第 14 条）：selfDone——协调者自己也是这一段的产者、它那几份交了（S2 的 at-product）；impl——这一段是执行段（产物是实现记录）。
+export function coordinatorProgress({ role, stageId, rows, recipientIsPm, selfDone = false, impl = true }) {
   if (!Array.isArray(rows) || !rows.length) return null
   const STATE = { ok: '在磁盘上', missing: '还没有', blank: '是空文件', stale: '还是上一轮的' }
   const lines = []
@@ -298,7 +299,7 @@ export function coordinatorProgress({ role, stageId, rows, recipientIsPm }) {
   if (!recipientIsPm) {
     close = '这一条你不用处理：交没交，PM 推进出这一段时门禁会核。'
   } else if (!running && !stoppedShort) {
-    close = '名单上的都交了：照 /agent-team:at 第 3 节核实（实现记录的「被写路径隔离拒绝」一节要读）再推进。'
+    close = `名单上的都交了：照 /agent-team:at 第 3 节核实${impl ? '（实现记录的「被写路径隔离拒绝」一节要读）' : ''}再推进。`
   } else {
     close =
       (running ? '还在跑的，等它停下再核——它的完成通知不一定到你这里（交互模式下送回派它的协调者）；' : '') +
@@ -306,9 +307,9 @@ export function coordinatorProgress({ role, stageId, rows, recipientIsPm }) {
       '推进出这一段时门禁会核每一份。这一条不是在催你推进。'
   }
   return (
-    `交付物核验（${stageId} 进度）：刚返回的 ${role} 是 ${stageId} 的协调者，这一段没有它自己的产物；门禁记着它这一次在 ${stageId} 派出去的：\n` +
+    `交付物核验（${stageId} 进度）：刚返回的 ${role} 是 ${stageId} 的协调者，${selfDone ? '它自己的那几份交了' : '这一段没有它自己的产物'}；门禁记着它这一次在 ${stageId} 派出去的：\n` +
     `${lines.join('\n')}\n` +
-    '不在上面的执行角色是它这一次没派过的（或者门禁没记下）。' +
+    `不在上面的${impl ? '执行角色' : '产者'}是它这一次没派过的（或者门禁没记下）。` +
     close
   )
 }

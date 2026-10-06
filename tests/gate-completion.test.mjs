@@ -18,7 +18,7 @@ import { BUBBLE_MARK } from '../hooks/lib/deliverable.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from '../hooks/lib/retry-budget.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { DISPATCHES_FILE } from '../hooks/lib/control-files.mjs'
-import { parseNotifications, readDispatchLog } from '../hooks/lib/completion.mjs'
+import { coordinatorProgress, parseNotifications, readDispatchLog } from '../hooks/lib/completion.mjs'
 
 const PRODUCT = 'agent-team:at-product'
 const ARCH = 'agent-team:at-architect'
@@ -236,6 +236,8 @@ test('19-13 协调者返回（S5 正路）：报它派出去的执行角色与�
     writeFileSync(join(dirs.runDir, '05-impl', 'at-backend.md'), '# 实现记录\n做了。\n')
     const c = contextOf(run('completion', prompt(note('a00000000000000a1', { toolUseId: 'toolu_01ARCH', result: '已派出 at-backend、at-frontend。' })), GATE, dirs.projectDir))
     assert.match(c, /S5 进度/)
+    // M4h 复核（docs/43 §8，低-3）：S5 的协调者在这一段没有自己的产物——头一句不许说「它自己的那几份交了」（S2 那一种）。
+    assert.ok(c.includes('刚返回的 at-architect 是 S5 的协调者，这一段没有它自己的产物；'), c)
     assert.match(c, /at-backend（后台派发）：05-impl\/at-backend\.md 在磁盘上/)
     assert.match(c, /at-frontend（后台派发）：05-impl\/at-frontend\.md 还没有——门禁还没见它停下：可能还在跑/)
     assert.ok(!c.includes('完成通知到 PM 那里'), c)
@@ -479,6 +481,7 @@ test('19-33 前台派发的协调者跑完（H5a）：进度列它这一次运�
     run('deliverable', post('agent-team:at-backend', completed('a00000000000000b6', '没写完。'), { caller: ARCH, callerId: 'a00000000000000a6', toolUseId: 'toolu_01B6' }), GATE, dirs.projectDir)
     const c = contextOf(run('deliverable', post(ARCH, completed('a00000000000000a6', '回报。'), { toolUseId: 'toolu_01A6' }), GATE, dirs.projectDir))
     assert.match(c, /S5 进度/)
+    assert.ok(c.includes('刚返回的 at-architect 是 S5 的协调者，这一段没有它自己的产物；'), c)
     assert.match(c, /at-backend（前台派发）：05-impl\/at-backend\.md 还没有——门禁最后一回拦了它/)
   })
 })
@@ -560,4 +563,47 @@ test('19-41 实测 M5：前台并发派发时，后返回的那个收到的账�
     assert.ok(!c.includes('05-impl/at-frontend.md'), c)
     assert.ok(!c.includes('05-impl/at-backend.md'), c)
   })
+})
+
+// M4h（docs/43，审查第 14 条的 S2 进度）：at-product 既是 S2 的协调者又是产者——它返回时自己那份交了、这一段却没齐（它派的 at-ui 还在跑），原来
+// 进度那一支走不进去（只认「这一段没有它自己的产物」的协调者），PM 收不到 at-ui 的现状。现在照样报；头一句说它自己那几份交了，收尾不提实现记录。
+test('M4h 第 14 条：S2 的协调者 at-product 前台跑完、自己那份交了而 at-ui 还在跑——进度照样列它派的 at-ui', () => {
+  inRun({ stage: 'S2', roster: ['at-product', 'at-ui'], artifacts: ['00-contract.md', '01-prd.md'] }, (dirs) => {
+    run('deliverable', post('agent-team:at-ui', launched('a00000000000000c1'), { caller: PRODUCT, callerId: 'a00000000000000c0', toolUseId: 'toolu_01C1' }), GATE, dirs.projectDir)
+    const c = contextOf(run('deliverable', post(PRODUCT, completed('a00000000000000c0', '回报。'), { toolUseId: 'toolu_01C0' }), GATE, dirs.projectDir))
+    assert.match(c, /S2 进度/)
+    assert.match(c, /at-ui（后台派发）：02-ui-spec\.md 还没有/)
+    assert.ok(c.includes('刚返回的 at-product 是 S2 的协调者，它自己的那几份交了；门禁记着它这一次在 S2 派出去的：'), c)
+    assert.ok(!c.includes('这一段没有它自己的产物') && !c.includes('实现记录'), c)
+    assert.ok(c.includes('不在上面的产者是它这一次没派过的'), c)
+  })
+})
+
+test('M4h 第 14 条：S2 的协调者 at-product 后台派发、完成通知到了——完成核验那一支同样报它派的 at-ui', () => {
+  inRun({ stage: 'S2', roster: ['at-product', 'at-ui'], artifacts: ['00-contract.md', '01-prd.md'] }, (dirs) => {
+    run('deliverable', post(PRODUCT, launched('a00000000000000d0'), { toolUseId: 'toolu_01D0' }), GATE, dirs.projectDir)
+    run('deliverable', post('agent-team:at-ui', launched('a00000000000000d1'), { caller: PRODUCT, callerId: 'a00000000000000d0', toolUseId: 'toolu_01D1' }), GATE, dirs.projectDir)
+    const c = contextOf(run('completion', prompt(note('a00000000000000d0', { toolUseId: 'toolu_01D0' })), GATE, dirs.projectDir))
+    assert.match(c, /S2 进度/)
+    assert.match(c, /at-ui（后台派发）：02-ui-spec\.md 还没有/)
+    assert.ok(c.includes('它自己的那几份交了'), c)
+  })
+})
+
+test('M4h 第 14 条：S2 齐了之后 at-product 再返回——不报进度（这一段已经齐了）', () => {
+  inRun({ stage: 'S2', roster: ['at-product', 'at-ui'], artifacts: ['00-contract.md', '01-prd.md', '02-ui-spec.md', '02-wireframe.html'] }, (dirs) => {
+    run('deliverable', post('agent-team:at-ui', launched('a00000000000000e1'), { caller: PRODUCT, callerId: 'a00000000000000e0', toolUseId: 'toolu_01E1' }), GATE, dirs.projectDir)
+    const c = contextOf(run('deliverable', post(PRODUCT, completed('a00000000000000e0', '回报。'), { toolUseId: 'toolu_01E0' }), GATE, dirs.projectDir))
+    assert.doesNotMatch(c, /S2 进度/)
+  })
+})
+
+// M4h：收尾那一句只在执行段提实现记录——不是执行段（S2）的协调者，名单上的都交了时不叫 PM 去读实现记录（S2 没有实现记录）。
+test('M4h 第 14 条：协调者进度的收尾——不是执行段的不提实现记录、说「产者」', () => {
+  const rows = [{ role: 'at-ui', mode: 'background', stop: 'pass', items: [{ name: '02-ui-spec.md', state: 'ok' }, { name: '02-wireframe.html', state: 'ok' }] }]
+  const s2 = coordinatorProgress({ role: 'at-product', stageId: 'S2', rows, recipientIsPm: true, selfDone: true, impl: false })
+  assert.ok(s2.includes('名单上的都交了：照 /agent-team:at 第 3 节核实再推进。') && !s2.includes('实现记录'), s2)
+  assert.ok(s2.includes('不在上面的产者是它这一次没派过的'), s2)
+  const s5 = coordinatorProgress({ role: 'at-architect', stageId: 'S5', rows: [{ ...rows[0], items: [{ name: '05-impl/at-ui.md', state: 'ok' }] }], recipientIsPm: true })
+  assert.ok(s5.includes('（实现记录的「被写路径隔离拒绝」一节要读）') && s5.includes('不在上面的执行角色是它这一次没派过的'), s5)
 })
