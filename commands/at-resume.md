@@ -86,6 +86,9 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 批准还在（门禁记在 run 目录里，`/agent-team:at-status` 的「返工批准」一行列得出），不用再问；被拒的那次写入照第 4 节重写
 （连同那条 escalation 与新的 `contract_sha`，上一个会话里记过的就带着）。
 
+**问了没答的**（`escalations` 里有 `answer` 是空串的：上一个会话问了用户、还没等到答复）：先照 `${CLAUDE_PLUGIN_ROOT}/commands/at.md`
+第 4 节把那一问重新问一遍，答复补进那一条的 `answer`，再往下走。
+
 契约那一段（`00-contract.md`）**不要重写**。它是这趟 run 的需求基线，S1 之后就冻结了；
 要改只能走升级流程（见 `/agent-team:at` 的第 4 节，`${CLAUDE_PLUGIN_ROOT}/commands/at.md`）。
 例外：门禁回传叫你「原样重写一次 `00-contract.md`、从回传里拿 sha」的（`contract_sha` 是 PENDING 或不合法，或者 `state.json` 是重建的），

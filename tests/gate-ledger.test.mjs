@@ -8,6 +8,7 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { run, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
+import { dispatchLine } from '../hooks/lib/completion.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 
@@ -1386,4 +1387,38 @@ test('M4b【阶段】执行段齐了、写者是非产者（架构师改 03-arch
     assert.ok(out.includes('都在磁盘上了'), `${agent}：${out}`)
     assert.match(out, /被写路径隔离拒绝[^。]*已解决[^。]*那一份不算交齐/, agent)
   }
+})
+
+// M4g（docs/42，docs/39 §3）：门禁的派发记录里有它在那一段被派出去过、state.json 没记——这不是漏派（下级派出去的也算叫到），出路只有补记。
+// 原来与真漏派报成同一句（「是漏了：把它派出去」），PM 把「叫到」读窄时会照着去重派一个已经交过产物的人。
+const LOGGED_HEAD = "【产者交代】下面这些角色在门禁的派发记录里、在那一段被派出去过，state.json 却没记着这一趟在那一段叫到过它们"
+const withDispatchLog = (opts, body) => {
+  const { projectDir, pluginDir } = makeRun(opts)
+  try {
+    const line = dispatchLine({ at: '2026-09-20T10:12:00Z', agentId: 'a-ui', toolUseId: 'u-ui', role: 'at-ui', stage: 'S2', caller: 'at-product', callerId: 'a-product', mode: 'background' })
+    writeFileSync(join(projectDir, '.agent-team', 'runs', 'r1', 'dispatches.jsonl'), line + '\n')
+    return body(projectDir)
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
+}
+test('M4g：S2 的 at-ui 在门禁的派发记录里、state.json 没记——产者交代单列成漏记，叫 PM 补记、不重派；不说「是漏了」', () => {
+  for (const shape of [{ stage_roles: { S2: ['at-product'] } }, {}]) {
+    withDispatchLog({ ...WALKED_S2, ...shape }, (projectDir) => {
+      const ctx = ctxOf(writeState(projectDir).stdout)
+      assert.ok(ctx.includes(LOGGED_HEAD), ctx)
+      assert.match(ctx, /S2 的 at-ui/)
+      assert.ok(ctx.includes('不用重派，也不要写进 trimmed'), ctx)
+      assert.ok(!ctx.includes('不是裁剪，是漏了'), ctx)
+    })
+  }
+})
+
+test('M4g：收件人不是 PM 时，漏记那一段说补记是 PM 的动作、原样冒泡', () => {
+  withDispatchLog({ ...WALKED_S2, stage_roles: { S2: ['at-product'] } }, (projectDir) => {
+    const ctx = ctxOf(writeState(projectDir, 'at-architect').stdout)
+    assert.ok(ctx.includes(LOGGED_HEAD), ctx)
+    assert.ok(ctx.includes('补记是 PM 的动作') && ctx.includes('原样冒泡给派你的人'), ctx)
+  })
 })

@@ -599,3 +599,24 @@ test('M3y：回到链首 S1 时，后面各段都不报', () => {
   })
   assert.deepEqual(decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE }).gaps, [])
 })
+
+// M4g（docs/42，docs/39 §3「产者交代不并派发记录」）：H6 判「叫过」时并上了门禁的派发记录，产者交代原来只看 stage_roles（旧 run 是 roster）
+// 与 trimmed——PM 把「叫到」读窄（只记自己亲手派的）时，被下级派出去、真交了产物的角色报出来的话与真漏派逐字相同（docs/11 §5.24）。
+// 派发记录里有它在那一段被派出去过的，gap 标 dispatched: true，调用方单列；别的段派过不算。
+test('M4g：门禁的派发记录里有它在那一段被派出去过——gap 标 dispatched，别的段派过不算', () => {
+  for (const state of [
+    { stage: 'S3', history: h('S1', 'S2', 'S3'), stage_roles: { S2: ['at-product'] }, roster: ['at-product'], trimmed: {} },
+    m2bShapeA(),
+  ]) {
+    const base = decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE })
+    assert.deepEqual(base.gaps, [{ stage: 'S2', role: 'at-ui' }], JSON.stringify(state))
+    const logged = decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE, dispatched: { S2: ['at-ui'] } })
+    assert.deepEqual(logged.gaps, [{ stage: 'S2', role: 'at-ui', dispatched: true }], JSON.stringify(state))
+    const elsewhere = decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE, dispatched: { S5: ['at-ui'] } })
+    assert.deepEqual(elsewhere.gaps, [{ stage: 'S2', role: 'at-ui' }], JSON.stringify(state))
+    // 读坏的派发记录（不是对象、段的值不是数组、里面有非字符串）不改变结论。
+    for (const bad of [null, [], 'x', { S2: 'at-ui' }, { S2: [1, null] }]) {
+      assert.deepEqual(decideCoverage({ stages, state, availableRoles: M2B_AVAILABLE, dispatched: bad }).gaps, [{ stage: 'S2', role: 'at-ui' }], JSON.stringify(bad))
+    }
+  }
+})

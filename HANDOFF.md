@@ -30,7 +30,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/41` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/42` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，下一轮从 `docs/39` §5 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -124,6 +124,10 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   缺测试」、不写不冒泡；缺测试的回退回 S5，验收因为缺测试判不了的也回 S5（S5、S6、S7 各一轮）。不写测试只认两种情形——这一次没有新行为；
   契约第 1 节用户原话或第 4 节修订记录里用户说了不要——产者、架构师、`at-qa`、`/agent-team:at` 逐字同一句；契约第 3 节是 PM 自己写的、架构方案
   是架构师写的，都不算（被验的一方不能单方面关掉它），别的理由由 PM 问用户。门禁不读内容。理由在 `docs/41`（§8 是复核）。
+- **sha 一律用门禁给的值**：【产物】、账本比对的「没记」与「记账之后被改过」、`rework_base` 的拒绝理由都带门禁按磁盘算的值（先剥 BOM、
+  折 CRLF），PM 照抄、不自己算、不照着磁盘改账；PM 写完 `reach.json`，门禁按当前 `project.json` 与花名册重算核对。产者交代并上门禁的派发
+  记录：派发记录里有、`stage_roles` 没记的单列成「漏记」，出路只有补记。问用户之前先记一条 `answer` 为空串的 escalation，答复之后补上。
+  理由在 `docs/42`。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。

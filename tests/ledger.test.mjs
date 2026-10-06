@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { buildLedgerNotices } from '../hooks/lib/ledger.mjs'
+import { buildLedgerNotices, reachCheckNotice } from '../hooks/lib/ledger.mjs'
 
 const STAGES = {
   S1: { role: 'at-pm', requires: [], produces: ['00-contract.md'] },
@@ -427,4 +427,27 @@ test('M4f 复核：__main__ 与 at-pm 都单列在「不受 paths 管」那一�
   const s = joined({ kind: 'project', reach })
   assert.ok(s.includes('不受 paths 管：__main__（主会话）、at-pm——都是项目经理这一个身份，写路径隔离在 run 目录之外对它一律放行、不看前缀。门禁不拦不等于该它写：项目代码与配置照旧交给执行角色，补 paths 是认领，不是代写。'), s)
   for (const r of ['__main__', 'at-pm']) assert.ok(!s.includes(`${r} 还能写到`), s)
+})
+
+// M4g（docs/42，审查第 28 条）：PM 照【触达表】把 JSON 手抄进 .agent-team/reach.json，原来没有任何东西核它。现在写完之后门禁按当前
+// project.json 与花名册重算：语义上相同（键序、BOM、CRLF 都不算不同）不吭声；不同、或者写进去的不是合法 JSON，给出正确的那一份。
+test('M4g 第 28 条 reachCheckNotice：与门禁算的相同就不吭声；不同、不是合法 JSON 都给出正确的那一份', () => {
+  const expected = {
+    'at-pm': { own: [], reachableRoles: ['a'], reach: ['p/'], widenedBy: { 'p/': 'at-pm → a' }, widened: true, unrestricted: true },
+    a: { own: ['p/'], reachableRoles: [], reach: ['p/'], widenedBy: {}, widened: false, unrestricted: false },
+  }
+  const text = JSON.stringify(expected, null, 2)
+  const reordered = JSON.stringify({ a: expected.a, 'at-pm': expected['at-pm'] })
+  const bomCrlf = String.fromCharCode(0xfeff) + text.split('\n').join('\r\n')
+  for (const ok of [text, reordered, bomCrlf]) assert.equal(reachCheckNotice({ writtenText: ok, expected }), null, ok.slice(0, 30))
+  const wrong = JSON.stringify({ ...expected, a: { ...expected.a, unrestricted: true } })
+  for (const [bad, head] of [
+    [wrong, '【触达表】刚写进 .agent-team/reach.json 的与门禁按当前 project.json 与花名册算出来的不一样'],
+    ['{', '【触达表】刚写进 .agent-team/reach.json 的不是一份合法的 JSON'],
+    ['', '【触达表】刚写进 .agent-team/reach.json 的不是一份合法的 JSON'],
+  ]) {
+    const n = reachCheckNotice({ writtenText: bad, expected })
+    assert.ok(typeof n === 'string' && n.startsWith(head), n)
+    assert.ok(n.includes('把下面这份 JSON 原样重写进 .agent-team/reach.json：' + String.fromCharCode(10) + JSON.stringify(expected, null, 2)), n)
+  }
 })

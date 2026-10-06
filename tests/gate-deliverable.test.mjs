@@ -1428,7 +1428,7 @@ test('M3b：收件人是 at-product 时，收尾不再出现「把 artifacts 改
 // （那只证明夹具活着），是「同一份夹具、只把收件人换成 PM，那句收尾就回来」。
 // 分支判据被改成恒「改不了」时这一条红；被改成恒「改得了」时上一条红。两条各守一侧。
 test('M3b 正向自检锚：同一份夹具、收件人换成 at-pm 时那句收尾照旧出现——上一条守的是分支，不是文案整个没了', () => {
-  assert.match(driftAs('at-pm').context, /把 artifacts 改成与磁盘一致/)
+  assert.ok(driftAs('at-pm').context.includes(PM_DRIFT_TAIL), driftAs('at-pm').context)
 })
 
 test('M3b：收件人改不了时，文案要先说清这一条他改不了', () => {
@@ -1486,7 +1486,7 @@ test('M3b：收件人是 at-pm 时 stderr 为空——那条路径本来就通�
 })
 
 test('M3b：收件人是主线程（没有 agent_type 这个键）时，保持旧收尾', () => {
-  assert.match(driftAs(null).context, /把 artifacts 改成与磁盘一致/)
+  assert.ok(driftAs(null).context.includes(PM_DRIFT_TAIL), driftAs(null).context)
 })
 
 test('M3b：收件人是主线程时 stderr 为空', () => {
@@ -1505,4 +1505,33 @@ test('M4b H5a：执行段已经齐了、非协调者返回、PM 收件——同�
   const out = runH5a({ stage: 'S5', returns: 'at-qa', roster: ['at-ui'], diskArtifacts: ['05-impl/at-ui.md'] }, { ledger: LEDGER_UI })
   assert.match(out, /两种可能/)
   assert.match(out, /被写路径隔离拒绝[^。]*已解决[^。]*那一份不算交齐/)
+})
+
+// M4g（docs/42，审查第 28 条）：PM 收到的「没记」那一行原来不带值，收尾却叫它「需要的话把 artifacts 改成与磁盘一致」——PM 只好自己算 sha
+// （M5f 里 haiku 版 PM 真的去调了 Get-FileHash），带 BOM、CRLF 的产物上造出假漂移；照着磁盘改账还会把一次真漂移洗成合法（与契约那一条
+// 同一个理由）。现在每一行都带门禁按磁盘算出来的值，收尾叫它先弄清是谁写的、照这个值记、不要自己算。
+const PM_DRIFT_TAIL = "记账之前先弄清是谁、什么时候写的或改的：写它的人回报里报过同一个值（它写的时候收到过【产物】回传），或者是返工、同一段里重派重写的，照上面门禁算出来的值记进 artifacts；对不上、又说不清的，告诉用户，不要为了消掉这一条照着磁盘改账。值一律用上面给的，不要自己算——门禁先剥 BOM、把 CRLF 折成 LF 再算，自己算的会对不上。"
+test('M4g 第 28 条：「没记」「记账之后被改过」两种行都带门禁按磁盘算出来的值；PM 的收尾照这个值记、不自己算、不照着磁盘改账', () => {
+  const { projectDir, pluginDir } = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md', '02-ui-spec.md', '02-wireframe.html'], roster: ['at-product', 'at-ui'] })
+  try {
+    const runDir = join(projectDir, '.agent-team', 'runs', 'r1')
+    writeFileSync(join(runDir, '01-prd.md'), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('# PRD\r\n甲\r\n', 'utf8')]))
+    const state = JSON.parse(readFileSync(join(runDir, 'state.json'), 'utf8'))
+    state.artifacts = { '02-ui-spec.md': 'sha256:' + '0'.repeat(64) }
+    writeFileSync(join(runDir, 'state.json'), JSON.stringify(state))
+    for (const agent of ['at-pm', null]) {
+      const input = { tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-ui' } }
+      if (agent !== null) input.agent_type = agent
+      const c = JSON.parse(run('deliverable', input, GATE, projectDir).stdout).hookSpecificOutput.additionalContext
+      const prd = sha256OfContract(readFileSync(join(runDir, '01-prd.md')))
+      const ui = sha256OfContract(readFileSync(join(runDir, '02-ui-spec.md')))
+      assert.ok(c.includes(`01-prd.md：磁盘上有这份文件，但 artifacts 里没记（门禁按磁盘算出来是 ${prd}）`), c)
+      assert.ok(c.includes(`02-ui-spec.md：记录的是 sha256:${'0'.repeat(64)}，门禁按磁盘算出来是 ${ui}——记账之后被改过`), c)
+      assert.ok(c.includes(PM_DRIFT_TAIL), c)
+      for (const k of ['改成与磁盘一致', '核实磁盘内容']) assert.ok(!c.includes(k), `${k}：${c}`)
+    }
+  } finally {
+    rmSync(projectDir, { recursive: true, force: true })
+    rmSync(pluginDir, { recursive: true, force: true })
+  }
 })

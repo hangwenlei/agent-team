@@ -355,12 +355,15 @@ test('命令正文里出现的每个 .agent-team 路径都是控制文件、门�
 //     的 roster 算出 never_invoked（M1b 终审 I4）。⚠️ 它和 state.json 的 roster 语义
 //     不同，别把两个名单混成一个：available_roles 是「这个项目有哪些角色可用」
 //     （配置，/at-init 写一次），roster 是「这一趟真正叫到了谁」（运行时逐段累加）。
+//   - answer：与 kind 同一种——escalations[] 每条记录自己的字段（M4g，docs/42：问之前先记一条 answer 为空串的，答复之后补上；
+//     「往 state.json 的 escalations 追加一条……answer 先写空串」那一句里两者挨在一起）。
 const STATE_JSON_BLOCK_NON_FIELDS = new Set([
   'slug',
   'subagent_type',
   'kind',
   'produces',
   'available_roles',
+  'answer',
 ])
 // ⭐ 裁定「锚跟着收窄往里挪」：这条同样**收窄两次**（按空行切段后 `block.includes('state.json')` 这个
 // 跳过条件，以及 STATE_JSON_BLOCK_NON_FIELDS 这个豁免集），而此前同样没有正向锚。

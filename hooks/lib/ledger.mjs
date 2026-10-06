@@ -22,6 +22,8 @@ import { isPlainObject, isStageChain, productsOfStage, stageRoles, isRolePattern
 import { VERIFY_REDO, splitByAccept } from './freshness.mjs'
 import { closedAt, blockerLine } from './closing.mjs'
 import { MAIN } from './decide.mjs'
+import { normalizeText } from './text-norm.mjs'
+import { isDeepStrictEqual } from 'node:util'
 
 // 「这个动作只能由 PM 执行、非 PM 请回报上级」——stageDone 与 produce 两个分支都要
 // 说这句话：推进/收口 state.stage 与把哈希写进 artifacts，改的都是同一份控制文件
@@ -114,6 +116,26 @@ export function pluginNotice(report) {
  *   一条回传上。兜底（删掉重建）按 project.json 的写入次数计：run 进行中时 PM 写 state.json 已经收到过一次同样的句子，
  *   只说「第二次写完仍收到」会被数成第二次，第一次写完就删文件（合并前复测 8 次里 1 次）。
  */
+// M4g（docs/42，审查第 28 条）：PM 照【触达表】把 JSON 手抄进 .agent-team/reach.json，原来没有任何东西核它（/agent-team:at-status 照它报，
+// 抄错了就报错）。写完之后门禁按当前 project.json 与花名册重算、与写进去的比：语义上相同（键序、BOM、CRLF 不算不同）不吭声；不同、或者
+// 写进去的不是合法 JSON，给出正确的那一份。expected 是门禁算的，原样落盘的 JSON 走 safeJson（docs/27 §2.1）。
+export function reachCheckNotice({ writtenText, expected }) {
+  let parsed
+  try {
+    parsed = JSON.parse(normalizeText(writtenText ?? ''))
+  } catch {
+    parsed = undefined
+  }
+  if (parsed !== undefined && isDeepStrictEqual(parsed, expected)) return null
+  return (
+    '【触达表】刚写进 .agent-team/reach.json 的' +
+    (parsed === undefined
+      ? '不是一份合法的 JSON（写坏了，或者被截断了）。'
+      : '与门禁按当前 project.json 与花名册算出来的不一样（手抄出错，或者是照旧的 project.json 算的）。') +
+    `把下面这份 JSON 原样重写进 .agent-team/reach.json：\n${safeJson(expected)}`
+  )
+}
+
 export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 = false }) {
   const why = utf16 ? '（文件是 UTF-16 编码，门禁只读 UTF-8）' : '（常见原因：注释、尾逗号、文件不是 UTF-8 编码）'
   const how = justWritten
