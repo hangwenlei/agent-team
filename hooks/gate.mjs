@@ -47,10 +47,13 @@ import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, isControlFile, isGateF
 import {
   CONTRACT_BASE_FILE,
   DRIFT_FIX,
+  bodyShaOf,
   decideContractBase,
   driftHead,
   initialBase,
+  lastDispatchAtOf,
   outdatedFix,
+  outdatedProducts,
   readContractBase,
   revisedBase,
   section1Drift,
@@ -68,7 +71,7 @@ import { validateProject } from './lib/project.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
 import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
-import { isPlainObject, isStageChain, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName } from './lib/stages.mjs'
+import { isPlainObject, isStageChain, isVerifyStage, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
 import { GATE_CHECK_PATH, gateCheckReason, isGateCheck, selfCheckIdentity } from './lib/gate-check.mjs'
@@ -904,43 +907,92 @@ function writeDeliveredSnapshot(ctx) {
 }
 
 // M3z：门禁专属文件的拒绝理由。路径是这次调用给的，过 inline。
-// M4j（docs/45，审查第 20 条）：契约基线（hooks/lib/contract-base.mjs）。推进出第一段之后门禁第一次见到 state.json 时记下第 1 节与整份
-// 契约的 sha；已经有了就不动。写不进、读不出都只是少拦，留一行痕。
+// M4j（docs/45，审查第 20 条）：契约基线（hooks/lib/contract-base.mjs）。推进出第一段之后门禁第一次见到 state.json 时记下第 1 节、修订指纹与
+// 修订块标题；已经有了就不动——在却读不出来的也不动（复核 F7：读坏就重记，会把改过的第 1 节洗成基线），留一行痕。切不出第 1 节的，记下
+// 之后说一句【契约】（复核 F8）。写不进只是少拦，留一行痕。返回要追加的回传。
 function ensureContractBase(ctx) {
   try {
-    if (!isStageChain(ctx.stages) || !isPlainObject(ctx.state) || ctx.artifactExists(CONTRACT_BASE_FILE)) return
-    if (Object.keys(ctx.stages).indexOf(ctx.state.stage) <= 0) return
+    if (!isStageChain(ctx.stages) || !isPlainObject(ctx.state)) return []
+    if (Object.keys(ctx.stages).indexOf(ctx.state.stage) <= 0) return []
+    if (ctx.artifactExists(CONTRACT_BASE_FILE)) {
+      if (!readContractBase(ctx.artifactBytes(CONTRACT_BASE_FILE))) {
+        process.stderr.write('agent-team ledger：契约基线在却读不出来，这一趟第 1 节与对着上一版契约的结论不核（不重记，免得把改过的第 1 节记成基线）。\n')
+      }
+      return []
+    }
     const base = initialBase(ctx.artifactBytes(CONTRACT_FILE))
-    if (!base) return
+    if (!base) return []
     writeFileSync(join(ctx.runDir, CONTRACT_BASE_FILE), `${JSON.stringify(base, null, 2)}\n`)
+    return base.section1 === null
+      ? ['【契约】契约里切不出第 1 节（「## 1. 用户原话」那一节，到下一个「## 2.」这样的编号节标题为止）：门禁这一趟不锁第 1 节，改了它也不会拦。' +
+          '契约的格式见 at-contract-format：第 1 节逐字照抄用户原话。']
+      : []
   } catch (e) {
-    process.stderr.write(`agent-team ledger：契约基线写不进（${e?.message ?? e}），这一次不记，下一次写 state.json 时再试。\n`)
+    process.stderr.write(`agent-team ledger：契约基线写不进（${quote(e?.message ?? e, { max: 120 })}），这一次不记，下一次写 state.json 时再试。\n`)
+    return []
   }
 }
 
-// 写契约之后：整份 sha 变了（一次修订）就重拍验证段的快照；第 1 节变了、有对着上一版契约的结论，各说一段【契约】。没有基线（还在第一段、
-// 或者读不出来）不说。
+// 修订那一刻还在跑的验证段角色（复核 F4）：这一趟派发记录里，验证段的派发、门禁没见它停下（最后一回是「拦」也算没停）的。角色与段只认
+// 花名册与阶段链认得的（派发记录 Bash 写得进），说出来的都是插件自己的名字。
+function runningVerifiers(ctx) {
+  const bytes = ctx.artifactBytes(DISPATCHES_FILE)
+  if (!bytes || !isStageChain(ctx.stages)) return []
+  const log = readDispatchLog(bytes.toString('utf8'))
+  const roster = loadRoster()
+  const out = []
+  for (const d of log.dispatches) {
+    if (!Object.hasOwn(ctx.stages, d.stage) || !isVerifyStage(ctx.stages[d.stage])) continue
+    if (!isPlainObject(roster) || !Object.hasOwn(roster, d.role)) continue
+    const last = lastStop(log, d.agent_id)
+    if (last !== null && last !== 'block') continue
+    const label = `${d.role}（${d.stage}）`
+    if (!out.includes(label)) out.push(label)
+  }
+  return out
+}
+
+// 写契约之后（复核 docs/45 §8）：修订指纹变了就按修订块标题分——不改需求的答复只换指纹；改需求的重拍验证段的快照、记下时刻，【契约】列出
+// 对着上一版契约的结论与出路（看当前段），以及修订那一刻还在跑的验证段角色。第 1 节变了另说一段。已经收口的 run 只说一句另起一趟（复核
+// F11：收口之后不再推进、不再回退）。没有基线（还在第一段）不说；在却读不出来留痕。
 function contractBaseNotices(ctx) {
   const out = []
   try {
-    const base = readContractBase(ctx.artifactBytes(CONTRACT_BASE_FILE))
+    const raw = ctx.artifactBytes(CONTRACT_BASE_FILE)
+    const base = readContractBase(raw)
+    if (raw && !base) {
+      process.stderr.write('agent-team ledger：契约基线在却读不出来，这一次不核第 1 节与修订。\n')
+      return out
+    }
     const bytes = ctx.artifactBytes(CONTRACT_FILE)
     if (!base || !bytes) return out
-    const next = revisedBase(base, bytes, verifyShasOf({ stages: ctx.stages, artifactExists: ctx.artifactExists, artifactBytes: ctx.artifactBytes }))
-    if (next) writeFileSync(join(ctx.runDir, CONTRACT_BASE_FILE), `${JSON.stringify(next, null, 2)}\n`)
+    if (closedAt(ctx.state) !== null) {
+      if (section1Drift(base, bytes) || bodyShaOf(bytes.toString('utf8')) !== base.body_sha) {
+        out.push('【契约】这一趟已经收口：收口之后改契约，验证段的结论不再重出、门禁也不再核——交付之后的新改动另起一趟（/agent-team:at）。')
+      }
+      return out
+    }
+    const shas = verifyShasOf({ stages: ctx.stages, artifactExists: ctx.artifactExists, artifactBytes: ctx.artifactBytes })
+    const rev = revisedBase(base, bytes, shas, new Date().toISOString())
+    if (rev) writeFileSync(join(ctx.runDir, CONTRACT_BASE_FILE), `${JSON.stringify(rev.base, null, 2)}\n`)
     if (section1Drift(base, bytes)) {
       out.push(`【契约】${driftHead(ctx.stages)}；这次写入之后磁盘上的第 1 节跟它不一样。${DRIFT_FIX}。改回去之前，推进与收口都会被拒。`)
     }
-    const outdated = next ? Object.keys(next.verify_base) : []
-    if (outdated.length) {
-      const fix = outdatedFix(ctx.stages, outdated)
-      out.push(
-        `【契约】契约改了：验证段已经写成的 ${outdated.join('、')} 对着的是上一版契约（门禁记下了它们这一刻的样子）。` +
-          `推进出验证段与收口之前，它们要对着这一版重出——${fix.text}${fix.rollback ? '，再派人重出' : ''}。`,
-      )
+    if (rev && rev.requirement) {
+      const snap = Object.keys(rev.base.verify_base)
+      const running = runningVerifiers(ctx)
+      const parts = []
+      if (snap.length) {
+        const fix = outdatedFix(ctx.stages, snap, ctx.state?.stage)
+        parts.push(
+          `验证段已经写成的 ${snap.join('、')} 对着的是上一版契约（门禁记下了它们这一刻的样子）。推进出验证段与收口之前，它们要对着这一版重出——${fix.text}。`,
+        )
+      }
+      if (running.length) parts.push(`还在跑的 ${running.join('、')}：门禁没见它停下，它交的结论同样算对着上一版契约——停下之后在那一段同段重派它重出。`)
+      if (parts.length) out.push(`【契约】契约改了：${parts.join('')}`)
     }
   } catch (e) {
-    process.stderr.write(`agent-team ledger：契约基线读写出错（${e?.message ?? e}），这一次不核第 1 节与验证段的新旧。\n`)
+    process.stderr.write(`agent-team ledger：契约基线读写出错（${quote(e?.message ?? e, { max: 120 })}），这一次不核第 1 节与验证段的新旧。\n`)
   }
   return out
 }
@@ -1594,8 +1646,10 @@ function main() {
       // M4d 复核（docs/38 §3）：门禁自己记的派发记录——推进与收口判「这一段叫过谁」时并上它（hooks/lib/advance.mjs 的 calledIn）：PM 少记、
       // 漏记进 stage_roles 的人，照样要它交、整段裁掉也不算。读不出来、没有这份文件就当没有，退回只看 stage_roles。
       let dispatched = null
+      let dispatchLog = null
       try {
-        dispatched = dispatchedByStage(readDispatchLog(readFileSync(join(runDir, DISPATCHES_FILE), 'utf8')))
+        dispatchLog = readDispatchLog(readFileSync(join(runDir, DISPATCHES_FILE), 'utf8'))
+        dispatched = dispatchedByStage(dispatchLog)
       } catch {}
       const closing = decideClosing({ before, after, stages: stagesForRework, diskSha, atPath: join(ROOT, 'commands', 'at.md'), dispatched })
       if (!closing.ok) denyAndExit(closing.reason, spec.event)
@@ -1616,15 +1670,27 @@ function main() {
 
       // M4j（docs/45，审查第 20 条）：契约基线（门禁专属的 contract-base.json，hooks/lib/contract-base.mjs）——推进与收口时，契约第 1 节
       // 跟推进出第一段时记下的不同、验证段的结论对着上一版契约，拒。排在最后：缺、空、上一轮的、返工预算这些先说。读不出来当没有基线。
-      let contractBase = null
+      // 复核（docs/45 §8）：修订那一刻还在跑的验证段角色交的结论也算对着上一版契约——按派发记录里它那一段最后一次派出去的时刻认（F4）；
+      // 基线在却读不出来留一行痕（F7）。
+      let contractBaseRaw = null
       let contractBytes = null
       try {
-        contractBase = readContractBase(readFileSync(join(runDir, CONTRACT_BASE_FILE)))
+        contractBaseRaw = readFileSync(join(runDir, CONTRACT_BASE_FILE))
       } catch {}
       try {
         contractBytes = readFileSync(join(runDir, CONTRACT_FILE))
       } catch {}
-      const cb = decideContractBase({ before, after, stages: stagesForRework, base: contractBase, contractBytes, diskSha })
+      const contractBase = readContractBase(contractBaseRaw)
+      if (contractBaseRaw && !contractBase) process.stderr.write('agent-team H6 契约基线：在却读不出来，这一次不核第 1 节与对着上一版契约的结论。\n')
+      const cb = decideContractBase({
+        before,
+        after,
+        stages: stagesForRework,
+        base: contractBase,
+        contractBytes,
+        diskSha,
+        lastDispatchAt: lastDispatchAtOf(stagesForRework, dispatchLog),
+      })
       if (!cb.ok) denyAndExit(cb.reason, spec.event)
     }
   }
@@ -1845,8 +1911,7 @@ function main() {
     // 留一行痕。内容没变就不写。
     if (kind === 'state') writeDeliveredSnapshot(ctx)
     // M4j（docs/45）：契约基线——推进出第一段之后第一次见到 state.json 时记下（contract-base.mjs）；写契约之后按它说【契约】。
-    if (kind === 'state') ensureContractBase(ctx)
-    const contractBaseLines = kind === 'contract' ? contractBaseNotices(ctx) : []
+    const contractBaseLines = kind === 'state' ? ensureContractBase(ctx) : kind === 'contract' ? contractBaseNotices(ctx) : []
 
     // M3u（docs/29）：project.json 的形状问题只有 PM 改得了，在它写控制文件的几个时机说出来——写 project.json
     // 本身（三档全报）；每趟 run 开头写 current-run（三档全报，已装用户的旧配置在 S1 就露面，不等 S5 撞上拒绝）；
@@ -1915,7 +1980,25 @@ function main() {
       const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
       return logBytes ? dispatchedByStage(readDispatchLog(logBytes.toString('utf8'))) : null
     })()
-    const blockers =
+    // M4j 复核（docs/45 §8，F6）：对着上一版契约的验证段结论也是收口阻碍——与 H6 的契约判据同一份 outdatedProducts，【阶段】不说「该收口了」，
+    // 出路与 H6 同一份 outdatedFix（看当前段）。
+    const outdatedNow = (() => {
+      try {
+        const base = readContractBase(ctx.artifactBytes(CONTRACT_BASE_FILE))
+        if (!base) return new Set()
+        const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
+        const log = logBytes ? readDispatchLog(logBytes.toString('utf8')) : null
+        const diskSha = (n) => {
+          if (!ctx.artifactExists(n)) return { exists: false, sha: null }
+          const b = ctx.artifactBytes(n)
+          return { exists: true, sha: b ? sha256OfContract(b) : null }
+        }
+        return new Set(outdatedProducts({ stages: ctx.stages, base, diskSha, lastDispatchAt: lastDispatchAtOf(ctx.stages, log) }))
+      } catch {
+        return new Set()
+      }
+    })()
+    const blockers0 =
       stageDone && closedAt(ctx.state) === null && ctx.state?.stage === lastStageId(ctx.stages)
         ? closeBlockers({
             stages: ctx.stages,
@@ -1926,10 +2009,16 @@ function main() {
               const bytes = ctx.artifactBytes(name)
               if (!bytes) return 'unreadable'
               if (isBlankText(bytes)) return 'empty'
-              return fresh.isStale(name) ? 'stale' : 'ok'
+              return fresh.isStale(name) ? 'stale' : outdatedNow.has(name) ? 'outdated' : 'ok'
             },
           })
         : null
+    const blockers = (() => {
+      const od = Array.isArray(blockers0) ? blockers0.filter((b) => b.why === 'outdated').map((b) => b.name) : []
+      if (!od.length) return blockers0
+      const fix = outdatedFix(ctx.stages, od, ctx.state?.stage).text
+      return blockers0.map((b) => (b.why === 'outdated' ? { ...b, fix } : b))
+    })()
 
     const notices = buildLedgerNotices({
       kind,

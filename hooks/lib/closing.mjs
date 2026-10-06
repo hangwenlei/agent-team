@@ -111,6 +111,10 @@ export function blockerLine(stages, b, state, prior, dispatched = null) {
     const book = isPlainObject(state?.stage_roles) ? `并进 roster 与 stage_roles 的 ${sid}` : '并进 roster'
     return `${b.name}（${what}：派它的产者 ${who} 补交——这一段它还没交过，不用记回退；补交的角色在收口那一次${book}${trim}）`
   }
+  // M4j 复核（docs/45 §8，F6）：对着上一版契约的验证段结论（contract-base.mjs 的 outdatedProducts）；出路由调用方按当前段算好挂在 fix 上。
+  if (b.why === 'outdated') {
+    return `${b.name}（对着上一版契约：契约在它写成之后改过——${typeof b.fix === 'string' ? b.fix : '照写契约那一次的【契约】重出'}）`
+  }
   if (b.why === 'stale') {
     // 复核二（G9）：08-delivery.md 是 PM 自己的验证段产物——不说「让它的产者」。
     if (own) return `${b.name}（还是上一轮的：这是你自己的产物，这一轮重写）`
