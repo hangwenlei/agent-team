@@ -25,9 +25,11 @@ const INIT = read('commands/at-init.md')
 const AT = read('commands/at.md')
 const RESUME = read('commands/at-resume.md')
 
-test('at-init §2：建键禁令只对按设计不认领路径的那几个，并逐个点名；at-pm 另行放行，不被说成「没键就拒」', () => {
+// M4f 复核（docs/41 §8，审查低-5）：原来这里钉着括注「执行角色里只对它们」——M4f 之后没有键的执行角色都被拒，那句成了假话，
+// 而这条判据让它只能留着。整条的写法在 tests/tests-and-nopaths-prose.test.mjs 里整句钉。
+test('at-init §2：建键禁令只对按设计不认领路径的那几个，并逐个点名；at-pm 另行放行，不被说成「没键就拒」；不说「执行角色里只对它们」', () => {
   const s = flat(sectionOf(INIT, '## 2.'))
-  assert.match(s, /执行角色里只对它们/)
+  assert.ok(!s.includes('执行角色里只对它们'), '没有键的执行角色都被拒，「只对它们」是假话')
   assert.match(s, /`at-pm` 不参与路径认领，另行放行/)
   assert.ok(!s.includes('（且只对它们）'), '孤立的「且只对它们」会被读成 at-pm 没有键也会被拒')
   for (const role of NO_PATHS_ROLES) assert.ok(s.includes(role), role)

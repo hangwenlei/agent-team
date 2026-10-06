@@ -74,8 +74,8 @@ export function prefixProblems(prefix, { platform = process.platform, label = '�
   } else {
     const where = landing(prefix, platform)
     // 改法要说全：只说「前缀要留在项目里」时，实测 PM 会把 '../shared/' 换成项目里并不存在的 'shared/'——多半是
-    // 另一个地方，这个角色凭空多认领了一个目录。理由不说「这个角色写不到项目外」：PM、没有键的 at-qa、at-acceptance
-    // 写得到，这句还会随降档出现在 at-pm 的键上；说的是门禁不会按这条前缀放行任何写入（第 8 步整条作废、认领者
+    // 另一个地方，这个角色凭空多认领了一个目录。理由不说「这个角色写不到项目外」：PM 写得到（M4f 之前没有键的 at-qa、
+    // at-acceptance 也写得到，docs/41），这句还会随降档出现在 at-pm 的键上；说的是门禁不会按这条前缀放行任何写入（第 8 步整条作废、认领者
     // 查找跳过它、H3 不拿不判人的键判人），这对每一种持有者都成立。
     if (where === 'outside') {
       out.block.push(

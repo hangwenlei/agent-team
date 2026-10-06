@@ -101,6 +101,8 @@ flowchart TB
 
 实现阶段的角色由架构师分发，项目经理不越级派发；同一阶段的角色并行干活。谁能派谁以 `roster.json` 为准，每一段谁来做、交什么以 `stages.json` 为准。
 
+实现角色为每一条新行为写自动化测试；测试角色只跑、不写，缺测试判不通过，退回实现阶段补。不写测试只有两种情形：这一次没有新行为，或者你说过不要（在需求原话里，或者之后答复的问题里）。
+
 交付之后这一趟就收口了：不再回退，也不再派人。接着要改动或修复，用 `/agent-team:at <改动>` 另起一趟（新的契约、新的返工预算）。返工时，测试、验收与交付报告一律重新出，不沿用上一轮的。
 
 ### 什么时候会问你
@@ -298,6 +300,8 @@ flowchart TB
 ```
 
 Implementation roles are dispatched by the architect — the project manager does not skip levels — and roles in the same stage work in parallel. Who may dispatch whom is defined in `roster.json`; which role does each stage and what it hands over, in `stages.json`.
+
+Implementation roles write automated tests for every new behavior; the testing role runs them but never writes them, and missing tests fail the testing stage and send the run back to implementation. Tests are skipped only when a run adds no new behavior or when you said so — in your original request or in an answer you gave later.
 
 Once delivered, the run is closed: no more rollbacks and no more dispatches. For further changes or fixes, start a new run with `/agent-team:at <change>` (a new contract and a fresh rework budget). During rework, the test, acceptance and delivery reports are always produced anew rather than carried over from the previous round.
 

@@ -44,16 +44,17 @@ function fmt(list) {
   return list.length ? list.join('、') : '（无，这是叶子角色）'
 }
 
-// 花名册有没有用：null、不是对象、数组、空对象都算坏。H1 与 H3（M3u）共用这一份——H3 拿到一个坏花名册
-// 时若照「不在花名册里就不归我管」放行，就对所有人全开（loadRoster 读坏时退回的正是 {}）。
 // 在 run 目录之外不受 project.json 的 paths 管的身份：项目经理（at-pm）与主线程（MAIN）。写路径隔离（writepath.mjs 第 1 步）与
 // 触达表（reach.mjs 的 unrestricted）共用这一个判断（M4f，docs/41，审查第 27 条）：两处各写一份会分叉——触达表原来就把
-// 项目经理报成「只够得到别人认领的那几个前缀」，而写路径隔离对它整段放行。
+// 项目经理报成「只够得到别人认领的那几个前缀」，而写路径隔离对它整段放行。契约守卫的 isContractWriter 也就是它（同一个
+// 函数，M4f 复核）：契约写者与不受 paths 管的是同一个身份；这条豁免的安全性依赖什么，论证在 contract-guard.mjs 那段注释里。
 export function exemptFromPaths(role) {
   const caller = callerOf({ agent_type: role })
   return caller === MAIN || caller === 'at-pm'
 }
 
+// 花名册有没有用：null、不是对象、数组、空对象都算坏。H1 与 H3（M3u）共用这一份——H3 拿到一个坏花名册
+// 时若照「不在花名册里就不归我管」放行，就对所有人全开（loadRoster 读坏时退回的正是 {}）。
 export function isValidRoster(roster) {
   return roster !== null && typeof roster === 'object' && !Array.isArray(roster) && Object.keys(roster).length > 0
 }

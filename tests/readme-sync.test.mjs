@@ -1846,3 +1846,30 @@ test('M4f 第 34 条：两半的「这不是沙箱」都写明 at-qa、at-accept
     assert.ok(!/整段放行|lets them through entirely/.test(s), `${half} 还在说整段放行`)
   }
 })
+
+// M4f 复核（docs/41 §8）：「这不是沙箱」那一条整条钉——只钉其中一句时，复核在那一句后面追加「at-qa 仍可写测试文件」，全套不红。
+const NOT_SANDBOX_WHOLE = [
+  "> **This is not a sandbox.** Write-path isolation governs every team role except the project manager by the `paths` in `project.json`: outside the run directory a role may write only its own prefixes, and nothing at all without an entry — including `at-qa` and `at-acceptance`, which claim no directories by design and write only their own deliverable in the run directory. `Bash` is not watched by any gate, and implementation roles keep it to build and test. Before implementation (and during it, when a role is refused) the project manager adds prefixes to `paths` from the architecture plan (it only adds; it asks you first for `.claude/`, CI/CD or credential locations; it tells you what it added); they stay for later runs.",
+  "> **这不是沙箱。** 写路径隔离按 `project.json` 的 `paths` 管项目经理以外的各个角色：在 run 目录之外，只能写划给自己的前缀，没有条目就哪都写不了——按设计不认领目录的 `at-qa` 与 `at-acceptance` 也一样，它们只写 run 目录里自己那份产物。`Bash` 没有任何门禁看着，而执行角色保留它来构建和测试。项目经理在实现之前（实现中有角色被拒时也会）照架构方案往 `paths` 里补前缀（只加不删；落在 `.claude/`、CI/CD、凭据这类位置的先问你；补了什么会告诉你），这些前缀留给以后各趟。",
+]
+test('M4f 复核：两半「这不是沙箱」那一条整条就是这样，不多不少', () => {
+  for (const [half, k] of HALVES) {
+    const s = blockUnder(read(half), pairOf('## Known Limitations')[k])
+    const head = NOT_SANDBOX_WHOLE[k].slice(0, NOT_SANDBOX_WHOLE[k].indexOf('**', 4) + 2)
+    const line = s.split(/\r?\n/).find((l) => l.startsWith(head))
+    assert.ok(line, `${half} 的已知边界里找不到以「${head}」开头的那一条`)
+    assert.equal(stripWs(line), stripWs(NOT_SANDBOX_WHOLE[k]), `${half} 的「这不是沙箱」那一条变了（整条比对，空白不计）`)
+  }
+})
+
+// M4f 复核（docs/41 §8，审查低-12）：用户要知道的用法——新行为由实现角色写测试，缺测试退回实现阶段；只有两种情形不写。
+const README_TESTS = [
+  "Implementation roles write automated tests for every new behavior; the testing role runs them but never writes them, and missing tests fail the testing stage and send the run back to implementation. Tests are skipped only when a run adds no new behavior or when you said so — in your original request or in an answer you gave later.",
+  "实现角色为每一条新行为写自动化测试；测试角色只跑、不写，缺测试判不通过，退回实现阶段补。不写测试只有两种情形：这一次没有新行为，或者你说过不要（在需求原话里，或者之后答复的问题里）。",
+]
+test('M4f 复核：两半「一趟 run 怎么走」都写明测试由实现角色写、缺测试退回实现阶段、只有两种情形不写', () => {
+  for (const [half, k] of HALVES) {
+    const s = blockUnder(read(half), pairOf('### How a run flows')[k])
+    assert.ok(hasSentence(s, README_TESTS[k]), `${half} 的「一趟 run 怎么走」缺这一段（整句）`)
+  }
+})

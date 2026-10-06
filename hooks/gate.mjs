@@ -131,8 +131,8 @@ function isValidInput(input) {
 // 「最保守」退化路径，而不是让整个检查项的判定半途而废。
 // ⚠️ M3u：H3（decideWritePath）与 validateProject 也消费它。对 H3 来说空花名册**不是**天然保守的——H3 对
 // 「不在花名册里」的调用者放行，{} 会让所有人都「不在花名册里」。所以 decideWritePath 先用 decide.mjs 的
-// isValidRoster（与 H1 同一份）核花名册：读坏时，除 PM 与没有键的 at-qa、at-acceptance 之外一律拒，不走那条
-// 放行。validateProject 读坏时不核对角色名，单列一条【插件】（其余键上的问题照报）。
+// isValidRoster（与 H1 同一份）核花名册：读坏时，除 PM 之外一律拒（没有键的 at-qa、at-acceptance 在那之前的第 2 步就被拒了，
+// M4f），不走那条放行。validateProject 读坏时不核对角色名，单列一条【插件】（其余键上的问题照报）。
 // ⚠️ M3v：deliverable 分支没有 run 时判「这次派发派不派得动」（decideDelegation，读坏时判拒，于是不发「有意的放行」那一段）。
 // ⚠️ M3w：H2（readiness）也消费它——按派发者给多段角色选段，要派发者沿派发边的触达（computeReach）。读坏时触达是空的、
 // callerReach 传 null，按派发者选段退回老规则：既可能多拒（S2 已齐后返修 at-ui）也可能少查（S2 被裁时架构师派 at-ui），

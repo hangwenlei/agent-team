@@ -21,6 +21,7 @@ import { approvalTargetFor, askUserText, limitOf } from './budget.mjs'
 import { isPlainObject, isStageChain, productsOfStage, stageRoles, isRolePatternStage } from './stages.mjs'
 import { VERIFY_REDO, splitByAccept } from './freshness.mjs'
 import { closedAt, blockerLine } from './closing.mjs'
+import { MAIN } from './decide.mjs'
 
 // 「这个动作只能由 PM 执行、非 PM 请回报上级」——stageDone 与 produce 两个分支都要
 // 说这句话：推进/收口 state.stage 与把哈希写进 artifacts，改的都是同一份控制文件
@@ -192,9 +193,9 @@ export function buildLedgerNotices({
     for (const [role, r] of Object.entries(reach)) {
       if (!r) continue
       // M4f（docs/41，审查第 27 条）：不受 paths 管的身份（reach.mjs 的 unrestricted，即项目经理）单列一行——它在 run 目录之外写哪都
-      // 放行，逐条列它「还能写到」的前缀，等于把最宽的身份报成最窄。
+      // 放行，逐条列它「还能写到」的前缀，等于把最宽的身份报成最窄。M4f 复核：__main__ 注明是主会话，不让 PM 与用户读成又一个角色。
       if (r.unrestricted === true) {
-        free.push(inline(role))
+        free.push(role === MAIN ? `${inline(role)}（主会话）` : inline(role))
         continue
       }
       if (!r.widened) continue
@@ -210,8 +211,11 @@ export function buildLedgerNotices({
     // 实现代码违反了 brief 自己写的规则（Task 6 落地时发现，不在简报明确列出的
     // 「已经过时的地方」里）。换成「门禁」——本文件头部注释与 reach.mjs 头部注释
     // 已经在用这个词表达同一个意思（"这不是门禁""不是安全边界"），不是新造的说法。
+    // M4f 复核：末一句提醒门禁不拦不等于该它写——PM 在 S4、S5 补 paths 时收到这一段，「写哪都放行」单说会把它往自己写代码那边推
+    // （docs/35 §5「PM 自己写项目代码」还开着）。
     const freeLine = free.length
-      ? `不受 paths 管：${free.join('、')}——项目经理在 run 目录之外写哪都放行，写路径隔离不看它的前缀。\n`
+      ? `不受 paths 管：${free.join('、')}——都是项目经理这一个身份，写路径隔离在 run 目录之外对它一律放行、不看前缀。` +
+        '门禁不拦不等于该它写：项目代码与配置照旧交给执行角色，补 paths 是认领，不是代写。\n'
       : ''
     const body =
       freeLine +
@@ -402,17 +406,20 @@ function chainIds(stages) {
 // （H5b），被拒还没解决的那一份在门禁看来就是交了；门禁不读它写了什么，这一句把 PM 引到那一节上。H5a「全部齐备」那句同用。
 export const IMPL_RECORD_NOTE =
   '这一段的产物是各执行角色的实现记录：推进之前逐份读，有「被写路径隔离拒绝」一节、里面还有没标「已解决」的条目的，那一份不算交齐；' +
-  '「测试」一节缺了、或者新行为没有测试也没写明为什么的，同样不算（门禁看不出这两点；做法见 /agent-team:at 第 3 节「各段的具体做法」' +
-  '里这一段那一条）。'
+  '「测试」一节缺了、或者有新行为没有测试又不属于那两种情形的，同样不算（门禁看不出这两点；做法与那两种情形见 /agent-team:at 第 3 节' +
+  '「各段的具体做法」里这一段那一条）。'
 
 // 第二轮复核：同一条回传发给执行角色时用这一句——上面那句叫读者去逐份读、去照 /agent-team:at 做，它都做不了。
-const IMPL_RECORD_ROLE_NOTE =
-  '你自己的实现记录里「被写路径隔离拒绝」一节还有没标「已解决」的条目的话，这一段还没做完：回报时照实说，不要只报「齐了」。'
+// M4f 复核（docs/41 §8，审查低-12）：三句都带「测试」一节——只给 PM 那句带，产者与架构师照旧只报被拒那一条，PM 多绕一轮。
+export const IMPL_RECORD_ROLE_NOTE =
+  '你自己的实现记录里「被写路径隔离拒绝」一节还有没标「已解决」的条目、「测试」一节缺了、或者有新行为没有测试又不属于你正文' +
+  '「新行为要有自动化测试」那一节说的两种情形的，这一段还没做完：回报时照实说，不要只报「齐了」。'
 // 文档核对（docs/36 §3.2）：非 PM、又不是这一段产者的写者（S5 里改 03-arch.md 的架构师、提前被派来写 06-test.md 的 at-qa）没有
 // 实现记录，「你自己的」对它们是空话。给一句不预设收件人有实现记录的。
-const IMPL_RECORD_PEER_NOTE =
+export const IMPL_RECORD_PEER_NOTE =
   '这一段的产物是各执行角色的实现记录，门禁不读写了什么：有「被写路径隔离拒绝」一节、里面还有没标「已解决」的条目的那一份' +
-  '不算交齐，回报时照实说，不要只报「齐了」。'
+  '不算交齐，「测试」一节缺了、或者有新行为没有测试又不属于执行角色正文「新行为要有自动化测试」那一节说的两种情形的也不算，' +
+  '回报时照实说，不要只报「齐了」。'
 
 // 执行段「齐了」那句按写者分三档：PM（推进者）、这一段的产者（写的是自己的实现记录）、其余非 PM 写者。产者按 stages.json 这一段
 // 的 role 与 producers 认（stageRoles），writer 是剥过前缀的调用者；读不出来时按「其余」说，那一句对谁都不是假话。

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { computeReach } from '../hooks/lib/reach.mjs'
 import { decideWritePath } from '../hooks/lib/writepath.mjs'
+import { exemptFromPaths } from '../hooks/lib/decide.mjs'
+import { isContractWriter } from '../hooks/lib/contract-guard.mjs'
 
 const ROSTER = {
   'at-pm': { can_delegate_to: ['at-product', 'at-architect'] },
@@ -238,4 +240,12 @@ test('M4f：unrestricted 与写路径隔离第 1 步是同一个判断——标�
     const d = decideWritePath({ role, filePath: '/proj/nobody-claims/x.ts', project: TEMPLATE, runDir: '/proj/.agent-team/runs/r1', stages, agentTeamDir: '/proj/.agent-team', roster: REAL_ROSTER })
     assert.equal(d.decision, v.unrestricted ? 'allow' : 'deny', `${role}：${JSON.stringify(d)}`)
   }
+})
+
+// M4f 复核（docs/41 §8，审查低-6）：「谁算项目经理」只有一份函数体——契约守卫的 isContractWriter 就是 decide.mjs 的 exemptFromPaths。
+// 两份同体实现今天等价，可没有判据钉着，下一次只改一份就分叉（M4f 自己的理由正是「两处各写一份会分叉」）。
+test('M4f 复核：isContractWriter 与 exemptFromPaths 是同一个函数；空串、别的名字、别的插件前缀都不算项目经理', () => {
+  assert.equal(isContractWriter, exemptFromPaths)
+  for (const r of [undefined, null, '__main__', 'at-pm', 'agent-team:at-pm']) assert.equal(exemptFromPaths(r), true, String(r))
+  for (const r of ['', ' ', 'agent-team:', 'at-qa', 'agent-team:at-qa', 'AT-PM', 'other:at-pm', 'at-pm ', 0, {}]) assert.equal(exemptFromPaths(r), false, JSON.stringify(r))
 })
