@@ -35,4 +35,6 @@ contract_sha；升级问题那一种，escalations[] 里问之前记的那一条
 ### 2026-09-18 · 用户主动提出
 **改动**：…
 **对契约的影响**：…
+
+标题照这个格式写：门禁按 kind 分哪些修订要验证段的结论重出——sensitive、env-blocked、budget-exhausted 的答复不用，别的（含用户主动提出）要。
 -->

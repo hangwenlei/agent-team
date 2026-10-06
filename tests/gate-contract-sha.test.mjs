@@ -17,7 +17,8 @@ import { run, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 
-const ORIGINAL = 'fixture 00-contract.md\n'
+// M4j（docs/45）：带上第 1 节——推进出第一段之后门禁记契约基线，切不出第 1 节的契约会多一段【契约】（这几条判据要的是「契约对得上就不提」）。
+const ORIGINAL = 'fixture 00-contract.md\n\n## 1. 用户原话\n\n> 原话\n'
 const REVISED = ORIGINAL + '\n## 4. 修订记录\n\n### 2026-10-04 用户答复\n范围加上导出。\n'
 const H0 = sha256OfContract(ORIGINAL)
 const H1 = sha256OfContract(REVISED)

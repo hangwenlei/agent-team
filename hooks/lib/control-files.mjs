@@ -86,10 +86,13 @@ export function mayBeStateFile(filePath) {
 //   - runs/*/dispatches.jsonl（M4d，docs/38，全量审查第 19 条）：派发记录——H5a 记团队角色的每一次派发（谁、哪一段、谁派的、前台还是后台），
 //     H5b 每拦一回记一行。完成核验（UserPromptSubmit）靠它把完成通知对回角色与段、认出「平台静默放行」。改得了它，完成核验就会核错人、
 //     说错成因（只是说错，不放行任何东西）。
-export const GATE_FILES = ['runs/*/approvals.jsonl', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl']
+//   - runs/*/contract-base.json（M4j，docs/45，审查第 20 条）：契约基线——推进出第一段时契约第 1 节的原文、契约每修订一次那一刻验证段
+//     各份结论的 sha（hooks/lib/contract-base.mjs）。改得了它，第 1 节就能悄悄改写、对着上一版契约的结论就能收口。
+export const GATE_FILES = ['runs/*/approvals.jsonl', 'runs/*/contract-base.json', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl']
 export const APPROVALS_FILE = 'approvals.jsonl'
 export const DELIVERED_FILE = 'delivered.json'
 export const DISPATCHES_FILE = 'dispatches.jsonl'
+export const CONTRACT_BASE_FILE = 'contract-base.json'
 
 /** 按规范化之后的字面末段认：门禁认不出的写法（流后缀、结尾带点）也认——gate.mjs 拿它决定要不要先查 exoticPath。不认 8.3 短名：
  * 短名只在文件已经存在时才有，那时 isGateFile 经 norm() 的 realpath 认得出，而 gate.mjs 对每一次写入都调 isGateFile（复核 platform-1：
@@ -97,7 +100,7 @@ export const DISPATCHES_FILE = 'dispatches.jsonl'
  * 也当成它。 */
 export function mayBeGateFile(filePath) {
   const leaf = leafName(filePath)
-  return leaf === APPROVALS_FILE || leaf === DELIVERED_FILE || leaf === DISPATCHES_FILE
+  return leaf === APPROVALS_FILE || leaf === DELIVERED_FILE || leaf === DISPATCHES_FILE || leaf === CONTRACT_BASE_FILE
 }
 
 /** 任何项目的 .agent-team/runs/<id>/ 下的门禁专属文件——按路径形状认，不只认门禁这一刻认的项目根：写别的项目的批准记录
