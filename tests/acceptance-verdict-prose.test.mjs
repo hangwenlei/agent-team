@@ -34,7 +34,8 @@ const AT_DELIVER =
   `「${DELIVER_LABEL}」（推荐写在问题正文或选项说明里，不写进标签）。用户选了它、或者在对话里单独发了这一句，门禁记下这条批准；它只对那一刻的` +
   '`07-acceptance.md` 有效（验收结论再改一个字就不算了），所以在验收结论写成、你读过之后再问——`S6` 里 `env-blocked` 那一问发生在验收结论写成之前，' +
   '门禁记不下，那一问照常问（往下走还是停），照现状交付到验收结论写成之后再问。答复照上面写进修订块（kind 照问的那一类）：门禁记着这条批准，' +
-  '它之后的第一次改契约算记这条答复，不算改需求、验证段的结论不用重出（一条批准只盖一次修订，之后真改需求照常重出）。交付文档里写明哪些没过、哪些没验证。'
+  '它之后的第一次改契约算记这条答复，不算改需求、验证段的结论不用重出（一份验收结论只批一次、只盖一次修订；之后再往这一块里补写不算修订，' +
+  '改别处、加新块照常算）。交付文档里写明哪些没过、哪些没验证。'
 const AT_CLOSE =
   '门禁收口时读 `07-acceptance.md` 的第一行：不是「结论：通过」的，只有用户经' + `规范标签「${DELIVER_LABEL}」批准过、门禁记下了（第 4 节），收口才放行` +
   '（`S6` 那一问里答过照现状交付的，验收结论写成之后照第 4 节再问一次）。'
@@ -87,8 +88,21 @@ test('M4k：at-status——返工批准那一行列照现状交付的写法，�
 })
 
 test('M4k 评审 F12：at-resume——门禁记下了照现状交付批准、验收结论之后没改过的，不用重问；README 两半目录树里批准记录的说明', () => {
-  assert.ok(has(read('commands/at-resume.md'), `照现状交付那一问同样：门禁记下了批准、验收结论之后没改过的，不用重问，把「${DELIVER_LABEL}」补进 \`answer\`。`))
+  assert.ok(
+    has(
+      read('commands/at-resume.md'),
+      `照现状交付那一问同样：门禁记下了批准的不用重问，把「${DELIVER_LABEL}」补进 \`answer\`——批准绑着那一刻的验收结论，之后验收结论改过的，推进或收口时门禁会拒，照它的出路重问。`,
+    ),
+  )
   const r = read('README.md')
   assert.ok(r.includes('    ├── approvals.jsonl  你批准过的额外返工轮与照现状交付（门禁自己记）'), '中文半')
   assert.ok(r.includes('    ├── approvals.jsonl  extra rework rounds and deliveries as is you approved (recorded by the gates)'), '英文半')
+})
+
+// 复核（低 5）：boot.mjs 加载失败、Node 太旧时给记录器的那两句——说它是批准记录器，返工与照现状交付都要再批一次。
+test('M4k 复核：boot.mjs 给记录器的那两句跟上照现状交付', () => {
+  const boot = read('hooks/boot.mjs')
+  assert.ok(!boot.includes('返工批准的记录器不拦任何东西'), 'boot.mjs 还写着返工批准的记录器')
+  assert.equal(boot.split('（批准记录器不拦任何东西）').length - 1, 2)
+  assert.equal(boot.split('用户若是在批准再返工一轮或照现状交付').length - 1, 2)
 })

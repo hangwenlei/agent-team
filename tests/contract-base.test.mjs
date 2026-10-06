@@ -97,12 +97,13 @@ test('M4j：readContractBase——带 BOM 也读得出；读不出、形状不�
   assert.equal(readContractBase(buf('[]')), null)
   const ok = sha('x')
   const full = { section1: 'a', body_sha: ok, revisions: ['### h', 7], verify_base: { '06-test.md': ok, '07-acceptance.md': 'nope' }, revised_at: NOW }
-  const want = { section1: 'a', body_sha: ok, revisions: ['### h'], verify_base: { '06-test.md': ok }, revised_at: NOW, deliver_used: [] }
+  const want = { section1: 'a', body_sha: ok, revisions: ['### h'], verify_base: { '06-test.md': ok }, revised_at: NOW, deliver_used: [], deliver_blocks: [] }
   assert.deepEqual(readContractBase(buf(JSON.stringify(full))), want)
   assert.deepEqual(readContractBase(buf(BOM + JSON.stringify(full))), want, '复核（F7）：带 BOM')
-  assert.deepEqual(readContractBase(buf(JSON.stringify({ section1: 7, body_sha: 'x', revised_at: 'yes' }))), { section1: null, body_sha: null, revisions: [], verify_base: {}, revised_at: null, deliver_used: [] })
-  // M4k（docs/46）：用过的照现状交付批准（它们的 at）；只留字符串。
-  assert.deepEqual(readContractBase(buf(JSON.stringify({ ...full, deliver_used: [NOW, 7] }))).deliver_used, [NOW])
+  assert.deepEqual(readContractBase(buf(JSON.stringify({ section1: 7, body_sha: 'x', revised_at: 'yes' }))), { section1: null, body_sha: null, revisions: [], verify_base: {}, revised_at: null, deliver_used: [], deliver_blocks: [] })
+  // M4k（docs/46）：用过的照现状交付批准（按验收结论的 sha 记，只留合法的 sha）与用掉它们的修订块标题（只留字符串）。
+  const got = readContractBase(buf(JSON.stringify({ ...full, deliver_used: [ok, 'nope', 7], deliver_blocks: ['### h', 7] })))
+  assert.deepEqual([got.deliver_used, got.deliver_blocks], [[ok], ['### h']])
 })
 
 test('M4j：verificationProducts 与 verifyShasOf——验证段的固定产物；在、不是空白的才记', () => {
@@ -114,20 +115,20 @@ test('M4j：verificationProducts 与 verifyShasOf——验证段的固定产物�
 
 test('M4j：initialBase 与 revisedBase——只改第 1 节、只改空白不算修订；新加的修订块全是不改需求的答复：只换指纹；别的修订：重拍快照、记下时刻', () => {
   const base = initialBase(buf(CONTRACT))
-  assert.deepEqual(base, { section1: SECTION1, body_sha: bodyShaOf(CONTRACT), revisions: [], verify_base: {}, revised_at: null, deliver_used: [] })
+  assert.deepEqual(base, { section1: SECTION1, body_sha: bodyShaOf(CONTRACT), revisions: [], verify_base: {}, revised_at: null, deliver_used: [], deliver_blocks: [] })
   assert.equal(initialBase(null), null)
   const shas = { '06-test.md': sha('t'), '07-acceptance.md': sha('a') }
   assert.equal(revisedBase(base, buf(CONTRACT), shas, NOW), null, '契约没变')
   assert.equal(revisedBase(base, buf(CONTRACT.replace('能加一条', '能加一条、删一条')), shas, NOW), null, '复核（F2）：只改第 1 节不算修订')
   const admin = withBlock(CONTRACT, '### 2026-10-06 · 升级 #1（kind: env-blocked）', '**用户裁决**：照现状交付。')
   assert.deepEqual(revisedBase(base, buf(admin), shas, NOW), {
-    base: { section1: SECTION1, body_sha: bodyShaOf(admin), revisions: ['### 2026-10-06 · 升级 #1（kind: env-blocked）'], verify_base: {}, revised_at: null, deliver_used: [] },
+    base: { section1: SECTION1, body_sha: bodyShaOf(admin), revisions: ['### 2026-10-06 · 升级 #1（kind: env-blocked）'], verify_base: {}, revised_at: null, deliver_used: [], deliver_blocks: [] },
     requirement: false,
   })
   const user = withBlock(admin, '### 2026-10-07 · 用户主动提出')
   const afterAdmin = revisedBase(base, buf(admin), shas, NOW).base
   assert.deepEqual(revisedBase(afterAdmin, buf(user), shas, NOW), {
-    base: { section1: SECTION1, body_sha: bodyShaOf(user), revisions: ['### 2026-10-06 · 升级 #1（kind: env-blocked）', '### 2026-10-07 · 用户主动提出'], verify_base: shas, revised_at: NOW, deliver_used: [] },
+    base: { section1: SECTION1, body_sha: bodyShaOf(user), revisions: ['### 2026-10-06 · 升级 #1（kind: env-blocked）', '### 2026-10-07 · 用户主动提出'], verify_base: shas, revised_at: NOW, deliver_used: [], deliver_blocks: [] },
     requirement: true,
   })
   // 没有新的修订块、改了第 2 节：算改需求。认不出类别的新块：算改需求。
@@ -217,24 +218,41 @@ test('M4j H6：对着上一版契约的结论——推进核到达段之前的�
   assert.equal(decideContractBase({ ...args, before: state('S4'), after: state('S5') }).ok, true)
 })
 
-test('M4k（docs/46，评审 F1、F2）：revisedBase 的照现状交付批准——有一条没用过的（deliverAt），这次修订不算改需求、记进 deliver_used；没有就照标题分；标题里的「照现状交付」不特殊', () => {
+test('M4k（docs/46，评审 F1、F2；复核中 2）：revisedBase 的照现状交付批准——有一条没用过的（按验收结论的 sha），这次修订不算改需求、sha 记进 deliver_used、这次加的修订块记进 deliver_blocks；没有就照标题分；标题里的「照现状交付」不特殊', () => {
   const base = initialBase(buf(CONTRACT))
   const shas = { '06-test.md': sha('t'), '07-acceptance.md': sha('a') }
-  const AT = '2026-10-06T11:00:00.000Z'
-  const conflict = withBlock(CONTRACT, '### 2026-10-06 · 升级 #1（kind: contract-conflict）', '**用户裁决**：照现状交付。')
-  assert.deepEqual(revisedBase(base, buf(conflict), shas, NOW, AT), {
-    base: { ...base, body_sha: bodyShaOf(conflict), revisions: ['### 2026-10-06 · 升级 #1（kind: contract-conflict）'], deliver_used: [AT] },
+  const S = sha('结论：不通过' + NL)
+  const H1 = '### 2026-10-06 · 升级 #1（kind: contract-conflict）'
+  const conflict = withBlock(CONTRACT, H1, '**用户裁决**：照现状交付。')
+  assert.deepEqual(revisedBase(base, buf(conflict), shas, NOW, S), {
+    base: { ...base, body_sha: bodyShaOf(conflict, [H1]), revisions: [H1], deliver_used: [S], deliver_blocks: [H1] },
     requirement: false,
-    deliver: AT,
+    deliver: S,
   })
   assert.equal(revisedBase(base, buf(conflict), shas, NOW).requirement, true, '没有批准：照标题分')
-  assert.equal(revisedBase(base, buf(CONTRACT), shas, NOW, AT), null, '契约没变：不消耗')
-  const marked = withBlock(CONTRACT, '### 2026-10-06 · 升级 #1（kind: contract-conflict）· 照现状交付')
+  assert.equal(revisedBase(base, buf(CONTRACT), shas, NOW, S), null, '契约没变：不消耗')
+  const marked = withBlock(CONTRACT, H1 + '· 照现状交付')
   assert.equal(revisedBase(base, buf(marked), shas, NOW).requirement, true, '标记不特殊')
   // 用过之后：deliver_used 跟着带；下一次修订没有新批准，照标题分。
-  const used = revisedBase(base, buf(conflict), shas, NOW, AT).base
+  const used = revisedBase(base, buf(conflict), shas, NOW, S).base
   const next = withBlock(conflict, '### 2026-10-07 · 用户主动提出')
   const r = revisedBase(used, buf(next), shas, NOW)
   assert.equal(r.requirement, true)
-  assert.deepEqual(r.base.deliver_used, [AT])
+  assert.deepEqual(r.base.deliver_used, [S])
+})
+
+test('M4k 复核（中 1）：用掉批准的那几块修订块，之后只改它们不算修订；改别处、加新块、改了那一块的标题照常判；bodyShaOf 不计这几块', () => {
+  const base = initialBase(buf(CONTRACT))
+  const shas = { '06-test.md': sha('t'), '07-acceptance.md': sha('a') }
+  const S = sha('结论：不通过' + NL)
+  const H1 = '### 2026-10-06 · 升级 #1（kind: contract-conflict）'
+  const answered = withBlock(CONTRACT, H1, '**用户裁决**：照现状交付。')
+  const used = revisedBase(base, buf(answered), shas, NOW, S).base
+  const more = answered + '**对契约的影响**：AC7 不修。' + NL
+  assert.notEqual(bodyShaOf(answered), bodyShaOf(more))
+  assert.equal(bodyShaOf(answered, [H1]), bodyShaOf(more, [H1]))
+  assert.equal(revisedBase(used, buf(more), shas, NOW), null, '只改那一块：不算修订')
+  assert.equal(revisedBase(used, buf(more.replace('- 命令行工具。', '- 网页。')), shas, NOW).requirement, true, '改第 2 节照算')
+  assert.equal(revisedBase(used, buf(withBlock(more, '### 2026-10-07 · 用户主动提出')), shas, NOW).requirement, true, '加新块照算')
+  assert.equal(revisedBase(used, buf(more.split(H1).join('### 2026-10-06 · 升级 #1（kind: tradeoff）')), shas, NOW).requirement, true, '改了那一块的标题：不再认它')
 })

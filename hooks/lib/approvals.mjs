@@ -89,10 +89,14 @@ export function promptDeliver(prompt) {
  */
 export function planApprovals({ items, state, stages, grants, acceptance = null }) {
   const known = [...(Array.isArray(grants) ? grants : [])]
+  // 复核（中 2）：这份验收结论已经记过的照现状交付批准，同一次里前一条记下的也算。
+  const deliverKnown = [...(isPlainObject(acceptance) && Array.isArray(acceptance.approved) ? acceptance.approved : [])]
   const out = []
   for (const item of Array.isArray(items) ? items : []) {
     if (item.deliver) {
-      out.push(item.why ? item : planDeliver(state, acceptance))
+      const p = item.why ? item : planDeliver(state, acceptance, deliverKnown)
+      if (typeof p.sha === 'string') deliverKnown.push(p.sha)
+      out.push(p)
       continue
     }
     if (!item.stage) {
@@ -119,7 +123,7 @@ export function planApprovals({ items, state, stages, grants, acceptance = null 
   return out
 }
 
-function planDeliver(state, acceptance) {
+function planDeliver(state, acceptance, approved = []) {
   if (closedAt(state) !== null) return { deliver: true, why: 'closed' }
   const a = isPlainObject(acceptance) ? acceptance : null
   if (!a || !a.exists || a.blank || typeof a.sha !== 'string') return { deliver: true, why: 'no-acceptance' }
@@ -128,6 +132,7 @@ function planDeliver(state, acceptance) {
   // 评审 F3：对着上一版契约的验收结论（契约基线记着），H6 的契约判据会先拒——批准了也推进不了、收不了口，重出之后 sha 一变批准就作废。排在「通过」之前。
   if (a.outdated === true) return { deliver: true, why: 'outdated-acceptance' }
   if (a.verdict === 'pass') return { deliver: true, why: 'deliver-not-needed' }
+  if (approved.includes(a.sha)) return { deliver: true, why: 'deliver-duplicate' }
   return { deliver: true, name: a.name, sha: a.sha }
 }
 
@@ -160,6 +165,8 @@ function deliverWhyText(why, cause) {
         '验收结论对着上一版契约（契约在它写成之后改过，门禁记着）：照写契约那一次的【契约】、或者 H6 拒绝理由给的出路先让它对着这一版重出，' +
         `读过之后再问。${ASK_DELIVER}`
       )
+    case 'deliver-duplicate':
+      return '这一份验收结论的照现状交付已经记过了（一份结论只批一次、只盖一次修订），不用再问：照常推进或收口。'
     case 'deliver-not-needed':
       return '验收结论第一行是「结论：通过」，不需要批准：照常推进或收口。'
     default:

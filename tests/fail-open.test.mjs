@@ -273,6 +273,8 @@ test('crashContext：把异常消息放进引号；只有 deliverable 与 ledger
   // M3z：approval-ask 在 PostToolUse 上，崩了要说「这次的回答没有记下」；approval-prompt 在 UserPromptSubmit 上，什么都发不了。
   assert.match(crashContext('approval-ask', err, true), /^【门禁】这次的回答没有记下/)
   assert.doesNotMatch(crashContext('approval-ask', err, true), /放行/)
+  // M4k（docs/46，复核低 5）：用户选的可能是照现状交付。
+  assert.match(crashContext('approval-ask', err, true), /「照现状交付」/)
   assert.equal(crashContext('approval-prompt', err, true), null)
   assert.match(crashContext('ledger', { toString: 1 }, true), /^【门禁】/)
 })

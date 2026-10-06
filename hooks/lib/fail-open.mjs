@@ -213,7 +213,7 @@ export function crashContext(check, err, recipientIsPm) {
   } else if (check === 'approval-ask') {
     // M3z（docs/34）：approval-prompt 在 UserPromptSubmit 上，什么都发不了（hookOutput），这里只有 approval-ask。
     text =
-      `【门禁】这次的回答没有记下——门禁自己出了错（${msg}）：用户选的若是「再返工一轮」，它没有记成返工批准。` +
+      `【门禁】这次的回答没有记下——门禁自己出了错（${msg}）：用户选的若是「再返工一轮」或「照现状交付」，它没有记成批准。` +
       '重新问一次；再出错就停下，把这一段原样告诉用户。'
   } else {
     return null

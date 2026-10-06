@@ -11,6 +11,7 @@ import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 import { bodyShaOf } from '../hooks/lib/contract-base.mjs'
+import { dispatchLine } from '../hooks/lib/completion.mjs'
 
 const NL = String.fromCharCode(10)
 const sha = (s) => sha256OfContract(Buffer.from(s, 'utf8'))
@@ -136,14 +137,27 @@ test('M4k 与契约基线的衔接（评审 F1、F2）：门禁记下照现状�
   withRun(S8_RUN, DONE(FAIL), ({ projectDir, runDir }) => {
     putBase(runDir)
     run('approval-ask', asked('照现状交付'), GATE, projectDir)
-    const at = approvalsOf(runDir)[0].at
     writeFileSync(join(runDir, '00-contract.md'), answered)
     const c = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
     assert.ok(!c.includes('契约改了') && c.includes('照现状交付'), c)
     assert.deepEqual(baseNow(runDir).verify_base, {})
-    assert.deepEqual(baseNow(runDir).deliver_used, [at])
+    assert.deepEqual(baseNow(runDir).deliver_used, [sha(FAIL)])
+    // 复核（中 1）：之后往同一块里补一句——不算修订，不重拍。
+    const completed = answered + '**对契约的影响**：第 2 条不修，交付文档写明。' + NL
+    writeFileSync(join(runDir, '00-contract.md'), completed)
+    const c2 = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
+    assert.ok(!c2.includes('契约改了'), c2)
+    assert.deepEqual(baseNow(runDir).verify_base, {})
     assert.equal(decisionOf(run('rework', closeWrite(runDir), GATE, projectDir).stdout), null, '收口放行')
-    writeFileSync(join(runDir, '00-contract.md'), answered + '### 2026-10-07 · 用户主动提出' + NL + '**改动**：加一条：能删。' + NL)
+    // 收口之后（closed_at 落了盘），再往用掉批准的那一块补一句：不算改了契约，不说「已经收口」。
+    const statePath = join(runDir, 'state.json')
+    const closedState = { ...JSON.parse(readFileSync(statePath, 'utf8')), never_invoked: [], closed_at: '2026-10-06T12:00:00Z' }
+    writeFileSync(statePath, JSON.stringify(closedState))
+    writeFileSync(join(runDir, '00-contract.md'), completed + '**补记**：用户确认过。' + NL)
+    const afterClose = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
+    assert.ok(!afterClose.includes('这一趟已经收口'), afterClose)
+    writeFileSync(statePath, JSON.stringify({ ...closedState, closed_at: null }))
+    writeFileSync(join(runDir, '00-contract.md'), completed + '### 2026-10-07 · 用户主动提出' + NL + '**改动**：加一条：能删。' + NL)
     const again = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
     assert.ok(again.includes('契约改了'), again)
   })
@@ -207,6 +221,77 @@ test('M4k 评审 F11：插件的阶段链上认不出验收那一段——H6 不
   } finally {
     rmSync(plugin, { recursive: true, force: true })
   }
+})
+
+test('M4k 复核（中 2）：同一份验收结论批两次——第二次不记（回传说已经记过）；改过的验收结论上的旧批准不用来盖修订', () => {
+  const putBase = (runDir) =>
+    writeFileSync(join(runDir, 'contract-base.json'), JSON.stringify({ section1: '> 做一个待办清单。', body_sha: bodyShaOf(CONTRACT), revisions: [], verify_base: {}, revised_at: null }))
+  withRun(S8_RUN, DONE(FAIL), ({ projectDir, runDir }) => {
+    run('approval-prompt', prompted('照现状交付'), GATE, projectDir)
+    const again = ctxOf(run('approval-ask', asked('照现状交付'), GATE, projectDir).stdout)
+    assert.ok(again.includes('没有记成照现状交付的批准') && again.includes('已经记过'), again)
+    assert.equal(approvalsOf(runDir).length, 1)
+  })
+  withRun(S8_RUN, DONE(FAIL), ({ projectDir, runDir }) => {
+    putBase(runDir)
+    run('approval-ask', asked('照现状交付'), GATE, projectDir)
+    writeFileSync(join(runDir, '07-acceptance.md'), FAIL + '- 第 3 条：没过' + NL)
+    writeFileSync(join(runDir, '00-contract.md'), CONTRACT + '### 2026-10-07 · 用户主动提出' + NL + '**改动**：加一条：能删。' + NL)
+    const c = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
+    assert.ok(c.includes('契约改了'), c)
+  })
+  // 批准记录里同一份 sha 有两行（Bash 写的、旧版本记的）：也只盖一次修订——第二次修订照标题分。
+  withRun(S8_RUN, DONE(FAIL), ({ projectDir, runDir }) => {
+    putBase(runDir)
+    const line = JSON.stringify({ at: '2026-10-06T11:00:00.000Z', source: 'ask', kind: 'deliver-as-is', product: '07-acceptance.md', sha: sha(FAIL) })
+    writeFileSync(join(runDir, 'approvals.jsonl'), line + NL + line.split('11:00').join('11:05') + NL)
+    const first = CONTRACT + '### 2026-10-06 · 升级 #1（kind: contract-conflict）' + NL + '**用户裁决**：照现状交付。' + NL
+    writeFileSync(join(runDir, '00-contract.md'), first)
+    assert.ok(!ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout).includes('契约改了'))
+    writeFileSync(join(runDir, '00-contract.md'), first + '### 2026-10-07 · 用户主动提出' + NL + '**改动**：加一条：能删。' + NL)
+    const second = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
+    assert.ok(second.includes('契约改了'), second)
+  })
+})
+
+test('M4k 复核（中 3）：防绕过——派发记录里在 S7 派出去过的 at-acceptance，删名字、写 trimmed 也翻不成整段裁掉；同一次写入里删名字、裁掉并收口也不行', () => {
+  const dispatched = { stage: 'S8', history: upTo('S8'), roster: ['at-qa'], stage_roles: { S6: ['at-qa'], S7: [] }, trimmed: { 'at-acceptance': 'S7' } }
+  withRun(dispatched, DONE(FAIL), ({ projectDir, runDir }) => {
+    const line = dispatchLine({ at: '2026-10-06T10:00:00.000Z', agentId: 'a0000000000000a07', toolUseId: null, role: 'at-acceptance', stage: 'S7', caller: 'at-pm', callerId: null, mode: 'background' })
+    writeFileSync(join(runDir, 'dispatches.jsonl'), line + NL)
+    const d = decisionOf(run('rework', closeWrite(runDir), GATE, projectDir).stdout)
+    assert.ok(d?.permissionDecision === 'deny' && d.permissionDecisionReason.includes('「结论：不通过」'), JSON.stringify(d))
+  })
+  withRun(S8_RUN, DONE(FAIL), ({ projectDir, runDir }) => {
+    const w = stateWrite(runDir, (s) => ({ ...s, roster: ['at-qa'], stage_roles: { S6: ['at-qa'], S7: [] }, trimmed: { 'at-acceptance': 'S7' }, never_invoked: [], closed_at: '2026-10-06T12:00:00Z' }))
+    const d = decisionOf(run('rework', w, GATE, projectDir).stdout)
+    assert.ok(d?.permissionDecision === 'deny' && d.permissionDecisionReason.includes('「结论：不通过」'), JSON.stringify(d))
+  })
+})
+
+test('M4k 复核（中 3、低 4）：记录器认对着上一版契约的——验收结论修订之前派出去、之后才交的；测试报告对着上一版契约的；S7 的【阶段】这时不提照现状交付', () => {
+  const REV = '2026-10-06T10:30:00.000Z'
+  const baseWith = (runDir, vb) =>
+    writeFileSync(join(runDir, 'contract-base.json'), JSON.stringify({ section1: '> 做一个待办清单。', body_sha: bodyShaOf(CONTRACT), revisions: [], verify_base: vb, revised_at: REV }))
+  withRun(S8_RUN, DONE(FAIL), ({ projectDir, runDir }) => {
+    baseWith(runDir, {})
+    const line = dispatchLine({ at: '2026-10-06T10:00:00.000Z', agentId: 'a0000000000000a07', toolUseId: null, role: 'at-acceptance', stage: 'S7', caller: 'at-pm', callerId: null, mode: 'background' })
+    writeFileSync(join(runDir, 'dispatches.jsonl'), line + NL)
+    const r = ctxOf(run('approval-ask', asked('照现状交付'), GATE, projectDir).stdout)
+    assert.ok(r.includes('对着上一版契约'), r)
+    assert.deepEqual(approvalsOf(runDir), [])
+  })
+  withRun(S8_RUN, DONE(FAIL), ({ projectDir, runDir }) => {
+    baseWith(runDir, { '06-test.md': sha('test' + NL) })
+    const r = ctxOf(run('approval-ask', asked('照现状交付'), GATE, projectDir).stdout)
+    assert.ok(r.includes('对着上一版契约'), r)
+    assert.deepEqual(approvalsOf(runDir), [])
+  })
+  withRun(S7_RUN, { '06-test.md': 'test' + NL, '07-acceptance.md': FAIL }, ({ projectDir, runDir }) => {
+    baseWith(runDir, { '07-acceptance.md': sha(FAIL) })
+    const c = ctxOf(run('ledger', posted(join(runDir, 'state.json')), GATE, projectDir).stdout)
+    assert.ok(!c.includes('「照现状交付」'), c)
+  })
 })
 
 test('M4k H3：批准记录是门禁专属文件——拒绝理由说它也记照现状交付的批准', () => {

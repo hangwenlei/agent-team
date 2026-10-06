@@ -229,6 +229,9 @@ test('M4k planApprovals：照现状交付——验收结论没过（不通过、
   // 评审 F3：验收结论对着上一版契约（契约基线记着）——不记，先重出；排在「通过」之前（对着上一版契约的通过同样不算数）。
   assert.deepEqual(p(AT_S8, ACC({ outdated: true })), [{ deliver: true, why: 'outdated-acceptance' }])
   assert.deepEqual(p(AT_S8, ACC({ outdated: true, verdict: 'pass' })), [{ deliver: true, why: 'outdated-acceptance' }])
+  // 复核（中 2）：这一份验收结论已经记过照现状交付——不再记（一份结论只批一次）。
+  assert.deepEqual(p(AT_S8, ACC({ approved: [ACC().sha] })), [{ deliver: true, why: 'deliver-duplicate' }])
+  assert.deepEqual(p(AT_S8, ACC({ approved: ['sha256:' + 'f'.repeat(64)] })), rec)
   assert.deepEqual(planApprovals({ items: [{ deliver: true, why: 'multi' }], state: AT_S8, stages: STAGES, grants: [], acceptance: ACC() }), [{ deliver: true, why: 'multi' }])
   // 返工批准与照现状交付混在一次里：各判各的。
   assert.deepEqual(planApprovals({ items: [{ stage: 'S9' }, { deliver: true }], state: AT_S8, stages: STAGES, grants: [], acceptance: ACC() }), [{ stage: 'S9', why: 'off-chain' }, ...rec])
@@ -240,7 +243,7 @@ test('M4k approvalNotices：照现状交付记下了——只对现在这份验�
   assert.match(s, /只对现在这份 07-acceptance\.md 有效/)
   assert.match(s, /一条批准只盖一次修订/)
   assert.doesNotMatch(s, /· 照现状交付/)
-  const cases = { closed: /已经收口/, 'no-acceptance': /还没有验收结论/, 'stale-acceptance': /上一轮/, 'outdated-acceptance': /对着上一版契约/, 'deliver-not-needed': /结论：通过/, malformed: /认不出/, multi: /多选/, array: /多选/, afk: /离开/, 'follow-up': /追问/, response: /另写了一段话/, notes: /备注/, 'no-run': /没有进行中的 run/, unreadable: /读不到/, 'write-failed': /写不进/ }
+  const cases = { closed: /已经收口/, 'no-acceptance': /还没有验收结论/, 'stale-acceptance': /上一轮/, 'outdated-acceptance': /对着上一版契约/, 'deliver-duplicate': /已经记过/, 'deliver-not-needed': /结论：通过/, malformed: /认不出/, multi: /多选/, array: /多选/, afk: /离开/, 'follow-up': /追问/, response: /另写了一段话/, notes: /备注/, 'no-run': /没有进行中的 run/, unreadable: /读不到/, 'write-failed': /写不进/ }
   for (const [why, re] of Object.entries(cases)) {
     const t = approvalNotices({ results: [{ deliver: true, why }], total: 0, cause: 'state' }).join(NL)
     assert.match(t, /^【门禁】这次的回答没有记成照现状交付的批准/, why)
@@ -249,4 +252,9 @@ test('M4k approvalNotices：照现状交付记下了——只对现在这份验�
   const again = approvalNotices({ results: [{ deliver: true, why: 'malformed' }], total: 0 }).join(NL)
   assert.match(again, /「照现状交付」/)
   assert.doesNotMatch(again, /再返工一轮/)
+})
+
+test('M4k 复核（中 2）：同一次两道题都选了「照现状交付」——前一条记下之后，第二条判成已经记过', () => {
+  const two = planApprovals({ items: [{ deliver: true }, { deliver: true }], state: AT_S8, stages: STAGES, grants: [], acceptance: ACC() })
+  assert.deepEqual(two, [{ deliver: true, name: '07-acceptance.md', sha: ACC().sha }, { deliver: true, why: 'deliver-duplicate' }])
 })

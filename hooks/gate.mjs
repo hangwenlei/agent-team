@@ -934,7 +934,8 @@ function ensureContractBase(ctx) {
   }
 }
 
-// M4k（docs/46，评审 F1、F2）：approvals.jsonl 里绑着验收结论现在这份、契约基线还没记成用过的照现状交付批准（第一条的 at）；没有给 null。
+// M4k（docs/46，评审 F1、F2）：验收结论现在这份的 sha——approvals.jsonl 里有它的照现状交付批准、契约基线还没把它记成用过（复核中 2：按 sha 记，
+// 同一份结论批两次也只盖一次修订）；没有给 null。
 function unusedDeliverApproval(ctx, base) {
   const acc = acceptanceOf(ctx.stages)
   if (!acc) return null
@@ -942,9 +943,8 @@ function unusedDeliverApproval(ctx, base) {
   const ab = ctx.artifactBytes(APPROVALS_FILE)
   if (!accBytes || !ab) return null
   const now = sha256OfContract(accBytes)
-  const used = new Set(Array.isArray(base.deliver_used) ? base.deliver_used : [])
-  const hit = readDeliverApprovalEntries(ab.toString('utf8'), acc.name).find((e) => e.sha === now && e.at !== null && !used.has(e.at))
-  return hit ? hit.at : null
+  if (Array.isArray(base.deliver_used) && base.deliver_used.includes(now)) return null
+  return readDeliverApprovalEntries(ab.toString('utf8'), acc.name).some((e) => e.sha === now) ? now : null
 }
 
 // 修订那一刻还在跑的验证段角色（复核 F4）：这一趟派发记录里，验证段的派发、门禁没见它停下（最后一回是「拦」也算没停）的。角色与段只认
@@ -981,7 +981,7 @@ function contractBaseNotices(ctx) {
     const bytes = ctx.artifactBytes(CONTRACT_FILE)
     if (!base || !bytes) return out
     if (closedAt(ctx.state) !== null) {
-      if (section1Drift(base, bytes) || bodyShaOf(bytes.toString('utf8')) !== base.body_sha) {
+      if (section1Drift(base, bytes) || bodyShaOf(bytes.toString('utf8'), base.deliver_blocks) !== base.body_sha) {
         out.push('【契约】这一趟已经收口：收口之后改契约，验证段的结论不再重出、门禁也不再核——交付之后的新改动另起一趟（/agent-team:at）。')
       }
       return out
@@ -1019,7 +1019,9 @@ function contractBaseNotices(ctx) {
 }
 
 // M4k（docs/46）：记录器判「照现状交付要不要记」时读的验收结论——在不在、空不空、sha、首行（approvals.mjs 的 planApprovals 那一支）；评审 F3：
-// 对不对着上一版契约（与 H6 的契约判据同一份 outdatedProducts）。契约基线读不出来就当不对着（少拦）。
+// 对不对着上一版契约（与 H6 的契约判据同一份 outdatedProducts）——复核（低 4）：验证段里不是项目经理自己写的那几份（测试报告、验收结论）有一份对着
+// 上一版就算（测试报告对着上一版，收口要回退重测，验收结论跟着重出，批准白记）；契约基线读不出来就当不对着（少拦）。复核（中 2）：这份验收结论已经
+// 记过的照现状交付批准（approved）。
 function acceptanceOnDisk(ctx, name) {
   const bytes = ctx.artifactExists(name) ? ctx.artifactBytes(name) : null
   let outdated = false
@@ -1028,10 +1030,16 @@ function acceptanceOnDisk(ctx, name) {
     if (base && bytes) {
       const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
       const log = logBytes ? readDispatchLog(logBytes.toString('utf8')) : null
-      const diskSha = (n) => (n === name ? { exists: true, sha: sha256OfContract(bytes) } : { exists: false, sha: null })
-      outdated = outdatedProducts({ stages: ctx.stages, base, diskSha, lastDispatchAt: lastDispatchAtOf(ctx.stages, log) }).includes(name)
+      const diskSha = (n) => {
+        const b = ctx.artifactExists(n) ? ctx.artifactBytes(n) : null
+        return b ? { exists: true, sha: sha256OfContract(b) } : { exists: false, sha: null }
+      }
+      outdated = outdatedProducts({ stages: ctx.stages, base, diskSha, lastDispatchAt: lastDispatchAtOf(ctx.stages, log) }).some(
+        (n) => !isContractWriter(producerOfName(ctx.stages, n)?.role),
+      )
     }
   } catch {}
+  const ab = ctx.artifactBytes(APPROVALS_FILE)
   return {
     name,
     exists: Boolean(bytes),
@@ -1039,6 +1047,7 @@ function acceptanceOnDisk(ctx, name) {
     sha: bytes ? sha256OfContract(bytes) : null,
     verdict: bytes ? acceptanceVerdict(bytes) : null,
     outdated,
+    approved: readDeliverApprovals(ab ? ab.toString('utf8') : null, name),
   }
 }
 
@@ -2104,7 +2113,8 @@ function main() {
     const acceptanceNote = (() => {
       try {
         const acc = acceptanceOf(ctx.stages)
-        if (!acc || !stageDone || ctx.state?.stage !== acc.stageId || closedAt(ctx.state) !== null) return null
+        // 复核（低 4）：验收结论对着上一版契约的，H6 先按契约判据拒（出路是重出），记录器也不记照现状交付——这一句不说。
+        if (!acc || !stageDone || ctx.state?.stage !== acc.stageId || closedAt(ctx.state) !== null || outdatedNow.has(acc.name)) return null
         const ab = ctx.artifactBytes(APPROVALS_FILE)
         const block = acceptanceBlock({
           stages: ctx.stages,

@@ -290,5 +290,7 @@ test('M4k askUserText：带上第三个选项「照现状交付」的条件与�
   assert.equal(L, '照现状交付')
   assert.equal(v.DELIVER_LABEL, L)
   const t = ask('S5', [], '再回退。')
-  assert.ok(t.includes('验收结论已经写成、第一行不是「结论：通过」的') && t.includes(`第三个选项，标签逐字写「${L}」`), t)
+  assert.ok(t.includes('这一轮的验收结论已经写成、第一行不是「结论：通过」的') && t.includes(`第三个选项，标签逐字写「${L}」`), t)
+  // 复核（低 6）：问不了用户时，照现状交付的那一句也给。
+  assert.ok(t.includes(`要照现状交付的，整条只写「${L}」`), t)
 })
