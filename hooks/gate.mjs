@@ -14,7 +14,7 @@ import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSyn
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
-import { MAIN, callerOf, decideDelegation, stripPluginPrefix } from './lib/decide.mjs'
+import { MAIN, callerOf, decideDelegation, malformedCaller, malformedCallerReason, stripPluginPrefix } from './lib/decide.mjs'
 import { denyOutput, crashNotice } from './lib/deny.mjs'
 import { projectRootFrom, readProjectConfig, readRunContext } from './lib/runctx.mjs'
 import { candidateStages, decideReadiness } from './lib/readiness.mjs'
@@ -1124,7 +1124,9 @@ function main() {
 
   if (CHECK === 'delegation') {
     const result = decideDelegation(input, loadRoster())
-    if (result.decision === 'deny') denyAndExit(result.reason, spec.event)
+    // M4i 复核（docs/44 §8）：被设置或 --agent 换掉的主会话（带 agent_type、不是项目经理、没有 agent_id）被拒时，理由末尾说身份——H1 的
+    // 「冒泡给上级」对它不成立（M10e：架构师被 --agent 换成主会话）。别的调用者 selfCheckIdentity 返回空串。
+    if (result.decision === 'deny') denyAndExit(result.reason + selfCheckIdentity(input, '派发'), spec.event)
   }
 
   if (CHECK === 'readiness') {
@@ -1243,6 +1245,9 @@ function main() {
     // hook 输入照样带 agent_type（docs/05-M0-结论.md「次要事实」），这种
     // 配置下 at-pm 会作为一个有名有姓的角色继续往下走 per-role 判定，
     // 不享受这条豁免（Task 4 复审 1）。
+    // M4i 复核（docs/44 §8，低-7）：与 H1 同一个形状检查——agent_type 在却认不出，就判不出它归不归本插件管，按安全边界拒（原来走
+    // 下面「花名册外的调用者放行」）。
+    if (malformedCaller(input)) denyAndExit(malformedCallerReason('写入'), spec.event)
     const role = callerOf(input)
     if (role === MAIN) process.exit(0)
 
@@ -1289,8 +1294,10 @@ function main() {
         )
         process.exit(0)
       }
+      // M4i 复核（docs/44 §8，M10f）：被换掉的主会话自举到一半（runs 下非空、指针还没写）就落到这里，理由只说「有人建过 run 而指针不在」，
+      // 它会当成别人留下的坏 run——末尾接上身份那一句（别的调用者返回空串）。
       denyAndExit(
-        `agent-team 写路径门禁读不到运行上下文（${ctx.reason}），按安全边界拒绝。`,
+        `agent-team 写路径门禁读不到运行上下文（${ctx.reason}），按安全边界拒绝。` + selfCheckIdentity(input, '写入'),
         spec.event,
       )
     }
@@ -1314,7 +1321,9 @@ function main() {
       agentTeamDir: ctx.agentTeamDir,
       roster: loadRoster(),
     })
-    if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
+    // M4i 复核（docs/44 §8，低-8）：主会话被设置或 --agent 换掉时（带 agent_type、不是项目经理、没有 agent_id），拒绝理由末尾说身份——
+    // 它没有上级，「冒泡给上级」对它不成立；它第一次撞上的往往就是写控制文件这一下（selfCheckIdentity 对别的调用者返回空串）。
+    if (r.decision === 'deny') denyAndExit(r.reason + selfCheckIdentity(input, '写入'), spec.event)
 
     // M3z（docs/34，全量审查第 16 条）：不记回退就重做。非 PM 写 run 目录里自己名下、早于 state.stage 那一段的产物，它在当前段
     // 又没有活、那份已经交过 → 拒（hooks/lib/redo.mjs）。PM 自己的产物不判（契约修订块、04-dispatch.md 的增补都是正文明令）。
@@ -1371,7 +1380,7 @@ function main() {
         process.exit(0)
       }
       denyAndExit(
-        `agent-team 契约保护读不到运行上下文（${ctx.reason}），按安全边界拒绝。`,
+        `agent-team 契约保护读不到运行上下文（${ctx.reason}），按安全边界拒绝。` + selfCheckIdentity(input, '写入'),
         spec.event,
       )
     }
@@ -1388,7 +1397,7 @@ function main() {
       filePath,
       runDir: ctx.runDir,
     })
-    if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
+    if (r.decision === 'deny') denyAndExit(r.reason + selfCheckIdentity(input, '写入'), spec.event)
   }
 
   if (CHECK === 'rework') {

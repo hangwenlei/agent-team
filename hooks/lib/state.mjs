@@ -236,7 +236,8 @@ export function validateState(state, { stages, grants } = {}) {
   // 判据认不出它，没有派发记录时缺产物的推进会被放过、【阶段】哑掉。roster、stage_roles、trimmed 的键、never_invoked 都看，同一个名字只报一次。
   {
     const prefixed = new Set()
-    const scan = (list) => list.forEach((r) => typeof r === 'string' && r.startsWith(PLUGIN_PREFIX) && prefixed.add(r))
+    // 只剩前缀的退化名（stripPluginPrefix 原样返回）不在这里说：叫它「写裸名」就自相矛盾了（复核，docs/44 §8）。
+    const scan = (list) => list.forEach((r) => typeof r === 'string' && r.startsWith(PLUGIN_PREFIX) && stripPluginPrefix(r) !== r && prefixed.add(r))
     if (isStringArray(state.roster)) scan(state.roster)
     if (isStringArray(state.never_invoked)) scan(state.never_invoked)
     if (isPlainObject(state.stage_roles)) Object.values(state.stage_roles).forEach((roles) => isStringArray(roles) && scan(roles))
@@ -244,6 +245,15 @@ export function validateState(state, { stages, grants } = {}) {
     for (const r of prefixed) {
       p(`${quote(r)} 带着插件前缀：state.json 里的角色名（roster、stage_roles、trimmed、never_invoked）写裸名 ${quote(stripPluginPrefix(r))}——带前缀的对不上 stages.json 里的产者名，按段的判据认不出它`)
     }
+  }
+  // M4i 复核（docs/44 §8，低-9）：项目经理不进 roster 与 stage_roles——它们记的是叫到的角色，PM 自己做的那几段不写（M5f 里 haiku 版 PM
+  // 这样记过，docs/39 §3）。只报不拦，同几个名字只报一次。
+  {
+    const pmNames = new Set()
+    const scanPm = (list) => list.forEach((r) => typeof r === 'string' && stripPluginPrefix(r) === 'at-pm' && pmNames.add(r))
+    if (isStringArray(state.roster)) scanPm(state.roster)
+    if (isPlainObject(state.stage_roles)) Object.values(state.stage_roles).forEach((roles) => isStringArray(roles) && scanPm(roles))
+    if (pmNames.size) p(`项目经理（${[...pmNames].map((r) => quote(r)).join('、')}）不进 roster 与 stage_roles：它们记的是叫到的角色，你自己做的那几段不写`)
   }
 
   // ——— trimmed（M3a 新加的字段，与 roster 是一对）———

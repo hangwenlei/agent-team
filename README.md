@@ -162,7 +162,7 @@ flowchart TB
 > **主会话会被接管成 `at-pm`。** 它的工具面是 `Agent(...)`（受派发白名单约束）、`AskUserQuestion`、`Bash`、`Read`、`Glob`、`Grep`、`Write`、`Edit`——能改动的范围与普通会话相当，把它限制在目标项目里的是角色说明，不是工具权限。它拿不到你在普通会话里能用的 MCP 工具与网页搜索、抓取（WebSearch、WebFetch），团队里其余角色也拿不到——每个角色只拿自己清单里的工具。按上面的方式安装，影响范围只在安装它的那个项目目录；也不要用 `--agent`、或在你自己的设置里设 `agent` 键，把主会话换成别的角色，门禁按主会话的身份判定。
 
 > [!NOTE]
-> **设置里的 `agent` 会盖掉项目经理。** 用户、项目或本地设置里写了别的 `agent`，主会话就不是 `agent-team:at-pm`，团队跑不起来（门禁自检会说出来）：去掉那一项设置，或者起会话时加 `--agent agent-team:at-pm`。
+> **设置里的 `agent` 会盖掉项目经理。** 用户、项目或本地设置里写了别的 `agent`（或者起会话时带了别的 `--agent`），主会话就不是 `agent-team:at-pm`，团队跑不起来（门禁会说出来）：去掉那一项设置，或者起会话时加 `--agent agent-team:at-pm`。
 
 > [!IMPORTANT]
 > **续会话要带上 `--plugin-dir`。** `claude --resume` 不会继承这个参数；忘了带，CLI 会打印 `Continuing with the default tools and system prompt — the agent's tool restrictions no longer apply.`，插件命令与全部角色限制随即失效。按 local 作用域安装时同理：只在安装它的项目目录里续会话。
@@ -368,7 +368,7 @@ You can watch a role but not talk to it: roles report their questions to the pro
 > **The main session is taken over as `at-pm`.** Its tool surface is `Agent(...)` (bound by the dispatch whitelist), `AskUserQuestion`, `Bash`, `Read`, `Glob`, `Grep`, `Write` and `Edit` — it can change anything an ordinary session can, and what keeps it inside the target project is its role definition, not its permissions. It does not get the MCP tools or the web search and fetch tools (WebSearch, WebFetch) that an ordinary session has, and no other role on the team gets them either: each role gets only the tools on its own list. Installed as above, its reach is limited to the one project directory that declares it. Don't swap the main session for another role with `--agent` or an `agent` key in your own settings either: the gates judge by the main session's identity.
 
 > [!NOTE]
-> **An `agent` in your settings overrides the project manager.** If user, project or local settings name another `agent`, the main session is not `agent-team:at-pm` and the team cannot run (the gate self-check says so): remove that setting, or start the session with `--agent agent-team:at-pm`.
+> **An `agent` in your settings overrides the project manager.** If user, project or local settings name another `agent` (or the session was started with another `--agent`), the main session is not `agent-team:at-pm` and the team cannot run (the gates say so): remove that setting, or start the session with `--agent agent-team:at-pm`.
 
 > [!IMPORTANT]
 > **Pass `--plugin-dir` every time you resume.** `claude --resume` does not inherit it; forget it and the CLI prints `Continuing with the default tools and system prompt — the agent's tool restrictions no longer apply.`, after which the plugin's commands and every role restriction are gone. With a local-scope install the same holds for directories: resume only in the project directory that holds the install.

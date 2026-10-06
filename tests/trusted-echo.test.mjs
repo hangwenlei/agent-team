@@ -590,6 +590,13 @@ const SCENARIOS = [
     calls: (_, P) => [['delegation', dispatch('agent-team:at-product', undefined, { name: P })]],
   },
   {
+    // M4i 复核（docs/44 §8，中-1）：validateState 新拼进【state.json】的两处磁盘值——带插件前缀的角色名、roster 与 never_invoked 的交集。
+    name: 'validateState 的前缀与交集',
+    disk: true,
+    state: (s, P) => ({ ...s, roster: [...s.roster, 'agent-team:' + P], never_invoked: ['agent-team:' + P], trimmed: { ['agent-team:' + P + 'T']: 'S2' } }),
+    calls: ({ run }) => [['ledger', posted('at-pm', join(run, 'state.json'))]],
+  },
+  {
     // M3v 复核（docs/30 §3）：unknown-stage 那一行 stderr 痕迹带着收件人（hook 输入的 agent_type）。上面那个场景的 stage 合法，
     // 走不到它；把这一处的 inline 去掉，全套此前照样全绿。
     name: 'unknown-stage：收件人是载荷（hook 输入的 agent_type）',

@@ -13,7 +13,7 @@
 import { resolve, sep } from 'node:path'
 import { norm } from './path-norm.mjs'
 import { inline, quote } from './trusted.mjs'
-import { PLUGIN_PREFIX, exemptFromPaths } from './decide.mjs'
+import { PLUGIN_PREFIX, exemptFromPaths, malformedCaller } from './decide.mjs'
 
 export const GATE_CHECK_PATH = '.agent-team/gate-check'
 export const GATE_CHECK_ONLINE = 'agent-team 门禁自检：在线'
@@ -54,18 +54,22 @@ export function gateCheckReason({ version = process.version, execPath = process.
 }
 
 /**
- * M4i（docs/44，审查第 22 条）：主会话被设置里别的 agent 盖住时——hook 输入带 agent_type、不是项目经理、没有 agent_id（子代理才带
- * agent_id）——自检照样回「在线」，可这样跑不了团队：H1 不管它的派发（花名册外的调用者），第一次写 state.json 就被拒。接在自检的
- * 拒绝理由后面，说清身份与出路；别的调用者返回空串。agent_type 来自设置里的名字，磁盘上谁都写得进，过 quote（docs/27 §2.1）。
+ * M4i（docs/44，审查第 22 条）：主会话被设置里别的 agent 或启动时的 --agent 换掉时——hook 输入带 agent_type、不是项目经理、没有 agent_id
+ * （子代理才带 agent_id；M10 实测）——自检照样回「在线」，可这样跑不了团队：门禁不把它当项目经理，写控制文件被拒。接在自检的拒绝理由
+ * 后面（action 是「自检」），也接在 H1、H3、H4 的拒绝理由后面（「派发」「写入」）；别的调用者（含认不出的）返回空串。还没有 run 时
+ * H3 对谁都放行（/agent-team:at-init 自举靠它）：M10d 里被换掉的主会话写 project.json 成功了；M10f 里它先写 run 的 state.json 成功，
+ * 再写 current-run 时 runs 下已经非空、指针不在，门禁判读不出运行上下文、拒了——所以说的是「建 run、记 state.json」会被拒。复核（docs/44 §8）：以「注意：」开头——命令正文对
+ * 「另外，」开头的追加句另有约定（收尾时转告、不就地修），这一句要它停下；不说「派发不归花名册管」（换成团队里别的角色时是假话）。
+ * agent_type 来自设置里的名字，磁盘上谁都写得进，过 quote（docs/27 §2.1）。
  */
-export function selfCheckIdentity(input) {
+export function selfCheckIdentity(input, action = '自检') {
   const raw = input?.agent_type
-  if (typeof raw !== 'string' || raw === '' || exemptFromPaths(raw)) return ''
+  if (typeof raw !== 'string' || raw === '' || malformedCaller(input) || exemptFromPaths(raw)) return ''
   if (typeof input?.agent_id === 'string' && input.agent_id !== '') return ''
   return (
-    `另外：发起这次自检的是 ${quote(raw)}，不是 agent-team 的项目经理（${PLUGIN_PREFIX}at-pm）——主会话被设置里别的 agent 盖住了` +
-    '（用户、项目或本地设置里写的 agent 会盖掉插件设的那一个）。这样跑不了这支团队：你的派发不归花名册管，第一次写 state.json 就会被拒。' +
-    `停下来告诉用户：去掉设置里的 agent，或者用 claude --agent ${PLUGIN_PREFIX}at-pm 起会话。`
+    `注意：发起这次${action}的是 ${quote(raw)}，不是 agent-team 的项目经理（${PLUGIN_PREFIX}at-pm）——设置里的 agent 或者启动时的 --agent 换掉了主会话。` +
+    '这样跑不了这支团队：门禁不把你当项目经理，建 run、记 state.json 这些项目经理的写入会被拒。停下来告诉用户：去掉设置里的那一项 agent、' +
+    `起会话时不带别的 --agent，或者直接用 claude --agent ${PLUGIN_PREFIX}at-pm 起会话。`
   )
 }
 

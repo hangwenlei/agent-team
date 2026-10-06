@@ -2,7 +2,7 @@
 branch: main
 worktree: C:/Users/82370/Desktop/Agent-Team
 ---
-> 更新时间：2026-10-06T06:35:31-07:00
+> 更新时间：2026-10-06T07:49:42-07:00
 
 ## 📋 任务看板
 
@@ -55,8 +55,8 @@ worktree: C:/Users/82370/Desktop/Agent-Team
 - [ ] 53. `docs/42` §4 仍开着的：escalations 记没记门禁不核、reach.json 只在写的那一刻核、不核的几格一声不吭、当前段与最后一次派发的产物值只靠回报、「漏记」两个方向都会错、at-status 只在真实会话里看得到；§5 没量到的（续跑重问、照【账本比对】的值记、漏记那一支、写 reach.json 之后的核对、用户主动改需求）
 - [x] 54. 第三轮后一半「续跑与对齐」：at-resume 先读 /agent-team:at 第 3–6 节（第 40 条）；`03-alignment.md` 有了定义、S3 完成定义列上它、派发裁决模板不再说拉通、整段裁掉之后 H2 的拒绝理由说清（第 38 条）；「放弃」那一支先确认没有还在跑的派发、写 `current-run` 时门禁列出别的 run 里还没停下的派发（第 24-1 条）；S2 的协调者进度（第 14 条）。真实会话 M9 三段接力收了口，实测里冒出的进程红线并进这一轮修了；对抗复核两中七低都修了；随 `v2.6.0` 发布（`docs/43`）
 - [ ] 55. `docs/43` §4 仍开着的：按 `agent_id` 认 run、【派发】只在写指针那一刻报、整段裁掉只在 H2 的拒绝理由里说、`03-alignment.md` 的内容门禁不读、规格原话「并行拉通」不改、S2 进度只在 at-product 自己交了时报、【派发】对被放弃的 run 每次写指针都重报、进程红线只在正文里、停服务的做法只在 Windows 上核过
-- [x] 56. 第四轮「H1 与花名册」：`agent_type` 不是非空字符串时 H1 拒、项目经理被拒时说由谁派（第 35 条）；受管辖的派发带非空 `name` 拒、README 写明不支持 teammate（第 42 条）；派 `at-pm` 一律拒、自检报身份（第 22 条，M10 实测）；`validateState` 报带前缀的名字与 `roster` ∩ `never_invoked`、模板不叫 S4 写 `never_invoked`、`/agent-team:at` 写明裸名（第 36 条）。对抗复核在做；随 `v2.7.0` 发布（`docs/44`）
-- [ ] 57. `docs/44` §4 仍开着的：花名册外的调用者照旧放行、身份只认 `agent_type` 与 `agent_id` 在不在、teammate 只在 H1 拦、`validateState` 只报不拦、字面量 `"__main__"` 当 `agent_type`
+- [x] 56. 第四轮「H1 与花名册」：`agent_type` 不是非空字符串时 H1 拒、项目经理被拒时说由谁派（第 35 条）；受管辖的派发带非空 `name` 拒、README 写明不支持 teammate（第 42 条）；派 `at-pm` 一律拒、自检报身份（第 22 条，M10 实测）；`validateState` 报带前缀的名字与 `roster` ∩ `never_invoked`、模板不叫 S4 写 `never_invoked`、`/agent-team:at` 写明裸名（第 36 条）。对抗复核一中八低都修了，复核之后的探针 M10d–M10g 又补了 H1 与读不到运行上下文时的身份那一句；随 `v2.7.0` 发布（`docs/44`）
+- [ ] 57. `docs/44` §4 仍开着的：花名册外的调用者照旧放行、还没有 run 时 H3 对谁都放行、身份只认 `agent_type` 与 `agent_id` 在不在、teammate 只在 H1 拦、`validateState` 只报不拦且只认本插件前缀、字面量 `"__main__"` 当 `agent_type`
 - [ ] 42. `docs/36` §5 仍开着的：`Bash` 写文件门禁看不见、PM 自己写根级文件、每补一次 `paths` 都要手抄 `reach.json`（第 28 条）、执行段的提醒只是一句话、共列的根级文件互相覆盖、「没开跑」只靠 at-qa 的固定首行、S2 里 at-ui 被拒拿到给 S5 的出路、at-status 对没解决的实现记录照打 ✓、`at-qa` 写测试拦不住（第 34 条）、用户自己设置里的 `agent` 盖过插件默认（第 22 条）、mac/Linux/WSL 上持 `Bash` 的角色的 `Glob`/`Grep`；修法 3（`docs/36` §2.10：执行角色为新行为补自动化测试，要先裁定「06-test.md 报缺测试」怎么路由）；§6 没量到的（P5、`--bg`/交互/桌面端下的全名 settings、真实会话里从零撞上拒绝、at-ui 在 S5 写前端目录、haiku/opus）
 - [ ] 35. `docs/32` §4 仍开着的：时序一半（返工轮那一半已由第 36 项结清）、叫到之后又裁掉、新 run 漏写 `stage_roles` 静默退回、只写名字不派人之后门禁不再报、续跑时读不到 at.md（at-resume 的字段方向没有真实会话样本）、`available_roles` 写坏时 PM 把自己记进账
 - [ ] 32. `docs/30` §4 仍开着的：run 读不出来时 PM 改旧 run 没有门禁挡（只靠正文）、第二趟漏切指针时 ledger 一句不说（门禁侧有原型）、契约写到 `.agent-team` 之外只靠正文、PM 搞错项目根时自检不追加、readiness 崩溃时 PM 收不到、validateState 与 H6 对坏 history 的冲突（归第 17 条）

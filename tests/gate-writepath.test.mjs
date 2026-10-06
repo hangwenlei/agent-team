@@ -1025,3 +1025,52 @@ test('writepath：主线程写 run 目录里别人的阶段产物也放行——
     rmSync(dirs.pluginDir, { recursive: true, force: true })
   }
 })
+
+// M4i 复核（docs/44 §8，低-7、低-8）：H3 与 H1 用同一个形状检查——agent_type 在却认不出（空串、数字、只剩插件前缀）时，写没人认领的路径
+// 也拒（原来走「花名册外的调用者放行」）。主会话被设置或 --agent 换掉时（带 agent_type、不是项目经理、没有 agent_id），写控制文件被拒，
+// 理由末尾接上身份那一句——它没有上级，「冒泡给上级」对它不成立。
+test('M4i 复核：H3——认不出的调用者写没人认领的路径也拒；被换掉的主会话写控制文件，理由末尾说身份', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5', project: PROJECT })
+  try {
+    const write = (agent, file_path, extra = {}) => ({ tool_name: 'Write', agent_type: agent, tool_input: { file_path, content: 'x' }, ...extra })
+    for (const bad of ['', 0, 'agent-team:']) {
+      const d = decisionOf(run('writepath', write(bad, join(dirs.projectDir, 'unclaimed', 'x.ts')), undefined, dirs.projectDir).stdout)
+      assert.equal(d?.permissionDecision, 'deny', JSON.stringify(bad))
+      assert.ok(d.permissionDecisionReason.startsWith('门禁认不出发起这次写入的是谁'), d.permissionDecisionReason)
+    }
+    const ctl = decisionOf(run('writepath', write('my-main', join(dirs.projectDir, '.agent-team', 'project.json')), undefined, dirs.projectDir).stdout)
+    assert.equal(ctl?.permissionDecision, 'deny')
+    assert.ok(ctl.permissionDecisionReason.endsWith("注意：发起这次写入的是 \"my-main\"，不是 agent-team 的项目经理（agent-team:at-pm）——设置里的 agent 或者启动时的 --agent 换掉了主会话。这样跑不了这支团队：门禁不把你当项目经理，建 run、记 state.json 这些项目经理的写入会被拒。停下来告诉用户：去掉设置里的那一项 agent、起会话时不带别的 --agent，或者直接用 claude --agent agent-team:at-pm 起会话。"), ctl.permissionDecisionReason)
+    // H4：被换掉的主会话写契约，契约保护拒，理由末尾同样说身份。
+    const contract = decisionOf(run('contract', write('my-main', join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md')), undefined, dirs.projectDir).stdout)
+    assert.ok(contract?.permissionDecision === 'deny' && contract.permissionDecisionReason.endsWith("注意：发起这次写入的是 \"my-main\"，不是 agent-team 的项目经理（agent-team:at-pm）——设置里的 agent 或者启动时的 --agent 换掉了主会话。这样跑不了这支团队：门禁不把你当项目经理，建 run、记 state.json 这些项目经理的写入会被拒。停下来告诉用户：去掉设置里的那一项 agent、起会话时不带别的 --agent，或者直接用 claude --agent agent-team:at-pm 起会话。"), JSON.stringify(contract))
+    // 带 agent_id 的子代理写控制文件：照旧，不说身份。
+    const sub = decisionOf(run('writepath', write('agent-team:at-backend', join(dirs.projectDir, '.agent-team', 'project.json'), { agent_id: 'a0000000000000e02' }), undefined, dirs.projectDir).stdout)
+    assert.ok(sub?.permissionDecision === 'deny' && !sub.permissionDecisionReason.includes('注意：发起这次'), JSON.stringify(sub))
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// M4i 复核第三步（docs/44 §8，M10f 实测）：被换掉的主会话自举——先写 run 的 state.json（还没有 run，放行），再写 current-run 时 runs 下
+// 已经非空、指针不在，门禁判读不出运行上下文、按安全边界拒。那两条拒绝（H3、H4）原来只说「有人建过 run 而指针不在」，被换掉的主会话会
+// 当成别人留下的坏 run；末尾接上身份那一句。项目经理在这种状态下照旧放行（修一个坏掉的 run 要它动手）。
+test('M4i 复核：读不到运行上下文时，H3、H4 拒绝被换掉的主会话，理由末尾说身份；项目经理照旧放行', () => {
+  const p = mkdtempSync(join(tmpdir(), 'agent-team-m4i-boot-'))
+  try {
+    mkdirSync(join(p, '.agent-team', 'runs', '20261006-0900-probe'), { recursive: true })
+    writeFileSync(join(p, '.agent-team', 'runs', '20261006-0900-probe', 'state.json'), '{"run_id":"20261006-0900-probe","stage":"S1"}')
+    const write = (agent, file_path) => ({ tool_name: 'Write', ...(agent ? { agent_type: agent } : {}), tool_input: { file_path, content: 'x' } })
+    const pointer = join(p, '.agent-team', 'current-run')
+    for (const check of ['writepath', 'contract']) {
+      const d = decisionOf(run(check, write('my-main', pointer), undefined, p).stdout)
+      assert.equal(d?.permissionDecision, 'deny', check)
+      assert.ok(d.permissionDecisionReason.includes('读不到运行上下文'), d.permissionDecisionReason)
+      assert.ok(d.permissionDecisionReason.endsWith("注意：发起这次写入的是 \"my-main\"，不是 agent-team 的项目经理（agent-team:at-pm）——设置里的 agent 或者启动时的 --agent 换掉了主会话。这样跑不了这支团队：门禁不把你当项目经理，建 run、记 state.json 这些项目经理的写入会被拒。停下来告诉用户：去掉设置里的那一项 agent、起会话时不带别的 --agent，或者直接用 claude --agent agent-team:at-pm 起会话。"), d.permissionDecisionReason)
+      assert.equal(decisionOf(run(check, write('agent-team:at-pm', pointer), undefined, p).stdout), null, `${check}：项目经理在这种状态下照旧放行`)
+    }
+  } finally {
+    rmSync(p, { recursive: true, force: true })
+  }
+})

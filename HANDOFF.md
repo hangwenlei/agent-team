@@ -135,9 +135,10 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   `wholeStageTrimmed`），所以不在 `available_roles` 里的产者也要写进 `trimmed`。PM 写 `current-run` 时门禁列出别的、没收口的 run 里没停下的派发
   （【派发】，停下行按 `agent_id` 在所有 run 里认）；按 `agent_id` 把停下认回派它的那一趟照旧没做。理由在 `docs/43`。
 - **项目经理只能是主会话、调用者认不出就拒**：H1 对 `agent_type` 在却不是非空字符串的拒；任何调用者派 `at-pm` 一律拒（花名册外的、裸名也拒）；
-  受管辖的派发带非空 `name`（agent teams 的 teammate）拒，与 `isolation` 同形；项目经理被拒时说那个角色由谁派（从花名册现算）。主会话被设置里
-  别的 agent 盖住时（实测：`agent_type` 是那个名字、没有 `agent_id`），自检的「在线」后面说清身份与出路。`state.json` 里的角色名写裸名，
-  `validateState` 报带前缀的与 `roster` ∩ `never_invoked`（只报、不拦）。理由在 `docs/44`。
+  受管辖的派发带非空 `name`（agent teams 的 teammate）拒，与 `isolation` 同形；项目经理被拒时说那个角色由谁派（从花名册现算）。认不出的调用者
+  （`malformedCaller`）H1、H3 共用一个判断。主会话被设置里别的 agent 或启动时的 `--agent` 换掉时（实测：`agent_type` 是那个名字、没有 `agent_id`），
+  自检与 H1、H3、H4 的拒绝理由末尾都说清身份与出路（`selfCheckIdentity`）；还没有 run 时 H3 对谁都放行，那是 at-init 自举的既有设计。`state.json`
+  里的角色名写裸名，`validateState` 报带前缀的、`roster` ∩ `never_invoked`、项目经理进了 `roster`（只报、不拦）。理由在 `docs/44`。
 - **外部值进模型读得到的文字（受信回传、拒绝理由、留痕），按值从哪来决定怎么引**：磁盘上谁都写得进的一律
   `quote`（一对双引号里）；调用方自己这次给的参数与由项目根拼出的路径用 `inline`；记录的 sha 用 `shaOrNote`；
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。

@@ -18,6 +18,10 @@ test('M4i 第 36 条：派发裁决模板第 1 节不再叫 S4 写 never_invoked
   const t = read('templates/04-dispatch.md')
   assert.ok(!t.includes('后者写进 state.json 的 never_invoked'), '模板还叫 S4 写 never_invoked')
   assert.ok(has(t, '（不在这里写 state.json 的 never_invoked：它收口时才算，见 /agent-team:at 第 6 节）'))
+  // 复核（docs/44 §8，M14）：never_invoked 只许出现在列举的这几句里——保留新句、再加一句「这一段先记进 never_invoked」，原来的判据照绿。
+  let rest = stripWs(t)
+  for (const s of ['（不在这里写 state.json 的 never_invoked：它收口时才算，见 /agent-team:at 第 6 节）', 'never_invoked 是收口时算出来的结果']) rest = rest.split(stripWs(s)).join('')
+  assert.ok(!rest.includes('never_invoked'), '模板里多了一处 never_invoked')
 })
 
 const AT_BARE =
@@ -38,11 +42,12 @@ const EN_TEAMS =
   '> **Agent teams teammates are not supported.** With agent teams (experimental) on, team roles must still be dispatched as subagents: a ' +
   'dispatch with a `name` starts a teammate, whose stop the gates cannot see, so the dispatch whitelist refuses it.'
 const ZH_AGENT =
-  '> **设置里的 `agent` 会盖掉项目经理。** 用户、项目或本地设置里写了别的 `agent`，主会话就不是 `agent-team:at-pm`，团队跑不起来（门禁自检' +
+  '> **设置里的 `agent` 会盖掉项目经理。** 用户、项目或本地设置里写了别的 `agent`（或者起会话时带了别的 `--agent`），主会话就不是 `agent-team:at-pm`，团队跑不起来（门禁' +
   '会说出来）：去掉那一项设置，或者起会话时加 `--agent agent-team:at-pm`。'
 const EN_AGENT =
-  '> **An `agent` in your settings overrides the project manager.** If user, project or local settings name another `agent`, the main ' +
-  'session is not `agent-team:at-pm` and the team cannot run (the gate self-check says so): remove that setting, or start the session ' +
+  '> **An `agent` in your settings overrides the project manager.** If user, project or local settings name another `agent` (or the session ' +
+  'was started with another `--agent`), the main ' +
+  'session is not `agent-team:at-pm` and the team cannot run (the gates say so): remove that setting, or start the session ' +
   'with `--agent agent-team:at-pm`.'
 test('M4i 第 42、22 条：README 两半的已知边界——不支持 teammate；设置里的 agent 会盖掉项目经理与出路', () => {
   const zh = section(ZH, '## 已知边界')

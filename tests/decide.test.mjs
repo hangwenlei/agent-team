@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { callerOf, decideDelegation } from '../hooks/lib/decide.mjs'
+import { callerOf, decideDelegation, malformedCaller, malformedCallerReason } from '../hooks/lib/decide.mjs'
 
 const ROSTER = {
   __main__: { can_delegate_to: ['at-product', 'at-architect'] },
@@ -267,7 +267,7 @@ const REAL = JSON.parse(readFileSync(new URL('../roster.json', import.meta.url),
 // 第 35 条：agent_type 在、却不是非空字符串（空串、数字、对象……）——callerOf 把它原样当名字，花名册里查不到，走「未登记的调用者放行」，
 // 一个畸形字段就绕过了整个 H1。认不出调用者就按安全边界拒。缺失与 null 照旧是主线程。
 test('M4i 第 35 条：agent_type 在却不是非空字符串时拒——认不出是谁在派', () => {
-  for (const bad of ['', 0, 1, {}, [], true]) {
+  for (const bad of ['', 0, 1, {}, [], true, 'agent-team:']) {
     const r = decideDelegation({ agent_type: bad, tool_input: { subagent_type: 'agent-team:at-backend' } }, REAL)
     assert.equal(r.decision, 'deny', JSON.stringify(bad))
     assert.ok(r.reason.includes('门禁认不出发起这次派发的是谁'), r.reason)
@@ -309,7 +309,9 @@ test('M4i 第 22 条：任何调用者派 at-pm 一律拒，花名册外的也�
     for (const target of ['agent-team:at-pm', 'at-pm']) {
       const r = decideDelegation({ ...(caller === undefined ? {} : { agent_type: caller }), tool_input: { subagent_type: target } }, REAL)
       assert.equal(r.decision, 'deny', `${caller} → ${target}`)
-      assert.ok(r.reason.includes('项目经理只能是主会话'), r.reason)
+      // 复核（docs/44 §8，低-2）：项目经理自己（与主线程）派 at-pm——它本来就是主会话，说「at-pm 就是你」，不叫它停下、不报设置问题。
+      const want = caller === undefined || caller === 'agent-team:at-pm' ? PM_SELF : caller === 'agent-team:at-architect' ? PM_TEAM : PM_OTHER
+      assert.ok(r.reason === want, r.reason)
     }
   }
   assert.equal(decideDelegation({ agent_type: 'my-main', tool_input: { subagent_type: 'other-plugin:at-pm' } }, REAL).decision, 'allow')
@@ -322,4 +324,46 @@ test('M4i 第 35 条：由谁派不点名 __main__ 与调用者自己', () => {
   const r = decideDelegation({ agent_type: 'agent-team:at-pm', tool_input: { subagent_type: 'x-role' } }, roster)
   assert.equal(r.decision, 'deny')
   assert.ok(r.reason.includes('花名册里没有哪个角色能派 x-role') && !r.reason.includes('__main__'), r.reason)
+})
+
+// ---- M4i 复核（docs/44 §8）----
+
+const PM_SELF = "at-pm 就是你：项目经理是主会话，不能被派成子代理。你自己那几段的产物你自己写，不派人（/agent-team:at 第 3 节）。"
+// 复核第二步：别的团队角色（子代理，或者被 --agent 换成主会话的团队角色）冒泡；花名册外的只说这一句——被换掉的主会话由门禁接在后面的身份
+// 那一句给出路（gate-check 那条门禁子进程判据），别的插件的子代理不归我们指路。
+const PM_TEAM = "项目经理只能是主会话，at-pm 不能被派成子代理：要项目经理做的事，写进你的回报冒泡给派你的人。"
+const PM_OTHER = "项目经理只能是主会话，at-pm 不能被派成子代理：子代理里的项目经理带着写契约与控制文件的权限，却不是主会话。"
+
+// 低-5：主线程（没有 agent_type）被拒时，理由里不出现门禁内部的哨兵 __main__，说「主会话」。
+test('M4i 复核：主线程被拒的几种理由都说「主会话」，不出现 __main__', () => {
+  const reasons = [
+    decideDelegation({ tool_input: { subagent_type: 'agent-team:at-backend' } }, REAL).reason,
+    decideDelegation({ tool_input: { subagent_type: 'agent-team:at-product', isolation: 'worktree' } }, REAL).reason,
+    decideDelegation({ tool_input: { subagent_type: 'agent-team:at-product', name: 'x' } }, REAL).reason,
+    decideDelegation({ tool_input: {} }, REAL).reason,
+  ]
+  for (const r of reasons) {
+    assert.ok(!r.includes('__main__'), r)
+    assert.ok(r.startsWith('主会话'), r)
+  }
+})
+
+// 复核变异：name 为 null 与缺失一样（平台看 name 的真值）；协调者带 name 同样拒（原来只量了项目经理）；花名册里某个条目的
+// can_delegate_to 坏了，「由谁派」跳过它、不抛。
+test('M4i 复核：name 为 null 放行、协调者带 name 拒；「由谁派」跳过坏条目', () => {
+  assert.equal(decideDelegation({ agent_type: 'agent-team:at-pm', tool_input: { subagent_type: 'agent-team:at-product', name: null } }, REAL).decision, 'allow')
+  const arch = decideDelegation({ agent_type: 'agent-team:at-architect', tool_input: { subagent_type: 'agent-team:at-backend', name: 'be' } }, REAL)
+  assert.equal(arch.decision, 'deny')
+  assert.ok(arch.reason.includes('去掉 name 参数重新派发'), arch.reason)
+  assert.ok(arch.reason.includes('没开时 name 只是让子代理能被 SendMessage 找到，团队角色用不上它'), arch.reason)
+  const roster = { ...REAL, 'at-broken': { can_delegate_to: null } }
+  const r = decideDelegation({ agent_type: 'agent-team:at-pm', tool_input: { subagent_type: 'agent-team:at-backend' } }, roster)
+  assert.ok(r.reason.includes('at-backend 由 at-architect 派'), r.reason)
+})
+
+// 低-7：形状检查是共用的一份——H3 的写入用同一个判断（gate-writepath 那一条核门禁子进程）。
+test('M4i 复核：malformedCaller——缺失、null、正常名字不算；空串、非字符串、只剩插件前缀算', () => {
+  for (const ok of [{}, { agent_type: null }, { agent_type: 'agent-team:at-pm' }, { agent_type: 'my-main' }]) assert.equal(malformedCaller(ok), false, JSON.stringify(ok))
+  for (const bad of [{ agent_type: '' }, { agent_type: 0 }, { agent_type: {} }, { agent_type: 'agent-team:' }]) assert.equal(malformedCaller(bad), true, JSON.stringify(bad))
+  assert.ok(malformedCallerReason('写入').startsWith('门禁认不出发起这次写入的是谁'))
 })
