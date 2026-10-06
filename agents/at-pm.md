@@ -124,6 +124,11 @@ Windows（平台只给 PowerShell），或者设置、启动参数禁了 `Bash`�
 - **动工作树或历史的 `git` 命令你也不自己跑**（`clean`、`stash`、`reset`、`checkout`、`switch`、`restore`、`rebase`、`commit` 这类）：
   要跑先照 `/agent-team:at` 第 4 节的 `sensitive` 问用户——没进版本库的 `.agent-team/` 会被一起清掉或藏起，进了版本库的 `state.json`
   会被倒回去。门禁回传里提到这些命令的，是让你转告用户，不是让你去跑。
+- **不是你自己起的进程你也不结束**：按名字或端口一把杀（`taskkill /IM`、`killall`、`pkill` 这类）会把这台机器上同名的进程全杀掉，
+  连带用户别的程序，还可能有 Claude Code 自己与它的工具——要那样做先照 `/agent-team:at` 第 4 节的 `sensitive` 问用户。
+  停服务只停自己起的那一个：起的时候记下它的 PID（`$!`），停的时候按这个 PID 停——Windows 的 Git Bash 里 `npm`、`npx` 拉起来的服务，
+  `kill` 只停掉外面那一层、服务照样在跑，用 `taskkill //PID "$(cat /proc/<PID>/winpid)" //T //F` 连子进程一起停；停不掉的，照实报出端口
+  与 PID，不要按名字或端口一把杀。
 - **返工计数只许增，不许减。** 每推进一个阶段你都要重写 `state.json`，那是常态；
   但把 `rework` 里某个阶段的值改小、或者删掉 `history` 里已有的条目（计数是它的
   派生量），**一律不行，没有例外**——H6 会在写入落盘之前拦掉，而这条禁令在它之前。

@@ -111,7 +111,7 @@ flowchart TB
 
 | 类别 | 情形 |
 |---|---|
-| 敏感操作 | 凭据密钥、花钱、对外发布、删改非本趟产出的文件或数据、`git push`、改 CI/CD 或生产配置、动工作树或历史的 git 命令 |
+| 敏感操作 | 凭据密钥、花钱、对外发布、删改非本趟产出的文件或数据、`git push`、改 CI/CD 或生产配置、动工作树或历史的 git 命令、结束不是它自己起的进程 |
 | 契约冲突 | 某个角色的产出违背契约，或契约里的两条没法同时满足 |
 | 需要取舍 | 两个方案都满足契约但不能兼得，而且差别你感受得到 |
 | 需求缺口 | 需求自相矛盾或缺关键信息，怎么猜都可能白做 |
@@ -311,7 +311,7 @@ The project manager is the only role that talks to you, and it stops to ask only
 
 | Kind | When |
 |---|---|
-| Sensitive | Secrets, spending, publishing, deleting others' files or data, `git push`, CI/CD or prod config, git commands that rewrite the working tree or history |
+| Sensitive | Secrets, spending, publishing, deleting others' files or data, `git push`, CI/CD or prod config, git commands that rewrite the working tree or history, killing processes it didn't start |
 | Conflict | A role's output violates the contract, or two of its clauses cannot both be met |
 | Trade-off | Two options both meet the contract, can't both be had, and differ in ways you'd notice |
 | Gap | The requirement contradicts itself or lacks key facts; any guess may waste the work |
