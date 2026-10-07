@@ -12,7 +12,7 @@
 
 import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
 import { MAIN, callerOf, decideDelegation, malformedCaller, malformedCallerReason, stripPluginPrefix } from './lib/decide.mjs'
 import { denyOutput, crashNotice } from './lib/deny.mjs'
@@ -1035,6 +1035,88 @@ function contractBaseNotices(ctx) {
     process.stderr.write(`agent-team ledger：契约基线读写出错（${quote(e?.message ?? e, { max: 120 })}），这一次不核第 1 节与验证段的新旧。\n`)
   }
   return out
+}
+
+// M4p（docs/51，docs/30 §4「第二趟起漏切指针、契约写在当前 run 之外」）：这次写的是 runs/ 下另一趟（不是 current-run 那一趟）的契约或阶段产物吗——
+// 是就回 { id（那一趟的目录名，照这次给的路径原样）, dir, name（契约或产物名，插件自己的名字）, role（产者；契约算项目经理的）, valid（目录名当得了
+// run id）}，否则 null。收窄到契约与产物：写 state.json（建新 run 时它本来就先于指针，/agent-team:at 第 1 节）、写别的文件都不算。currentRunDir 是
+// 指针指着的那一趟的目录（那一趟读不出来时由调用方按 current-run 的原文拼）；stages 读不出时只认契约。
+function otherRunWrite({ agentTeamDir, currentRunDir, stages }, filePath) {
+  if (typeof filePath !== 'string' || typeof agentTeamDir !== 'string' || typeof currentRunDir !== 'string') return null
+  const runsDir = join(agentTeamDir, 'runs')
+  const base = norm(runsDir)
+  const target = norm(filePath)
+  if (!target.startsWith(`${base}/`)) return null
+  const rel = target.slice(base.length + 1).split('/')
+  if (rel.length < 2 || !rel[0]) return null
+  const otherDir = join(runsDir, rel[0])
+  if (norm(otherDir) === norm(currentRunDir)) return null
+  const tail = rel.slice(1).join('/')
+  let name = null
+  let role = null
+  if (tail === CONTRACT_FILE) {
+    name = CONTRACT_FILE
+    role = 'at-pm'
+  } else {
+    const owner = isStageChain(stages) ? stageOwnerOfRunPath(stages, otherDir, target) : null
+    if (!owner) return null
+    name = owner.produces
+    role = owner.role
+  }
+  // 显示用的目录名照这次给的路径原样取：规范化之后的路径在 Windows、macOS 上折成了小写（复核 docs/51 §8）。
+  let id = rel[0]
+  try {
+    const seg = relative(runsDir, filePath).split(/[\\/]/)[0]
+    if (seg && !seg.startsWith('..') && norm(join(runsDir, seg)) === norm(otherDir)) id = seg
+  } catch {}
+  return { id, dir: otherDir, name, role, valid: RUN_ID.test(id) }
+}
+
+// M4p：current-run 里写的 run id，合法的才算；读不出、不合法回 null。指针指着的那一趟读不出来时，【指针】靠它认「这次写的不是那一趟」。
+function pointerIdOf(agentTeamDir) {
+  try {
+    const id = readFileSync(join(agentTeamDir, 'current-run'), 'utf8').trim()
+    return RUN_ID.test(id) ? id : null
+  } catch {
+    return null
+  }
+}
+
+// M4p：【指针】那一段。两个 run id 都是磁盘上的值（目录名、current-run 的内容），过 quote；文件名与角色名是插件自己的名字。复核（docs/51 §8）：
+// 出路按情形给——新建的就是那一趟（指针指过去；契约与项目经理自己的产物原样重写拿回传，别的角色的产物指过去之后 H3 拒项目经理写它，派它的产者
+// 重交）；写错了目录（照原样写进指针指着的那一趟，那一趟读不出来时不给）；要接着做那一趟（用户定过放弃的、拿不准的先问用户，它已经收口就不能接着做）。
+// 目录名当不了 run id 的，不给「指过去」「接着做」。指针指着的那一趟读不出来（currentBroken）：叫它别去修那一趟（/agent-team:at 第 1 节）。
+function pointerNotice(other, currentId, { currentBroken = false } = {}) {
+  const X = quote(other.id)
+  const C = quote(currentId)
+  const where = other.valid
+    ? `【指针】这次写的是 ${X} 那一趟 run 目录里的 ${other.name}，current-run 指着 ${C}`
+    : `【指针】这次写进的 ${X} 不是一趟 run 的目录（这个名字当不了 run id），current-run 指着 ${C}`
+  const judged = currentBroken
+    ? '——那一趟的 state.json 读不出来，门禁这一次什么都没核，这次写入也没有 sha 回传。别去修那一趟（/agent-team:at 第 1 节：原来那一趟坏了就另起一趟，' +
+      '不写它的任何文件）。'
+    : `——门禁按 ${C} 判，这次写入没有 sha 回传、不进账本比对。`
+  const redo = isContractWriter(other.role)
+    ? '再原样重写一次这份文件拿回传'
+    : `再派 ${other.role} 重交一次（这一份是你写的，不算它交的；它重交之前，别拿这一份当这一段交齐了）`
+  const lines = []
+  if (other.valid) lines.push(`新建的就是 ${X}、忘了改指针：照 /agent-team:at 第 1 节把 current-run 指到它，${redo}`)
+  else lines.push(`这个目录当不了 run：照 /agent-team:at 第 1 节用合法的 run id 另建一趟，写进那一趟；${X} 里这一份告诉用户`)
+  if (!currentBroken) lines.push(`写错了目录、要写的是 ${C} 那一趟：照原样写进 ${C}；${X} 里这一份已经被这次写入改了，告诉用户`)
+  if (other.valid) {
+    lines.push(
+      other.closed
+        ? `要接着做的是 ${X} 那一趟：它已经收口，不能再接着做——交付之后的新改动另起一趟`
+        : `要接着做的是 ${X} 那一趟：那一趟是用户定过放弃的、或者拿不准，先问用户；用户要接着做，再把 current-run 指到它、跑 /agent-team:at-resume`,
+    )
+  }
+  return `${where}${judged}看是哪一种：\n${lines.map((l) => `  - ${l}`).join('\n')}`
+}
+
+// M4p：那一趟收没收口（【指针】要不要给「接着做」）。读不出来当没收口。
+function runClosed(dir) {
+  const st = runStateOf(dir)
+  return isPlainObject(st) && closedAt(st) !== null
 }
 
 // M4o（docs/50，审查第 20 条修法 A）：项目一级那份原话记录（记录器在 /agent-team:at 展开时写的）这一次怎么办——bindDecision 说作废就标上 dropped
@@ -2080,6 +2162,20 @@ function main() {
       //   - 不是 no-run：没有 run 就没有哈希可拿。偏离 /agent-team:at 第 1 节的顺序、直接写契约的那一格，落盘之后 runs/
       //     非空、指针不在，这里判丢指针——契约的哈希确实丢了，该出声（tests/gate-fail-open.test.mjs 钉着）。
       // 上面三条缝（project.json 本身、坏 state.json、在别处被弄坏的 project.json）先说完就退出了，不叠这一段。
+      // M4p 复核（docs/51 §8，中 1）：指针指着的那一趟 state.json 读不出来，项目经理照 /agent-team:at 第 1 节另起一趟、却漏切了指针，把契约或产物写进
+      // 了新的那一趟——先说【指针】、叫它别去修那一趟。原来这里出【门禁】，修法叫它照 current-run 重建那一趟的 state.json，正好违反第 1 节。
+      // 阶段链从插件自己那份读（ctx 读不出时没有它），读不出就只认契约。
+      if (ctx.cause === 'state' && isContractWriter(input.agent_type) && typeof ctx.agentTeamDir === 'string') {
+        const pid = pointerIdOf(ctx.agentTeamDir)
+        if (pid) {
+          let stages = null
+          try {
+            stages = JSON.parse(normalizeText(readFileSync(join(ROOT, 'stages.json'), 'utf8')))
+          } catch {}
+          const other = otherRunWrite({ agentTeamDir: ctx.agentTeamDir, currentRunDir: join(ctx.agentTeamDir, 'runs', pid), stages }, filePath)
+          if (other) emitHookJson(spec.event, { contexts: [pointerNotice({ ...other, closed: runClosed(other.dir) }, pid, { currentBroken: true })] })
+        }
+      }
       if (
         ctx.kind !== 'no-run' &&
         isContractWriter(input.agent_type) &&
@@ -2101,6 +2197,12 @@ function main() {
     // 路径：控制文件，以及 run 目录下的阶段产物（后者用来判断当前阶段的产物齐
     // 没齐）；underDir 判的是后一类，写在 hooks/lib/path-norm.mjs 里（评审 I-2：
     // 这段比较与 writepath.mjs 里同一处判定曾经是两份逐字符相同的拷贝）。
+    // M4p（docs/51，docs/30 §4）：漏切指针——项目经理把契约或阶段产物写进另一趟的 run 目录。原来这一格落进下面的提前退出、一句不说：没有 sha 回传、
+    // 不进账本比对，门禁照旧按指针指着的那一趟判。只在写者是项目经理时说（执行角色写别的 run 的目录，H3 本来就拒）。
+    if (isContractWriter(input.agent_type)) {
+      const other = otherRunWrite({ agentTeamDir: ctx.agentTeamDir, currentRunDir: ctx.runDir, stages: ctx.stages }, filePath)
+      if (other) emitHookJson(spec.event, { contexts: [pointerNotice({ ...other, closed: runClosed(other.dir) }, basename(ctx.runDir))] })
+    }
     if (!isControlFile(filePath, ctx.agentTeamDir) && !underDir(filePath, ctx.runDir)) {
       process.exit(0)
     }
