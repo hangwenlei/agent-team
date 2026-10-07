@@ -61,10 +61,21 @@ test('控制文件清单是闭集合，改了要回头同步规格 §6.2.1 与�
 // ============================================================================
 // M3z（docs/34，全量审查第 16 条）：门禁专属文件——门禁自己写、任何人（含 PM 与主线程）的 Edit/Write/NotebookEdit 都拒。
 // approvals.jsonl 是返工批准记录，PM 写得进它就能给自己批第 4 轮；delivered.json 是交付快照，改得了它就能让重做的判据失效。
-import { GATE_FILES, leafName, mayBeGateFile, isGateFile, mayBeStateFile } from '../hooks/lib/control-files.mjs'
+import { GATE_FILES, PROJECT_GATE_FILES, leafName, mayBeGateFile, isGateFile, mayBeStateFile } from '../hooks/lib/control-files.mjs'
 
 test('M3z 门禁专属文件清单是闭集合', () => {
-  assert.deepEqual([...GATE_FILES].sort(), ['runs/*/approvals.jsonl', 'runs/*/contract-base.json', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl'])
+  assert.deepEqual([...GATE_FILES].sort(), ['runs/*/approvals.jsonl', 'runs/*/contract-base.json', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl', 'runs/*/user-words.json'])
+  assert.deepEqual([...PROJECT_GATE_FILES].sort(), ['user-words.json'])
+})
+
+test('M4o isGateFile：项目一级的原话记录 .agent-team/user-words.json 也是门禁专属；多一层、.agent-team 之外的同名文件不是', () => {
+  for (const p of ['/proj/.agent-team/user-words.json', '/elsewhere/.AGENT-TEAM/USER-WORDS.JSON', '/proj/.agent-team/runs/r1/user-words.json']) {
+    assert.equal(isGateFile(p), true, p)
+    assert.equal(mayBeGateFile(p), true, p)
+  }
+  for (const p of ['/proj/user-words.json', '/proj/src/user-words.json', '/proj/.agent-team/x/user-words.json', '/proj/.agent-team/runs/user-words.json']) {
+    assert.equal(isGateFile(p), false, p)
+  }
 })
 
 test('M3z isGateFile：任意项目、任意 run 下的 approvals.jsonl、delivered.json；它们不是控制文件（PM 也写不了）', () => {

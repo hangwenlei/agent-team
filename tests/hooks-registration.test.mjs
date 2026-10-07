@@ -249,16 +249,25 @@ test('接线：工具事件上的 matcher 放进来的工具恰好是该检查�
   }
 })
 
-test('接线：生命周期事件上的检查项（toolNames 为 null）不带 matcher——它要看见每一次事件', () => {
+// M4o（docs/50）：原话记录器挂在 UserPromptExpansion 上，只要本插件的 at 这一条命令——它是唯一一个带 matcher 的生命周期检查项，matcher 照
+// checks.mjs 里它自己声明的那一条（锚定；下面另有一条判据核它放进来的命令恰好是 agent-team:at）。别的照旧不带。
+test('接线：生命周期事件上的检查项（toolNames 为 null）不带 matcher——它要看见每一次事件；声明了 matcher 的照声明', () => {
   for (const r of registrations()) {
     if (CHECKS[r.check]?.toolNames !== null) continue
     assert.equal(
       r.matcher,
-      undefined,
+      CHECKS[r.check].matcher,
       `${r.check} 注册时带了 matcher ${JSON.stringify(r.matcher)}；它按角色自己判该不该管，` +
         'matcher 只会让一部分子代理收尾静默绕过它',
     )
   }
+})
+
+test('接线（M4o）：原话记录器的 matcher 放进来的命令恰好是 agent-team:at——at-init、at-resume、at-status、裸名、别的插件的 at 都不放', () => {
+  const r = registrations().find((x) => x.check === 'user-words')
+  assert.ok(r, 'hooks.json 里没有 user-words 的注册')
+  const names = ['agent-team:at', 'agent-team:at-init', 'agent-team:at-resume', 'agent-team:at-status', 'at', 'probe:at', 'x:agent-team:at', 'agent-team:at ']
+  assert.deepEqual(names.filter((n) => new RegExp(r.matcher).test(n)), ['agent-team:at'], r.matcher)
 })
 
 test('接线：每个检查项恰好注册一次', () => {

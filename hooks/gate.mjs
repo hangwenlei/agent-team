@@ -12,7 +12,7 @@
 
 import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
 import { MAIN, callerOf, decideDelegation, malformedCaller, malformedCallerReason, stripPluginPrefix } from './lib/decide.mjs'
 import { denyOutput, crashNotice } from './lib/deny.mjs'
@@ -76,6 +76,7 @@ import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
 import { isPlainObject, isStageChain, isVerifyStage, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
+import { USER_WORDS_FILE, WORDS_FIX, bindDecision, blankAtSession, pendingRecord, readWords, section1Mismatch, wordsMismatchText, wordsOf } from './lib/user-words.mjs'
 import { GATE_CHECK_PATH, gateCheckReason, isGateCheck, selfCheckIdentity } from './lib/gate-check.mjs'
 import {
   SECOND_WRITE_NOTE,
@@ -448,7 +449,7 @@ function emitHookJson(event, parts) {
 // M3z（docs/34）：给用户的那一行只在 PreToolUse、PostToolUse 上发——SubagentStop 上 stdout 等于拦截，UserPromptSubmit 上 stdout
 // 进模型上下文（hookOutput 对这两种事件有东西要发就报 BUG）。
 function inputUnreadable(spec, what) {
-  const outcome = spec.recorder === true ? '这次的回答没有记下' : '没有做校验、放行'
+  const outcome = spec.recorder === true ? (spec.records === 'user-words' ? '这次的原话没有记下' : '这次的回答没有记下') : '没有做校验、放行'
   process.stderr.write(`agent-team ${CHECK}：读不出这次的 hook 输入（${what}），${outcome}。\n`)
   emitHookJson(spec.event, userFacing(spec.event) ? { systemMessage: systemMessage('input', { check: CHECK }) } : {})
 }
@@ -1036,6 +1037,60 @@ function contractBaseNotices(ctx) {
   return out
 }
 
+// M4o（docs/50，审查第 20 条修法 A）：项目一级那份原话记录（记录器在 /agent-team:at 展开时写的）这一次怎么办——bindDecision 说作废就标上 dropped
+// （记下之前就有的这一趟没收口却被写了：续跑了它，这条命令的需求被搁下了）；说绑、这一趟又还没有自己那份，就绑：先把项目一级那份标上 bound，
+// 再写 run 目录那份（后一步写不进时，记录不会一直挂着、被下一趟绑上——那样这一趟只是不核）。creating：这一次是这个会话用 Write 建出这一趟的
+// state.json（H6 里写之前文件还不在）——只有那一次绑。账本（项目经理在当前这一趟写 state.json、契约）只作废，H6（任何一趟的 state.json）作废与绑都做。
+// 复核（docs/50 §9）：原来账本在第一段里写 state.json、契约时也绑，run 目录里有就直接返回、不判作废——晚绑会跨会话绑错、回退到第一段时与契约
+// 基线互相卡死，续跑一趟自带记录的旧 run 不作废。写不进只是这一趟不核，留痕。
+function settleWords({ runDir, agentTeamDir, sessionId, state, stages, creating }) {
+  if (typeof runDir !== 'string' || typeof agentTeamDir !== 'string') return
+  const pendingPath = join(agentTeamDir, USER_WORDS_FILE)
+  let pending = null
+  try {
+    pending = readWords(readFileSync(pendingPath))
+  } catch {}
+  if (!pending) return
+  const runsDir = join(agentTeamDir, 'runs')
+  const ids = isStageChain(stages) ? Object.keys(stages) : []
+  const runId = basename(runDir)
+  const decision = bindDecision(pending, {
+    sessionId,
+    runId,
+    sameRun: (a, b) => norm(join(runsDir, a)) === norm(join(runsDir, b)),
+    creating: creating === true,
+    firstStage: ids.length > 0 && isPlainObject(state) && state.stage === ids[0],
+    closed: isPlainObject(state) && closedAt(state) !== null,
+  })
+  if (!decision) return
+  try {
+    if (decision === 'drop') {
+      writeFileSync(pendingPath, `${JSON.stringify({ ...pending, dropped: runId }, null, 2)}\n`)
+      process.stderr.write(`agent-team user-words：${quote(runId)} 是那条命令之前就有的一趟、这次被续跑了，那条命令的原话记录作废。\n`)
+      return
+    }
+    writeFileSync(pendingPath, `${JSON.stringify({ ...pending, bound: runId }, null, 2)}\n`)
+    const own = join(runDir, USER_WORDS_FILE)
+    if (!existsSync(own)) writeFileSync(own, `${JSON.stringify({ ...pending, bound: runId, bound_at: new Date().toISOString() }, null, 2)}\n`)
+  } catch (e) {
+    process.stderr.write(`agent-team user-words：原话记录写不进（${quote(e?.message ?? e, { max: 120 })}），这一趟可能不核契约第 1 节。\n`)
+  }
+}
+
+// M4o：这一趟 run 目录里的原话记录；没有回 null，在却读不出：留痕、当没有（少拦）。
+function runWords(runDir) {
+  if (typeof runDir !== 'string') return null
+  let bytes = null
+  try {
+    bytes = readFileSync(join(runDir, USER_WORDS_FILE))
+  } catch {
+    return null
+  }
+  const rec = readWords(bytes)
+  if (!rec) process.stderr.write('agent-team user-words：这一趟的原话记录在却读不出来，这一次不核契约第 1 节。\n')
+  return rec
+}
+
 // M4k（docs/46）：记录器判「照现状交付要不要记」时读的验收结论——在不在、空不空、sha、首行（approvals.mjs 的 planApprovals 那一支）；评审 F3：
 // 对不对着上一版契约（与 H6 的契约判据同一份 outdatedProducts）——复核（低 4）：验证段里不是项目经理自己写的那几份（测试报告、验收结论）有一份对着
 // 上一版就算（测试报告对着上一版，收口要回退重测，验收结论跟着重出，批准白记）；契约基线读不出来就当不对着（少拦）。复核（中 2）：这份验收结论已经
@@ -1079,7 +1134,11 @@ function gateFileReason(checked, exotic) {
       ? '这是门禁自己记的派发记录（谁在哪一段被派出去、谁派的、交付物核验拦过它几回），子代理完成时门禁靠它核产物，不用、也不许改。'
       : leafIs(CONTRACT_BASE_FILE)
         ? '这是门禁记下的契约基线（推进出第一段时契约第 1 节的原文，每一次改需求的修订那一刻验证段各份结论的样子），门禁自己维护，不用、也不许改。'
-        : '这是门禁自己拍的交付快照，PM 推进或回退之后由门禁照磁盘重拍，不用、也不许改。'
+        : leafIs(USER_WORDS_FILE)
+          ? // M4o 复核（docs/50 §9，正文中 3）：原来落到交付快照那一句，来历与出路都是错的。
+            '这是门禁在用户发出 /agent-team:at 时记下的原话（项目一级那份，或者绑进这一趟 run 目录的那份），不用、也不许改；契约第 1 节对不上它，' +
+            '就照它改第 1 节。'
+          : '这是门禁自己拍的交付快照，PM 推进或回退之后由门禁照磁盘重拍，不用、也不许改。'
   return (
     `agent-team 门禁：不得写 ${inline(checked)}——${exotic ? `${exotic}；它可能就是门禁专属文件。` : ''}${what}` +
     '任何人（包括项目经理与主线程）都不用 Edit/Write 写它。'
@@ -1833,6 +1892,19 @@ function main() {
       })
       if (!cb.ok) denyAndExit(cb.reason, spec.event)
 
+      // M4o（docs/50，审查第 20 条修法 A）：推进出第一段时，契约第 1 节对不上用户在 /agent-team:at 后面写的原话（这一趟建起来那一次绑进 run 目录的
+      // 记录），拒。没有记录的（更早建的 run、别的会话建的、不经门禁建的、命令没带参数、收口之后照用户的消息另起的）不核。
+      // 排在契约判据之后、验收判据之前：两样都是契约那一族，第一段推进时契约基线还没有，不会两样一起说。
+      const chain = isStageChain(stagesForRework) ? Object.keys(stagesForRework) : []
+      if (chain.length && isPlainObject(before) && isPlainObject(after) && before.stage === chain[0] && chain.indexOf(after.stage) > 0) {
+        const words = runWords(runDir)
+        const m = words && contractBytes ? section1Mismatch(contractBytes.toString('utf8'), words.args) : null
+        if (m) denyAndExit(`${wordsMismatchText(m)}。${WORDS_FIX}——再推进。`, spec.event)
+      }
+      // M4o 复核（docs/50 §9）：放行之前处理项目一级那份原话记录——这个会话建出这一趟 state.json 的那一次（写之前它不在）绑，续跑命令之前就有的那一趟
+      // 作废（settleWords）。排在所有拒绝之后：被拒的写入不绑。
+      settleWords({ runDir, agentTeamDir, sessionId: input.session_id, state: after, stages: stagesForRework, creating: before === null && beforeText === null })
+
       // M4k（docs/46，docs/35 §5「收口不读验收结论」）：验收结论首行——推进出验收那一段与收口时，不是「结论：通过」、又没有门禁记下的
       // 照现状交付批准（approvals.jsonl 里 sha 等于它现在的 sha），拒（hooks/lib/verdict.mjs）。排在最后：对着上一版契约的结论先重出，
       // 读它的首行才有意义。批准读同一个目录下的 approvals.jsonl（上面读过；读不出来当一条都没有——更严的一侧）。
@@ -2075,6 +2147,15 @@ function main() {
     if (kind === 'state') writeDeliveredSnapshot(ctx)
     // M4j（docs/45）：契约基线——推进出第一段之后第一次见到 state.json 时记下（contract-base.mjs）；写契约之后按它说【契约】。
     const contractBaseLines = kind === 'state' ? ensureContractBase(ctx) : kind === 'contract' ? contractBaseNotices(ctx) : []
+    // M4o（docs/50，审查第 20 条修法 A）：原话记录——项目经理在这一趟写 state.json 或契约时作废（settleWords；绑只在 H6 建 run 的那一次）；还在第一段、契约在时
+    // 拿第 1 节对它（第一段之后第 1 节的变化归契约基线管）。写契约那一次对不上说【契约】；写 state.json 时第一段的产物齐了，【阶段】那一句补上。
+    const firstStageId = isStageChain(ctx.stages) ? Object.keys(ctx.stages)[0] : null
+    if (kind === 'state' || kind === 'contract') {
+      settleWords({ runDir: ctx.runDir, agentTeamDir: ctx.agentTeamDir, sessionId: input.session_id, state: ctx.state, stages: ctx.stages, creating: false })
+    }
+    const words = kind === 'state' || kind === 'contract' ? runWords(ctx.runDir) : null
+    const wordsMismatch =
+      words && bytes && firstStageId !== null && ctx.state?.stage === firstStageId ? section1Mismatch(bytes.toString('utf8'), words.args) : null
 
     // M3u（docs/29）：project.json 的形状问题只有 PM 改得了，在它写控制文件的几个时机说出来——写 project.json
     // 本身（三档全报）；每趟 run 开头写 current-run（三档全报，已装用户的旧配置在 S1 就露面，不等 S5 撞上拒绝）；
@@ -2240,6 +2321,7 @@ function main() {
       reworkStale,
       closeBlockers: blockers,
       acceptanceNote,
+      wordsNote: wordsMismatch && kind !== 'contract' ? `${wordsMismatchText(wordsMismatch)}。推进出 ${firstStageId} 会被拒：${WORDS_FIX}。` : null,
       budget: validation ? validation.budget : [],
       grants,
       // M4b 第二轮复核：执行段「齐了」那句按写者分（谓词与 H3 同一个 isContractWriter）。
@@ -2254,6 +2336,7 @@ function main() {
       if (reachNotice) notices.push(reachNotice)
     }
     for (const line of contractBaseLines) notices.push(line)
+    if (wordsMismatch && kind === 'contract') notices.push(`【契约】${wordsMismatchText(wordsMismatch)}。${WORDS_FIX}——改好之前推进不出 ${firstStageId}。`)
     // M4h（docs/43，审查第 24-1 条）：写 current-run 时，别的、没收口的 run 里门禁还没见它停下的派发（inflightElsewhere 上方）。
     if (isPointer) {
       const inflight = inflightNotice(inflightElsewhere(ctx))
@@ -2335,6 +2418,50 @@ function main() {
     }
 
     emitHookJson(spec.event, { contexts: notices })
+  }
+
+  if (CHECK === 'user-words') {
+    // M4o（docs/50，审查第 20 条修法 A）：原话记录。/agent-team:at 展开时（UserPromptExpansion），把用户写在命令后面的那段话、这个会话的 id、
+    // 那一刻 runs/ 下已有的 run 记进项目一级的 .agent-team/user-words.json——整份重写，最近的一次命令为准；这个会话之后建出一趟新 run 的 state.json
+    // 那一次由 H6 绑进 run 目录（settleWords）。不拦任何东西、stdout 一个字都不写（这个事件上 exit 2 会把用户的命令拦掉）。.agent-team 不在不建它：
+    // 还没跑过 /agent-team:at-init 的项目，项目经理会叫用户先跑它（之后没重发命令、在对话里叫它接着做的，这一趟不核）。runs/ 读不出来当一趟都没有。
+    // 记不下只是这一趟不核第 1 节，留痕。
+    const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+    // 复核（docs/50 §9）：不带参数的 /agent-team:at——这个会话之前那条命令记下的、还挂着（没绑也没作废）的那份清掉：这一次的需求在之后的对话里给，
+    // 留着它会绑给这一次建的那一趟。别的会话的那份不动。
+    const blank = blankAtSession(input)
+    if (blank) {
+      try {
+        const p = readWords(readFileSync(join(agentTeamDir, USER_WORDS_FILE)))
+        if (p && p.session_id === blank && p.bound === null && p.dropped === null) {
+          unlinkSync(join(agentTeamDir, USER_WORDS_FILE))
+          process.stderr.write('agent-team user-words：/agent-team:at 这次没带参数，这个会话之前记下的原话作废。\n')
+        }
+      } catch {}
+      process.exit(0)
+    }
+    const w = wordsOf(input)
+    if (!w) process.exit(0)
+    let isDir = false
+    try {
+      isDir = statSync(agentTeamDir).isDirectory()
+    } catch {}
+    if (!isDir) {
+      process.stderr.write('agent-team user-words：这个项目里还没有 .agent-team（没跑过 /agent-team:at-init），这次的原话不记。\n')
+      process.exit(0)
+    }
+    let runsBefore = []
+    try {
+      runsBefore = readdirSync(join(agentTeamDir, 'runs'))
+    } catch {}
+    try {
+      const rec = pendingRecord({ at: new Date().toISOString(), sessionId: w.sessionId, args: w.args, runsBefore })
+      writeFileSync(join(agentTeamDir, USER_WORDS_FILE), `${JSON.stringify(rec, null, 2)}\n`)
+      process.stderr.write('agent-team user-words：已记下 /agent-team:at 后面的原话。\n')
+    } catch (e) {
+      process.stderr.write(`agent-team user-words：原话记不下（${quote(e?.message ?? e, { max: 120 })}），这一趟契约第 1 节不跟它核。\n`)
+    }
+    process.exit(0)
   }
 
   if (CHECK === 'approval-ask' || CHECK === 'approval-prompt') {
@@ -3067,7 +3194,7 @@ try {
   // 什么。不按调用者门控——ctx 正常时崩溃，只有这次调用的发起者看得见；非 PM 收到冒泡句。PM 收件时给用户一行。
   // readiness 在 PreToolUse 上只给用户一行（那里不发受信块），stop-gate 在 SubagentStop 上什么都不发（hookOutput 定）。
   // 这一段自己再抛就会掉进 boot.mjs 的「加载失败」退路、说错原因，所以整段兜住：兜不住就只剩上面那行 stderr。
-  process.stderr.write(crashNotice(CHECK, err, spec?.recorder === true))
+  process.stderr.write(crashNotice(CHECK, err, spec?.recorder === true, spec?.records))
   try {
     const pm = isPlainObject(INPUT) && isContractWriter(INPUT.agent_type)
     const notification = isPlainObject(INPUT) && typeof INPUT.prompt === 'string' && INPUT.prompt.includes('<task-notification>')

@@ -42,6 +42,17 @@ function linesOf(text) {
   return t.split(/\r?\n/).map((l) => l.replace(/\s+$/, ''))
 }
 
+/** 契约的行：剥 BOM、折 CRLF、每行去掉行尾空白。第 1 节、修订指纹与原话核对（user-words.mjs）共用这一份。 */
+export function contractLines(text) {
+  return linesOf(typeof text === 'string' ? text : '')
+}
+
+/** 编号节标题（「## 1. 用户原话」「## 4. 修订记录」）的编号；不是编号节标题回 null。 */
+export function numberedHeading(line) {
+  const m = typeof line === 'string' ? SECTION_RE.exec(line) : null
+  return m ? Number(m[1]) : null
+}
+
 /** 第 n 节在 lines 里的 [标题行, 下一个编号节标题)；没有这一节回 null。 */
 function sectionRange(lines, n) {
   const start = lines.findIndex((l) => {

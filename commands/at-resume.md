@@ -99,6 +99,9 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 要改只能走升级流程（见 `/agent-team:at` 的第 4 节，`${CLAUDE_PLUGIN_ROOT}/commands/at.md`）。
 例外：门禁回传叫你「原样重写一次 `00-contract.md`、从回传里拿 sha」的（`contract_sha` 是 PENDING 或不合法，或者 `state.json` 是重建的），
 照它逐字原样重写——第 1 节一个字不动，那不是改契约。
+还停在 `S1` 的另有一种：推进出 `S1` 被 H6 以「契约第 1 节对不上用户在 /agent-team:at 后面写的原话」拒的（写契约时的【契约】也这么说），照拒绝理由
+把第 1 节改成那段原话——原话在这一趟 run 目录的 `user-words.json` 里（args 那一项），这是照抄、不是改契约。还停在 `S1`、契约还没写的：先 `Read`
+`${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 2 节再写，第 1 节照抄这一趟 run 目录 `user-words.json` 里的原话；没有这份文件的，问用户这一趟的需求原话。
 
 ## 3. 状态文件有问题时
 

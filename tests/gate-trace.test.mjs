@@ -384,6 +384,22 @@ const SCENARIOS = [
     setup: () => ({ ...fromRun({ runId: 'r1', stage: 'S2' }), input: { hook_event_name: 'UserPromptSubmit', prompt: '继续' } }),
     shape: { status: 0, stdout: 'empty', stderr: 'empty' },
   },
+  // M4o（docs/50）：原话记录器。只取不写文件的两格——记下原话会写 .agent-team/user-words.json，那是记录器的本分。
+  {
+    name: 'user-words：展开的不是 /agent-team:at，静默',
+    check: 'user-words',
+    setup: () => ({
+      ...fromRun({ runId: 'r1', stage: 'S2' }),
+      input: { hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'agent-team:at-init', command_args: 'x', session_id: 's' },
+    }),
+    shape: { status: 0, stdout: 'empty', stderr: 'empty' },
+  },
+  {
+    name: 'user-words：项目里没有 .agent-team，不记，stderr 留痕',
+    check: 'user-words',
+    setup: () => ({ ...cleanDir(), input: { hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'agent-team:at', command_args: 'x', session_id: 's' } }),
+    shape: { status: 0, stdout: 'empty', stderr: 'nonempty' },
+  },
 ]
 
 function runBoth(sc) {

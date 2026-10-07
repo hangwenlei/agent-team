@@ -163,6 +163,23 @@
           }
         ]
       }
+    ],
+    "UserPromptExpansion": [
+      {
+        "matcher": "^agent-team:at$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "user-words"
+            ],
+            "timeout": 30,
+            "statusMessage": "记下需求原话…"
+          }
+        ]
+      }
     ]
   }
 }

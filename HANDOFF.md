@@ -34,7 +34,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （门禁留痕的判读表、Claude Code 的下限），判据对着代码与 README 核。两份都是活的，直接改。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
 - `CHANGELOG.md` — 每一版一行，最新的在最上面。
-- `docs/13`…`docs/49` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/50` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，它 §5 排的六轮到 `docs/48` 做完；之后从 `docs/00-开放边界.md` 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -166,6 +166,13 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   列它（`hooks/lib/contract-base.mjs` 的 `decideContractBase`，排在 H6 别的判据之后）。出路看当前段（`outdatedFix`：早于当前段的回退、当前段的同段
   重派、后面的段走到时照常重出）。改第 1 节不算修订；回退之后 `rework_base` 接手，不另起一套新鲜度口径。推进出第一段之前不核（S1 里转写错了
   可以改）。理由在 `docs/45`。
+- **契约第 1 节对着用户原话核**：`/agent-team:at` 带参数展开时（UserPromptExpansion，matcher 锚定 `^agent-team:at$`，从插件名来）记录器把原话、会话 id、
+  那一刻已有的 run 记进项目一级的 `.agent-team/user-words.json`，不带参数的那一次清掉这个会话还挂着的那份。只在这个会话用 Write 建出一趟新 run 的
+  `state.json` 的那一次（H6，写之前文件不在）绑进它的 run 目录——不晚绑（晚绑会跨会话绑错、回退到第一段时与契约基线卡死）；命令之前就有、没收口的
+  那一趟被写了（续跑）就作废，不论它自己带没带记录（`hooks/lib/user-words.mjs` 的 `bindDecision`，`gate.mjs` 的 `settleWords`）。第一段里写契约时
+  对不上说【契约】、【阶段】补句，推进出第一段时 H6 拒；比之前折空白、去格式字符（模型照抄不出不换行空格），整段引用块也认，按原话的行数往下认，
+  对不上报码位。两份记录都是门禁专属（项目一级那份是唯一不在 `runs/<id>/` 下的，`PROJECT_GATE_FILES`）。记录器不拦任何东西、stdout 不写；失败时按
+  `records` 说「原话没有记下」。理由在 `docs/50`（§9 是复核）。
 - **收口读验收结论，照现状交付由门禁记**：`07-acceptance.md` 的第一个非空行固定写「结论：通过」「结论：不通过」「结论：判不了」之一（`hooks/lib/verdict.mjs`
   的 `acceptanceVerdict`：不通过、判不了按前缀认，通过严格）；推进出验收那一段与收口时 H6 读它（`decideAcceptance`，排在 H6 最后），【阶段】在 S7 齐了时与
   S8 的收口阻碍里用同一份 `acceptanceBlock`。没过的只有用户经规范标签「照现状交付」批准过才放行：两个记录器也认它（标签与返工批准的同在 `budget.mjs`），
@@ -223,6 +230,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   只有 `-p`、SDK 宿主能前台派（`PostToolUse` 在子代理跑完之后才到，`status` 是 `completed`）。完成通知每一条在主会话触发一次 UserPromptSubmit，
   `prompt` 就是那段 `<task-notification>` XML，同一个 task-id 会通知不止一次。嵌套派发的通知按模式路由：交互模式下孙代理的通知回到停车的协调者、
   `-p` 下协调者还在跑时也送给它——这两种情形主会话都只收到协调者那一条。子代理回报里出现指令形状的字样时，CLI 在最前面插一段 `[harness: …]` 注记。
+- **UserPromptSubmit、UserPromptExpansion 上 hook 的输出进不进转录看 stdout**（CLI 2.1.286，`docs/50` §1.3）：stdout 为空的不留记录、stderr 跟着丢；
+  带 additionalContext 的只记那段上下文；纯文本 stdout 才连 stderr 一起记。调试日志里都有。门禁在这两个事件上的留痕行只能在 `--debug-file` 里数。
 - **拿内置浏览器验页面行为之前，先看面板显没显示**（`tabs_context` 会说）：面板隐藏时页面不渲染，`requestAnimationFrame`
   不跑，连 `window.scrollTo` 都不生效——点锚点「不动」、动画「不播」都会是假阴性。要么让面板显示，要么用 Playwright 无头浏览器测
   （它打不开 `file://`，本地页面要起 `python -m http.server` 再看；快照与截图只能写进仓库下的 `.playwright-mcp/`，测完删掉）。2026-09-27 就因此把一个能用的 `<a name>` 锚点误判成不能跳，多发了一版。
