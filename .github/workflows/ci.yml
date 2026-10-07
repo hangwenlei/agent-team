@@ -69,8 +69,9 @@ jobs:
           node-version: 24
       - name: tag the release
         run: node scripts/tag-release.mjs --push
-      # 第 45 条剩下的「没有 GitHub Release」（docs/52）：打完 tag 给这一版建 Release（scripts/github-release.mjs：tag 不在远端不建、已有就不动、
-      # 正文是 CHANGELOG.md 里这一版那一行）。上一步红了也跑——它自己先核 tag 在不在远端；补不上的旧版 tag 会让上一步一直红，跟着不跑就永远建不出这一版的。
+      # 第 45 条剩下的「没有 GitHub Release」（docs/52）：打完 tag 给 3.3.1 起还没有 Release 的各版建一条（scripts/github-release.mjs，与打 tag 同一份认法：
+      # tag 不在远端或指向别处的不建、已有就不动、正文是 CHANGELOG.md 里这一版那一行）。上一步红了也跑——它自己核 tag 在不在、指没指对；补不上的旧版 tag
+      # 会让上一步一直红，跟着不跑就永远建不出这一版的。
       - name: publish the GitHub release
         if: ${{ !cancelled() }}
         env:
