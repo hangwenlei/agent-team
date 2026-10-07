@@ -197,20 +197,21 @@ export function dispatchOf(log, taskId, toolUseId) {
 /**
  * M4n（docs/49，全量审查第 24 条）：按 agent_id 认派它的那一趟。runs：[{ id, dir, current, log }]（log 是 readDispatchLog 的结果，current 为真的是
  * current-run 指着的那一趟）。当前这一趟的派发记录里有它：返回 null，照当前这一趟判（与原来一样）。没有、而别的一趟有：返回 { id, dir, dispatch }——
- * 它是那一趟派出去的（指针切走之前，或者那一趟的协调者在切走之后又往下派的），dispatch 是那一趟里对应它的那一行（dispatchOf 的挑法）；几趟都有时取
- * 排在最后的那一趟。哪一趟都没有：返回 null（CLI 的内部分叉、门禁没记下的派发），照当前这一趟判。
+ * 它是那一趟派出去的（指针切走之前，或者那一趟的协调者在切走之后又往下派的），dispatch 是那一趟里对应它的那一行（dispatchOf 的挑法）。
+ * 哪一趟都没有：返回 null（CLI 的内部分叉、门禁没记下的派发），照当前这一趟判。复核（docs/49 §8）：别的几趟都记着它（拷来的、伪造的），认不准
+ * 是哪一趟——同样返回 null、照当前这一趟判，不挑一趟记进去。
  */
 export function elsewhereRunOf(runs, agentId, toolUseId = null) {
   if (typeof agentId !== 'string' || !AGENT_ID_RE.test(agentId)) return null
   const list = Array.isArray(runs) ? runs.filter((r) => isPlainObject(r) && Array.isArray(r.log?.dispatches)) : []
   if (list.some((r) => r.current && r.log.dispatches.some((d) => d.agent_id === agentId))) return null
-  let found = null
+  const found = []
   for (const r of list) {
     if (r.current) continue
     const dispatch = dispatchOf(r.log, agentId, toolUseId)
-    if (dispatch) found = { id: r.id, dir: r.dir, dispatch }
+    if (dispatch) found.push({ id: r.id, dir: r.dir, dispatch })
   }
-  return found
+  return found.length === 1 ? found[0] : null
 }
 
 const STATUS_PHRASE = { failed: '派发失败了', killed: '被停下了', stopped: '被停下了' }

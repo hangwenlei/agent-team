@@ -192,7 +192,7 @@ export function readProjectConfig(projectDir) {
  * hasAgentTeam 注入只为单测；绝不抛——探测出错时退回 CLAUDE_PROJECT_DIR / cwd。
  */
 // run id 的白名单：以字母或数字开头，其余只许字母、数字、点、下划线、连字符。
-const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+export const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 export function projectRootFrom(env, cwd, hasAgentTeam = hasAgentTeamDir) {
   const dir = env !== null && typeof env === 'object' ? env.CLAUDE_PROJECT_DIR : undefined
