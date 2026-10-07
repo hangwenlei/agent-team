@@ -34,7 +34,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （门禁留痕的判读表、Claude Code 的下限），判据对着代码与 README 核。两份都是活的，直接改。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
 - `CHANGELOG.md` — 每一版一行，最新的在最上面。
-- `docs/13`…`docs/50` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/51` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，它 §5 排的六轮到 `docs/48` 做完；之后从 `docs/00-开放边界.md` 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -103,7 +103,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   从 `PLUGIN_PREFIX` 派生。门禁按剥前缀的名字认 PM 不收紧。理由在 `docs/36`。
 - **根级文件共列，不加 `shared` 键**：根级清单、构建配置、顶层测试目录列给每个会改它们的 S5 产者；S3 的「落盘清单」与 S4「照清单补 `paths`」
   是对齐的那一步（加了 `shared` 也省不掉，前缀按字面比、S0 时文件还不存在）。S5 被拒的在实现记录里留「被写路径隔离拒绝」一节、标「已解决」，
-  PM、at-resume、at-qa 按它判交没交齐，执行段「齐了」时门禁提醒先读它（`IMPL_RECORD_NOTE`）。理由在 `docs/36`。
+  PM、at-resume、at-qa 按它判交没交齐，执行段「齐了」时门禁提醒先读它（`IMPL_RECORD_NOTE`）。要改同一份文件的执行角色由架构师先后派，门禁不强制串行
+  （「还在跑」只能按停下行认，中断的子代理会让门禁一直拒；`tests/shared-worktree-prose.test.mjs` 钉着那一句）。理由在 `docs/36`、`docs/51` §1.2。
 - **冒泡的出口由门禁认，不改「交没交」**：H5b 在子代理已经被拦过一回（`stop_hook_active`）、最后一条回复的第一行以「冒泡：」开头时放它停下
   （`hooks/lib/deliverable.mjs` 的 `isBubbleStop`，标记的单一真源是 `BUBBLE_MARK`）；这一段的产物照旧算没交：下一段的前置（H2）与收口照常判缺、
   【阶段】不说齐了，推进那一次 H6 拒（M4d，`docs/38`）。
@@ -153,7 +154,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （【派发】，停下行按 `agent_id` 在所有 run 里认）。停下、完成、再往下派人时按 `agent_id` 认回派它的那一趟（当前这一趟的派发记录里没有、别的一趟有）：
   H5b 不按这一趟核、放它停下、停下行记回那一趟（只在那一趟收了口时不记）；完成核验告诉 PM 它属于哪一趟；那一趟的协调者再派人，H2 在派发那一帧拒，
   H2 放行时 H5a 记回那一趟、回传叫它停下（`completion.mjs` 的 `elsewhereRunOf`；几趟都记着、目录名不是合法 run id 的不认）。写路径隔离照旧按当前
-  这一趟判。理由在 `docs/43`、`docs/49`（§8 是复核）。
+  这一趟判。项目经理把契约或阶段产物写进一趟不是 `current-run` 的 run 目录（漏切指针），账本回传【指针】——收窄到契约与产物，写 `state.json`、别的文件、
+  执行角色的写入不说（`gate.mjs` 的 `otherRunWrite`）。理由在 `docs/43`、`docs/49`（§8 是复核）、`docs/51`。
 - **项目经理只能是主会话、调用者认不出就拒**：H1 对 `agent_type` 在却不是非空字符串的拒；任何调用者派 `at-pm` 一律拒（花名册外的、裸名也拒）；
   受管辖的派发带非空 `name`（agent teams 的 teammate）拒，与 `isolation` 同形；项目经理被拒时说那个角色由谁派（从花名册现算）。认不出的调用者
   （`malformedCaller`）H1、H3 共用一个判断。主会话被设置里别的 agent 或启动时的 `--agent` 换掉时（实测：`agent_type` 是那个名字、没有 `agent_id`），

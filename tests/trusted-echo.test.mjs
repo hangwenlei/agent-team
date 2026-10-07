@@ -973,3 +973,27 @@ test('正向锚点：violations 认得出不在引号里的磁盘值，放过引
   assert.deepEqual(violations(ctx(`  - stage 是 ${JSON.stringify(PAYLOADS.clean)}，但……`), { disk: true }), [])
   assert.deepEqual(violations(ctx(`  - rework["S2"] 是 ${JSON.stringify('a"' + PAYLOADS.clean)}`), { disk: true }), [])
 })
+
+// M4p（docs/51）：漏切指针的【指针】说出另一趟的 run 目录名——那是项目经理这次写的路径里的一段，目录名谁都建得出。Windows 上行分隔符
+// 那三种是合法的文件名字符（POSIX 上连 \n 都合法），这里只造那三种。current-run 的内容那一边不用造：它不是合法的 run id 时门禁读不出运行
+// 上下文，走不到这一段。
+test('不回显外部值：另一趟的 run 目录名带行分隔符（漏切指针的【指针】）', async () => {
+  const bad = []
+  for (const pname of ['u2028', 'nel', 'u2029']) {
+    const P = PAYLOADS[pname]
+    const dirs = makeRun({ runId: 'r1', stage: 'S2', project: PROJECT, roster: baseState().roster })
+    try {
+      const other = join(dirs.projectDir, '.agent-team', 'runs', `r2${P}`)
+      mkdirSync(other, { recursive: true })
+      writeFileSync(join(other, '00-contract.md'), '# 契约\n')
+      const r = await gate('ledger', posted('agent-team:at-pm', join(other, '00-contract.md')), dirs.projectDir)
+      bad.push(...violations(r, { disk: true }).map((v) => `${pname}：${v}`))
+      const all = channels(r).map((c) => c.text).join('\n')
+      if (!all.includes('【指针】')) bad.push(`${pname}：正向锚点没命中——【指针】没出来，这一条什么都没测`)
+    } finally {
+      rmSync(dirs.projectDir, { recursive: true, force: true })
+      rmSync(dirs.pluginDir, { recursive: true, force: true })
+    }
+  }
+  assert.deepEqual(bad, [], bad.join('\n'))
+})

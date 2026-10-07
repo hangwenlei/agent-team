@@ -1037,6 +1037,34 @@ function contractBaseNotices(ctx) {
   return out
 }
 
+// M4p（docs/51，docs/30 §4「第二趟起漏切指针、契约写在当前 run 之外」）：这次写的是 runs/ 下另一趟（不是 current-run 那一趟）的契约或阶段产物吗——
+// 是就回 { id（那一趟的目录名，按规范化之后的路径取）, name（契约或产物名，插件自己的名字）}，否则 null。收窄到契约与产物：写 state.json（建新 run 时
+// 它本来就先于指针，/agent-team:at 第 1 节）、写别的文件不算——项目经理有意动上一趟的那几样（替它收口）不该误报。
+function otherRunWrite(ctx, filePath) {
+  if (typeof filePath !== 'string' || typeof ctx.agentTeamDir !== 'string' || typeof ctx.runDir !== 'string') return null
+  const runsDir = join(ctx.agentTeamDir, 'runs')
+  const base = norm(runsDir)
+  const target = norm(filePath)
+  if (!target.startsWith(`${base}/`)) return null
+  const rel = target.slice(base.length + 1).split('/')
+  if (rel.length < 2 || !rel[0]) return null
+  const otherDir = join(runsDir, rel[0])
+  if (norm(otherDir) === norm(ctx.runDir)) return null
+  const name = rel.slice(1).join('/')
+  if (name === CONTRACT_FILE) return { id: rel[0], name }
+  const owner = ctx.stages ? stageOwnerOfRunPath(ctx.stages, otherDir, target) : null
+  return owner ? { id: rel[0], name: owner.produces } : null
+}
+
+// M4p：【指针】那一段。两个 run id 都是磁盘上的值（目录名、current-run 的内容），过 quote；文件名是插件自己的名字。
+function pointerNotice(other, currentId) {
+  return (
+    `【指针】这次写的是 ${quote(other.id)} 那一趟 run 目录里的 ${other.name}，current-run 指着 ${quote(currentId)}——门禁按 ${quote(currentId)} 判，` +
+    '这次写入没有 sha 回传、不进账本比对。新建的那一趟：照 /agent-team:at 第 1 节先把 current-run 指过去，再原样重写一次这份文件拿回传；' +
+    `要接着做的确是 ${quote(other.id)} 那一趟：先把 current-run 改回它，再跑 /agent-team:at-resume。`
+  )
+}
+
 // M4o（docs/50，审查第 20 条修法 A）：项目一级那份原话记录（记录器在 /agent-team:at 展开时写的）这一次怎么办——bindDecision 说作废就标上 dropped
 // （记下之前就有的这一趟没收口却被写了：续跑了它，这条命令的需求被搁下了）；说绑、这一趟又还没有自己那份，就绑：先把项目一级那份标上 bound，
 // 再写 run 目录那份（后一步写不进时，记录不会一直挂着、被下一趟绑上——那样这一趟只是不核）。creating：这一次是这个会话用 Write 建出这一趟的
@@ -2101,6 +2129,12 @@ function main() {
     // 路径：控制文件，以及 run 目录下的阶段产物（后者用来判断当前阶段的产物齐
     // 没齐）；underDir 判的是后一类，写在 hooks/lib/path-norm.mjs 里（评审 I-2：
     // 这段比较与 writepath.mjs 里同一处判定曾经是两份逐字符相同的拷贝）。
+    // M4p（docs/51，docs/30 §4）：漏切指针——项目经理把契约或阶段产物写进另一趟的 run 目录。原来这一格落进下面的提前退出、一句不说：没有 sha 回传、
+    // 不进账本比对，门禁照旧按指针指着的那一趟判。只在写者是项目经理时说（执行角色写别的 run 的目录，H3 本来就拒）。
+    if (isContractWriter(input.agent_type)) {
+      const other = otherRunWrite(ctx, filePath)
+      if (other) emitHookJson(spec.event, { contexts: [pointerNotice(other, basename(ctx.runDir))] })
+    }
     if (!isControlFile(filePath, ctx.agentTeamDir) && !underDir(filePath, ctx.runDir)) {
       process.exit(0)
     }
