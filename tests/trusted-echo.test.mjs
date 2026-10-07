@@ -156,12 +156,12 @@ const stateWrite = (run, content) => write('at-pm', join(run, 'state.json'), { c
 // M4d（docs/38）：完成核验的输入——主会话收到的那条 <task-notification>（UserPromptSubmit 的 prompt），以及门禁在派发那一刻记下的那一行。
 const DISPATCHES = 'dispatches.jsonl'
 const oneLine = (P) => P.split('\n').join(' ')
-const notify = ({ status = 'completed', result = null } = {}) => ({
+const notify = ({ status = 'completed', result = null, taskId = 'a0000000000000001', toolUseId = 'toolu_01' } = {}) => ({
   hook_event_name: 'UserPromptSubmit',
   prompt: [
     '<task-notification>',
-    '<task-id>a0000000000000001</task-id>',
-    '<tool-use-id>toolu_01</tool-use-id>',
+    `<task-id>${taskId}</task-id>`,
+    `<tool-use-id>${toolUseId}</tool-use-id>`,
     `<status>${status}</status>`,
     '<summary>Agent "x" finished</summary>',
     ...(result === null ? [] : [`<result>${result}</result>`]),
@@ -473,6 +473,49 @@ const SCENARIOS = [
       return [['ledger', posted('at-pm', join(p, '.agent-team', 'current-run'))]]
     },
     anchor: (all) => all.includes('一条认不出角色或段的派发'),
+  },
+  {
+    // M4n（docs/49，第 24 条）：按 agent_id 认回别的一趟——那一趟的派发记录（Bash 写得进）里的角色与段，经完成核验、H5b 的留痕回到文字里。
+    // 认不得的不回显（完成核验退回「一条认不出角色或段的派发」）；run 目录名是固定的 r0，加引号——别的目录名进不来：runLogs 只列名字是合法
+    // run id 的目录（RUN_ID，与 runctx 认 current-run 同一个口径）。复核（docs/49 §8）：只伪造角色、只伪造段的两行也要退回那一句（known 要两样都认得）。
+    name: '别的 run 的派发记录里的角色与段（按 agent_id 认回那一趟：完成核验与 H5b）',
+    disk: true,
+    calls: ({ p }, P) => {
+      const old = join(p, '.agent-team', 'runs', 'r0')
+      mkdirSync(old, { recursive: true })
+      writeFileSync(join(old, 'state.json'), JSON.stringify({ run_id: 'r0', stage: 'S5', closed_at: null }))
+      writeFileSync(
+        join(old, 'dispatches.jsonl'),
+        [
+          { kind: 'dispatch', at: 't', agent_id: 'a0000000000000001', tool_use_id: 'toolu_01', role: P, stage: P, caller: P, caller_id: null, mode: 'background' },
+          { kind: 'dispatch', at: 't', agent_id: 'a0000000000000003', tool_use_id: 'toolu_03', role: 'at-backend', stage: P, caller: '__main__', caller_id: null, mode: 'background' },
+          { kind: 'dispatch', at: 't', agent_id: 'a0000000000000004', tool_use_id: 'toolu_04', role: P, stage: 'S5', caller: '__main__', caller_id: null, mode: 'background' },
+        ].map((l) => JSON.stringify(l) + '\n').join(''),
+      )
+      return [
+        ['completion', notify()],
+        ['completion', notify({ taskId: 'a0000000000000003', toolUseId: 'toolu_03' })],
+        ['completion', notify({ taskId: 'a0000000000000004', toolUseId: 'toolu_04' })],
+        ['stop-gate', { ...stopped('agent-team:at-backend'), agent_id: 'a0000000000000001' }],
+      ]
+    },
+    anchor: (all) => all.split('一条认不出角色或段的派发').length - 1 >= 3 && all.includes('那一趟派出去的，current-run 指着别的一趟'),
+  },
+  {
+    // M4n：那一趟的协调者在指针切走之后又往下派人——目标角色是它自己这次给的参数（不查④），花名册认不得就不说出来。
+    name: '别的 run 的协调者往下派人时的目标角色（按 agent_id 认回那一趟：H5a 的回传）',
+    calls: ({ p }, P) => {
+      const old = join(p, '.agent-team', 'runs', 'r0')
+      mkdirSync(old, { recursive: true })
+      writeFileSync(join(old, 'state.json'), JSON.stringify({ run_id: 'r0', stage: 'S5', closed_at: null }))
+      writeFileSync(
+        join(old, 'dispatches.jsonl'),
+        JSON.stringify({ kind: 'dispatch', at: 't', agent_id: 'a00000000000000c0', tool_use_id: null, role: 'at-architect', stage: 'S5', caller: '__main__', caller_id: null, mode: 'background' }) + '\n',
+      )
+      const input = { ...returned(P, 'agent-team:at-architect'), agent_id: 'a00000000000000c0', tool_response: { status: 'async_launched', isAsync: true, agentId: 'a0000000000000002' } }
+      return [['deliverable', input]]
+    },
+    anchor: (all) => all.includes('那一趟不是当前 run'),
   },
   {
     // M4g 复核（K14）：写完 reach.json 门禁重算核对，给出的「正确那一份」里有 project.json 的前缀——原样落盘的 JSON 只许走 safeJson

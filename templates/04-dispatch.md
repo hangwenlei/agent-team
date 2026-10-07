@@ -36,3 +36,12 @@ sensitive / contract-conflict / tradeoff / contract-hole / budget-exhausted / en
 <照 03-arch.md 的「落盘清单」往 .agent-team/project.json 的 paths 里补了哪些前缀、补在谁名下；S5 里补的也追加在这里。
 照【project.json】或拒绝理由删掉、改掉了哪些条目、为什么（S1 里改的，写这份文件时补记）。收尾时告诉用户——补的前缀留给以后各趟。
 没改就写「无」。>
+
+## 6. 代码基线
+
+<写这份文件时项目代码的样子：走过 S5 之后要回到 S5 之前时，拿它对照这一趟（自基线以来）改了什么。在项目根跑，只用不改工作树、
+暂存内容与历史的 git 命令：`git rev-parse --show-toplevel` 报错的，写「不是 git 仓库」；`git rev-parse --verify -q HEAD` 的输出
+（没有输出的写「还没有提交」）；`git --no-optional-locks -c core.quotepath=off status --porcelain -uall -- .` 里 `.agent-team/` 之外的
+条目（没有就写「干净」）。不 add、不 commit、不打 tag、不 stash：这些会改仓库，要跑先照 /agent-team:at 第 4 节的 sensitive 问用户。
+返工轮回到 S4 重写这份文件时，这一节照抄上一次记的，不重记；上一次没有这一节的（更早建的 run、漏记了），写「没记」，不补记——走过 S5 之后
+补记的，会把这一趟的改动当成基线。>
