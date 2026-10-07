@@ -532,3 +532,20 @@ test('M3v：no-run 与 ok 不带 cause——它只描述「判不出来」的原
     cleanup(dirs)
   }
 })
+
+// 第 33 条（C9，M4l）：current-run 末尾带换行（编辑器、echo 写的）——照样认出那一趟，不当成指向一个不存在的 run。
+test('第 33 条（C9）：current-run 末尾带 LF、CRLF、空白——照样认出那一趟', () => {
+  const LF = String.fromCharCode(10)
+  const CR = String.fromCharCode(13)
+  for (const tail of [LF, CR + LF, '  ' + LF]) {
+    const dirs = makeRun({ runId: 'r9', stage: 'S2', stages: STAGES })
+    try {
+      writeFileSync(join(dirs.projectDir, '.agent-team', 'current-run'), 'r9' + tail)
+      const ctx = readRunContext(dirs.projectDir, dirs.pluginDir)
+      assert.equal(ctx.ok, true, JSON.stringify(tail))
+      assert.equal(ctx.runId, 'r9')
+    } finally {
+      cleanup(dirs)
+    }
+  }
+})

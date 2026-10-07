@@ -6,7 +6,7 @@
 // 这一层的行为由 tests/version-bump.test.mjs 末尾在临时 git 仓库里造提交钉着。
 
 import { execFileSync } from 'node:child_process'
-import { judgeVersionBump, withoutVersionOnlyManifest } from './lib/version-bump.mjs'
+import { CHANGELOG, judgeVersionBump, withoutVersionOnlyManifest } from './lib/version-bump.mjs'
 
 const [base, head] = process.argv.slice(2)
 
@@ -17,6 +17,15 @@ function git(...args) {
 function manifestAt(ref) {
   try {
     return JSON.parse(git('show', `${ref}:.claude-plugin/plugin.json`))
+  } catch {
+    return null
+  }
+}
+
+// 第 45 条（M4l）：事件之后那个提交的 CHANGELOG.md（没有给 null）——版本号往前挪时，最上面那一行要是这一版。
+function changelogAt(ref) {
+  try {
+    return git('show', `${ref}:${CHANGELOG}`)
   } catch {
     return null
   }
@@ -67,6 +76,7 @@ const r = judgeVersionBump({
   before: before?.version ?? null,
   after: after?.version,
   changed: withoutVersionOnlyManifest(changed, before, after),
+  changelog: changelogAt(head),
 })
 console.log(`${r.ok ? '✔' : '✖'} ${r.reason}`)
 process.exit(r.ok ? 0 : 1)

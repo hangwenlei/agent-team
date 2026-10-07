@@ -8,3 +8,10 @@
 # 临时检出推进公开仓库（本仓库为「add -A 卷走别人的东西」栽过一次，
 # 见 docs/11 的换行符那一节同族的操作纪律）。
 .claude/worktrees/
+
+# Playwright 的快照与截图只能写在仓库下的这个目录（HANDOFF「注意事项」），测完删；忘了删也不进仓库（第 48 条，M4l）。
+.playwright-mcp/
+
+# 临时脚本与草稿不放进仓库；万一建了，也不进仓库（第 48 条，M4l）。⚠️ 忽略只管 git：node --test 照样递归收它下面的 *.test.mjs，
+# 所以仓库里还是不要建它（HANDOFF「注意事项」）。
+scratchpad/

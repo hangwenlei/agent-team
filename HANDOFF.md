@@ -30,7 +30,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
-- `docs/13`…`docs/45` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `CHANGELOG.md` — 每一版一行，最新的在最上面。
+- `docs/13`…`docs/47` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，下一轮从 `docs/39` §5 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -45,7 +46,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **发布纪律：每次推 `main` 都挪 `version`** —— 只碰散文 / `docs/` / `tests/` 挪最后一位，碰插件会加载的东西挪中间一位，任何一位不长到 `10`。
   理由：`claude plugin update` 比的是 `version` 字符串，不是 commit。CI 在推 main / 向 main 提 PR 时核它（`scripts/check-version-bump.mjs`，
   「插件会加载的」清单的单一真源是 `scripts/lib/version-bump.mjs` 的 `PLUGIN_LOADED`）。main 没开分支保护，所以那是**事后**告警：
-  先推功能分支、等 CI 全绿，再合进 main 推送。
+  先推功能分支、等 CI 全绿，再合进 main 推送。每挪一次，在 `CHANGELOG.md` 最上面加一行「- x.y.z：这一版改了什么」，版本检查核它；推 main、判据与
+  版本检查都过了之后 CI 按版本打 tag（`v` 加版本号，`ci.yml` 的 `tag` 作业）。理由在 `docs/47`。
 - **`docs/11` §1–§4 原文一字不改，只追加 §5.x；带日期的实测记录正文不改，订正与收口写在旁边 —— 而且写在原话的标题底下**，只在新一节里指称它的收口，扫标题的人读不到。
 - **一条注释不是一条判据。** 要防的事配判据；写不出来就按 `docs/16` §3 开头那条付三样（拒绝的判据长什么样、它打不红的那一刀、什么会让答案改变）。
 - **列举，不报总数**（`docs/16` §3.1）。失效条件写成可观测状态或归属规则，不写成要人去数的阈值。
@@ -171,7 +173,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **锚串替换不要用 `String.prototype.replace(a, b)`**：`b` 里的 `$'`、`$&` 会被展开成替换模式（`docs/26` §3 就这样把一段文档
   搅乱过）。用 `split(a).join(b)`，并断言命中次数。
 
-- **换行符是混的**（`docs/11` §5.28）：索引统一 LF，`core.autocrlf=true` 让签出副本是 CRLF，被工具重写过的文件停在 LF。
+- **换行符**（`docs/11` §5.28）：M4l 起有 `.gitattributes`（`* text=auto eol=lf`），签出的工作区副本都是 LF；之前签出、git 还没再碰过的副本仍可能是 CRLF。
   锚串替换要**断言命中数，并核对命中的是你要的那一处** —— 同一个实参有几处合法命中时，断言防不了砍错的那一刀。落盘后扫控制字节与行尾混用。
   扫行尾用 Node 或 `grep -U`：Git Bash 的 grep 不带 `-U` 看不见 CR，会报出假的「全是 LF」（`docs/39` §3）。
 - **后台 agent 与主会话共用工作树时**，别 `git add -A` / `checkout` / `reset`；要并行就用隔离 worktree。
@@ -181,7 +183,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   `claude rm` 只删 `~/.claude/jobs/<id>/`，转录不动。
 - 变异验证用 `cp` 备份与还原，不用 `git checkout` / `git restore`；备份放仓库外。
 - 裸 `node --test`（仓库根，不带路径参数）；带路径参数会报出一个假的 `pass 0 / fail 1`。
-- 仓库里不要建 `scratchpad/`：它不在 `.gitignore` 里，而 `node --test` 会递归收它下面的 `*.test.mjs`。
+- 仓库里不要建 `scratchpad/`：它进了 `.gitignore`，但 `node --test` 照样递归收它下面的 `*.test.mjs`。
 - **绝不 `claude plugin enable` / `disable`**：`enable` 接管正在跑的会话，`disable` 不把工具面还回来。
 - **`agents/at-pm.md` 的 `model:` 不是摆设**：命令行里不带 `--model` 时，项目经理就跑在这一行写的模型上，删掉它会无声地
   掉回用户的默认模型；桌面应用起会话时总带 `--model`，所以在桌面端看不出来。见 `docs/11` §5.36 的订正。

@@ -4,8 +4,10 @@
 # 要在发布之前拦住：先推功能分支、等这里全绿，再合进 main 推送（HANDOFF.md「常用命令」）。
 name: ci
 
+# 只认分支：不写 branches，推 tag 也会触发（第 45 条起 CI 自己在推 main 之后打 tag）。
 on:
   push:
+    branches: ['**']
   pull_request:
     branches: [main]
 
@@ -47,3 +49,28 @@ jobs:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: node scripts/check-version-bump.mjs "$BASE" "$HEAD"
+
+  # 第 45 条（docs/47）：推 main 就是发布——全部判据与版本检查都过了，按 plugin.json 的版本打 vX.Y.Z（已经有了就不动）。
+  # 只有这个作业有写权限；GITHUB_TOKEN 推的 tag 不会再触发工作流。
+  tag:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, version-bump]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: tag the release
+        run: |
+          v="v$(node -p "require('./.claude-plugin/plugin.json').version")"
+          if git ls-remote --exit-code --tags origin "refs/tags/$v" > /dev/null; then
+            echo "$v 已经有了，不动。"
+          else
+            git tag "$v" "$GITHUB_SHA"
+            git push origin "refs/tags/$v"
+          fi
