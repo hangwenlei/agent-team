@@ -88,11 +88,19 @@ export function denyOutput(reason, event) {
 /**
  * @param {string} check 崩溃时的检查项名（CHECK，如 'deliverable'）
  * @param {Error} err main() 内部抛出的异常
- * @param {boolean} [recorder] 这个检查项是不是返工批准的记录器（checks.mjs 的 recorder，调用方传）
+ * @param {boolean} [recorder] 这个检查项是不是记录器（checks.mjs 的 recorder，调用方传）
+ * @param {string} [records] 记录器记的是什么（checks.mjs 的 records）：'user-words' 是原话记录（M4o，docs/50），别的是返工批准的记录器
  * @returns {string} 要写进 stderr 的那一行（含结尾换行）
  */
-export function crashNotice(check, err, recorder = false) {
+export function crashNotice(check, err, recorder = false, records = null) {
   // M3z（docs/34 §3，platform-5）：返工批准的记录器不放行任何东西，它崩了的后果是这次的回答没有记下。
+  // M4o（docs/50）：原话记录器崩了的后果是这一趟契约第 1 节不跟原话核，用户什么都不用做。
+  if (recorder === true && records === 'user-words') {
+    return (
+      `agent-team ${check} 检查项在判定过程中异常崩溃（${quote(err?.message ?? err, { max: 120 })}），这次 /agent-team:at 后面的原话没有记下` +
+      `（它是原话记录器，不拦任何东西），这一趟契约第 1 节不跟它核。\n`
+    )
+  }
   if (recorder === true) {
     return (
       `agent-team ${check} 检查项在判定过程中异常崩溃（${quote(err?.message ?? err, { max: 120 })}），这次的回答没有记下` +

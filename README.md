@@ -133,6 +133,7 @@ flowchart TB
 ├── project.json         勘察结果：各角色能写的目录、可用角色、构建与测试命令
 ├── reach.json           算上派发之后，各角色实际能写到的地方
 ├── current-run          当前这一趟的 run id
+├── user-words.json      你最近一次在 /agent-team:at 后面写的原话（门禁自己记）
 └── runs/<run_id>/
     ├── 00-contract.md   契约：你的原话与修订记录
     ├── …                各阶段的产物（实现阶段每个执行角色各一份）
@@ -140,7 +141,8 @@ flowchart TB
     ├── contract-base.json 门禁记下的契约基线：你的原话，每次改需求时验证段结论的样子
     ├── delivered.json   门禁记下的已交付产物快照
     ├── dispatches.jsonl 门禁记下的派发：谁在哪一段被派出去、拦过它几回
-    └── state.json       这一趟的账本
+    ├── state.json       这一趟的账本
+    └── user-words.json  这一趟的需求原话（门禁记下，契约第 1 节对着它核）
 ```
 
 代码本身写进 `project.json` 分给各角色的目录里。
@@ -342,6 +344,7 @@ When rework runs out, only the option 「再返工一轮：回到 <stage>」 is 
 ├── project.json         the survey: writable directories per role, available roles, build and test commands
 ├── reach.json           where each role can actually write once dispatch is taken into account
 ├── current-run          the id of the current run
+├── user-words.json      the words you last wrote after /agent-team:at (recorded by the gates)
 └── runs/<run_id>/
     ├── 00-contract.md   the contract: your words and its revisions
     ├── …                each stage's deliverables (one per implementation role in the implementation stage)
@@ -349,7 +352,8 @@ When rework runs out, only the option 「再返工一轮：回到 <stage>」 is 
     ├── contract-base.json the gates' contract baseline: your words, and the verification conclusions at each requirement change
     ├── delivered.json   the gates' snapshot of delivered artifacts
     ├── dispatches.jsonl the gates' record of dispatches: who was sent out in which stage, and how many times a stop was blocked
-    └── state.json       the run's ledger
+    ├── state.json       the run's ledger
+    └── user-words.json  this run's request in your words (recorded by the gates; the contract's first section is checked against it)
 ```
 
 The code itself goes into the directories `project.json` assigns to each role.

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
-import { CONTROL_FILES, GATE_FILES } from '../hooks/lib/control-files.mjs'
+import { CONTROL_FILES, GATE_FILES, PROJECT_GATE_FILES } from '../hooks/lib/control-files.mjs'
 import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { producedNames, expandProduces, stageRolesInRun, participantsOf } from '../hooks/lib/stages.mjs'
@@ -311,7 +311,8 @@ test('命令正文里出现的每个 .agent-team 路径都是控制文件、门�
   const produced = producedNames(stages)
   const ok = (rel) =>
     // M3z（docs/34）：门禁专属文件（返工批准记录、交付快照）也是 .agent-team 下的合法路径——/agent-team:at-status 要读前者。
-    [...CONTROL_FILES, ...GATE_FILES].some((c) => new RegExp(`^${c.replace('*', '[^/]+')}$`).test(rel)) ||
+    // M4o（docs/50）：项目一级的原话记录（.agent-team/user-words.json）同样是门禁专属文件，/agent-team:at 第 2 节点它的名字。
+    [...CONTROL_FILES, ...GATE_FILES, ...PROJECT_GATE_FILES].some((c) => new RegExp(`^${c.replace('*', '[^/]+')}$`).test(rel)) ||
     /^runs\/[^/]+\/?$/.test(rel) ||
     [...produced].some((p) => rel.endsWith(p))
   // 字符类里有 *（M3v）：正文会写 Glob 模式（`.agent-team/runs/*/state.json`，commands/at-resume.md 找丢了指针的 run），

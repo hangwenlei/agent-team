@@ -518,6 +518,42 @@ const SCENARIOS = [
     anchor: (all) => all.includes('那一趟不是当前 run'),
   },
   {
+    // M4o（docs/50，审查第 20 条修法 A）：用户在 /agent-team:at 后面写的原话（门禁专属的 user-words.json，Bash 写得进）与契约第 1 节的行，经写契约时
+    // 的【契约】、写 state.json 时【阶段】的补句、H6 推进出第一段的拒绝理由回到文字里——一律过 quote。对不上的放在原话的最后一行：载荷里
+    // 不按 \n 断开的那几种整个落在那一行，按 \n 断开的那一种，标签落在最后一行。
+    name: '原话记录里的原话与契约第 1 节的行（【契约】、【阶段】补句、H6 推进出第一段的拒绝理由）',
+    disk: true,
+    state: (s) => ({ ...s, stage: 'S1', roster: [], history: [{ stage: 'S1', at: '2026-09-17T14:30:00Z' }], rework: {} }),
+    runFiles: {
+      'user-words.json': (P) => JSON.stringify({ at: 't', session_id: 's', args: P, runs_before: [], bound: 'r1', dropped: null }),
+      '00-contract.md': (P) => {
+        const lines = P.split(/\r?\n/).map((l) => l.replace(/\s+$/, ''))
+        while (lines.length && lines[0] === '') lines.shift()
+        while (lines.length && lines[lines.length - 1] === '') lines.pop()
+        lines[lines.length - 1] += ' 改过'
+        return ['## 1. 用户原话', '', ...lines, '', '## 2. PM 的理解（可改）', ''].join('\n')
+      },
+    },
+    calls: ({ run }) => [
+      ['ledger', posted('agent-team:at-pm', join(run, '00-contract.md'))],
+      ['ledger', posted('agent-team:at-pm', join(run, 'state.json'))],
+      [
+        'rework',
+        {
+          hook_event_name: 'PreToolUse',
+          tool_name: 'Write',
+          agent_type: 'agent-team:at-pm',
+          session_id: 's',
+          tool_input: {
+            file_path: join(run, 'state.json'),
+            content: JSON.stringify({ ...baseState(), stage: 'S2', roster: [], history: ['S1', 'S2'].map((stage) => ({ stage, at: '2026-09-17T14:30:00Z' })), rework: {} }),
+          },
+        },
+      ],
+    ],
+    anchor: (all, P) => reached(all, P) && all.split('对不上用户在 /agent-team:at 后面写的原话').length - 1 >= 3,
+  },
+  {
     // M4g 复核（K14）：写完 reach.json 门禁重算核对，给出的「正确那一份」里有 project.json 的前缀——原样落盘的 JSON 只许走 safeJson
     // （docs/27 §2.1）。带冒号的载荷（shaHead）让 project.json 判阻断，那时门禁本来就不核 reach.json，锚点对它放行。
     name: 'project.paths 的元素（写完 reach.json 之后的【触达表】核对）',

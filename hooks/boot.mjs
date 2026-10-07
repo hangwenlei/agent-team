@@ -49,6 +49,9 @@ if (atLeast(HAVE, MIN_NODE)) {
       recorderNote:
         '检查项加载失败，这次的回答记不下（批准记录器不拦任何东西）。重装或更新 agent-team 插件；' +
         '用户若是在批准再返工一轮或照现状交付，修好之后要再批准一次。',
+      wordsNote:
+        '检查项加载失败，这次 /agent-team:at 后面的原话记不下（原话记录器不拦任何东西），这一趟契约第 1 节不跟它核。' +
+        '重装或更新 agent-team 插件。',
     })
   })
 } else {
@@ -63,6 +66,9 @@ if (atLeast(HAVE, MIN_NODE)) {
     recorderNote:
       '检查项没有运行（Node 太旧），这次的回答记不下（批准记录器不拦任何东西）。升级 Node 到 ' + MIN_NODE + ' 或更新；' +
       '用户若是在批准再返工一轮或照现状交付，升级之后要再批准一次。',
+    wordsNote:
+      '检查项没有运行（Node 太旧），这次 /agent-team:at 后面的原话记不下（原话记录器不拦任何东西），这一趟契约第 1 节不跟它核。' +
+      '升级 Node 到 ' + MIN_NODE + ' 或更新。',
   })
 }
 
@@ -96,8 +102,10 @@ async function refuse(msg) {
   // 放行那一句排第一（M3v，docs/30）：界面只显示「<事件>:<工具> hook error」加 stderr 的第一个非空行（docs/28），
   // 排在后面的话，用户看得见这行灰字，却看不出这次放行了——加载失败时它还排在整段栈之后。原因与补救都在这一句里，
   // 细节（版本、栈）跟在后面。
-  // 返工批准的记录器（表里 recorder 为真）不放行任何东西，失败的后果是这次的回答记不下（M3z 复核 platform-5）。
-  process.stderr.write('agent-team ' + CHECK + ' ' + (spec && spec.recorder === true ? msg.recorderNote : msg.openNote) + '\n')
+  // 返工批准的记录器（表里 recorder 为真）不放行任何东西，失败的后果是这次的回答记不下（M3z 复核 platform-5）；原话记录器（records 是
+  // 'user-words'，M4o）失败的后果是这一趟契约第 1 节不跟原话核。
+  const note = spec && spec.recorder === true ? (spec.records === 'user-words' ? msg.wordsNote : msg.recorderNote) : msg.openNote
+  process.stderr.write('agent-team ' + CHECK + ' ' + note + '\n')
   process.stderr.write(msg.stderrHead + '\n')
   process.exit(1)
 }

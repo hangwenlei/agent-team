@@ -89,11 +89,16 @@ export function mayBeStateFile(filePath) {
 //     说错成因（只是说错，不放行任何东西）。
 //   - runs/*/contract-base.json（M4j，docs/45，审查第 20 条）：契约基线——推进出第一段时契约第 1 节的原文、每一次改需求的修订那一刻
 //     验证段各份结论的 sha（hooks/lib/contract-base.mjs）。改得了它，第 1 节就能悄悄改写、对着上一版契约的结论就能收口。
-export const GATE_FILES = ['runs/*/approvals.jsonl', 'runs/*/contract-base.json', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl']
+//   - runs/*/user-words.json 与项目一级的 user-words.json（M4o，docs/50，审查第 20 条修法 A）：用户在 /agent-team:at 后面写的原话——
+//     记录器在命令展开时记进项目一级那份，这一趟的 run 建起来之后绑进 run 目录（hooks/lib/user-words.mjs）。改得了它，第 1 节就能照着
+//     改过的「原话」写。项目一级那份是唯一一份不在 runs/<id>/ 下的门禁专属文件：命令展开那一刻这一趟的 run 还没建。
+export const GATE_FILES = ['runs/*/approvals.jsonl', 'runs/*/contract-base.json', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl', 'runs/*/user-words.json']
+export const PROJECT_GATE_FILES = ['user-words.json']
 export const APPROVALS_FILE = 'approvals.jsonl'
 export const DELIVERED_FILE = 'delivered.json'
 export const DISPATCHES_FILE = 'dispatches.jsonl'
 export const CONTRACT_BASE_FILE = 'contract-base.json'
+export const USER_WORDS_FILE = 'user-words.json'
 
 /** 按规范化之后的字面末段认：门禁认不出的写法（流后缀、结尾带点）也认——gate.mjs 拿它决定要不要先查 exoticPath。不认 8.3 短名：
  * 短名只在文件已经存在时才有，那时 isGateFile 经 norm() 的 realpath 认得出，而 gate.mjs 对每一次写入都调 isGateFile（复核 platform-1：
@@ -101,14 +106,19 @@ export const CONTRACT_BASE_FILE = 'contract-base.json'
  * 也当成它。 */
 export function mayBeGateFile(filePath) {
   const leaf = leafName(filePath)
-  return leaf === APPROVALS_FILE || leaf === DELIVERED_FILE || leaf === DISPATCHES_FILE || leaf === CONTRACT_BASE_FILE
+  return leaf === APPROVALS_FILE || leaf === DELIVERED_FILE || leaf === DISPATCHES_FILE || leaf === CONTRACT_BASE_FILE || leaf === USER_WORDS_FILE
 }
 
 /** 任何项目的 .agent-team/runs/<id>/ 下的门禁专属文件——按路径形状认，不只认门禁这一刻认的项目根：写别的项目的批准记录
- * 同样是伪造。路径先过 norm()（解析 ..、软链接，Windows 上折小写），末段再过 leafName。 */
+ * 同样是伪造。路径先过 norm()（解析 ..、软链接，Windows 上折小写），末段再过 leafName。M4o 起也认 .agent-team/ 下那一份项目一级的
+ * （PROJECT_GATE_FILES）。 */
 export function isGateFile(filePath) {
   if (typeof filePath !== 'string' || !filePath) return false
   const segs = norm(filePath).split('/')
+  if (segs.length >= 2) {
+    const [dot, leaf] = segs.slice(-2)
+    if (dot.toLowerCase() === '.agent-team' && PROJECT_GATE_FILES.includes(leafName(leaf))) return true
+  }
   if (segs.length < 4) return false
   const [dot, runs, id, leaf] = segs.slice(-4)
   if (dot.toLowerCase() !== '.agent-team' || runs.toLowerCase() !== 'runs' || !id) return false
