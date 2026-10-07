@@ -46,7 +46,7 @@ Node 找不到、旧到门禁起不来，或者 hooks 被关掉时，平台不�
 
 Node 起得来但太旧时，门禁会拒绝每一次派发与写入，并写明要装哪个版本。自检不核 Claude Code 的版本：版本不够时，门禁可能照常在跑、自检也通过，分层派发却走不通——所以要自己确认，终端里用 `claude --version`，桌面端保持应用为最新。
 
-**更新**——版本号变了才会拉到新版，已经开着的会话要重开才生效：
+**更新**——版本号变了才会拉到新版，已经开着的会话要重开才生效。每一版改了什么写在 [CHANGELOG.md](CHANGELOG.md)，每一版都打了对应的 tag（`v` 加版本号）。
 
 ```sh
 claude plugin update agent-team@agent-team-marketplace --scope local
@@ -194,7 +194,7 @@ node --test
 ```
 
 - 从仓库根目录直接跑 `node --test`，不要带路径参数——带了会漏掉测试，并报一个假的失败。
-- **推 `main` 就是发布。** 每次推送都要挪 `.claude-plugin/plugin.json` 里的 `version`：`claude plugin update` 只比这个字符串。只改文档或测试挪最后一位，改到插件会加载的文件挪中间一位；任何一位不长到 10，满了进到上一位。
+- **推 `main` 就是发布。** 每次推送都要挪 `.claude-plugin/plugin.json` 里的 `version`：`claude plugin update` 只比这个字符串。只改文档或测试挪最后一位，改到插件会加载的文件挪中间一位；任何一位不长到 10，满了进到上一位。每挪一次，在 `CHANGELOG.md` 最上面加一行写这一版改了什么；推 `main` 之后 CI 按版本号打 tag。
 - CI 在 Linux、macOS、Windows 上跑全部测试；推 `main` 或向 `main` 提 PR 时还会核版本号是否按上一条挪了。先推功能分支、等 CI 全绿，再合进 `main` 推送。
 - 跑测试要 Node 22 或更新——安装一节写的 Node 下限只管门禁。CI 另有一个作业把门禁换到那个最低版本上跑全部测试，所以 `hooks/` 下的代码不能用比它更新的 Node API。
 - 设计记录与实测记录在 `docs/` 下。
@@ -255,7 +255,7 @@ If Node is missing or too old for the gates to start, or hooks are disabled, the
 
 If Node starts but is too old, the gates refuse every dispatch and write and say which version to install. The self-check does not check the Claude Code version: on an older Claude Code the gates may run and the self-check pass while layered dispatch still fails — so check it yourself with `claude --version` in a terminal, and keep the desktop app up to date.
 
-**Update** — a new release arrives only when its version number changes, and sessions already open need a restart:
+**Update** — a new release arrives only when its version number changes, and sessions already open need a restart. What changed in each version is in [CHANGELOG.md](CHANGELOG.md), and every version has a matching tag (`v` plus the version number).
 
 ```sh
 claude plugin update agent-team@agent-team-marketplace --scope local
@@ -403,7 +403,7 @@ node --test
 ```
 
 - Run bare `node --test` from the repository root, with no path argument — with one, tests are missed and a phantom failure is reported.
-- **Pushing to `main` is the release.** Every push must bump `version` in `.claude-plugin/plugin.json`, because that string is all `claude plugin update` compares. Docs- or tests-only changes bump the last digit; changes to anything the plugin loads bump the middle one. No digit ever reaches 10: it carries into the one above.
+- **Pushing to `main` is the release.** Every push must bump `version` in `.claude-plugin/plugin.json`, because that string is all `claude plugin update` compares. Docs- or tests-only changes bump the last digit; changes to anything the plugin loads bump the middle one. No digit ever reaches 10: it carries into the one above. Each bump adds a line at the top of `CHANGELOG.md` saying what changed; after a push to `main`, CI tags the version.
 - CI runs the full test suite on Linux, macOS and Windows; pushes and pull requests to `main` also check that the version was bumped as described above. Push a feature branch and wait for CI to pass before merging into `main` and pushing.
 - The test suite needs Node 22 or later — the Node minimum under Installation applies to the gates only. A separate CI job runs the whole suite with the gates on that minimum version, so code under `hooks/` must not use Node APIs newer than it.
 - Design notes and measurement records live under `docs/`.

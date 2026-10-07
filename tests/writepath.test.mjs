@@ -424,3 +424,13 @@ test('project.paths[role] 不是数组时拒绝，理由指向 project.json 配�
   assert.equal(r.decision, 'deny')
   assert.match(r.reason, /project\.json/)
 })
+
+// 第 33 条（WP1，M4l）：paths 的前缀按目录边界认——认领 src/server 的，写不了 src/server2/ 下的文件（粘连的前缀不算它的地盘）。
+test('第 33 条（WP1）：前缀按目录边界认——src/server 盖不住 src/server2/', () => {
+  const project = { paths: { 'at-backend': ['src/server'], 'at-frontend': ['src/web/'] } }
+  const r = (filePath) => decideWritePath({ roster: ROSTER, role: 'at-backend', filePath, project, runDir: RUN, stages: STAGES, agentTeamDir: AT })
+  assert.equal(r('/proj/src/server/api.ts').decision, 'allow')
+  assert.equal(r('/proj/src/server').decision, 'allow')
+  assert.equal(r('/proj/src/server2/api.ts').decision, 'deny')
+  assert.equal(r('/proj/src/serverless.ts').decision, 'deny')
+})

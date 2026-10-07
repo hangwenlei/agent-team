@@ -12,9 +12,10 @@ import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+const NL = String.fromCharCode(10)
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { judgeVersionBump, PLUGIN_LOADED, withoutVersionOnlyManifest } from '../scripts/lib/version-bump.mjs'
+import { CHANGELOG, judgeVersionBump, latestChangelogVersion, PLUGIN_LOADED, withoutVersionOnlyManifest } from '../scripts/lib/version-bump.mjs'
 
 const ok = (args) => judgeVersionBump(args).ok
 
@@ -213,6 +214,7 @@ test('CLI：只改文档、只挪最后一位 → 通过（锚：上面两条红
     const base = commit('base')
     write('docs/说明.md', '# x\n')
     manifest('0.7.8')
+    write('CHANGELOG.md', '# 更新记录\n\n- 0.7.8：文档。\n- 0.7.7：起点。\n')
     const head = commit('docs')
     const r = check(base, head)
     assert.equal(r.status, 0, r.stdout + r.stderr)
@@ -255,4 +257,57 @@ test('CLI：推一条新分支（before 全零）→ 跳过，通过', () => {
     const head = commit('only')
     assert.equal(check('0000000000000000000000000000000000000000', head).status, 0)
   })
+})
+
+// ---- 第 45 条（M4l）：每挪一次版本号，CHANGELOG.md 最上面那一版就是这一版 ----
+
+test('M4l latestChangelogVersion：第一条「- x.y.z：…」的版本；没有、读不出、不是这个形状给 null', () => {
+  assert.equal(CHANGELOG, 'CHANGELOG.md')
+  assert.equal(latestChangelogVersion('# 更新记录\n\n说明。\n\n- 2.9.1：工程卫生。\n- 2.9.0：收口读验收结论。\n'), '2.9.1')
+  assert.equal(latestChangelogVersion('- 2.9.1：x\r\n- 2.9.0：y\r\n'), '2.9.1')
+  assert.equal(latestChangelogVersion('# 更新记录\n'), null)
+  assert.equal(latestChangelogVersion('- 2.9.1 工程卫生\n'), null, '版本后面要紧跟全角冒号')
+  assert.equal(latestChangelogVersion('- 2.9.1：\n'), null, '冒号后面要有话')
+  assert.equal(latestChangelogVersion(null), null)
+  assert.equal(latestChangelogVersion('- 草稿：先写着\n- 2.9.1：x\n'), null, '最上面那一行写坏了：不往下找')
+})
+
+test('M4l judgeVersionBump：版本号往前挪、传了 changelog——最上面那一版不是这一版（没有、没写这一版、写在下面）不通过；是就通过；没往前挪不核', () => {
+  const ok = { before: '0.7.7', after: '0.7.8', changed: ['docs/a.md'] }
+  assert.equal(judgeVersionBump({ ...ok, changelog: '- 0.7.8：文档。\n- 0.7.7：起点。\n' }).ok, true)
+  for (const changelog of [null, '# 更新记录\n', '- 0.7.7：起点。\n', '- 0.7.7：起点。\n- 0.7.8：文档。\n']) {
+    const r = judgeVersionBump({ ...ok, changelog })
+    assert.equal(r.ok, false, JSON.stringify(changelog))
+    assert.match(r.reason, /CHANGELOG\.md/)
+    assert.match(r.reason, /0\.7\.8/)
+  }
+  assert.equal(judgeVersionBump(ok).ok, true, '没传 changelog（只测版本号那几条）照旧')
+  assert.equal(judgeVersionBump({ before: '0.7.7', after: '0.7.7', changed: [], changelog: null }).ok, true, '没有改动：不要求挪，也不核')
+})
+
+test('M4l CLI：版本号往前挪而 CHANGELOG.md 最上面不是这一版 → 不通过；补上那一行 → 通过', () => {
+  withRepo(({ write, manifest, commit, check }) => {
+    manifest('0.7.7')
+    write('CHANGELOG.md', '- 0.7.7：起点。\n')
+    const base = commit('base')
+    write('docs/说明.md', '# x\n')
+    manifest('0.7.8')
+    const bad = commit('no changelog line')
+    const r = check(base, bad)
+    assert.equal(r.status, 1, r.stdout + r.stderr)
+    assert.match(r.stdout, /CHANGELOG\.md/)
+    write('CHANGELOG.md', '- 0.7.8：文档。\n- 0.7.7：起点。\n')
+    const good = commit('changelog')
+    assert.equal(check(base, good).status, 0)
+  })
+})
+
+test('M4l 复核：只挪了版本号（改动清单被拿空）也核 CHANGELOG；拒绝理由引出最上面那一行', () => {
+  const r = judgeVersionBump({ before: '0.7.7', after: '0.7.8', changed: [], changelog: '- 0.7.7：起点。' + NL })
+  assert.equal(r.ok, false)
+  assert.ok(r.reason.includes('「- 0.7.7：起点。」'), r.reason)
+  const bad = judgeVersionBump({ before: '0.7.7', after: '0.7.8', changed: ['docs/a.md'], changelog: '- 0.7.8: 半角冒号' + NL })
+  assert.ok(!bad.ok && bad.reason.includes('「- 0.7.8: 半角冒号」'), bad.reason)
+  const none = judgeVersionBump({ before: '0.7.7', after: '0.7.8', changed: ['docs/a.md'], changelog: '# 更新记录' + NL })
+  assert.ok(!none.ok && none.reason.includes('没有「- 」开头的行'), none.reason)
 })

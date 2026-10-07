@@ -4,8 +4,10 @@
 # 要在发布之前拦住：先推功能分支、等这里全绿，再合进 main 推送（HANDOFF.md「常用命令」）。
 name: ci
 
+# 只认分支：不写 branches，推 tag 也会触发。（CI 自己打的 tag 用 GITHUB_TOKEN 推，本来就不触发任何工作流；这一条管的是手工推的 tag。）
 on:
   push:
+    branches: ['**']
   pull_request:
     branches: [main]
 
@@ -47,3 +49,22 @@ jobs:
           BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: node scripts/check-version-bump.mjs "$BASE" "$HEAD"
+
+  # 第 45 条（docs/47）：推 main 就是发布——本工作流的判据（三个系统）与版本检查都过了之后打 tag（min-node 是另一份工作流，等不了它）。
+  # 认法与补打在 scripts/tag-release.mjs：每一版打在 main 的 first-parent 历史上 plugin.json 第一次是它的提交，远端缺的都补上（某一次红了没打上的，
+  # 下一次全绿时补），已有、指向别处的不挪。只有这个作业有写权限；GITHUB_TOKEN 推的 tag 不触发任何工作流。
+  tag:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, version-bump]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: tag the release
+        run: node scripts/tag-release.mjs --push

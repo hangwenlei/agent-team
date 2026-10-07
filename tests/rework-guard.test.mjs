@@ -601,3 +601,20 @@ test('变异 X26：补记（回退之后同一次写入又往前记）越限 →
   assert.equal(r.budget, true)
   assert.match(r.reason, /S7（第 4 轮，上限 3）/)
 })
+
+// 第 33 条（RW6，M4l）：rework 字段缺了、写成 null、数组、字符串——当空对象：没有返工史时放行（不崩、不把数组下标当段），有返工史时照
+// 「不可重置」拒（拒的是判据，不是崩溃之后的兜底）。
+test('第 33 条（RW6）：rework 缺了、null、数组、字符串——没有返工史放行；有返工史照「不可重置」拒', () => {
+  const before = { stage: 'S2', history: H('S1', 'S2'), rework: {} }
+  for (const rework of [undefined, null, [5], 'x']) {
+    const after = { stage: 'S3', history: H('S1', 'S2', 'S3'), ...(rework === undefined ? {} : { rework }) }
+    assert.deepEqual(decideRework({ before, after }), { ok: true }, JSON.stringify(rework))
+  }
+  const once = { stage: 'S5', history: H('S1', 'S5'), rework: {} }
+  for (const rework of [undefined, null, [1]]) {
+    const after = { stage: 'S5', history: H('S1', 'S5', 'S5'), ...(rework === undefined ? {} : { rework }) }
+    const r = decideRework({ before: once, after })
+    assert.equal(r.ok, false, JSON.stringify(rework))
+    assert.match(r.reason, /不可重置/)
+  }
+})
