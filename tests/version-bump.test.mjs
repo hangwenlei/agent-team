@@ -81,6 +81,7 @@ test('PLUGIN_LOADED 与上一条逐一列举的清单一致——多认或少认
 
 // 第 46 条（docs/48）：角色正文、命令、skill、模板、stages.produces.md 与门禁指给模型读的插件文件（`${CLAUDE_PLUGIN_ROOT}/…`），
 // 改它就改了运行时的行为——都得算插件会加载的。原来 stages.README.md 是事后才补进清单的（M3p 复核）；这一条让清单跟着正文的指向走。
+// 漏了花括号的 $CLAUDE_PLUGIN_ROOT/… 也认（复核，docs/48 §8）。门禁代码里用 join(ROOT, …) 拼出来叫模型读的路径认不出（docs/48 §4）。
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..')
 function filesUnder(dir) {
   const out = []
@@ -95,7 +96,7 @@ test('第 46 条：正文与门禁指给模型读的每一个插件文件都算�
   const sources = [...['agents', 'commands', 'skills', 'templates', 'hooks'].flatMap(filesUnder), 'stages.produces.md']
   const pointed = new Set()
   for (const f of sources) {
-    for (const m of readFileSync(join(REPO, f), 'utf8').matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/([A-Za-z0-9_.\/-]*[A-Za-z0-9_])/g)) pointed.add(m[1])
+    for (const m of readFileSync(join(REPO, f), 'utf8').matchAll(/\$\{?CLAUDE_PLUGIN_ROOT\}?\/([A-Za-z0-9_.\/-]*[A-Za-z0-9_])/g)) pointed.add(m[1])
   }
   for (const p of ['stages.produces.md', 'stages.json', 'commands/at.md', 'hooks/boot.mjs']) assert.ok(pointed.has(p), `前置：没抽到 ${p}——抽到的：${[...pointed].join('、')}`)
   for (const p of pointed) assert.equal(ok({ before: '0.7.7', after: '0.7.8', changed: [p] }), false, `${p} 被指给模型读，却不算插件会加载的`)

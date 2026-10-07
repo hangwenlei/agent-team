@@ -160,6 +160,14 @@ test('M4l 复核 tag-release：按 main 的 first-parent 历史补打每一版�
     manifest('0.0.3')
     commit('next')
     git('tag', 'v0.0.3', c1)
+    // 本地已有、指向别处、还没推的 tag：空跑与推都报出来、退出码 1，不覆盖、不推（复核 docs/48 §8：空跑原来跳过了这一条，报「要打」、真推时才退出 1）。
+    for (const args of [['--dry-run'], []]) {
+      const local = run(...args)
+      assert.equal(local.status, 1, `${args.join(' ') || '--push'}：${local.stdout}${local.stderr}`)
+      assert.ok(local.stdout.includes('本地已有 v0.0.3'), local.stdout)
+      assert.ok(!local.stdout.includes('要打 v0.0.3'), '空跑不能先报「要打」')
+    }
+    assert.equal(tags().get('v0.0.3'), undefined, '本地那个指错的 tag 没被推上去')
     git('push', '-q', 'origin', 'refs/tags/v0.0.3')
     const clash = run()
     assert.equal(clash.status, 1, clash.stdout + clash.stderr)

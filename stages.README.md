@@ -123,8 +123,8 @@ S5 是第一种（一个模式配 N 个角色），S2 是第二种（`at-product
 `expectedArtifacts`/`producedNames`）。混用两个集合会重演 `docs/11` §5.6 那个缺口
 （M1 期间 `produces` 被写成字面量，前端干完活写不进自己的实现记录）。
 
-**H5（`deliverable.mjs`）不在上表；H2（`readiness.mjs`）只有判「齐没齐」的 `done` 在上表**：H2 选段（这个角色这次被派去
-做哪一段）与 H5（它交付了没有）问的是「`role` 这一个角色」的问题，不是「`<role>`
+**H5 判「交没交」的 `decideDeliverable` 不在上表（H5a 判「齐没齐」时那一次 `isStageDone` 归 `isStageDone` 那一行）；H2 只有判「齐没齐」的
+`done` 在上表**：H2 选段（这个角色这次被派去做哪一段）与 `decideDeliverable`（它交付了没有）问的是「`role` 这一个角色」的问题，不是「`<role>`
 展开成哪些人」的问题，`role` 字段本身不变。（这一句原来写的是「H2 与 H5 不在上表」，而表里早有 H2 `done` 那一行——
 第 46 条（`docs/48`）改掉。）但 H5 内部判定「交付了没有」时要拿
 **这一次被判的那个 `role`** 去展开 `stage.produces`——
