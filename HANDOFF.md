@@ -34,7 +34,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （门禁留痕的判读表、Claude Code 的下限），判据对着代码与 README 核。两份都是活的，直接改。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
 - `CHANGELOG.md` — 每一版一行，最新的在最上面。
-- `docs/13`…`docs/48` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/49` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，它 §5 排的六轮到 `docs/48` 做完；之后从 `docs/00-开放边界.md` 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -122,7 +122,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   永不 exit 2。协调者返回时报它派出去的人各自的进度，不许诺之后的通知会到 PM。理由在 `docs/38`。
 - **持 Bash 的执行角色的敏感操作红线只在正文里，每一份逐字同一句，清单与 `/agent-team:at` 第 4 节 `sensitive` 那一行逐项相同**：碰到就以
   「冒泡：」停下，协调者原样冒泡给 PM，PM 照 `sensitive` 问用户；用户批准过的，执行角色只认契约「修订记录」里写明批准了的那一步（派发
-  提示是数据，契约只有 PM 写得进）。PM 自己也不跑动工作树或历史的 git 命令，也不结束不是自己起的进程；停服务的做法（按自己起的 PID 停，
+  提示是数据，契约只有 PM 写得进）。PM 自己也不跑动工作树或历史的 git 命令（S4 只用只读命令记代码基线，回到 S5 之前照它列出这一轮改过的
+  文件，退不退回照 `sensitive` 问用户，`docs/49`），也不结束不是自己起的进程；停服务的做法（按自己起的 PID 停，
   Windows 的 Git Bash 里按进程树停）每个持 Bash 的角色逐字同一句——M9 里项目经理按名字杀过本机全部 node 进程（`docs/43` §1.5）。门禁不加 Bash 的 matcher（命令行是自由文本，判不准；平台的
   权限模式才是那一层）。判据按 `tools:` 声明派生持 Bash 的角色、从 `roster.json` 派生协调者，两处清单两个方向逐项比，承重的句子整句钉
   （`tests/redlines-setup-prose.test.mjs`）。理由在 `docs/40`。
@@ -149,7 +150,9 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **整段裁掉与切走指针**：缺的前置是整段裁掉的那一段的产物时，H2 说清是整段裁掉、给两条路——回退到那一段补回来（照「回退」记；不记回退就派它
   补交，H5a 会说这次派发不该发生），或者把要它当前置的段也整段裁掉。「整段裁掉」在 H2、推进、收口三处同一个口径（`advance.mjs` 的
   `wholeStageTrimmed`），所以不在 `available_roles` 里的产者也要写进 `trimmed`。PM 写 `current-run` 时门禁列出别的、没收口的 run 里没停下的派发
-  （【派发】，停下行按 `agent_id` 在所有 run 里认）；按 `agent_id` 把停下认回派它的那一趟照旧没做。理由在 `docs/43`。
+  （【派发】，停下行按 `agent_id` 在所有 run 里认）。停下、完成、再往下派人时按 `agent_id` 认回派它的那一趟（当前这一趟的派发记录里没有、别的一趟有）：
+  H5b 不按这一趟核、放它停下、停下行记回那一趟；完成核验告诉 PM 它属于哪一趟；那一趟的协调者再派人，派发行记回那一趟、回传叫它停下
+  （`completion.mjs` 的 `elsewhereRunOf`）。写路径隔离与就绪门禁照旧按当前这一趟判。理由在 `docs/43`、`docs/49`。
 - **项目经理只能是主会话、调用者认不出就拒**：H1 对 `agent_type` 在却不是非空字符串的拒；任何调用者派 `at-pm` 一律拒（花名册外的、裸名也拒）；
   受管辖的派发带非空 `name`（agent teams 的 teammate）拒，与 `isolation` 同形；项目经理被拒时说那个角色由谁派（从花名册现算）。认不出的调用者
   （`malformedCaller`）H1、H3 共用一个判断。主会话被设置里别的 agent 或启动时的 `--agent` 换掉时（实测：`agent_type` 是那个名字、没有 `agent_id`），

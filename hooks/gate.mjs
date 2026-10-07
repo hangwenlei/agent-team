@@ -33,6 +33,7 @@ import {
   dispatchOf,
   dispatchPhase,
   dispatchedByStage,
+  elsewhereRunOf,
   explainMissing,
   lastStop,
   missingCause,
@@ -208,17 +209,9 @@ function isReachJson(filePath, agentTeamDir) {
   return norm(filePath) === norm(`${agentTeamDir}/reach.json`)
 }
 
-// M4g（docs/42，审查第 28 条）：PM 写完 .agent-team/reach.json，按当前 project.json 与花名册重算一遍、与写进去的比（措辞在
-// hooks/lib/ledger.mjs 的 reachCheckNotice）。project.json 不在、有阻断或插件问题（花名册读不出）时不核：那时【触达表】本来就叫 PM
-// 先别写，「正确的那一份」也算不准。写进去的文件读不出来（被删、被占用）也不核。
-// M4h（docs/43，审查第 24-1 条）：PM 写 current-run 时，别的、没收口的 run 里「派出去了、门禁还没见它停下」的派发——指针一改，门禁就按新的
-// 这一趟判它们（停下行记进这一趟的派发记录、交付物核验按这一趟的段判），那一趟的产物没人核。按派发记录认：最后一回停下是「拦」的也算没停
-// （拦了它会接着跑）；门禁没见它停下的，可能还在跑，也可能早就被中断了、平台没报——两种都照实说，不按时间猜。角色与段只在花名册、阶段链认得
-// 它们时说出来（派发记录 Bash 写得进），run 目录名加引号（docs/27 §2.1）。按 agent_id 把停下认回派它的那一趟是另一件事（M，docs/39 往后放）。
-// 复核（docs/43 §8）：停下行按 agent_id 在所有 run 的派发记录里认——这一趟、收了口的也算（指针切走之后，停下行记进当时指针指着的那一趟；
-// agent_id 本身唯一），见过它不是「拦」的停下就算停了。runs 下的链接与 runctx 认 run 的口径一样算一个 run，同一个目录的别名只算一次，
-// 「这一趟自己」按规范化之后的路径认。state.json 读不出的那一趟照样列：判不出收没收口，宁可多报。
-function inflightElsewhere(ctx) {
+// 每一趟 run 的派发记录：[{ id, dir, current, log }]，读不出派发记录的那一趟不列。runs 下的链接与 runctx 认 run 的口径一样算一个 run，同一个目录的
+// 别名只算一次，「这一趟自己」（current）按规范化之后的路径认。写 current-run 时的【派发】与按 agent_id 认派它的那一趟（M4n，docs/49）共用。
+function runLogs(ctx) {
   if (typeof ctx.agentTeamDir !== 'string' || typeof ctx.runDir !== 'string') return []
   const runsDir = join(ctx.agentTeamDir, 'runs')
   let ids
@@ -229,8 +222,7 @@ function inflightElsewhere(ctx) {
   }
   const here = norm(ctx.runDir)
   const seen = new Set()
-  const finished = new Set()
-  const runs = []
+  const out = []
   for (const id of ids.sort()) {
     const dir = join(runsDir, id)
     const key = norm(dir)
@@ -242,17 +234,39 @@ function inflightElsewhere(ctx) {
     } catch {
       continue
     }
-    const log = readDispatchLog(text)
-    for (const [agentId, outcomes] of log.stops) if (outcomes.some((o) => o !== 'block')) finished.add(agentId)
-    if (key !== here) runs.push({ id, dir, log })
+    out.push({ id, dir, current: key === here, log: readDispatchLog(text) })
   }
+  return out
+}
+
+// 某一趟 run 的 state.json（读不出、解析不出给 null）。
+function runStateOf(dir) {
+  try {
+    return parseStateText(readFileSync(join(dir, 'state.json'), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+// M4g（docs/42，审查第 28 条）：PM 写完 .agent-team/reach.json，按当前 project.json 与花名册重算一遍、与写进去的比（措辞在
+// hooks/lib/ledger.mjs 的 reachCheckNotice）。project.json 不在、有阻断或插件问题（花名册读不出）时不核：那时【触达表】本来就叫 PM
+// 先别写，「正确的那一份」也算不准。写进去的文件读不出来（被删、被占用）也不核。
+// M4h（docs/43，审查第 24-1 条）：PM 写 current-run 时，别的、没收口的 run 里「派出去了、门禁还没见它停下」的派发——指针一改，那一趟的产物
+// 没人核（M4h 时门禁还按新的这一趟判它们：停下行记进这一趟的派发记录、交付物核验按这一趟的段判；M4n 起按 agent_id 认回那一趟）。按派发记录认：最后一回停下是「拦」的也算没停
+// （拦了它会接着跑）；门禁没见它停下的，可能还在跑，也可能早就被中断了、平台没报——两种都照实说，不按时间猜。角色与段只在花名册、阶段链认得
+// 它们时说出来（派发记录 Bash 写得进），run 目录名加引号（docs/27 §2.1）。
+// 复核（docs/43 §8）：停下行按 agent_id 在所有 run 的派发记录里认——这一趟、收了口的也算（agent_id 本身唯一），见过它不是「拦」的停下就算停了。
+// state.json 读不出的那一趟照样列：判不出收没收口，宁可多报。
+// M4n（docs/49，审查第 24 条）：指针切走之后，那一趟的人停下时门禁按 agent_id 认回那一趟（停下行记回那一趟、不按这一趟核），说法跟着改。
+function inflightElsewhere(ctx) {
+  const logs = runLogs(ctx)
+  const finished = new Set()
+  for (const { log } of logs) for (const [agentId, outcomes] of log.stops) if (outcomes.some((o) => o !== 'block')) finished.add(agentId)
   const roster = loadRoster()
   const out = []
-  for (const { id, dir, log } of runs) {
-    let state = null
-    try {
-      state = parseStateText(readFileSync(join(dir, 'state.json'), 'utf8'))
-    } catch {}
+  for (const { id, dir, log, current } of logs) {
+    if (current) continue
+    const state = runStateOf(dir)
     if (state && closedAt(state) !== null) continue
     for (const d of log.dispatches) {
       if (finished.has(d.agent_id)) continue
@@ -268,8 +282,9 @@ function inflightNotice(list) {
   const lines = list.map((x) => `  - ${quote(x.runId)}：${x.role ? `${x.role}（${x.stage}）` : '一条认不出角色或段的派发'}`)
   return (
     `【派发】current-run 指向这一趟之前，下面这些派发门禁还没见它们停下：\n${lines.join('\n')}\n` +
-    '指针一改，门禁就按这一趟判它们：它们停下时，停下行记进这一趟的派发记录、交付物核验按这一趟的段判，那一趟的产物没人核。还在跑的，先等它们停下' +
-    '（完成通知到了）再在这一趟里派人；门禁没见它停下、其实早已中断的（会话断过、被停掉），照实告诉用户那一趟哪几份没人核。'
+    '它们是那一趟派出去的：停下时门禁认得出，不按这一趟的段核、停下行记回那一趟，完成通知到时告诉你它属于哪一趟——但那一趟不是当前 run，' +
+    '它们交的东西没人核，它们还在改的项目文件会跟这一趟的人撞在一起。还在跑的，先等它们停下（完成通知到了）再在这一趟里派人；' +
+    '门禁没见它停下、其实早已中断的（会话断过、被停掉），照实告诉用户那一趟哪几份没人核。'
   )
 }
 
@@ -1148,6 +1163,37 @@ function appendDispatchLog(runDir, line, label) {
   } catch (err) {
     process.stderr.write(`agent-team ${label}：派发记录没有写成（${quote(err?.message ?? err, { max: 120 })}），完成核验这一次少核。\n`)
   }
+}
+
+// M4n（docs/49，全量审查第 24 条）：按 agent_id 认回去的停下行、派发行，记进派它的那一趟。那一趟收了口、state.json 读不出、角色不在花名册里、
+// 段不在阶段链上的不记——与记进当前这一趟同一个口径（recordStop 与 H5a 记派发那一处）。
+function recordElsewhere(other, line, role, stage, stages, label) {
+  const state = runStateOf(other.dir)
+  if (!state || closedAt(state) !== null || !isKnownStage(stages, stage)) return
+  const roster = loadRoster()
+  if (!isPlainObject(roster) || !Object.hasOwn(roster, role)) return
+  appendDispatchLog(other.dir, line, label)
+}
+
+// M4n：那一趟的人（指针切走之后还在跑的协调者）又往下派人时，回传给它。runId 是磁盘上的目录名，加引号（docs/27 §2.1）；role 只在花名册里认得
+// 时说出来。
+function elsewhereCallerNotice(runId, role) {
+  return (
+    `【派发】你是 ${quote(runId)} 那一趟派出去的，current-run 已经指着别的一趟——那一趟不是当前 run。你这次派出去的${role ? ` ${role}` : '人'}，` +
+    '门禁记回那一趟、不按当前这一趟核，它交的东西没人核，它改的项目文件还会跟当前这一趟的人撞在一起。不要再往下派人，停下手里的活，' +
+    '把这一段原样回报给派你的人。'
+  )
+}
+
+// M4n：完成通知对应的是别的一趟派出去的人——告诉项目经理它属于哪一趟、这一趟不核它。那一趟收了口的另说。
+function elsewhereCompletionNotice(other, state, known) {
+  const who = known ? `${other.dispatch.role}（${other.dispatch.stage}）` : '一条认不出角色或段的派发'
+  const head = `交付物核验：${who}是 ${quote(other.id)} 那一趟派出去的，`
+  if (state && closedAt(state) !== null) return `${head}那一趟已经收口——门禁不再核它的产物，它这次写的东西不计入任何一趟。`
+  return (
+    `${head}current-run 现在指着别的一趟——门禁不按这一趟核它，那一趟的产物这一次也没人核，它写的东西不计入这一趟。` +
+    '要接着用那一趟，先把 .agent-team/current-run 改回那个 run id，再跑 /agent-team:at-resume。'
+  )
 }
 
 // M4d（docs/38，全量审查第 19 条）：产物没交时 H5a（前台派发跑完、认不出前台还是后台）与完成核验（后台派发完成）共用的那一段。why 为 null 是认不出
@@ -2358,13 +2404,27 @@ function main() {
     const pmCan = isPlainObject(roster?.['at-pm']) && Array.isArray(roster['at-pm'].can_delegate_to) ? roster['at-pm'].can_delegate_to : []
     const contexts = []
     const seen = new Set()
+    let otherLogs = null
     for (const n of notes) {
       for (const taskId of n.taskIds) {
         if (seen.has(taskId)) continue
         seen.add(taskId)
         const d = dispatchOf(log, taskId, n.toolUseId)
+        if (!d) {
+          // M4n（docs/49，全量审查第 24 条）：当前这一趟没记它、别的一趟记着——它是那一趟派出去的（指针切走之前派的）。原来这里不出声；现在告诉
+          // 项目经理它属于哪一趟、这一趟不核它。通知的收件人不是项目经理（-p 下送给还在跑的协调者）时照旧不出声。
+          if (!recipientIsPm) continue
+          if (otherLogs === null) otherLogs = runLogs(ctx)
+          const other = elsewhereRunOf(otherLogs, taskId, n.toolUseId)
+          if (other) {
+            // 角色与段来自磁盘：花名册、阶段链认得才说出来，认不出的照【派发】的说法（派发记录 Bash 写得进）。
+            const known = isPlainObject(roster) && Object.hasOwn(roster, other.dispatch.role) && isKnownStage(ctx.stages, other.dispatch.stage)
+            contexts.push(elsewhereCompletionNotice(other, runStateOf(other.dir), known))
+          }
+          continue
+        }
         // 记录里的角色与段来自磁盘：只认花名册里的角色、阶段链上的段（之后原样拼进文字，是插件自己的名字）。
-        if (!d || !isPlainObject(roster) || !Object.hasOwn(roster, d.role) || !isKnownStage(ctx.stages, d.stage)) continue
+        if (!isPlainObject(roster) || !Object.hasOwn(roster, d.role) || !isKnownStage(ctx.stages, d.stage)) continue
         if (closedAt(ctx.state) !== null) {
           if (recipientIsPm) {
             contexts.push(
@@ -2514,6 +2574,49 @@ function main() {
           }
         }
       }
+      process.exit(0)
+    }
+
+    // M4n（docs/49，全量审查第 24 条）：按 agent_id 认派它的那一趟。当前这一趟的派发记录里没有它、别的一趟有——它是那一趟派出去的（指针切走
+    // 之前派的，或者那一趟的协调者在切走之后又往下派的）。原来一律按当前这一趟判：H5b 按这一趟的段核，旧 run 的执行角色恰好也是这一趟当前段的
+    // 产者时被拦下、叫它把那一趟的活交进这一趟的 run 目录；停下行、派发行都记进这一趟的派发记录。现在：
+    //   - H5b（input.agent_id 是停下的这个子代理）：不按这一趟核、放它停下，停下行记回那一趟，留痕——SubagentStop 上没有到父级的通道。
+    //   - H5a（input.agent_id 是发起这次派发的人）：派发行记回那一趟（段取发起者自己在那一趟的那一段），回传告诉它那一趟已经不是当前 run；
+    //     这一趟的交付物校验、账本比对、契约核对都不发——说的是这一趟，不是它的。
+    // 哪一趟都没有它（CLI 的内部分叉、门禁没记下的派发）：照原来按当前这一趟判。记回那一趟只在那一趟没收口、角色与段认得出时（与记进这一趟同一个口径）。
+    const ownId = typeof input?.agent_id === 'string' && AGENT_ID_RE.test(input.agent_id) ? input.agent_id : null
+    const elsewhere = ownId ? elsewhereRunOf(runLogs(ctx), ownId) : null
+    if (elsewhere && CHECK === 'stop-gate') {
+      const { role: hisRole, stage: hisStage } = elsewhere.dispatch
+      recordElsewhere(elsewhere, stopLine({ at: new Date().toISOString(), agentId: ownId, role: hisRole, stage: hisStage, outcome: 'pass' }), hisRole, hisStage, ctx.stages, label)
+      process.stderr.write(`agent-team ${label}：${ownId} 是 ${quote(elsewhere.id)} 那一趟派出去的，current-run 指着别的一趟——不按这一趟核、放它停下，停下行记回那一趟。\n`)
+      process.exit(0)
+    }
+    if (elsewhere && CHECK === 'deliverable') {
+      const launched = input?.tool_response?.agentId
+      const how = dispatchPhase(input?.tool_response)
+      if (how !== 'unknown' && typeof launched === 'string' && AGENT_ID_RE.test(launched)) {
+        const hisStage = elsewhere.dispatch.stage
+        recordElsewhere(
+          elsewhere,
+          dispatchLine({
+            at: new Date().toISOString(),
+            agentId: launched,
+            toolUseId: typeof input.tool_use_id === 'string' ? input.tool_use_id : null,
+            role,
+            stage: hisStage,
+            caller: callerOf(input),
+            mode: how === 'launched' ? 'background' : 'foreground',
+            callerId: ownId,
+          }),
+          role,
+          hisStage,
+          ctx.stages,
+          label,
+        )
+      }
+      const rosterNow = loadRoster()
+      emitHookJson(spec.event, { contexts: [elsewhereCallerNotice(elsewhere.id, isPlainObject(rosterNow) && Object.hasOwn(rosterNow, role) ? role : null)] })
       process.exit(0)
     }
 
