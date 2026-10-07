@@ -72,6 +72,7 @@ const ALLOWED = [
   { rel: 'version-bump.test.mjs', has: '[CLI,', why: '跑的是 scripts/check-version-bump.mjs，不是门禁' },
   { rel: 'hygiene.test.mjs', has: "['--check',", why: '只做语法检查（node --check），不执行任何门禁代码（第 48 条，M4l）' },
   { rel: 'release.test.mjs', has: '[TAG_CLI,', why: '跑的是 scripts/tag-release.mjs，不是门禁（第 45 条，M4l）' },
+  { rel: 'github-release.test.mjs', has: '[RELEASE_CLI]', why: '跑的是 scripts/github-release.mjs，不是门禁（第 45 条，M4q）' },
 ]
 
 test('门禁子进程只从 gate-runner 起：tests/ 下别处拿 node 起子进程的，只有清单里那几处', () => {
