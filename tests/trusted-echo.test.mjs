@@ -554,6 +554,34 @@ const SCENARIOS = [
     anchor: (all, P) => reached(all, P) && all.split('对不上用户在 /agent-team:at 后面写的原话').length - 1 >= 3,
   },
   {
+    // M4o 复核（docs/50 §9，门禁 T3）：同一个入口的另一句——原话照抄了，之后、下一个编号节标题之前多出一行（载荷），经【契约】与 H6 的拒绝理由
+    // 回到文字里。原话是干净的一行，多出来的那一行整个是载荷（按 \n 断开的那一种，标签落在最后一段）。
+    name: '契约第 1 节里原话之后多出来的那一行（【契约】、H6 推进出第一段的拒绝理由）',
+    disk: true,
+    state: (s) => ({ ...s, stage: 'S1', roster: [], history: [{ stage: 'S1', at: '2026-09-17T14:30:00Z' }], rework: {} }),
+    runFiles: {
+      'user-words.json': () => JSON.stringify({ at: 't', session_id: 's', args: '做一个待办应用', runs_before: [], bound: 'r1', dropped: null }),
+      '00-contract.md': (P) => ['## 1. 用户原话', '', '做一个待办应用', ...P.split(/\r?\n/).filter((l) => l.trim() !== '').slice(-1), '', '## 2. PM 的理解（可改）', ''].join('\n'),
+    },
+    calls: ({ run }) => [
+      ['ledger', posted('agent-team:at-pm', join(run, '00-contract.md'))],
+      [
+        'rework',
+        {
+          hook_event_name: 'PreToolUse',
+          tool_name: 'Write',
+          agent_type: 'agent-team:at-pm',
+          session_id: 's',
+          tool_input: {
+            file_path: join(run, 'state.json'),
+            content: JSON.stringify({ ...baseState(), stage: 'S2', roster: [], history: ['S1', 'S2'].map((stage) => ({ stage, at: '2026-09-17T14:30:00Z' })), rework: {} }),
+          },
+        },
+      ],
+    ],
+    anchor: (all, P) => reached(all, P) && all.split('还多出一行').length - 1 >= 2,
+  },
+  {
     // M4g 复核（K14）：写完 reach.json 门禁重算核对，给出的「正确那一份」里有 project.json 的前缀——原样落盘的 JSON 只许走 safeJson
     // （docs/27 §2.1）。带冒号的载荷（shaHead）让 project.json 判阻断，那时门禁本来就不核 reach.json，锚点对它放行。
     name: 'project.paths 的元素（写完 reach.json 之后的【触达表】核对）',

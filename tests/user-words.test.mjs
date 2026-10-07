@@ -17,6 +17,8 @@ import {
 const NL = String.fromCharCode(10)
 const CRLF = String.fromCharCode(13, 10)
 const BOM = String.fromCharCode(0xfeff)
+// 只比 kind、line、want、got——对不上的那一行另带的码位由最后一条判据核。
+const pick = (m) => (m ? { kind: m.kind, line: m.line, want: m.want, got: m.got } : m)
 
 const expansion = (over = {}) => ({
   hook_event_name: 'UserPromptExpansion',
@@ -54,21 +56,23 @@ test('readWords：读得出的记录；剥 BOM；形状不对回 null；runs_bef
   }
 })
 
-test('bindDecision：这个会话记下的、还没绑也没作废的——新的一趟在第一段时绑；记下之前就有的那一趟没收口就作废；别的一概不动', () => {
+test('bindDecision：这个会话记下的、还没绑也没作废的——这个会话建出新的一趟（第一段）的那一次绑；记下之前就有的那一趟没收口就作废；别的一概不动', () => {
   const p = pendingRecord({ at: 't', sessionId: 's-1', args: 'x', runsBefore: ['r0', 'R9'] })
   const same = (a, b) => a.toLowerCase() === b.toLowerCase()
-  const ask = (over = {}) => bindDecision(p, { sessionId: 's-1', runId: 'r1', sameRun: same, firstStage: true, closed: false, ...over })
+  const ask = (over = {}) => bindDecision(p, { sessionId: 's-1', runId: 'r1', sameRun: same, creating: true, firstStage: true, closed: false, ...over })
   assert.equal(ask(), 'bind')
-  assert.equal(ask({ firstStage: false }), null, '新的一趟已经走过第一段：不绑')
+  assert.equal(ask({ creating: false }), null, '复核（docs/50 §9）：不是建它的那一次不晚绑——晚绑会跨会话绑错、回退到第一段时与契约基线互相卡死')
+  assert.equal(ask({ firstStage: false }), null, '建出来就不在第一段：不绑')
+  assert.equal(ask({ runId: 'r0', creating: false }), 'drop', '作废不看是不是建它的那一次')
   assert.equal(ask({ runId: 'r0' }), 'drop', '记下之前就有的那一趟、没收口：这条命令的需求被搁下了')
   assert.equal(ask({ runId: 'r9' }), 'drop', '同一趟按 sameRun 认（Windows 上不分大小写）')
   assert.equal(ask({ runId: 'r0', closed: true }), null, '替它收口的那一次不作废')
   assert.equal(ask({ runId: 'r0', firstStage: false }), 'drop')
   assert.equal(ask({ sessionId: 's-2' }), null, '别的会话不绑')
   assert.equal(ask({ sessionId: 's-2', runId: 'r0' }), null, '别的会话也不作废')
-  assert.equal(bindDecision({ ...p, bound: 'r1' }, { sessionId: 's-1', runId: 'r2', sameRun: same, firstStage: true, closed: false }), null, '绑过的不再绑')
-  assert.equal(bindDecision({ ...p, dropped: 'r0' }, { sessionId: 's-1', runId: 'r2', sameRun: same, firstStage: true, closed: false }), null, '作废的不再绑')
-  assert.equal(bindDecision(null, { sessionId: 's-1', runId: 'r1', sameRun: same, firstStage: true, closed: false }), null)
+  assert.equal(bindDecision({ ...p, bound: 'r1' }, { sessionId: 's-1', runId: 'r2', sameRun: same, creating: true, firstStage: true, closed: false }), null, '绑过的不再绑')
+  assert.equal(bindDecision({ ...p, dropped: 'r0' }, { sessionId: 's-1', runId: 'r2', sameRun: same, creating: true, firstStage: true, closed: false }), null, '作废的不再绑')
+  assert.equal(bindDecision(null, { sessionId: 's-1', runId: 'r1', sameRun: same, creating: true, firstStage: true, closed: false }), null)
 })
 
 const contract = (section1, rest = ['## 2. PM 的理解（可改）', '', '- 命令行。', '']) =>
@@ -90,19 +94,20 @@ test('section1Mismatch：引用块的写法也认（每行前面一个「>」或
   assert.equal(section1Mismatch(contract(['> 第一行', '>', '>  缩进', '>第四行']), '第一行' + NL + NL + ' 缩进' + NL + '第四行'), null)
   assert.equal(section1Mismatch(contract(['> 第一行', '', '> 第三行']), '第一行' + NL + NL + '第三行'), null)
   assert.equal(section1Mismatch(contract(['> > 用户自己引的一句']), '> 用户自己引的一句'), null)
+  assert.equal(section1Mismatch(contract(['> 第一行', '> 第二行', '>', '>']), '第一行' + NL + '第二行'), null, '复核（门禁 U6）：原话之后只剩「>」空行也算空行')
   const m = section1Mismatch(contract(['> 做一个待办应用，顺手加个登录']), '做一个待办应用')
   assert.equal(m?.kind, 'line', JSON.stringify(m))
 })
 
 test('section1Mismatch：对不上的几种——改了一行、少了几行、多了几行、切不出第 1 节；报的是第几行与两边的原文', () => {
-  assert.deepEqual(section1Mismatch(contract(['做一个待办清单应用']), '做一个待办应用'), { kind: 'line', line: 1, want: '做一个待办应用', got: '做一个待办清单应用' })
+  assert.deepEqual(pick(section1Mismatch(contract(['做一个待办清单应用']), '做一个待办应用')), { kind: 'line', line: 1, want: '做一个待办应用', got: '做一个待办清单应用' })
   assert.deepEqual(
-    section1Mismatch(contract(['第一行']), '第一行' + NL + '第二行'),
+    pick(section1Mismatch(contract(['第一行']), '第一行' + NL + '第二行')),
     { kind: 'line', line: 2, want: '第二行', got: '' },
     '少了一行，下面紧跟空行',
   )
   assert.deepEqual(
-    section1Mismatch(['## 1. 用户原话', '', '第一行', '## 2. PM 的理解'].join(NL), '第一行' + NL + '第二行'),
+    pick(section1Mismatch(['## 1. 用户原话', '', '第一行', '## 2. PM 的理解'].join(NL), '第一行' + NL + '第二行')),
     { kind: 'line', line: 2, want: '第二行', got: '## 2. PM 的理解' },
   )
   assert.deepEqual(section1Mismatch(['## 1. 用户原话', '', '第一行'].join(NL), '第一行' + NL + '第二行'), { kind: 'short', line: 2, want: '第二行', got: null })
@@ -116,9 +121,9 @@ test('section1Mismatch：对不上的几种——改了一行、少了几行、�
 })
 
 test('section1Mismatch：两种写法都对不上时，报认得更远的那一种（同样远报直接写的那一种）', () => {
-  const m = section1Mismatch(contract(['> 第一行', '> 第二行改了']), '第一行' + NL + '第二行')
+  const m = pick(section1Mismatch(contract(['> 第一行', '> 第二行改了']), '第一行' + NL + '第二行'))
   assert.deepEqual(m, { kind: 'line', line: 2, want: '第二行', got: '> 第二行改了' })
-  assert.deepEqual(section1Mismatch(contract(['完全不同']), '原话'), { kind: 'line', line: 1, want: '原话', got: '完全不同' })
+  assert.deepEqual(pick(section1Mismatch(contract(['完全不同']), '原话')), { kind: 'line', line: 1, want: '原话', got: '完全不同' })
 })
 
 test('wordsMismatchText：说出第几行、原话与契约里的那一行（都过 quote），指到 run 目录里的记录文件', () => {
@@ -140,4 +145,29 @@ test('crashNotice：原话记录器崩了说「原话没有记下」、这一趟
   assert.ok(w.includes('原话没有记下') && w.includes('不跟它核') && !w.includes('批准'), w)
   const a = crashNotice('approval-ask', new Error('boom'), true)
   assert.ok(a.includes('这次的回答没有记下') && a.includes('再批准一次'), a)
+})
+
+test('section1Mismatch（复核 docs/50 §9，门禁中 2）：空白变体（不换行空格、全角空格、制表符）折成一个普通空格、连续空白算一个，零宽与格式字符不计——模型照抄不出它们', () => {
+  const NBSP = String.fromCharCode(0xa0)
+  const IDEO = String.fromCharCode(0x3000)
+  const THIN = String.fromCharCode(0x2009)
+  const ZW = String.fromCharCode(0x200b)
+  const SHY = String.fromCharCode(0xad)
+  const TAB = String.fromCharCode(9)
+  const words = `输入格式：数字${NBSP}运算符${NBSP}数字（例如${IDEO}3${THIN}+ 4）${ZW}。` + NL + `第二${SHY}行${TAB}末尾`
+  assert.equal(section1Mismatch(contract(['输入格式：数字 运算符 数字（例如 3 + 4）。', '第二行 末尾']), words), null)
+  assert.equal(section1Mismatch(contract(['输入格式：数字  运算符 数字（例如 3 + 4）。', '第二行  末尾']), words), null, '连续空白算一个')
+  assert.equal(section1Mismatch(contract(['> 输入格式：数字 运算符 数字（例如 3 + 4）。', '> 第二行 末尾']), words), null, '引用块同样')
+  assert.equal(section1Mismatch(contract(['输入格式：数字运算符 数字（例如 3 + 4）。', '第二行 末尾']), words)?.kind, 'line', '少了一处空白照样对不上')
+  assert.equal(section1Mismatch(contract(['输入格式，数字 运算符 数字（例如 3 + 4）。', '第二行 末尾']), words)?.kind, 'line', '标点改了照样对不上')
+})
+
+test('section1Mismatch 与 wordsMismatchText（复核 docs/50 §9）：对不上的那一行报第一个不同的字与两边的码位（肉眼看不出的差别也说得出）', () => {
+  const m = section1Mismatch(contract(['输入格式，数字']), '输入格式：数字')
+  assert.deepEqual(m, { kind: 'line', line: 1, want: '输入格式：数字', got: '输入格式，数字', col: 5, wantCode: 'U+FF1A', gotCode: 'U+FF0C' })
+  const t = wordsMismatchText(m)
+  assert.ok(t.includes('从第 5 个字起不一样') && t.includes('U+FF1A') && t.includes('U+FF0C'), t)
+  const shorter = section1Mismatch(contract(['输入格式']), '输入格式：数字')
+  assert.equal(shorter.col, null, '一边是另一边的开头：不报码位')
+  assert.ok(!wordsMismatchText(shorter).includes('U+'), wordsMismatchText(shorter))
 })
