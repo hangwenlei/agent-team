@@ -399,7 +399,7 @@ export function validateState(state, { stages, grants } = {}) {
         if (typeof e[k] !== 'string') p(`escalations[${i}].${k} 缺失或不是字符串`)
       }
       if (typeof e.kind === 'string' && !ESCALATION_KINDS.includes(e.kind)) {
-        p(`escalations[${i}].kind 是 ${quote(e.kind)}，必须是规格 §5.1 列的这几类之一：${ESCALATION_KINDS.join('、')}`)
+        p(`escalations[${i}].kind 是 ${quote(e.kind)}，必须是这几类之一：${ESCALATION_KINDS.join('、')}`)
       }
     })
   }
@@ -438,7 +438,7 @@ export function validateState(state, { stages, grants } = {}) {
         const want = derived[k] ?? 0
         if (have !== want) {
           p(`rework[${quote(k)}] 是 ${quote(have)}，但 history 里 ${quote(k)} 出现了 ${want + 1} 次，应当是 ${want}——` +
-            `计数是 history 的派生量，不能单独改（规格 §4.2 ③）`)
+            `计数是 history 的派生量，不能单独改`)
         }
       }
     }

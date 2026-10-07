@@ -12,8 +12,8 @@
 //   ③ 绝不抛异常  —— 一、纯函数层：注册抛、写入抛、取环境变量抛，一样都不漏出来
 //   ④ 不写文件    —— 四、开着把整张矩阵跑一遍，项目目录下的文件清单前后相同
 // 另有两组：五、测试帮手缺省剥掉开关（不然开着留痕跑 node --test，九条与留痕无关的
-// 既有用例会一起红，docs/21 §8 的 M1）；六、docs/21 里写的开关名、前缀与判读表就是源码里
-// 与 hooks.json 里的那几样。
+// 既有用例会一起红，docs/21 §8 的 M1）；六、判读说明（docs/00-现行参考.md §1，原来在 docs/21 §4）里写的开关名、前缀与
+// 判读表就是源码里与 hooks.json 里的那几样。
 //
 // ⚠️ 二那张矩阵是**纯旁路**这条约束唯一的子进程级判据，所以它自己要先被证明不是空转：
 // 「每个检查项都在矩阵里」「退出码 0 与 2 都出现过」「stdout 空与非空都出现过」
@@ -513,29 +513,30 @@ test('测试帮手：跑测试的进程自己开着留痕，run() 缺省仍然�
 })
 
 // ---------------------------------------------------------------------------
-// 六、docs/21 写的开关名与前缀，就是源码里那两个
+// 六、判读说明写的开关名与前缀，就是源码里那两个
 // ---------------------------------------------------------------------------
 //
-// docs/21 是「怎么用它验证一趟 run」的那份说明：它教人设哪个变量、grep 哪个前缀。
-// 源码里任何一个改了名而文档没跟，照着文档做的人会得到一个零命中——而零命中在这里
-// 恰好长得跟「门禁没跑」一模一样。
+// 「怎么用它验证一趟 run」的说明教人设哪个变量、grep 哪个前缀。源码里任何一个改了名而说明没跟，照着做的人会得到一个零命中——
+// 而零命中在这里恰好长得跟「门禁没跑」一模一样。第 47 条（docs/48）起这份说明是活的 docs/00-现行参考.md §1；docs/21 是 2026-09-24 的
+// 记录，不再跟着改。
+const LIVING = 'docs/00-现行参考.md'
 
-test('docs/21 里写着的开关名与 grep 前缀，就是 hooks/lib/trace.mjs 导出的那两个', () => {
-  const doc = read('docs/21-门禁留痕.md')
-  assert.ok(doc.includes(TRACE_ENV), `docs/21 里找不到 ${TRACE_ENV}`)
-  assert.ok(doc.includes(TRACE_PREFIX), `docs/21 里找不到 ${TRACE_PREFIX}`)
+test('docs/00-现行参考.md 里写着的开关名与 grep 前缀，就是 hooks/lib/trace.mjs 导出的那两个', () => {
+  const doc = read(LIVING)
+  assert.ok(doc.includes(TRACE_ENV), `${LIVING} 里找不到 ${TRACE_ENV}`)
+  assert.ok(doc.includes(TRACE_PREFIX), `${LIVING} 里找不到 ${TRACE_PREFIX}`)
 })
 
-// docs/21 §4 那张判读表，是核的人把一条记录对回「这是哪一道门禁」的唯一依据：
+// 判读表（docs/00-现行参考.md §1；原来在 docs/21 §4，被这条判据逼着两次往带日期的记录里加行）是核的人把一条记录对回「这是哪一道门禁」的唯一依据：
 // 记录里 CLI 写下的身份是 `command` 字段 = hooks.json 的 statusMessage，
 // 而这一行自报的是 check=<检查项>。**两列都来自 hooks/hooks.json**，所以表逐行对着它钉：
 // 有人改了一句 statusMessage、或者加了一道门禁而表没跟，核的人会拿着一句过期的字去
 // 对记录——对不上时它长得跟「那道门禁没跑」一模一样。
 //
-// 框表用两个锚（§4 的标题与 §5 的标题），锚在文件里必须恰好出现一次：撞上第二处，
+// 框表用两个锚（§1 的标题与 §2 的标题），锚在文件里必须恰好出现一次：撞上第二处，
 // 抠出来的就不是那张表（docs/16 §3.2 那个形状）。
-const TABLE_START = '## 4. 怎么用它验证一趟 run 里每道门禁都跑过'
-const TABLE_END = '## 5. '
+const TABLE_START = '## 1. 门禁留痕怎么判读'
+const TABLE_END = '## 2. '
 
 function traceTableOf(doc) {
   const nStart = doc.split(TABLE_START).length - 1
@@ -573,14 +574,14 @@ test('自检：traceTableOf() 从合成样本里只抠判读表那几行，别�
     TABLE_START,
     '| 门禁 | `check=` | 记录的 `command` |',
     '| H1 | `delegation` | `校验派发白名单…` | x |',
-    '## 5. 下一节',
+    '## 2. 下一节',
     '| H9 | `nope` | `不该被抠出来` | x |',
   ].join('\n')
   assert.deepEqual(traceTableOf(sample), { pairs: ['delegation ⇄ 校验派发白名单…'] })
 })
 
-test('docs/21 §4 那张判读表逐行等于 hooks/hooks.json 里的（检查项, statusMessage）', () => {
-  const got = traceTableOf(read('docs/21-门禁留痕.md'))
-  assert.ok(!got.err, `docs/21 里框不出那张判读表：${got.err}`)
+test('docs/00-现行参考.md 的判读表逐行等于 hooks/hooks.json 里的（检查项, statusMessage）', () => {
+  const got = traceTableOf(read(LIVING))
+  assert.ok(!got.err, `${LIVING} 里框不出那张判读表：${got.err}`)
   assert.deepEqual(got.pairs.slice().sort(), hooksJsonPairs().sort())
 })

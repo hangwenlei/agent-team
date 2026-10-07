@@ -704,7 +704,7 @@ function contractNoticeFor(ctx, recipientCanWriteState) {
 // **诊断那一半对谁都成立，两支共用、一个字不动**：哪一段的哪个角色没交代、口径宽不宽、
 // 驱动者那条护栏——分支的只是「你去把它改了」这个假设。
 //
-// ⚠️ Ruling 2：narrowed 为假时文案要**自己说出口径比平时宽**。读的人凭这一句才知道
+// ⚠️ 收窄裁定：narrowed 为假时文案要**自己说出口径比平时宽**。读的人凭这一句才知道
 // 这批 gap 里可能混着「这个项目根本用不上的角色」与「PM 自己那几段」——不说的话，
 // 同一条提示在两种完全不同的口径下长得一模一样，而这正是本仓库反复栽的那个形状
 // （「静默的放行和门禁彻底坏掉长得一模一样」）。stderr 那一行痕迹是另一半，在调用点。
@@ -2187,7 +2187,7 @@ function main() {
     // ⚠️ 不塞进 buildLedgerNotices：那个函数的入参全是调用方算好的派生值，这一层
     // 才是持有 ctx.stages / ctx.state / ctx.project 的地方；措辞组装与 buildDriftNotice 同址。
     //
-    // ⚠️ Ruling 2：判据的宇宙收窄到 project.json 的 available_roles。ctx.project 在
+    // ⚠️ 收窄裁定：判据的宇宙收窄到 project.json 的 available_roles。ctx.project 在
     // readRunContext 里已经过 readJson 那一关（null / 数组 / 标量都会被判成读不出来），
     // 所以这里要么是一个普通对象、要么是 null（文件不在）；available_roles 本身是不是
     // 可用的一份，由 decideCoverage 自己判并回一个 narrowed。
@@ -2678,7 +2678,7 @@ function main() {
       // ⚠️ M3a Task 4 同时改掉了这句话里的**位置指代**：上一版写的是「与**下面**
       // compareArtifacts、**上面** readiness 分支」——**两个方位词里有一个是错的**，
       // compareArtifacts 那次调用在本文件里排在这一处**上面**，不是下面。
-      // 按 Ruling 11 同一条（文档与注释里不写 file:line，写符号名）：**方位词和行号是同一族
+      // 按同一条裁定（文档与注释里不写 file:line，写符号名）：**方位词和行号是同一族
       // ——靠位置定位，被下一次插入或搬动静默弄假，而且没有任何东西会红。** 改成点名。
       //
       // ⚠️ M3a Task 4：上一版这里写的是「口径与下面 compareArtifacts、上面 readiness

@@ -18,7 +18,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 ## 🔑 配置项清单
 
 - `AGENT_TEAM_GATE_TRACE`（可选）：等于 `1` 时每道门禁每次 `exit 0` 往 stderr 留一行痕，默认关。
-  `--bg` 会话必须经 `--settings` 的 `env` 传入，在 shell 里 export 传不到 hook（实测）。见 `docs/21-门禁留痕.md`。
+  `--bg` 会话必须经 `--settings` 的 `env` 传入，在 shell 里 export 传不到 hook（实测）。判读见 `docs/00-现行参考.md` §1，来历在 `docs/21`。
 - `CLAUDE_PLUGIN_ROOT`：由 CLI 注入，插件内部路径都从它解析，无需手动设置。
 - 推送 GitHub 需要本机 `gh` 已登录；凭据在系统 keyring 里，不进仓库。
 
@@ -29,10 +29,13 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `hooks/lib/` — 判定用的纯函数（`runctx.mjs` 读运行上下文、`trace.mjs` 门禁留痕、`retry-budget.mjs` 那份重试上限说明的单一真源等）。
 - `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
+  `stages.produces.md` 是 at-resume 与 at-status 运行时让模型读的「一段该交哪些产物」；`stages.README.md` 只给维护者（理由、消费方表、开发史）。
+- `docs/00-开放边界.md` — 还开着什么的活索引：每条指向记它的那一节，关上一条就从这里删掉、收口写在原话底下。`docs/00-现行参考.md` — 会变的现行事实
+  （门禁留痕的判读表、Claude Code 的下限），判据对着代码与 README 核。两份都是活的，直接改。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
 - `CHANGELOG.md` — 每一版一行，最新的在最上面。
-- `docs/13`…`docs/47` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
-  `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，下一轮从 `docs/39` §5 挑。
+- `docs/13`…`docs/48` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+  `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，它 §5 排的六轮到 `docs/48` 做完；之后从 `docs/00-开放边界.md` 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
 ## 🧠 长期决策与理由
@@ -48,11 +51,20 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   「插件会加载的」清单的单一真源是 `scripts/lib/version-bump.mjs` 的 `PLUGIN_LOADED`）。main 没开分支保护，所以那是**事后**告警：
   先推功能分支、等 CI 全绿，再合进 main 推送。每挪一次，在 `CHANGELOG.md` 最上面加一行「- x.y.z：这一版改了什么」，版本检查核它；推 main、ci 的判据与
   版本检查都过了之后，`ci.yml` 的 `tag` 作业跑 `scripts/tag-release.mjs`：每一版打在 main 的 first-parent 历史上 `plugin.json` 第一次是它的提交（`v` 加版本号），
-  缺的都补上，已有的不挪。不手工推 tag：GITHUB_TOKEN 推的不触发工作流，手工推旧提交的会按那个提交里的工作流起 CI。理由在 `docs/47`。
+  缺的都补上，已有的不挪。GITHUB_TOKEN 推不了指向「带着与 `main` 现在不同的工作流文件」的提交的 tag（推它等于创建或更新工作流）：那样的旧版作业
+  补不上、会红，要有 `workflow` 权限的人在本地跑 `node scripts/tag-release.mjs --push`（不带 `--push` 只列不打）。M4l 起工作流的 push 只认分支，推 tag
+  不触发 CI；M4l 之前的提交里的工作流不认这一条，一次推三个以内会起 CI。理由在 `docs/47` 与它的订正。
 - **`docs/11` §1–§4 原文一字不改，只追加 §5.x；带日期的实测记录正文不改，订正与收口写在旁边 —— 而且写在原话的标题底下**，只在新一节里指称它的收口，扫标题的人读不到。
+- **活的事实不写进带日期的记录**：判据要对着代码核的说明与数写在 `docs/00-现行参考.md`，还开着什么写在 `docs/00-开放边界.md`（docs/15 起每一份记录的「仍然开着的边界」
+  「没量到的」这类小节都要在那里有一行，`tests/open-index.test.mjs` 钉着）。判据逼着改一份带日期的记录，就是那件事该挪出来了。理由在 `docs/48`。
 - **一条注释不是一条判据。** 要防的事配判据；写不出来就按 `docs/16` §3 开头那条付三样（拒绝的判据长什么样、它打不红的那一刀、什么会让答案改变）。
+- **`docs/` 之外不写裁定编号**，写裁定的名字（`docs/16` §2.30；注释与判据里撞过号）；`tests/hygiene.test.mjs` 钉着。`docs/` 下带日期的记录原样引用编号，判据不扫。
 - **列举，不报总数**（`docs/16` §3.1）。失效条件写成可观测状态或归属规则，不写成要人去数的阈值。
 - **找缺陷靠变异验证，不靠读代码**（`docs/16` §3）。
+- **运行时正文只写现行规则。** 模型在运行时读得到的文字——角色正文、命令、skill、模板、`stages.produces.md`、插件的几份配置，以及门禁回传与拒绝理由
+  的字符串——不写开发史（docs 编号、里程碑编号、规格章节号、审查条目号、「上一版写的是」），也不指向给维护者的 `stages.README.md`；理由与来历写在
+  `docs/`、代码注释与 `stages.README.md` 里。正文指给模型读的插件文件都算插件会加载的（`PLUGIN_LOADED`，判据从各份 `${CLAUDE_PLUGIN_ROOT}/…` 派生着核）。
+  判据是 `tests/runtime-prose.test.mjs`，「插件会加载的」那一半在 `tests/version-bump.test.mjs`；理由在 `docs/48`。
 - **README 对外只写结论，不写过程。** 不写「某版本上实测」这类叙述、CLI 版本号和 `docs/` 编号引用；用户要知道的用法与风险照写，
   被 `tests/readme-sync.test.mjs` 钉着的那几条事实换成不带过程的说法保留。过程与证据留在 `docs/`。
   运行前提（Node 与 Claude Code 的最低版本）属于用法，照写，由判据钉着；不写的是「在某版本上实测过」这类过程。

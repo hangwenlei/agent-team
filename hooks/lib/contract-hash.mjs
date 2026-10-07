@@ -88,7 +88,7 @@ export function compareContractSha({ recorded, actual }) {
     kind: 'drift',
     problem:
       `契约漂移：磁盘上 00-contract.md 的 sha256 是 ${actual}，state.json 记的是 ${shaOrNote(recorded)}。` +
-      `契约可以改，但只能由用户改、经 PM 转写，改动作为带日期的修订块追加进契约（规格 §5.3）。` +
+      `契约可以改，但只能由用户改、经 PM 转写，改动作为带日期的修订块追加进契约。` +
       // M4g 复核（docs/42 §8）：原来说「每次改动都要在 escalations[] 里留一条记录」——用户主动改需求时与 /agent-team:at 第 4 节的「不记」
       // 正面冲突，照它记只能错记一类，或者写成 answer 空串、让「待办升级」一直挂着。
       `合法的改动有两种：第 4 节升级的答复（escalations 里问之前记的那一条，把它的 answer 补上）；用户在对话里主动提出的` +

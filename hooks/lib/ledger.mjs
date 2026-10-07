@@ -17,7 +17,7 @@
 import { compareContractSha, shaOrNote } from './contract-hash.mjs'
 import { inline, quote, safeJson } from './trusted.mjs'
 import { nextStage } from './state.mjs'
-import { approvalTargetFor, askUserText, limitOf } from './budget.mjs'
+import { approvalTargetFor, askUserText, limitOf, REWORK_LIMIT } from './budget.mjs'
 import { isPlainObject, isStageChain, productsOfStage, stageRoles, isRolePatternStage } from './stages.mjs'
 import { VERIFY_REDO, splitByAccept } from './freshness.mjs'
 import { closedAt, blockerLine } from './closing.mjs'
@@ -246,7 +246,7 @@ export function buildLedgerNotices({
       (lines.length
         ? `当前配置下，下面这些角色实际能写到的地方超出了它自己认领的路径：\n${lines.join('\n')}\n` +
           `这不是门禁也不是告警，是一份审计事实：写路径隔离只挡 Edit/Write 的直接写入，` +
-          `一个角色把写入转手派发给路径的合法拥有者就绕过去了（规格 §6.4）。`
+          `一个角色把写入转手派发给路径的合法拥有者就绕过去了。`
         : free.length
           ? '当前配置下，其余角色的触达都没有超出它自己认领的路径。'
           : '当前配置下，没有角色的触达超出它自己认领的路径。')
@@ -276,7 +276,7 @@ export function buildLedgerNotices({
     const named = budget.map((b) => `${known(b.stage) ? b.stage : quote(b.stage)} 已经返工 ${b.rounds} 轮，上限 ${b.limit}`)
     const onChain = budget.filter((b) => known(b.stage)).sort((a, b) => ids.indexOf(a.stage) - ids.indexOf(b.stage))
     const head =
-      `【返工预算】history 显示 ${named.join('；')}（规格 §4.2 ③：第 3 轮终局，不过则升级），门禁在这一趟 run 里读不到覆盖它的` +
+      `【返工预算】history 显示 ${named.join('；')}（上限 = ${REWORK_LIMIT} + 门禁记下的、覆盖那一段的返工批准条数），门禁在这一趟 run 里读不到覆盖它的` +
       '返工批准（批准记录丢了、读不出来，或者 history 被别处改过）。不要改计数——改小会被返工预算门禁以「不可重置」拒掉。'
     out.push(
       onChain.length
@@ -339,12 +339,12 @@ export function buildLedgerNotices({
       // 见本文件头部 pmOnlyNotice 上方的注释：这句话不能只靠跟 stageDone 分支拼在
       // 同一次回传里凑出语义，produce 分支自己必须说完整。
       // 第二个参数以中文收尾：模板是 `把${reportWhat}回报给上级`，直接传 '这个 sha256'
-      // 会拼成「sha256回报」，与本文件里 77 处「英文/数字 + 空格 + 中文」的惯例相反。
+      // 会拼成「sha256回报」，与本文件里「英文/数字 + 空格 + 中文」的惯例相反。
       const who = pmOnlyNotice('把这一条写进 artifacts', '这个 sha256 值')
       out.push(
         (recorded === undefined
           ? `【产物】${produceName} 的 sha256 是 ${produceSha}，state.json 的 artifacts 里还没有记。` +
-            `把这一条原样写进去——不要自己拼一个。它是 §6.2 内容比对的基线，也是 /at-status 对账的依据。`
+            `把这一条原样写进去——不要自己拼一个。它是之后账本比对内容的基线，也是 /at-status 对账的依据。`
           : `【产物】${produceName} 的 sha256 是 ${produceSha}，而 artifacts 里记的是 ${shaOrNote(recorded)}。` +
             `这份产物在记账之后被改过——如果是有意的，把新值写进去；如果不是，去看看是谁改的。`
         ) + who,
@@ -391,7 +391,7 @@ export function buildLedgerNotices({
     const nextLimit = limitOf(nxt, grants)
     // 复核（docs/34 §3，prose-3）：写产物触发的【阶段】会发给执行角色——它没有 AskUserQuestion、改不了 state.json，前面的 pmOnlyNotice
     // 已经叫非 PM 回报上级。问用户的做法只在写 state.json（写者只能是 PM）时给全。
-    const overHead = `\n推进到 ${nxt} 会让它到第 ${entered} 轮返工，超过上限 ${nextLimit}（规格 §4.2 ③：第 3 轮终局，不过则升级），H6 会拒这次推进`
+    const overHead = `\n推进到 ${nxt} 会让它到第 ${entered} 轮返工，超过上限 ${nextLimit}（${REWORK_LIMIT} 加上门禁记下的、覆盖它的返工批准条数），H6 会拒这次推进`
     const over =
       entered <= nextLimit
         ? ''

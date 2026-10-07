@@ -41,11 +41,11 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 ⚠️ **不要直接拿 `produces` 字段当文件名清单用。** 它有两种形式（数组 / 对象），而且数组
 形式里可能是**模式**（含 `<role>` 占位符）而不是字面文件名——照字面 `Glob` 一个
 `05-impl/<role>.md` 永远查不到，结果是把一段已经做完的 S5 判成「产物不齐」、白白重跑。
-正确的口径是 `hooks/lib/stages.mjs` 的
+正确的口径是 `${CLAUDE_PLUGIN_ROOT}/hooks/lib/stages.mjs` 的
 `expandProduces(stage, stageRolesInRun(stage, participantsOf(state, stage)))`——`participantsOf` 取的是
 `state.json` 的 `stage_roles` 在那一段记着的人（这一段叫到了谁）；没有 `stage_roles` 的旧 run 退回 `roster`。
 展开规则**只在那一处**，这里不复述（复述就是第二份）；要看它说了什么，
-读 `${CLAUDE_PLUGIN_ROOT}/stages.README.md` 的「`produces` 的两种形式」。
+读 `${CLAUDE_PLUGIN_ROOT}/stages.produces.md`。
 `stage_roles` 某一段里不是那一段产者的人（例：S5 里被叫去分发的 `at-architect`）本来就该在，展开时被 `stageRolesInRun` 滤掉，
 不是状态不一致，不要去删它。
 
@@ -57,7 +57,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
   S2 先看 `01-prd.md` 在不在，在就不要重派 `at-product`——`at-ui` 那两份（`02-ui-spec.md`、`02-wireframe.html`）只在这一趟要用 `at-ui` 时才算缺，
   用不用按磁盘判（契约、`01-prd.md`、`project.json` 的 `available_roles`），不凭记忆；不用，就在记账那次 Write 里把它写进
   `trimmed`（不在 `available_roles` 里的也写——`trimmed` 记的是你裁过谁，不是那条回传点不点名）。已经在磁盘上、内容是做完了的不要重派，该有而没在的从这一段继续派；都齐了就先照下一条核，核过了再照「产物齐了」那一条记账。
-  「全部都在磁盘上」对空集是真命题，照字面判会把整段跳过。判「齐了」的口径只在 `hooks/lib/state.mjs` 的 `isStageDone` 一处，
+  「全部都在磁盘上」对空集是真命题，照字面判会把整段跳过。判「齐了」的口径只在 `${CLAUDE_PLUGIN_ROOT}/hooks/lib/state.mjs` 的 `isStageDone` 一处，
   它对空集答「没齐」。run 目录下的产物用 `.agent-team/runs/<run_id>/` 开头的路径去 `Glob`。
 - **不管展开出来是不是空集**，停在下面这几段的，先核这几样，核不过就不算齐、不要记账推进：停在 `S3` 的，`03-arch.md` 要有
   「落盘清单」一节，没有就在 `S3` 里重派 `at-architect` 补；停在 `S4` 的，推进之前照 `${CLAUDE_PLUGIN_ROOT}/commands/at.md`

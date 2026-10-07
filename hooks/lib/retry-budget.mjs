@@ -1,6 +1,6 @@
 // 「平台对 `SubagentStop` 的拒绝重试多少次才静默放行」——这份知识的**单一真源**。
 //
-// 这个文件存在的全部理由：同一份知识此前在**八句话、六个文件**里各写了一份
+// 这个文件存在的全部理由：同一份知识此前在**八句话、七个文件**里各写了一份
 // （`hooks/gate.mjs` 的 H5a 告警正文、`hooks/lib/deliverable.mjs` 两处、
 // `hooks/lib/deny.mjs`、`stages.README.md`、`tests/deliverable.test.mjs`、
 // `tests/gate-deliverable.test.mjs`、`tests/gate-dispatch.test.mjs`），

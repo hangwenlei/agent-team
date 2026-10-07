@@ -925,12 +925,12 @@ test('写的不是 state.json 时不报产者交代——触发点是推进出�
   }
 })
 
-// ——— Ruling 2：真实 gate 上的收窄，以及收窄不成时的两半留痕 ———
+// ——— 收窄裁定：真实 gate 上的收窄，以及收窄不成时的两半留痕 ———
 
 // S1 走过了、at-pm 是它的产者、roster 里没有 at-pm（docs/15 §5.1 那一刻逐字如此），
 // 而 available_roles 不含 at-pm —— 所以它不该被点名。
 // 正向锚是上面那条「点名 S2 的 at-ui」：同一次输出里该点的那个真的被点了。
-test('Ruling 2：available_roles 不含 at-pm，S1 那一段不被点名', () => {
+test('收窄裁定：available_roles 不含 at-pm，S1 那一段不被点名', () => {
   const { projectDir, pluginDir } = makeRun(WALKED_S2)
   try {
     const ctx = ctxOf(writeState(projectDir).stdout)
@@ -943,7 +943,7 @@ test('Ruling 2：available_roles 不含 at-pm，S1 那一段不被点名', () =>
 
 // 已知违规样本锚：把 at-pm 塞进 available_roles（正是 commands/at-init.md 禁的那件事）
 // → 同一份 state 上 S1 立刻被点名。没有这条，上一条在「收窄退化成恒不点名」时照样绿。
-test('正向自检锚（Ruling 2）：at-pm 一旦被写进 available_roles，S1 立刻被点名', () => {
+test('正向自检锚（收窄裁定）：at-pm 一旦被写进 available_roles，S1 立刻被点名', () => {
   const { projectDir, pluginDir } = makeRun(PM_IN_AVAILABLE)
   try {
     assert.match(ctxOf(writeState(projectDir).stdout), /S1 的 at-pm/)

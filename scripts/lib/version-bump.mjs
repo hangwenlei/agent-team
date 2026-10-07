@@ -7,8 +7,10 @@
 
 // 「插件会加载的东西」的单一真源。以 / 结尾的是目录前缀，其余是仓库根下的文件。
 // 出处是 docs/19 §9.3 的纪律正文（「插件真正会加载的任何东西」，含 .claude-plugin/ 下两份
-// 清单），外加它漏掉的 stages.README.md——/agent-team:at-resume 与 at-status 的正文要模型在
-// 运行时读它的一节，改它就改了这两条命令的行为（M3p 复核）。
+// 清单），外加 stages.produces.md——/agent-team:at-resume 与 at-status 的正文要模型在运行时读它，
+// 改它就改了这两条命令的行为。原来那一节在 stages.README.md 里（M3p 复核补进清单）；第 46 条（docs/48）
+// 把它拆成给模型读的 stages.produces.md，stages.README.md 从此只给维护者看、不在清单里。
+// 正文与门禁指给模型读的插件文件都得在这里：tests/version-bump.test.mjs 从各份 ${CLAUDE_PLUGIN_ROOT}/… 派生着核。
 // .claude-plugin/plugin.json 每次发布都会改 version，只改 version 的那一次由
 // withoutVersionOnlyManifest 从清单里拿掉，不算在这里。
 export const PLUGIN_LOADED = [
@@ -20,7 +22,7 @@ export const PLUGIN_LOADED = [
   'settings.json',
   'stages.json',
   'roster.json',
-  'stages.README.md',
+  'stages.produces.md',
   '.claude-plugin/plugin.json',
   '.claude-plugin/marketplace.json',
 ]

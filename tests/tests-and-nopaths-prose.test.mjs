@@ -120,7 +120,7 @@ const CONTRACT_S3 = '「不写自动化测试」不写在这里：要不要测�
 
 const INIT_NOKEY =
   '- **也不要给 `at-qa` 与 `at-acceptance` 建键**：它们按设计不认领路径，不写实现代码，只写自己那份 run 产物。没有 `paths` 条目时，' +
-  '`hooks/lib/writepath.mjs` 的 `decideWritePath` 在 run 目录之外拒它们的每一次写入——与下面「其余每个会被派到的角色都要有键」那一条一样' +
+  '`${CLAUDE_PLUGIN_ROOT}/hooks/lib/writepath.mjs` 的 `decideWritePath` 在 run 目录之外拒它们的每一次写入——与下面「其余每个会被派到的角色都要有键」那一条一样' +
   '（`at-pm` 不参与路径认领，另行放行），这正是它们该有的样子，它们的正文红线也这样写。你给它们建了键，门禁就照键放行它们写那几个前缀，' +
   '等于在 run 目录之外给它们开了口子（`at-qa` 顺手写测试、`at-acceptance` 顺手改合格，正是它们被禁止的事）；账本会把这个键报出来。'
 

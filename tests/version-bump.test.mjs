@@ -10,7 +10,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 const NL = String.fromCharCode(10)
 import { dirname, join } from 'node:path'
@@ -52,7 +52,7 @@ test('插件会加载的每一类路径都被认出来——漏认一类，那�
     'settings.json',
     'stages.json',
     'roster.json',
-    'stages.README.md',
+    'stages.produces.md',
     '.claude-plugin/marketplace.json',
     '.claude-plugin/plugin.json',
   ]) {
@@ -72,19 +72,42 @@ test('PLUGIN_LOADED 与上一条逐一列举的清单一致——多认或少认
       'roster.json',
       'settings.json',
       'skills/',
-      'stages.README.md',
       'stages.json',
+      'stages.produces.md',
       'templates/',
     ],
   )
+})
+
+// 第 46 条（docs/48）：角色正文、命令、skill、模板、stages.produces.md 与门禁指给模型读的插件文件（`${CLAUDE_PLUGIN_ROOT}/…`），
+// 改它就改了运行时的行为——都得算插件会加载的。原来 stages.README.md 是事后才补进清单的（M3p 复核）；这一条让清单跟着正文的指向走。
+// 漏了花括号的 $CLAUDE_PLUGIN_ROOT/… 也认（复核，docs/48 §8）。门禁代码里用 join(ROOT, …) 拼出来叫模型读的路径认不出（docs/48 §4）。
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..')
+function filesUnder(dir) {
+  const out = []
+  for (const name of readdirSync(join(REPO, dir))) {
+    const rel = `${dir}/${name}`
+    if (statSync(join(REPO, rel)).isDirectory()) out.push(...filesUnder(rel))
+    else out.push(rel)
+  }
+  return out
+}
+test('第 46 条：正文与门禁指给模型读的每一个插件文件都算插件会加载的——改了它只挪最后一位不通过', () => {
+  const sources = [...['agents', 'commands', 'skills', 'templates', 'hooks'].flatMap(filesUnder), 'stages.produces.md']
+  const pointed = new Set()
+  for (const f of sources) {
+    for (const m of readFileSync(join(REPO, f), 'utf8').matchAll(/\$\{?CLAUDE_PLUGIN_ROOT\}?\/([A-Za-z0-9_.\/-]*[A-Za-z0-9_])/g)) pointed.add(m[1])
+  }
+  for (const p of ['stages.produces.md', 'stages.json', 'commands/at.md', 'hooks/boot.mjs']) assert.ok(pointed.has(p), `前置：没抽到 ${p}——抽到的：${[...pointed].join('、')}`)
+  for (const p of pointed) assert.equal(ok({ before: '0.7.7', after: '0.7.8', changed: [p] }), false, `${p} 被指给模型读，却不算插件会加载的`)
 })
 
 test('前缀不粘连：hooks-old.md 不是 hooks/ 下的文件', () => {
   assert.equal(ok({ before: '0.7.7', after: '0.7.8', changed: ['hooks-old.md'] }), true)
 })
 
-test('只认仓库根下的那几个目录与文件——docs/hooks/、tests/fixtures/agents/、docs/settings.json 都是散文', () => {
-  for (const path of ['docs/hooks/x.md', 'tests/fixtures/agents/a.md', 'docs/settings.json', 'docs/stages.README.md']) {
+test('只认仓库根下的那几个目录与文件——docs/hooks/、tests/fixtures/agents/、docs/settings.json 都是散文；stages.README.md 是给维护者的（第 46 条）', () => {
+  for (const path of ['docs/hooks/x.md', 'tests/fixtures/agents/a.md', 'docs/settings.json', 'docs/stages.README.md', 'stages.README.md']) {
     assert.equal(ok({ before: '0.7.7', after: '0.7.8', changed: [path] }), true, path)
   }
 })
