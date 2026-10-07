@@ -31,11 +31,16 @@ const MANIFEST = '.claude-plugin/plugin.json'
 export const CHANGELOG = 'CHANGELOG.md'
 const CHANGELOG_LINE = /^- (\d+\.\d+\.\d+)：(.*\S.*)$/
 
+// 第一个以「- 」开头的行（没有给 null）。
+function topChangelogLine(text) {
+  if (typeof text !== 'string') return null
+  return text.split(/\r?\n/).find((l) => l.startsWith('- ')) ?? null
+}
+
 /** CHANGELOG.md 最上面那一版：第一个以「- 」开头的行是「- x.y.z：…」（冒号后面有话）就给它的版本，否则 null。 */
 export function latestChangelogVersion(text) {
-  if (typeof text !== 'string') return null
-  const first = text.split(/\r?\n/).find((l) => l.startsWith('- '))
-  const m = first === undefined ? null : CHANGELOG_LINE.exec(first)
+  const first = topChangelogLine(text)
+  const m = first === null ? null : CHANGELOG_LINE.exec(first)
   return m ? m[1] : null
 }
 
@@ -90,6 +95,16 @@ export function judgeVersionBump({ before, after, changed, changelog }) {
   if (b && cmp(a, b) < 0) {
     return { ok: false, reason: `version 往回挪了（${before} → ${after}）。` }
   }
+  // 复核（M4l）：版本号往前挪就核 CHANGELOG——排在「没有改动」之前：只挪了版本号的那一次，改动清单被 withoutVersionOnlyManifest 拿空了。
+  if (changelog !== undefined && b && cmp(a, b) > 0 && latestChangelogVersion(changelog) !== after) {
+    const top = topChangelogLine(changelog)
+    return {
+      ok: false,
+      reason:
+        `${CHANGELOG} 最上面那一行${top === null ? '没有「- 」开头的行' : `是「${top}」`}，不是「- ${after}：…」：` +
+        `每挪一次版本号，在 ${CHANGELOG} 最上面加一行「- ${after}：这一版改了什么」（全角冒号，冒号后面写这一版改了什么）。`,
+    }
+  }
   if (!Array.isArray(changed) || changed.length === 0) {
     return { ok: true, reason: '两个提交之间没有改动，不要求挪版本号。' }
   }
@@ -113,12 +128,6 @@ export function judgeVersionBump({ before, after, changed, changelog }) {
       reason:
         `改了插件会加载的东西，要挪中间一位（${before} → ${after} 只挪了最后一位）。` +
         `这些路径是插件会加载的：${loaded.join('、')}`,
-    }
-  }
-  if (changelog !== undefined && latestChangelogVersion(changelog) !== after) {
-    return {
-      ok: false,
-      reason: `${CHANGELOG} 最上面那一行不是 ${after}：每挪一次版本号，在 ${CHANGELOG} 最上面加一行「- ${after}：这一版改了什么」。`,
     }
   }
   return { ok: true, reason: `${before} → ${after}` }

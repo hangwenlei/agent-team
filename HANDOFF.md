@@ -46,8 +46,9 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **发布纪律：每次推 `main` 都挪 `version`** —— 只碰散文 / `docs/` / `tests/` 挪最后一位，碰插件会加载的东西挪中间一位，任何一位不长到 `10`。
   理由：`claude plugin update` 比的是 `version` 字符串，不是 commit。CI 在推 main / 向 main 提 PR 时核它（`scripts/check-version-bump.mjs`，
   「插件会加载的」清单的单一真源是 `scripts/lib/version-bump.mjs` 的 `PLUGIN_LOADED`）。main 没开分支保护，所以那是**事后**告警：
-  先推功能分支、等 CI 全绿，再合进 main 推送。每挪一次，在 `CHANGELOG.md` 最上面加一行「- x.y.z：这一版改了什么」，版本检查核它；推 main、判据与
-  版本检查都过了之后 CI 按版本打 tag（`v` 加版本号，`ci.yml` 的 `tag` 作业）。理由在 `docs/47`。
+  先推功能分支、等 CI 全绿，再合进 main 推送。每挪一次，在 `CHANGELOG.md` 最上面加一行「- x.y.z：这一版改了什么」，版本检查核它；推 main、ci 的判据与
+  版本检查都过了之后，`ci.yml` 的 `tag` 作业跑 `scripts/tag-release.mjs`：每一版打在 main 的 first-parent 历史上 `plugin.json` 第一次是它的提交（`v` 加版本号），
+  缺的都补上，已有的不挪。不手工推 tag：GITHUB_TOKEN 推的不触发工作流，手工推旧提交的会按那个提交里的工作流起 CI。理由在 `docs/47`。
 - **`docs/11` §1–§4 原文一字不改，只追加 §5.x；带日期的实测记录正文不改，订正与收口写在旁边 —— 而且写在原话的标题底下**，只在新一节里指称它的收口，扫标题的人读不到。
 - **一条注释不是一条判据。** 要防的事配判据；写不出来就按 `docs/16` §3 开头那条付三样（拒绝的判据长什么样、它打不红的那一刀、什么会让答案改变）。
 - **列举，不报总数**（`docs/16` §3.1）。失效条件写成可观测状态或归属规则，不写成要人去数的阈值。
@@ -115,7 +116,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （`tests/redlines-setup-prose.test.mjs`）。理由在 `docs/40`。
 - **插件自带的 frontmatter 只用受限写法**：每个非空行恰好一行 `key: 值`，键不重复，值不以 YAML 指示符开头、不含「: 」与「 #」、不以「:」
   结尾、首尾没有空白、不是会被读成 null/布尔/数字的那几种，行里没有制表符与 `---`。挡的是已经核过、会让平台的 YAML 解析器与按行读的判据
-  读出不同东西的写法——解析失败会让平台把整份当空（Windows 上装下来的副本是 CRLF，平台的退路在那里不起作用），折行能授出判据看不见的
+  读出不同东西的写法——解析失败会让平台把整份当空（Windows 上装下来的副本是 CRLF 时，平台的退路在那里不起作用——M4l 起有 `.gitattributes`，新装的副本是 LF，
+  已装的副本在更新改到那份文件之前仍是 CRLF），折行能授出判据看不见的
   工具，值里的 `---` 会被平台当成收尾。不声称封闭。`tests/frontmatter-subset.test.mjs` 钉着；理由在 `docs/40` §1.8。
 - **按设计不认领路径的 `at-qa`、`at-acceptance` 只写 run 目录里自己那份产物**：没有 `paths` 键时写路径隔离在 run 目录之外拒（M4f；此前整段
   放行），项目根之外与 `.agent-team/` 下的非控制文件也拒；拒绝理由点名它自己那份产物（从 `stages.json` 取）、叫它照实写进那份结论、
@@ -173,7 +175,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **锚串替换不要用 `String.prototype.replace(a, b)`**：`b` 里的 `$'`、`$&` 会被展开成替换模式（`docs/26` §3 就这样把一段文档
   搅乱过）。用 `split(a).join(b)`，并断言命中次数。
 
-- **换行符**（`docs/11` §5.28）：M4l 起有 `.gitattributes`（`* text=auto eol=lf`），签出的工作区副本都是 LF；之前签出、git 还没再碰过的副本仍可能是 CRLF。
+- **换行符**（`docs/11` §5.28）：M4l 起有 `.gitattributes`（`* text=auto eol=lf`），新克隆、新签出的副本是 LF；已有的工作树里，git 只在改写一个文件时
+  （它有改动被拉下来、切到内容不同的分支）按新规则写它，没碰过的仍是 CRLF（本工作树里还有不少），`pull`、`reset --hard` 不会把它们改过来。
   锚串替换要**断言命中数，并核对命中的是你要的那一处** —— 同一个实参有几处合法命中时，断言防不了砍错的那一刀。落盘后扫控制字节与行尾混用。
   扫行尾用 Node 或 `grep -U`：Git Bash 的 grep 不带 `-U` 看不见 CR，会报出假的「全是 LF」（`docs/39` §3）。
 - **后台 agent 与主会话共用工作树时**，别 `git add -A` / `checkout` / `reset`；要并行就用隔离 worktree。

@@ -2,7 +2,7 @@
 // 有语法错误时全套也要红（每一份 node --check 一遍）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -40,4 +40,9 @@ test('第 48 条：hooks/、scripts/、tests/helpers/、tests/fixtures/ 下每�
     if (r.status !== 0) bad.push(`${relative(ROOT, join(ROOT, f))}：${(r.stderr || '').split(/\r?\n/).find((l) => /Error/.test(l)) ?? r.stderr}`)
   }
   assert.deepEqual(bad, [])
+})
+
+// 复核（低 5）：scratchpad/ 进了忽略清单，git status 就不再提示它——而 node --test 照样递归收它下面的 *.test.mjs。看不见了不等于没风险：仓库根下不许有它。
+test('第 48 条：仓库根下没有 scratchpad/（忽略只管 git，node --test 照样收它下面的判据）', () => {
+  assert.ok(!existsSync(join(ROOT, 'scratchpad')), '仓库根下有 scratchpad/：挪到仓库外')
 })

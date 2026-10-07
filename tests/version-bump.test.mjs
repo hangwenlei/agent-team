@@ -12,6 +12,7 @@ import assert from 'node:assert/strict'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+const NL = String.fromCharCode(10)
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CHANGELOG, judgeVersionBump, latestChangelogVersion, PLUGIN_LOADED, withoutVersionOnlyManifest } from '../scripts/lib/version-bump.mjs'
@@ -299,4 +300,14 @@ test('M4l CLI：版本号往前挪而 CHANGELOG.md 最上面不是这一版 → 
     const good = commit('changelog')
     assert.equal(check(base, good).status, 0)
   })
+})
+
+test('M4l 复核：只挪了版本号（改动清单被拿空）也核 CHANGELOG；拒绝理由引出最上面那一行', () => {
+  const r = judgeVersionBump({ before: '0.7.7', after: '0.7.8', changed: [], changelog: '- 0.7.7：起点。' + NL })
+  assert.equal(r.ok, false)
+  assert.ok(r.reason.includes('「- 0.7.7：起点。」'), r.reason)
+  const bad = judgeVersionBump({ before: '0.7.7', after: '0.7.8', changed: ['docs/a.md'], changelog: '- 0.7.8: 半角冒号' + NL })
+  assert.ok(!bad.ok && bad.reason.includes('「- 0.7.8: 半角冒号」'), bad.reason)
+  const none = judgeVersionBump({ before: '0.7.7', after: '0.7.8', changed: ['docs/a.md'], changelog: '# 更新记录' + NL })
+  assert.ok(!none.ok && none.reason.includes('没有「- 」开头的行'), none.reason)
 })

@@ -11,7 +11,7 @@
 # /c/... 形式在那里会 ENOENT。tests/gate-runner.test.mjs 钉着本文件的几处关键写法。
 name: min-node
 
-# 只认分支：推 tag 不触发（第 45 条起 CI 在推 main 之后打 tag）。
+# 只认分支：手工推的 tag 不触发（CI 自己打的 tag 用 GITHUB_TOKEN 推，本来就不触发）。
 on:
   push:
     branches: ['**']
