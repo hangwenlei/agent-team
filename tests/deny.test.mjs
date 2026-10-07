@@ -89,3 +89,9 @@ test('crashNotice：接到的异常是 undefined 或 null 时不抛，照样产�
     assert.match(text, /deliverable/)
   }
 })
+
+// M4k（docs/46，复核低 5）：两个记录器也记照现状交付——崩溃那一句说清两种批准都要再批一次，不只说返工。
+test('M4k crashNotice：批准记录器崩溃——说它是批准记录器、返工与照现状交付都要再批准一次', () => {
+  const text = crashNotice('approval-ask', new Error('boom'), true)
+  assert.ok(text.includes('批准记录器') && text.includes('照现状交付') && !text.includes('返工批准的记录器'), text)
+})

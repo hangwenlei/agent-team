@@ -115,6 +115,10 @@ export function blockerLine(stages, b, state, prior, dispatched = null) {
   if (b.why === 'outdated') {
     return `${b.name}（对着上一版契约：契约在它写成之后改过——${typeof b.fix === 'string' ? b.fix : '照写契约那一次的【契约】重出'}）`
   }
+  // M4k（docs/46）：验收结论首行没过、又没有门禁记下的照现状交付批准（verdict.mjs 的 acceptanceBlock）；整句由调用方算好挂在 fix 上。
+  if (b.why === 'verdict') {
+    return `${b.name}（${typeof b.fix === 'string' ? b.fix : '验收结论没过：照 /agent-team:at 第 6 节第一步处理'}）`
+  }
   if (b.why === 'stale') {
     // 复核二（G9）：08-delivery.md 是 PM 自己的验证段产物——不说「让它的产者」。
     if (own) return `${b.name}（还是上一轮的：这是你自己的产物，这一轮重写）`

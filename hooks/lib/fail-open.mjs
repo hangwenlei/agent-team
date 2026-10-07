@@ -31,8 +31,9 @@ export const GATE_NAME = {
   deliverable: '交付物核验',
   'stop-gate': '交付物核验',
   ledger: '账本',
-  'approval-ask': '返工批准',
-  'approval-prompt': '返工批准',
+  // M4k（docs/46，评审 F10）：两个记录器也记照现状交付——读不出输入、出错时还不知道是哪一种批准，叫「批准记录」。
+  'approval-ask': '批准记录',
+  'approval-prompt': '批准记录',
   completion: '交付物核验',
 }
 // 记录器不放行任何东西：它读不出输入、自己出错，后果是「这次的回答没有记下」，通用文案里的「放行」会说错后果（P3）。
@@ -212,7 +213,7 @@ export function crashContext(check, err, recipientIsPm) {
   } else if (check === 'approval-ask') {
     // M3z（docs/34）：approval-prompt 在 UserPromptSubmit 上，什么都发不了（hookOutput），这里只有 approval-ask。
     text =
-      `【门禁】这次的回答没有记下——门禁自己出了错（${msg}）：用户选的若是「再返工一轮」，它没有记成返工批准。` +
+      `【门禁】这次的回答没有记下——门禁自己出了错（${msg}）：用户选的若是「再返工一轮」或「照现状交付」，它没有记成批准。` +
       '重新问一次；再出错就停下，把这一段原样告诉用户。'
   } else {
     return null
@@ -256,16 +257,21 @@ export function systemMessage(kind, { cause, check } = {}) {
       return 'agent-team 返工批准：已记下，项目经理已收到。'
     case 'approval-skipped':
       return 'agent-team 返工批准：这次的回答没有记成批准，项目经理已收到原因。'
+    // M4k（docs/46）：同两个记录器记下的照现状交付批准。
+    case 'deliver-recorded':
+      return 'agent-team 照现状交付：已记下你的批准（只对现在这份验收结论有效），项目经理已收到。'
+    case 'deliver-skipped':
+      return 'agent-team 照现状交付：这次的回答没有记成批准，项目经理已收到原因。'
     case 'input':
       if (RECORDERS.has(check)) {
-        return 'agent-team 返工批准：读不出这次的 hook 输入，这次的回答没有记下。Claude Code 与插件的版本可能不匹配，两者都更新后再试。'
+        return 'agent-team 批准记录：读不出这次的 hook 输入，这次的回答没有记下。Claude Code 与插件的版本可能不匹配，两者都更新后再试。'
       }
       return (
         `agent-team ${GATE_NAME[check] ?? '门禁'}：读不出这次的 hook 输入，没有做校验、放行。` +
         'Claude Code 与插件的版本可能不匹配，两者都更新后再试。'
       )
     case 'crash':
-      if (RECORDERS.has(check)) return 'agent-team 返工批准：门禁这次出错，这次的回答没有记下。'
+      if (RECORDERS.has(check)) return 'agent-team 批准记录：门禁这次出错，这次的回答没有记下。'
       return check === 'readiness'
         ? 'agent-team 前置就绪：门禁这次出错，这次派发没有做前置产物校验、放行。'
         : `agent-team ${GATE_NAME[check] ?? '门禁'}：门禁这次出错，没有做完校验、放行。`

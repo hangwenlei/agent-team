@@ -96,7 +96,7 @@ export function crashNotice(check, err, recorder = false) {
   if (recorder === true) {
     return (
       `agent-team ${check} 检查项在判定过程中异常崩溃（${quote(err?.message ?? err, { max: 120 })}），这次的回答没有记下` +
-      `（它是返工批准的记录器，不拦任何东西）。用户若是在批准再返工一轮，要再批准一次。\n`
+      `（它是批准记录器，不拦任何东西）。用户若是在批准再返工一轮或照现状交付，要再批准一次。\n`
     )
   }
   return (

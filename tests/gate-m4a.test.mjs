@@ -190,7 +190,8 @@ test('M4a B 锚：回到 S5、实现记录还旧时，【返工】与 H5a 照旧
 // ============================================================================ A：收口标记 closed_at
 
 const FULL = H('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8')
-const DONE_FILES = { ...R1, '07-acceptance.md': 'acc r1\n', '08-delivery.md': 'delivery r1\n' }
+// M4k（docs/46）：收口读验收结论的首行——夹具里的验收结论写成「结论：通过」，收口那几条才是在测它们自己要测的那件事。
+const DONE_FILES = { ...R1, '07-acceptance.md': '结论：通过\nacc r1\n', '08-delivery.md': 'delivery r1\n' }
 const CLOSED_AT = '2026-10-01T15:00:00Z'
 const AT_S8 = { stage: 'S8', history: FULL, files: DONE_FILES, roster: [...ROSTER, 'at-acceptance'] }
 const AT_S8_CLOSED = { ...AT_S8, extra: { closed_at: CLOSED_AT } }

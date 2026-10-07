@@ -92,7 +92,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 **问了没答的**（`escalations` 里有 `answer` 是空串的：上一个会话问了用户、还没等到答复）：先照 `${CLAUDE_PLUGIN_ROOT}/commands/at.md`
 第 4 节把那一问重新问一遍——不要再追加一条，答复补进那一条的 `answer`，再往下走。`budget-exhausted` 那一条、门禁已经记下了批准的
-（`/agent-team:at-status` 的「返工批准」一行列得出），不用重问：把批准的那个规范标签补进 `answer`。
+（`/agent-team:at-status` 的「返工批准」一行列得出），不用重问：把批准的那个规范标签补进 `answer`。照现状交付那一问同样：门禁记下了批准的不用重问，把「照现状交付」补进 `answer`——批准绑着那一刻的验收结论，之后验收结论改过的，推进或收口时门禁会拒，照它的出路重问。
 
 契约那一段（`00-contract.md`）**不要重写**。它是这趟 run 的需求基线，S1 之后就冻结了；
 要改只能走升级流程（见 `/agent-team:at` 的第 4 节，`${CLAUDE_PLUGIN_ROOT}/commands/at.md`）。

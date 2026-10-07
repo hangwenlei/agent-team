@@ -168,6 +168,8 @@ export function buildLedgerNotices({
   // M4d 复核：门禁派发记录里每一段派出去过的角色——最后一段的收口阻碍与 H6 的收口判据同一个「叫过」口径（closing.mjs）。
   dispatched = null,
   closeBlockers,
+  // M4k（docs/46，评审 F5）：验收那一段齐了、验收结论首行没过或读不出时补的一句（gate.mjs 用 verdict.mjs 的 verdictStageNote 算好）。
+  acceptanceNote = null,
 } = {}) {
   const out = []
   const st = state && typeof state === 'object' ? state : {}
@@ -403,7 +405,8 @@ export function buildLedgerNotices({
           `叫到的人累加进 roster（state.json 里有 stage_roles 的，同一批人并进它的这一段），决定不叫的产出角色写进 trimmed。` +
           `分两次写，推进那一次产者交代会把刚走完那一段的产者点名报出来（门禁记过派发的报成漏记，没记过的报成漏派）。` +
           (implStage ? implRecordNote({ stage: stages?.[st.stage], writerIsPm, writer }) : '') +
-          `${who}${tail}${over}`
+          `${who}${tail}${over}` +
+          (acceptanceNote ? `\n${acceptanceNote}` : '')
         : Array.isArray(closeBlockers) && closeBlockers.length
           ? `【阶段】${st.stage} 的产物已经写了，它是阶段链的最后一段，但还收不了口——收口要最后一段的前置与产物都在、不是空文件、` +
             `而且是这一轮的：\n` +

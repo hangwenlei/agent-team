@@ -281,3 +281,16 @@ test('变异 X01：推荐后缀后面跟换行、括号里带空格，照样认�
   assert.equal(parseApprovalLabel('再返工一轮：回到 S5 (Recommended)\n'), 'S5')
   assert.equal(parseApprovalLabel('再返工一轮：回到 S5 ( Recommended )'), 'S5')
 })
+
+// M4k（docs/46，评审 F4）：返工预算那一问（H6 的拒绝理由、【阶段】、【返工预算】共用 askUserText）——验收结论已经写成又没过的，可以加第三个选项「照现状交付」；
+// 标签的单一真源在这里（verdict.mjs 原样再导出）。
+test('M4k askUserText：带上第三个选项「照现状交付」的条件与标签；标签从 budget.mjs 来', async () => {
+  const { askUserText: ask, DELIVER_LABEL: L } = await import('../hooks/lib/budget.mjs')
+  const v = await import('../hooks/lib/verdict.mjs')
+  assert.equal(L, '照现状交付')
+  assert.equal(v.DELIVER_LABEL, L)
+  const t = ask('S5', [], '再回退。')
+  assert.ok(t.includes('这一轮的验收结论已经写成、第一行不是「结论：通过」的') && t.includes(`第三个选项，标签逐字写「${L}」`), t)
+  // 复核（低 6）：问不了用户时，照现状交付的那一句也给。
+  assert.ok(t.includes(`要照现状交付的，整条只写「${L}」`), t)
+})

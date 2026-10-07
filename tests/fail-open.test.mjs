@@ -227,6 +227,8 @@ test('systemMessage：固定文字、README 的叫法、不带受信前缀', () 
     ...['readiness', 'deliverable', 'ledger', 'approval-ask'].map((check) => systemMessage('crash', { check })),
     systemMessage('approval-recorded'),
     systemMessage('approval-skipped'),
+    systemMessage('deliver-recorded'),
+    systemMessage('deliver-skipped'),
   ]
   for (const s of all) {
     assert.ok(typeof s === 'string' && s.startsWith('agent-team '), s)
@@ -240,13 +242,21 @@ test('systemMessage：固定文字、README 的叫法、不带受信前缀', () 
 })
 
 // M3z（docs/34）：记录器（approval-ask）不放行任何东西，它出错的后果是「这次的回答没有记下」——通用文案里的「放行」会说错后果（P3）。
-test('M3z systemMessage：返工批准记录器的几句说「没有记下」，不说「放行」', () => {
-  for (const s of [systemMessage('input', { check: 'approval-ask' }), systemMessage('crash', { check: 'approval-ask' }), systemMessage('approval-skipped')]) {
-    assert.match(s, /^agent-team 返工批准：/, s)
+// M4k（docs/46，评审 F10）：两个记录器也记照现状交付——读不出输入、出错那两句（还不知道是哪一种批准）改叫「批准记录」；记下、没记下按种类各一句。
+test('M3z systemMessage：批准记录器的几句说「没有记下」，不说「放行」', () => {
+  for (const s of [systemMessage('input', { check: 'approval-ask' }), systemMessage('crash', { check: 'approval-ask' })]) {
+    assert.match(s, /^agent-team 批准记录：/, s)
     assert.match(s, /没有记/, s)
     assert.doesNotMatch(s, /放行/, s)
   }
+  for (const s of [systemMessage('approval-skipped'), systemMessage('deliver-skipped')]) {
+    assert.match(s, /没有记/, s)
+    assert.doesNotMatch(s, /放行/, s)
+  }
+  assert.match(systemMessage('approval-skipped'), /^agent-team 返工批准：/)
   assert.match(systemMessage('approval-recorded'), /^agent-team 返工批准：已记下/)
+  assert.match(systemMessage('deliver-recorded'), /^agent-team 照现状交付：已记下/)
+  assert.match(systemMessage('deliver-skipped'), /^agent-team 照现状交付：/)
 })
 
 test('crashContext：把异常消息放进引号；只有 deliverable 与 ledger 有；非 PM 收到冒泡句', () => {
@@ -263,6 +273,8 @@ test('crashContext：把异常消息放进引号；只有 deliverable 与 ledger
   // M3z：approval-ask 在 PostToolUse 上，崩了要说「这次的回答没有记下」；approval-prompt 在 UserPromptSubmit 上，什么都发不了。
   assert.match(crashContext('approval-ask', err, true), /^【门禁】这次的回答没有记下/)
   assert.doesNotMatch(crashContext('approval-ask', err, true), /放行/)
+  // M4k（docs/46，复核低 5）：用户选的可能是照现状交付。
+  assert.match(crashContext('approval-ask', err, true), /「照现状交付」/)
   assert.equal(crashContext('approval-prompt', err, true), null)
   assert.match(crashContext('ledger', { toString: 1 }, true), /^【门禁】/)
 })

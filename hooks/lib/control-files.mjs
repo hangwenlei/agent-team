@@ -80,14 +80,15 @@ export function mayBeStateFile(filePath) {
 //
 // 门禁自己写、任何人的 Edit/Write/NotebookEdit 都拒，PM 与主线程也拒（hooks/gate.mjs 的 writepath 分支，排在主线程豁免之前，
 // 与门禁自检同一个位置）。它们不是控制文件：控制文件是 PM 记的账，这两份是门禁记的账——
-//   - runs/*/approvals.jsonl：用户批准的返工轮（hooks/lib/budget.mjs）。PM 写得进它，就能给自己批第 4 轮；
+//   - runs/*/approvals.jsonl：用户批准的返工轮（hooks/lib/budget.mjs）。PM 写得进它，就能给自己批第 4 轮；M4k（docs/46）起也记用户批准的
+//     照现状交付（hooks/lib/verdict.mjs）——PM 写得进它，就能带着没过的验收结论推进出验收段、收口；
 //   - runs/*/delivered.json：交付快照（hooks/lib/redo.mjs）。改得了它，不记回退的重做就拦不住。
 // Bash 照样写得进（与 state.json 同一档：那是一次需要刻意去做的伪造，不是顺手绕过）。
 //   - runs/*/dispatches.jsonl（M4d，docs/38，全量审查第 19 条）：派发记录——H5a 记团队角色的每一次派发（谁、哪一段、谁派的、前台还是后台），
 //     H5b 每拦一回记一行。完成核验（UserPromptSubmit）靠它把完成通知对回角色与段、认出「平台静默放行」。改得了它，完成核验就会核错人、
 //     说错成因（只是说错，不放行任何东西）。
-//   - runs/*/contract-base.json（M4j，docs/45，审查第 20 条）：契约基线——推进出第一段时契约第 1 节的原文、契约每修订一次那一刻验证段
-//     各份结论的 sha（hooks/lib/contract-base.mjs）。改得了它，第 1 节就能悄悄改写、对着上一版契约的结论就能收口。
+//   - runs/*/contract-base.json（M4j，docs/45，审查第 20 条）：契约基线——推进出第一段时契约第 1 节的原文、每一次改需求的修订那一刻
+//     验证段各份结论的 sha（hooks/lib/contract-base.mjs）。改得了它，第 1 节就能悄悄改写、对着上一版契约的结论就能收口。
 export const GATE_FILES = ['runs/*/approvals.jsonl', 'runs/*/contract-base.json', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl']
 export const APPROVALS_FILE = 'approvals.jsonl'
 export const DELIVERED_FILE = 'delivered.json'

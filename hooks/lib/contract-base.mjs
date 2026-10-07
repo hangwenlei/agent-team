@@ -66,13 +66,30 @@ export function section1Of(text) {
   return body.join('\n')
 }
 
-/** 修订指纹：去掉第 1 节的正文（标题行留着）、每行去掉行尾空白、去掉末尾空行之后的 sha。切不出第 1 节就整份算。 */
-export function bodyShaOf(text) {
+/**
+ * 修订指纹：去掉第 1 节的正文（标题行留着）、每行去掉行尾空白、去掉末尾空行之后的 sha。切不出第 1 节就整份算。
+ * M4k 复核（中 1）：exclude 里的修订块（第 4 节里标题等于它们的那几块，连标题一起）不计——用掉照现状交付批准的那几块，之后只改它们不算修订。
+ */
+export function bodyShaOf(text, exclude = []) {
   const lines = linesOf(typeof text === 'string' ? text : '')
   const r = sectionRange(lines, 1)
-  const kept = r ? [...lines.slice(0, r[0] + 1), ...lines.slice(r[1])] : lines
+  let kept = r ? [...lines.slice(0, r[0] + 1), ...lines.slice(r[1])] : lines
+  if (Array.isArray(exclude) && exclude.length) kept = withoutBlocks(kept, new Set(exclude))
   while (kept.length && kept[kept.length - 1] === '') kept.pop()
   return sha256OfContract(Buffer.from(kept.join('\n'), 'utf8'))
+}
+
+/** 第 4 节里去掉标题在 headings 里的那几块（从它的 ### 行到下一个 ### 行或下一个编号节标题）。没有第 4 节原样返回。 */
+function withoutBlocks(lines, headings) {
+  const r = sectionRange(lines, 4)
+  if (!r) return lines
+  const out = lines.slice(0, r[0] + 1)
+  let skipping = false
+  for (let i = r[0] + 1; i < r[1]; i++) {
+    if (lines[i].startsWith('### ')) skipping = headings.has(lines[i])
+    if (!skipping) out.push(lines[i])
+  }
+  return [...out, ...lines.slice(r[1])]
 }
 
 /** 第 4 节里修订块的标题（### 开头的行，去掉行尾空白）。没有第 4 节回 []。 */
@@ -114,6 +131,8 @@ export function readContractBase(bytes) {
     revisions: Array.isArray(v.revisions) ? v.revisions.filter((h) => typeof h === 'string') : [],
     verify_base,
     revised_at: typeof rev === 'string' && ISO_RE.test(rev) && !Number.isNaN(Date.parse(rev)) ? rev : null,
+    deliver_used: Array.isArray(v.deliver_used) ? v.deliver_used.filter((a) => typeof a === 'string' && SHA_RE.test(a)) : [],
+    deliver_blocks: Array.isArray(v.deliver_blocks) ? v.deliver_blocks.filter((h) => typeof h === 'string') : [],
   }
 }
 
@@ -145,22 +164,37 @@ export function verifyShasOf({ stages, artifactExists, artifactBytes }) {
 export function initialBase(contractBytes) {
   if (!contractBytes) return null
   const text = contractBytes.toString('utf8')
-  return { section1: section1Of(text), body_sha: bodyShaOf(text), revisions: revisionHeadingsOf(text), verify_base: {}, revised_at: null }
+  return { section1: section1Of(text), body_sha: bodyShaOf(text), revisions: revisionHeadingsOf(text), verify_base: {}, revised_at: null, deliver_used: [], deliver_blocks: [] }
 }
 
 /**
  * 一次契约写入之后：修订指纹没变回 null（不用重写）。变了——新加的修订块全是不改需求的答复：只换指纹与标题（requirement: false）；
  * 别的（含没有新块却改了别的节、认不出类别的新块）：verify_base 换成 verifyShas、revised_at 记 now（requirement: true）。第 1 节不动。
- * @returns {{ base: object, requirement: boolean } | null}
+ * M4k（docs/46，评审 F1、F2）：deliverSha 是验收结论现在这份的 sha——门禁记下了它的照现状交付批准、而 deliver_used 里还没有它时，调用方传进来。有它，
+ * 这次修订就是记那条答复的那一次：不算改需求，只换指纹与标题，sha 记进 deliver_used（复核中 2：按 sha 记，同一份结论批两次也只盖一次修订），这次新加的
+ * 修订块记进 deliver_blocks，之后修订指纹不计它们（复核中 1：往那几块里补一句不算修订；改别处、加新块照常判）。照现状交付接受没过的现状、不改需求；照标题分
+ * 会把它算成改需求（它多半是在 contract-conflict 那一问里、或者用户主动说的），刚批准的那份验收结论成了「对着上一版契约」，重出之后 sha 变了、
+ * 批准跟着作废，绕不出来。不靠 PM 在标题里写标记：漏写会绕圈，冒充只要一行字（设计评审 F1、F2）。
+ * @returns {{ base: object, requirement: boolean, deliver?: string } | null}
  */
-export function revisedBase(base, contractBytes, verifyShas, now) {
+export function revisedBase(base, contractBytes, verifyShas, now, deliverSha = null) {
   if (!base || !contractBytes) return null
   const text = contractBytes.toString('utf8')
-  const body = bodyShaOf(text)
+  const blocks = Array.isArray(base.deliver_blocks) ? base.deliver_blocks : []
+  const body = bodyShaOf(text, blocks)
   if (body === base.body_sha) return null
   const headings = revisionHeadingsOf(text)
   const known = new Set(Array.isArray(base.revisions) ? base.revisions : [])
   const added = headings.filter((h) => !known.has(h))
+  if (typeof deliverSha === 'string') {
+    const used = Array.isArray(base.deliver_used) ? base.deliver_used : []
+    const nextBlocks = [...blocks, ...added.filter((h) => !blocks.includes(h))]
+    return {
+      base: { ...base, body_sha: bodyShaOf(text, nextBlocks), revisions: headings, deliver_used: [...used, deliverSha], deliver_blocks: nextBlocks },
+      requirement: false,
+      deliver: deliverSha,
+    }
+  }
   if (added.length > 0 && added.every((h) => ADMIN_KINDS.includes(headingKind(h)))) {
     return { base: { ...base, body_sha: body, revisions: headings }, requirement: false }
   }
