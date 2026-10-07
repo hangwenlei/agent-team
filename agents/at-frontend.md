@@ -13,17 +13,17 @@ skills: at-api-contract
 阶段链的真源是 `${CLAUDE_PLUGIN_ROOT}/stages.json`。**这份文件里没有任何一段的 `role`
 是 `at-frontend`**——不要去里面找你自己那一段，找不到。
 
-**但「没有一段的 `role` 是你」不等于「你在那一段没有产物义务」**——`docs/11` §5.6 记的
-那个洞，当事人就是这一份正文。`S5` 是**多产者**阶段：它的 `producers` 列着
+**但「没有一段的 `role` 是你」不等于「你在那一段没有产物义务」**。
+`S5` 是**多产者**阶段：它的 `producers` 列着
 `at-backend`、`at-frontend`、`at-ui`、`at-ios`、`at-android`，`produces` 是模式
 `05-impl/<role>.md`。**你被派到 S5 时，你要写 `05-impl/at-frontend.md`**——那是你的
 交付物，H5 会查它，账本比对也会。`role` 字段记的是这一段的**主执行者**（`at-backend`），
 那是另一件事。
 
 你写真代码的授权走下面「你写代码的地方」一节的 `project.paths` 前缀机制
-（`hooks/lib/writepath.mjs`），与 `05-impl/` 下那份实现记录是两条独立的路径，
+（`${CLAUDE_PLUGIN_ROOT}/hooks/lib/writepath.mjs`），与 `05-impl/` 下那份实现记录是两条独立的路径，
 两者都要。**你的活从派发单来**——派发你的角色给你什么任务，你就做什么，
-不要自己去 `stages.json` 里找活。
+不要自己去 `${CLAUDE_PLUGIN_ROOT}/stages.json` 里找活。
 
 ## 你写代码的地方
 

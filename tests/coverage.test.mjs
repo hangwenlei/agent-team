@@ -7,7 +7,7 @@
 // 真实 run，换成合成阶段表就测不到真实 producers 集合的形状（S2 两个产者、
 // S5 五个产者）。
 //
-// ⚠️ Ruling 2（收窄轮）：判据的宇宙是 `stageRoles(S) ∩ available_roles`。
+// ⚠️ 收窄裁定（收窄轮）：判据的宇宙是 `stageRoles(S) ∩ available_roles`。
 // 本文件里凡是传了 availableRoles 的，走的就是真实生产路径；没传的那几条钉的是
 // 「收窄不成时不静默」那一半。两种口径在同一份 state 上的差，由「收窄前 / 收窄后」
 // 那一组逐条钉着。
@@ -23,7 +23,7 @@ const stages = JSON.parse(readFileSync(url('stages.json'), 'utf8'))
 
 // docs/15 §3.8 验证项 6 逐字记的那一趟的 available_roles（/at-init 写的，记录级）。
 // 注意它**不含** at-pm（commands/at-init.md 明令不写它），也**不含** at-ios / at-android
-// （那个项目用不上移动端）——这两件事正是 Ruling 2 要用的。
+// （那个项目用不上移动端）——这两件事正是收窄裁定要用的。
 const M2B_AVAILABLE = [
   'at-product', 'at-architect', 'at-backend', 'at-frontend', 'at-ui', 'at-qa', 'at-acceptance',
 ]
@@ -68,7 +68,7 @@ test('前置条件：模板的 available_roles 含 at-ios 与 at-android——�
 // 它们共用 m2bShapeA，锚要证明的是「同一组夹具在该报的时候真的报」。
 //
 // ⚠️ 这里的 roster 是 task-2 brief 逐字给的那一份（不含 at-pm）。**收窄之前**这份夹具
-// 算出来是两条（多一条 {S1, at-pm}）；Ruling 2 把宇宙收窄到 available_roles 之后
+// 算出来是两条（多一条 {S1, at-pm}）；收窄裁定把宇宙收窄到 available_roles 之后
 // at-pm 自动退出，brief 那句断言变成真的。差在哪、为什么，见下面「收窄前 / 收窄后」那一组。
 test('形状 A 回归：S2 走过了而 at-ui 既不在 roster 也不在 trimmed —— 报一条 gap', () => {
   const out = decideCoverage({ stages, state: m2bShapeA(), availableRoles: M2B_AVAILABLE })
@@ -161,20 +161,20 @@ test('正向自检锚（返工）：同一份 roster，返工做完推到 S6 之
   ])
 })
 
-// ——— Ruling 2：宇宙收窄到 available_roles ———
+// ——— 收窄裁定：宇宙收窄到 available_roles ———
 //
 // at-ios / at-android **从来没上过队**（不在那一趟的 available_roles 里），
 // 不存在一个关于它们的「裁剪」决定——要求 PM 为它们写一条 trimmed，等于要求把一个
 // 不存在的决定写下来，而设计 §3.1 的立论恰恰是「把已经存在的决定变成可机器读的」。
 
-test('Ruling 2：不在 available_roles 里的角色不进宇宙——终局 state 上 at-ios/at-android 不报', () => {
+test('收窄裁定：不在 available_roles 里的角色不进宇宙——终局 state 上 at-ios/at-android 不报', () => {
   const out = decideCoverage({ stages, state: m2bFinal(), availableRoles: M2B_AVAILABLE })
   assert.deepEqual(out.gaps, [{ stage: 'S2', role: 'at-ui' }, { stage: 'S5', role: 'at-ui' }])
 })
 
 // 正向自检锚：**同一份 state 逐字不变**，只把 available_roles 换成含 at-ios/at-android
 // 的那份 —— 它们真的会被报。没有这条，上一条在「收窄退化成恒沉默」时照样绿。
-test('正向自检锚（Ruling 2）：同一份 state，at-ios/at-android 一旦在 available_roles 里就报', () => {
+test('正向自检锚（收窄裁定）：同一份 state，at-ios/at-android 一旦在 available_roles 里就报', () => {
   const out = decideCoverage({ stages, state: m2bFinal(), availableRoles: FULL_AVAILABLE })
   assert.deepEqual(out.gaps, [
     { stage: 'S2', role: 'at-ui' },

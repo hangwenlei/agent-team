@@ -139,7 +139,7 @@ const SKILL_REVISION =
   '每追加一块，契约的 sha256 就变了：把写契约那一次回传（【契约】）给你的新哈希写进 `state.json` 的 `contract_sha`。升级问题那一种还有一件：' +
   '`escalations[]` 里那一条——问之前记、`answer` 先写空串，答复之后补上；用户主动提出的不记 escalation。'
 const TEMPLATE_REVISION =
-  '规格 §5.3：用户的每一次改动都作为一个带日期的修订块追加在这里——升级问题的答复，或者用户在对话里主动提出的（标「用户主动提出」）。'
+  '用户的每一次改动都作为一个带日期的修订块追加在这里——升级问题的答复，或者用户在对话里主动提出的（标「用户主动提出」）。'
 test('M4g 复核：写契约时的漂移回传、契约的格式与模板都分清两种合法修订，用户主动提出的不记 escalation', () => {
   const r = compareContractSha({ recorded: 'sha256:' + 'a'.repeat(64), actual: 'sha256:' + 'b'.repeat(64) })
   assert.equal(r.kind, 'drift')

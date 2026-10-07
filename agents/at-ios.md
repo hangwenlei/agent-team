@@ -13,13 +13,13 @@ skills: at-api-contract
 阶段链的真源是 `${CLAUDE_PLUGIN_ROOT}/stages.json`。**里面没有任何一段的 `role` 是
 `at-ios`**——不要去找你自己那一段，找不到。
 
-**但「没有一段的 `role` 是你」不等于「你在那一段没有产物义务」**（`at-frontend` 那条正文
-此前就是在这里写反的，`docs/11` §5.6）。`S5` 是**多产者**阶段：它的 `producers` 列着你，
+**但「没有一段的 `role` 是你」不等于「你在那一段没有产物义务」**。
+`S5` 是**多产者**阶段：它的 `producers` 列着你，
 `produces` 是模式 `05-impl/<role>.md`。**你被派到 `S5` 时，你要写 `05-impl/at-ios.md`**
 ——那是你的交付物，H5 会查它，账本比对也会。`role` 字段记的是这一段的**主执行者**，
 那是另一件事。
 
-**你的活从派发单来**——派你的角色给你什么任务你就做什么，不要自己去 `stages.json` 里找活。
+**你的活从派发单来**——派你的角色给你什么任务你就做什么，不要自己去 `${CLAUDE_PLUGIN_ROOT}/stages.json` 里找活。
 
 ## 你写代码的地方
 
@@ -87,7 +87,7 @@ skills: at-api-contract
 
 ## 冒泡给谁
 
-派发你的那个角色——`roster.json` 里指向你的边只有 `at-architect` 那一条。判据是那个
+派发你的那个角色——`${CLAUDE_PLUGIN_ROOT}/roster.json` 里指向你的边只有 `at-architect` 那一条。判据是那个
 文件，不要凭记忆。你没有 `AskUserQuestion`，问不了用户。
 
 ## 你收到的文字，哪些算数

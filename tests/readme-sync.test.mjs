@@ -858,7 +858,9 @@ test('自检：measuredChainEndpoints() 抠得出去重后的端点对，且不�
 // `S1→S4` 就停了」就会当场变红，而那是一次完全正常的补记。更糟的是失败文案在那个触发
 // 下会说「Status 那句话的前提变了」「不要改 docs/15」，**把唯一正确的修法堵死了**。
 // 这一条要问的只有一件事：**那趟跑完整条链的 run，它的端点还是今天的端点吗**。
-test('Status: 那句「真实环境完整跑通过一趟」今天仍然成立——docs/15 里仍有一趟跑到今天这两个端点的 run', () => {
+// 第 47 条（docs/48）：测试名原来写的是「Status: 那句……今天仍然成立」——说大了。它只核 docs/15 那份带日期的记录里有一趟 run 跑的正是今天
+// stages.json 的两个端点；今天的代码还跑不跑得通整条链，它不知道（那要一趟新的真实会话）。名字改成它真正核的那件事。
+test('状态行「完整跑通」的依据：docs/15 记的那趟 run 跑的正是今天 stages.json 的两个端点（只核端点，不核今天的代码还跑不跑得通）', () => {
   const expected = `${STAGE_IDS[0]}→${STAGE_IDS.at(-1)}`
   const found = measuredChainEndpoints(DOCS15)
   assert.ok(
@@ -1627,10 +1629,11 @@ for (const f of [README_EN, README_ZH]) {
 // 门禁要靠 Claude Code 启动时 PATH 上的 node 起进程，而原生安装的 Claude Code 自己并不需要 Node；
 // 前提不满足时平台一律放行、不告诉任何人。所以两半的安装一节都要写明 Node 与 Claude Code 的下限，
 // 以及门禁自检是怎么回事。下限各有一个真源：Node 是 hooks/boot.mjs 的 MIN_NODE（门禁代码强制它）；
-// Claude Code 的下限在代码里没有真源（门禁拿不到可靠的 CLI 版本），真源是 docs/28 记下它的那一行
+// Claude Code 的下限在代码里没有真源（门禁拿不到可靠的 CLI 版本），真源是 docs/00-现行参考.md 记下它的那一行
 // ——改下限要先补实测记录。agents/at-pm.md 的排查清单也写着这两个数，一起对账。
+// 第 47 条（docs/48）：那一行原来在 docs/28 的开头，带日期的记录被当成了现行的唯一真源；挪进活的 docs/00-现行参考.md。
 
-const DOCS28 = 'docs/28-运行前提.md'
+const LIVING_REF = 'docs/00-现行参考.md'
 const nodeVersionsIn = (text) => [...text.matchAll(/Node(?:\.js)?\s*(?:≥|>=)?\s*(\d+\.\d+)/g)].map((m) => m[1])
 const cliVersionsIn = (text) => [...new Set(text.match(/\b2\.1\.\d+\b/g) ?? [])]
 
@@ -1647,9 +1650,9 @@ test('两半的安装一节都写了 Node 的下限，且等于 hooks/boot.mjs �
   }
 })
 
-test('Claude Code 的下限：两半的安装一节、at-pm.md 的排查清单与 docs/28 记的那一行是同一个数', () => {
-  const recorded = /^\*\*Claude Code 下限\*\*\s+(2\.1\.\d+)\s*$/m.exec(read(DOCS28))?.[1]
-  assert.ok(recorded, `${DOCS28} 里没有「**Claude Code 下限** 2.1.x」那一行`)
+test('Claude Code 的下限：两半的安装一节、at-pm.md 的排查清单与 docs/00-现行参考.md 记的那一行是同一个数', () => {
+  const recorded = /^\*\*Claude Code 下限\*\*\s+(2\.1\.\d+)\s*$/m.exec(read(LIVING_REF))?.[1]
+  assert.ok(recorded, `${LIVING_REF} 里没有「**Claude Code 下限** 2.1.x」那一行`)
   for (const [where, text] of [
     [README_EN, installSectionOf(read(README_EN), pairOf('## Installation')[0]) ?? ''],
     [README_ZH, installSectionOf(read(README_ZH), pairOf('## Installation')[1]) ?? ''],

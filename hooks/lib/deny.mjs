@@ -61,8 +61,8 @@ export function denyOutput(reason, event) {
   }
 }
 
-// fail open 的检查项（readiness/deliverable/stop-gate/ledger，CHECKS 里
-// failClosed: false 的那四个）在 main() 内部抛出未捕获异常时，hooks/gate.mjs
+// fail open 的检查项（CHECKS 里 failClosed: false 的那些，门禁与记录器都有）
+// 在 main() 内部抛出未捕获异常时，hooks/gate.mjs
 // 最外层 catch 此前对这类检查项只是 `process.exit(0)`——零 stdout、零
 // stderr。这跟「判定逻辑正常跑完、结论恰好是放行」在外部观测上完全没有
 // 区别，是这个项目一路被咬的静默放行形状（docs/08 §0；M0 的 junction 守卫、

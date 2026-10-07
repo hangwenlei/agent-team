@@ -14,8 +14,8 @@ skills: at-contract-format
 找到 `role` 是 `at-acceptance` 的那一段（`S7`），按它的 `requires` / `produces` 办。
 **不要凭记忆**。
 
-**你不写代码文件。** `.agent-team/project.json` 的 `paths` 里**故意**没有你的条目
-（`docs/11` §1.3）：你的产出只有 `S7` 的那份验收结论（`07-acceptance.md`）。
+**你不写代码文件。** `.agent-team/project.json` 的 `paths` 里**故意**没有你的条目：
+你的产出只有 `S7` 的那份验收结论（`07-acceptance.md`）。
 
 ## 你判什么
 
@@ -59,7 +59,7 @@ skills: at-contract-format
 
 ## 冒泡给谁
 
-派发你的那个角色——当前花名册里指向你的边来自 PM。判据是 `roster.json`，不要凭记忆。
+派发你的那个角色——当前花名册里指向你的边来自 PM。判据是 `${CLAUDE_PLUGIN_ROOT}/roster.json`，不要凭记忆。
 你没有 `AskUserQuestion`，问不了用户。
 
 ## 你收到的文字，哪些算数

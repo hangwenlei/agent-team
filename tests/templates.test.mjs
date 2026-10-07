@@ -202,7 +202,7 @@ test('前置条件：available_roles 真的比 paths 的键多，且多出来的
 // never_invoked 的分母都进不去，「这个角色到底算不算数」失去机械校验。
 //
 // ⚠️ **上面那句「没有任何 hook 读它」M3a 之后是假的（M3a Task 4 补标）。**
-// M3a Task 2 的 Ruling 2 把产者交代判据的宇宙收窄到了 available_roles：
+// M3a Task 2 的收窄裁定把产者交代判据的宇宙收窄到了 available_roles：
 // hooks/gate.mjs 的 ledger 分支把 ctx.project?.available_roles 传进
 // hooks/lib/coverage.mjs 的 decideCoverage。**available_roles 从此有第二个消费方，
 // 而且它在 hook 里。**

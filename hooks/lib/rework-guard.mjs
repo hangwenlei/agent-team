@@ -91,7 +91,7 @@ function decideCounts({ before, after, stages, grants }) {
   const ha = Array.isArray(after.history) ? after.history : []
 
   if (ha.length < hb.length) {
-    return { ok: false, reason: `history 从 ${hb.length} 条变成 ${ha.length} 条——阶段进入日志只许追加，不许删。返工计数是它的派生量（规格 §4.2 ③），删 history 等于改计数。` }
+    return { ok: false, reason: `history 从 ${hb.length} 条变成 ${ha.length} 条——阶段进入日志只许追加，不许删。返工计数是它的派生量，删 history 等于改计数。` }
   }
 
   // 复核（docs/34 §3，budget-1，高）：「只许追加」此前只核条数与各段出现次数——把一条更早的 S5 改成还有额度的段、同时照常追加一条 S5，
@@ -106,7 +106,7 @@ function decideCounts({ before, after, stages, grants }) {
       ok: false,
       reason:
         `history[${i}] 是写入前就有的条目，段名是 ${quote(old.stage)}，这次写入把它改了——history 只许追加：已有的条目不许改段名、` +
-        '不许删（at 可以订正）。返工计数是它的派生量（规格 §4.2 ③），改旧条目的段名等于改计数。',
+        '不许删（at 可以订正）。返工计数是它的派生量，改旧条目的段名等于改计数。',
     }
   }
 
@@ -143,7 +143,7 @@ function decideCounts({ before, after, stages, grants }) {
         const list = over.map((o) => `${o.stage}（第 ${o.rounds} 轮，上限 ${o.limit}）`).join('、')
         const head =
           `这次写入记了一次回退：这一轮回到 ${target}，走完会让 ${list} 的返工超过上限` +
-          `（规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级；上限 = ${REWORK_LIMIT} + 门禁记下的、覆盖那一段的返工批准条数）。`
+          `（第 ${REWORK_LIMIT} 轮终局，不过则升级；上限 = ${REWORK_LIMIT} + 门禁记下的、覆盖那一段的返工批准条数）。`
         const same = restart.index === hb.length && typeof before.stage === 'string' && before.stage === restart.stage ? `${SAME_STAGE_HINT}\n` : ''
         return { ok: false, budget: true, reason: `${same}${head}\n${askUser(target, grants)}` }
       }
@@ -171,7 +171,7 @@ function decideCounts({ before, after, stages, grants }) {
     const raw = rw[stage] ?? 0
     const v = Number(raw)
     if (v < n) {
-      return { ok: false, reason: `rework[${quote(stage)}] 写成 ${quote(raw)}，但 history 里 ${quote(stage)} 出现 ${n + 1} 次、派生值是 ${n}——返工计数不可重置（规格 §4.2 ③）。` }
+      return { ok: false, reason: `rework[${quote(stage)}] 写成 ${quote(raw)}，但 history 里 ${quote(stage)} 出现 ${n + 1} 次、派生值是 ${n}——返工计数不可重置。` }
     }
   }
   for (const [stage, raw] of Object.entries(rw)) {
@@ -182,7 +182,7 @@ function decideCounts({ before, after, stages, grants }) {
     // 判据从 `Number(raw)` 改成直接验 raw 的类型，两边共用同一个谓词，
     // `{"S5": true}` 与 `{"S5": " 1 "}` 不再从这里溜过去。
     if (!isNonNegativeInteger(raw)) {
-      return { ok: false, reason: `rework[${quote(stage)}] 是 ${quote(raw)}，不是非负整数——返工计数是 history 的派生量（规格 §4.2 ③）。` }
+      return { ok: false, reason: `rework[${quote(stage)}] 是 ${quote(raw)}，不是非负整数——返工计数是 history 的派生量。` }
     }
     // M3z：上限按 limitOf（3 + 覆盖这一段的返工批准条数），而且只罚「比写入前大」——原样带着的旧值不重复拒：批准文件丢了、
     // 读不出来时，已经记好的第 4 轮不该让之后每一次记账都被拒（那会把整趟锁死，出路只剩改小计数，而那会被判据③拒）。
@@ -193,7 +193,7 @@ function decideCounts({ before, after, stages, grants }) {
       if (!isNonNegativeInteger(prev) || raw > prev) {
         const head =
           `rework[${quote(stage)}] 写成 ${quote(raw)}，超过返工上限 ${limit}` +
-          `（${REWORK_LIMIT} 轮，加上门禁这一趟记下的、覆盖它的返工批准 ${limit - REWORK_LIMIT} 条；规格 §4.2 ③：第 ${REWORK_LIMIT} 轮终局，不过则升级）。`
+          `（${REWORK_LIMIT} 轮，加上门禁这一趟记下的、覆盖它的返工批准 ${limit - REWORK_LIMIT} 条；第 ${REWORK_LIMIT} 轮终局，不过则升级）。`
         if (!stages) {
           return {
             ok: false,
@@ -249,7 +249,7 @@ function decideChainInvariant({ before, after, stages }) {
       reason:
         `stage 写成 ${quote(after.stage)}，history 的最后一条却是 ${quote(last.stage)}。推进与回退都是同一次 Write 改 stage、` +
         '往 history 追加同一段（回退还要记 rework 与 rework_base，照 /agent-team:at 第 3 节）；只改 stage 不记 history，' +
-        '返工计数就漏记了（规格 §4.2 ③）。',
+        '返工计数就漏记了。',
     }
   }
   return { ok: true }

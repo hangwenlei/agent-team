@@ -46,3 +46,29 @@ test('第 48 条：hooks/、scripts/、tests/helpers/、tests/fixtures/ 下每�
 test('第 48 条：仓库根下没有 scratchpad/（忽略只管 git，node --test 照样收它下面的判据）', () => {
   assert.ok(!existsSync(join(ROOT, 'scratchpad')), '仓库根下有 scratchpad/：挪到仓库外')
 })
+
+// 第 46 条（docs/48，M4m）：裁定编号只在裁定记录（docs/16）里用，别处写名字（docs/16 §2.30）。注释与判据里撞过号：同一个号在这里指
+// M3a 那条「产者交代的宇宙收窄到 available_roles」，裁定记录里同号的是另一件事。docs/ 整体不扫：带日期的记录原样引用编号。
+const NOT_SCANNED = new Set(['.git', 'docs', 'node_modules', '.claude', '.superpowers', 'scratchpad', '.playwright-mcp'])
+function textFiles(dir) {
+  const out = []
+  for (const name of readdirSync(join(ROOT, dir))) {
+    if (NOT_SCANNED.has(name)) continue
+    const rel = join(dir, name)
+    if (statSync(join(ROOT, rel)).isDirectory()) out.push(...textFiles(rel))
+    else if (/\.(mjs|cjs|js|json|md|ya?ml)$/.test(name)) out.push(rel)
+  }
+  return out
+}
+
+test('第 46 条：docs/ 之外不写裁定编号（Ruling 后面跟数字），写裁定的名字', () => {
+  const files = textFiles('.')
+  assert.ok(files.some((f) => f.startsWith('hooks')) && files.some((f) => f.startsWith('tests')), '前置：扫描集合里没有 hooks/ 或 tests/')
+  const bad = []
+  for (const f of files) {
+    readFileSync(join(ROOT, f), 'utf8').split(/\r?\n/).forEach((l, i) => {
+      if (/\bRuling\s+\d/.test(l)) bad.push(`${f}:${i + 1}  ${l.trim().slice(0, 80)}`)
+    })
+  }
+  assert.deepEqual(bad, [])
+})

@@ -27,7 +27,7 @@
 // ⚠️ 这条判据**不是** M3a 设计 §2 排除掉的「不管 roster、所有 producers 一律期待」。
 // 那一条会打死「按需组队」这个有意的设计（只派两个执行角色的 run 不该被要求交五份
 // 实现记录）。差别有两处：认 trimmed（已经**声明过**的裁剪就是交代），以及下面
-// Ruling 2 那条把宇宙收窄到 available_roles。问题从来不在「裁剪」，在「裁剪不可机器读」。
+// 收窄裁定把宇宙收窄到 available_roles。问题从来不在「裁剪」，在「裁剪不可机器读」。
 //
 // ⚠️ 失败策略是**报，不拦**（设计 §3.2 末尾）：调用方 hooks/gate.mjs 把 gaps 拼成
 // 一条 additionalContext，与 H5a 同一档，不是 deny。裁剪是合法动作，这条判据只负责
@@ -78,7 +78,7 @@ import { dispatchedIn } from './advance.mjs'
  * 从 stages.json 派生链尾（走 state.mjs 的 nextStage），断言它除 at-pm 外没有别的产出
  * 角色。**它红不是要你改那条断言，是 §5.25 记的那条边界刚从「零可观测」变成「真的在漏」。**
  *
- * **宇宙**（Ruling 2）：`stageRoles(S) ∩ availableRoles`。
+ * **宇宙**（收窄裁定）：`stageRoles(S) ∩ availableRoles`。
  * availableRoles 就是 .agent-team/project.json 的 `available_roles`——「**这个项目用得上
  * 哪些执行角色**」，由 /agent-team:at-init 写。它把**项目配置**与**运行时决定**分开：
  *

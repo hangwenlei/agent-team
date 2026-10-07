@@ -1,8 +1,8 @@
 // 第 45 条（M4l，docs/47）：按版本打 tag 的认法——纯函数，不读 git；CLI 外壳是 scripts/tag-release.mjs（CI 的 tag 作业在推 main 之后跑它）。
 //
 // 一版的 tag 打在 main 的 first-parent 历史上 plugin.json 第一次是这个版本的那个提交（合进来的一版打在合并提交上）。每次都把缺的补齐：某一次推 main
-// CI 红了、那一版没打上，下一次全绿时补；历史上的各版也是这样补上的（GITHUB_TOKEN 推的 tag 不触发任何工作流——手工推旧提交的 tag，会按那个提交里
-// 还没有分支过滤的工作流起 CI）。远端已有、指向别处的 tag 不挪，报出来让人看。
+// CI 红了、那一版没打上，下一次全绿时补。CI 推不了的（那个提交的工作流文件与 main 现在的不同，GITHUB_TOKEN 没有 workflows 权限）要人在本地补，
+// 历史上 v0.8.0–v2.9.0 那 22 版就是这样补的（docs/47 §0 的订正、docs/48）。远端已有、指向别处的 tag 不挪，报出来让人看。
 
 export const TAG_PREFIX = 'v'
 const VERSION_RE = /^\d+\.\d+\.\d+$/

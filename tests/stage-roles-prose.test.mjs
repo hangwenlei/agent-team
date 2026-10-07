@@ -73,7 +73,7 @@ test('M3x：at-qa 自查 S5 交齐时读 stage_roles.S5（旧 run 看 roster）'
   // 钉主句本身：括注里的 stage_roles 与旧 run 撑不起一个改回「这一趟 roster 提到的每一个」的主句。
   // M4a（docs/35）订正：主句改成「两边都有」——真实会话里 at-qa 把这句读成了「stage_roles.S5 里的每一个」，把被叫去分发的
   // at-architect 当成缺了实现记录，拒绝开测、被 H5b 一路顶回到平台的重试上限（docs/35 §4）。
-  assert.match(sec, /既在 `stages\.json` 的 `S5` `producers` 里、\s*又在 `state\.json` 的 `stage_roles`\s*的\s*`S5`/, 'at-qa 自查的主句没按 stage_roles 的 S5 那一段说')
+  assert.match(sec, /既在 `\$\{CLAUDE_PLUGIN_ROOT\}\/stages\.json` 的 `S5` `producers` 里、\s*又在 `state\.json` 的 `stage_roles`\s*的\s*`S5`/, 'at-qa 自查的主句没按 stage_roles 的 S5 那一段说')
   assert.match(sec, /旧 run[^\n]*`roster`/)
 })
 
@@ -159,8 +159,9 @@ test('M3x：at-pm 的「怎么写、为什么」指回 at.md 时给出可读路�
   assert.ok(block.includes('`${CLAUDE_PLUGIN_ROOT}/commands/at.md`'))
 })
 
-// stages.README「`produces` 的两种形式」一节是 /at-status、/at-resume 运行时让模型去读的。那里教人怎么展开的引导句
-// 要是还只写整趟 roster，按段的消费方就会被教回第 14 条那个错。
+// stages.README「`produces` 的两种形式」一节原来是 /at-status、/at-resume 运行时让模型去读的；第 46 条（docs/48）起模型读的是
+// stages.produces.md（tests/stages-produces.test.mjs 钉），这一节留给维护者。那里教人怎么展开的引导句要是还只写整趟 roster，
+// 改展开规则的人就会被教回第 14 条那个错。
 test('M3x：stages.README「produces 的两种形式」里教人展开的引导句同时提到 participantsOf', () => {
   const sec = section(read('stages.README.md'), '## `produces` 的两种形式', '## ')
   const guides = sec.split(/\n\s*\n/).filter((p) => p.includes('stageRolesInRun(stage,'))

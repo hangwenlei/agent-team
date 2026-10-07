@@ -118,7 +118,7 @@ function withRemote(body) {
       }
       return m
     }
-    const run = () => spawnSync(process.execPath, [TAG_CLI, '--push'], { cwd: dir, encoding: 'utf8' })
+    const run = (...args) => spawnSync(process.execPath, [TAG_CLI, ...(args.length ? args : ['--push'])], { cwd: dir, encoding: 'utf8' })
     body({ dir, git: (...a) => git(dir, ...a), manifest, commit, tags, run, write: (rel, t) => writeFileSync(join(dir, rel), t) })
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -143,6 +143,12 @@ test('M4l 复核 tag-release：按 main 的 first-parent 历史补打每一版�
     // 远端已有一个附注 tag、指向对的提交：ls-remote 给的是 tag 对象，剥开之后才是提交——认得出、不当冲突；它之后缺的旧版（不只是最新那一版）都补上。
     git('tag', '-a', 'v0.0.0', '-m', 'annotated', c0)
     git('push', '-q', 'origin', 'refs/tags/v0.0.0')
+    // 不带 --push：只列出要打什么，本地不建 tag、远端不动（M4m）。
+    const dry = run('--dry-run')
+    assert.equal(dry.status, 0, dry.stdout + dry.stderr)
+    assert.ok(dry.stdout.includes('要打 v0.0.1') && dry.stdout.includes('要打 v0.0.2'), dry.stdout)
+    assert.equal(git('tag', '--list', 'v0.0.1'), '', '空跑不建本地 tag')
+    assert.equal(tags().get('v0.0.1'), undefined, '空跑不推')
     const first = run()
     assert.equal(first.status, 0, first.stdout + first.stderr)
     const t = tags()

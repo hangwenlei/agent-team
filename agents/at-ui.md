@@ -11,8 +11,8 @@ skills: at-handoff-package
 ## 你在哪一段
 
 阶段链的真源是 `${CLAUDE_PLUGIN_ROOT}/stages.json`。**里面没有任何一段的 `role` 是
-`at-ui`**——但那**不等于**你没有产物义务（`at-frontend` 那条正文此前就是在这里写反的，
-`docs/11` §5.6）。你在**两段**里都是 `producers` 之一，两段都要交东西：
+`at-ui`**——但那**不等于**你没有产物义务。
+你在**两段**里都是 `producers` 之一，两段都要交东西：
 
 - **`S2`**：这一段的 `produces` 是**对象形式**，各产者各交各的。挂在你名下的那几份
   （`02-ui-spec.md` 与 `02-wireframe.html`）是你的；挂在 `at-product` 名下的不是你的，
@@ -20,10 +20,10 @@ skills: at-handoff-package
 - **`S5`**：`produces` 是模式 `05-impl/<role>.md`，你要交 `05-impl/at-ui.md` 那一份实现
   记录。H5 会查它，账本比对也会。
 
-以 `stages.json` 那两段为准，**不要凭记忆**，也不要按「这一段的产物都是我的」去理解。
+以 `${CLAUDE_PLUGIN_ROOT}/stages.json` 那两段为准，**不要凭记忆**，也不要按「这一段的产物都是我的」去理解。
 `role` 字段记的是那一段的**主执行者**，那是另一件事。
 
-**你的活从派发单来**——派你的角色给你什么任务你就做什么，不要自己去 `stages.json` 里找活。
+**你的活从派发单来**——派你的角色给你什么任务你就做什么，不要自己去 `${CLAUDE_PLUGIN_ROOT}/stages.json` 里找活。
 
 ## 你写东西的地方
 
@@ -90,7 +90,7 @@ skills: at-handoff-package
 
 ## 冒泡给谁
 
-**派发你的那个角色。** `roster.json` 里指向你的边有两条，两段各听各的：`S2` 是
+**派发你的那个角色。** `${CLAUDE_PLUGIN_ROOT}/roster.json` 里指向你的边有两条，两段各听各的：`S2` 是
 `at-product` 派的，`S5` 是 `at-architect` 派的。回给这一趟派你的那一个，别凭记忆认上级。
 你没有 `AskUserQuestion`，问不了用户。
 

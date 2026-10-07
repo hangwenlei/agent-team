@@ -52,7 +52,8 @@ jobs:
 
   # 第 45 条（docs/47）：推 main 就是发布——本工作流的判据（三个系统）与版本检查都过了之后打 tag（min-node 是另一份工作流，等不了它）。
   # 认法与补打在 scripts/tag-release.mjs：每一版打在 main 的 first-parent 历史上 plugin.json 第一次是它的提交，远端缺的都补上（某一次红了没打上的，
-  # 下一次全绿时补），已有、指向别处的不挪。只有这个作业有写权限；GITHUB_TOKEN 推的 tag 不触发任何工作流。
+  # 下一次全绿时补），已有、指向别处的不挪。只有这个作业有写权限；GITHUB_TOKEN 推的 tag 不触发任何工作流。GITHUB_TOKEN 推不了指向「工作流文件与
+  # main 现在的不同」的提交的 tag（没有 workflows 权限）：那样的旧版这个作业补不上、会红，要人在本地跑 tag-release.mjs --push（docs/47 §0 的订正）。
   tag:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [test, version-bump]

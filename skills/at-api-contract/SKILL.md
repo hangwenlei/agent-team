@@ -10,7 +10,7 @@ description: 前后端共读的接口契约格式。先定契约再各写各的�
 
 ## 规矩
 
-**先定契约，再各写各的。** 契约写进架构产物（见 `stages.json` 里 S3 的 produces），
+**先定契约，再各写各的。** 契约写进架构产物（见 `${CLAUDE_PLUGIN_ROOT}/stages.json` 里 S3 的 produces），
 不要散落在各自的实现文件里。
 
 ## 每个端点写清五项
