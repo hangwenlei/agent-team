@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import { crashNotice } from '../hooks/lib/deny.mjs'
 import {
   USER_WORDS_FILE,
+  WORDS_FIX,
   bindDecision,
   finishBinding,
   pendingRecord,
@@ -178,6 +179,24 @@ test('section1Mismatch（复核 docs/50 §9，门禁中 2）：空白变体（�
   assert.equal(section1Mismatch(contract(['> 输入格式：数字 运算符 数字（例如 3 + 4）。', '> 第二行 末尾']), words), null, '引用块同样')
   assert.equal(section1Mismatch(contract(['输入格式：数字运算符 数字（例如 3 + 4）。', '第二行 末尾']), words)?.kind, 'line', '少了一处空白照样对不上')
   assert.equal(section1Mismatch(contract(['输入格式，数字 运算符 数字（例如 3 + 4）。', '第二行 末尾']), words)?.kind, 'line', '标点改了照样对不上')
+})
+
+test('section1Mismatch（复核 docs/59 低 4）：默认不可见的字——变体选择符、组合字形连接符、谚文填充符——同格式字符一样不计；表情带不带 U+FE0F 都认', () => {
+  const cp = (...c) => String.fromCodePoint(...c)
+  const words = `做一个${cp(0x2764, 0xfe0f)}收藏按钮，家庭${cp(0x1f468, 0x200d, 0x1f469)}共享${cp(0x34f)}，备注${cp(0x3164)}可空`
+  assert.equal(section1Mismatch(contract([`做一个${cp(0x2764)}收藏按钮，家庭${cp(0x1f468, 0x1f469)}共享，备注可空`]), words), null)
+  assert.equal(section1Mismatch(contract([words]), words), null, '照抄的照样认')
+  assert.equal(section1Mismatch(contract([`做一个收藏按钮，家庭${cp(0x1f468, 0x1f469)}共享，备注可空`]), words)?.kind, 'line', '表情本身少了照样对不上')
+})
+
+test('wordsMismatchText（复核 docs/59 低 4）：引的原话与契约行里去掉不计的那些看不见的字——不显示成码点转义，免得照抄进第 1 节；WORDS_FIX 说它们不计', () => {
+  const heart = String.fromCodePoint(0x2764, 0xfe0f)
+  const t = wordsMismatchText({ kind: 'line', line: 1, want: `做一个${heart}收藏按钮`, got: `做一个${String.fromCodePoint(0x200d)}按钮`, col: 4, wantCode: 'U+2764', gotCode: 'U+6309' })
+  assert.ok(t.includes(`"做一个${String.fromCodePoint(0x2764)}收藏按钮"`) && t.includes('"做一个按钮"'), t)
+  assert.ok(!t.includes(String.fromCharCode(92) + 'u'), t)
+  const s = wordsMismatchText({ kind: 'short', line: 2, want: `第二行${heart}`, got: null })
+  assert.ok(!s.includes(String.fromCharCode(92) + 'u'), s)
+  assert.ok(WORDS_FIX.includes('看不见的字'), WORDS_FIX)
 })
 
 test('section1Mismatch 与 wordsMismatchText（复核 docs/50 §9）：对不上的那一行报第一个不同的字与两边的码位（肉眼看不出的差别也说得出）', () => {

@@ -115,7 +115,7 @@ export function prefixProblems(prefix, { platform = process.platform, label = '�
   // 「首尾有空白」还会让人去找一个并不存在的空格。
   const bare = prefix.replace(/\p{Cf}/gu, '')
   if (bare !== bare.trim()) out.fix.push(`${at} 首尾有空白——按字面比较，认领的是另一个名字`)
-  // 零宽空格之类的格式字符 trim 剥不掉，肉眼也看不出来；quote 照原样回显它们，所以把码点写出来。
+  // 零宽空格之类的格式字符 trim 剥不掉，肉眼也看不出来；quote 现在也写成码点（docs/59），这里另报一条，说清它按字面比较、认领的是另一个名字。
   const invisible = [...new Set(prefix.match(/\p{Cf}/gu) ?? [])]
   if (invisible.length) {
     const cps = invisible.map((c) => `U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join('、')

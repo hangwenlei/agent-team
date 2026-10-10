@@ -50,10 +50,10 @@ const UNCLEAN_RE = new RegExp(
 
 // M4x（docs/59）：格式字符（Unicode 的 Cf：零宽字符、双向控制符、BOM、软连字符、标签字符……）与 C0 之外的控制字符（DEL、C1）
 // JSON.stringify 也不转义。它们显示时不占位置，或者改写周围文字的方向；标签字符整段不可见、模型却读得到。一个夹了零宽字符的
-// 「受信前缀」消不掉，却和真的长得一样。变体选择符（U+FE00–FE0F、U+E0100–E01EF）是组合记号、不是 Cf，同样不占位置，一串跟在表情后面
-// 就能藏进任意字节——一起算。写成码点：看得见，JSON 照样解析得回原值；代价是带变体选择符的表情显示成表情加一个码点。星平面的（标签字符、
-// 后一段变体选择符）写成一对代理项的转义。
-const HIDDEN_CLASS = `${LINE_SEPARATORS.join('')}\\p{Cf}\\x7f-\\x9f\\u{fe00}-\\u{fe0f}\\u{e0100}-\\u{e01ef}`
+// 「受信前缀」消不掉，却和真的长得一样。还有一批默认不可见、却不在 Cf 里的（Unicode 的 Default_Ignorable_Code_Point）：变体选择符（组合记号，
+// 一串跟在表情后面就能藏进任意字节）、组合字形连接符、谚文填充符、蒙古文自由变体选择符、标签块里没分配的那些——一起算（复核 docs/59 §8）。
+// 写成码点：看得见，JSON 照样解析得回原值；代价是带变体选择符的表情显示成表情加一个码点。星平面的写成一对代理项的转义。
+const HIDDEN_CLASS = `${LINE_SEPARATORS.join('')}\\p{Cf}\\p{Default_Ignorable_Code_Point}\\x7f-\\x9f`
 const HIDDEN_RE = new RegExp(`[${HIDDEN_CLASS}]`, 'gu')
 const HAS_HIDDEN_RE = new RegExp(`[${HIDDEN_CLASS}]`, 'u')
 
@@ -79,8 +79,8 @@ function jsonOf(value) {
  *   - 值里的受信前缀消去——一个受信块里，前缀只该出现在开头那一次；
  *   - 按码点截断到 max，超出的标「…」；
  *   - 字符串用 JSON.stringify 加引号，并转义换行、回车、控制字符与引号；不是字符串的值输出它的
- *     JSON 写法，数字与字符串分得出来。再补上 JSON.stringify 不管的几种 Unicode 行分隔符、格式字符与
- *     DEL、C1 控制字符（写成码点，docs/59）。
+ *     JSON 写法，数字与字符串分得出来。再补上 JSON.stringify 不管的几种 Unicode 行分隔符、格式字符与别的默认
+ *     不可见的字、DEL、C1 控制字符（写成码点，docs/59）。
  * 值永远待在同一行，字符串永远在一对引号里——伪造不出新的一行，也混不进门禁自己的话。
  * 深层嵌套、toString 被换掉的对象都不抛：quote 出错，门禁就会在拼拒绝理由时崩溃。
  */
@@ -105,7 +105,7 @@ function clip(s, max) {
 
 /**
  * 这次调用方自己给的参数（file_path、subagent_type……）与门禁由项目根拼出的路径用它：干净的字符串
- * 原样输出（与既有文案逐字一样），不是字符串、带控制字符、行分隔符或格式字符、含受信前缀、或长过 max 的，
+ * 原样输出（与既有文案逐字一样），不是字符串、带控制字符、行分隔符、格式字符或别的默认不可见的字、含受信前缀、或长过 max 的，
  * 改用 quote。**磁盘上谁都写得进的值不用它**——干净的值不加引号，一句祈使句就能混进门禁的话里。
  */
 export function inline(value, { max = INLINE_MAX } = {}) {
@@ -122,7 +122,7 @@ export function inline(value, { max = INLINE_MAX } = {}) {
 }
 
 /**
- * 要原样落盘的 JSON（触达表）用它：不能截断、不能改值，只换写法——几种 Unicode 行分隔符、格式字符与 DEL、C1 控制字符、变体选择符写成
+ * 要原样落盘的 JSON（触达表）用它：不能截断、不能改值，只换写法——几种 Unicode 行分隔符、格式字符与别的默认不可见的字、DEL、C1 控制字符写成
  * \u 转义，受信前缀里的「账本回传」四个字也写成 \u 转义。结果仍是合法 JSON，解析出来与原值相同，
  * 但文本里不再有前缀的字面量。
  */
