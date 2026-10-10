@@ -175,12 +175,16 @@ export function decideReadiness({
         .join('、')
 
     if (missing.length === 0 && stale.length === 0) {
+      // 复核（docs/61 §8）：全角括号结尾不再补空格（与还旧那一支同一个写法）；不说「在那之后改过」——修订那一刻产者还在跑、之后才交的也算；
+      // 出路之后说清「到了这一段再派」（回退之后要先推进回来）。
+      const outNames = named(outdated)
       return {
         decision: 'deny',
         reason:
-          `${targetRole} 现在要做的是 ${stageId}，但它的前置 ${named(outdated)} 是对着上一版契约的结论（契约在那之后改过需求，它还没有重出）：` +
+          `${targetRole} 现在要做的是 ${stageId}，但它的前置 ${outNames}${outNames.endsWith('）') ? '' : ' '}是对着上一版契约的结论` +
+          '（契约改过需求之后它还没有对着这一版重出）：' +
           (callerCanWriteState
-            ? `${outdatedOut(outdated)}，再派 ${targetRole}。`
+            ? `${outdatedOut(outdated)}，到了 ${stageId} 再派 ${targetRole}。`
             : '怎么重出由项目经理定，把这一点写进你的回报冒泡给派你的人。'),
       }
     }

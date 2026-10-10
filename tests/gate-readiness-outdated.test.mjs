@@ -49,6 +49,9 @@ test('H2（docs/61）：改了需求之后 06-test.md 没有重出——派 at-a
     assert.equal(d?.permissionDecision, 'deny')
     const why = d.permissionDecisionReason
     assert.ok(why.includes('06-test.md') && why.includes('上一版契约'), why)
+    // 只点过期的那几份（复核 docs/61 §8）：01-prd.md 也是前置，不在里面；全角括号后面不多一个空格。
+    assert.ok(!why.includes('01-prd.md') && why.includes('（S6 的产物）是对着上一版契约的结论'), why)
+    assert.ok(why.includes('到了 S7 再派 at-acceptance'), why)
     // 出路看当前段（S7）：06-test.md 在更早的 S6——照「回退」记回到 S6，不是「后面的段走到时照常重出」。
     assert.ok(why.includes('「回退」记回到 S6') && !why.includes('不用回退'), why)
     assert.ok(!why.includes('accepted'), '验证段的结论不给「标 accepted」：' + why)
@@ -62,12 +65,39 @@ test('H2（docs/61）：06-test.md 在修订之后重写过（内容与修订那
   })
 })
 
-test('H2（docs/61）：没有契约基线、或者改的需求没碰到它（verify_base 里没有、也没有派发记录）——照常放行', () => {
+test('H2（docs/61）：没有契约基线、没改过需求、改过需求却没碰到它（verify_base 里没有、也没有派发记录）——照常放行', () => {
   withRun({ stage: 'S7', artifacts: S7_READY }, (dirs) => {
     assert.equal(decide(dirs, 'agent-team:at-acceptance'), null)
   })
   withRun({ stage: 'S7', artifacts: S7_READY, base: () => ({ revisions: [], verify_base: {}, revised_at: null }) }, (dirs) => {
     assert.equal(decide(dirs, 'agent-team:at-acceptance'), null)
+  })
+  withRun({ stage: 'S7', artifacts: S7_READY, base: () => ({ revisions: ['### 2026-10-10 用户主动提出'], verify_base: {}, revised_at: REVISED_AT }) }, (dirs) => {
+    assert.equal(decide(dirs, 'agent-team:at-acceptance'), null)
+  })
+})
+
+// 复核（docs/61 §8，中 1）：outdatedProducts 的第二条——产者在修订之前派出去、之后没再派过（修订那一刻还在跑、之后才交的）。停在 S6 时
+// 出路是同段重派；之后在修订之后再派一次 at-qa，不再算过期。
+test('H2（复核 docs/61 §8）：at-qa 在修订之前派出去、之后才交的 06-test.md——派 at-acceptance 拒，出路是在 S6 里同段重派；修订之后再派过一次就放行', () => {
+  withRun({ stage: 'S6', artifacts: S7_READY, base: () => ({ revisions: ['### 2026-10-10 用户主动提出'], verify_base: {}, revised_at: REVISED_AT }) }, (dirs) => {
+    const line = (at, id) => JSON.stringify({ kind: 'dispatch', agent_id: id, role: 'at-qa', stage: 'S6', caller: 'at-pm', at })
+    const log = join(dirs.runDir, 'dispatches.jsonl')
+    writeFileSync(log, line('2026-10-10T11:00:00Z', 'a0000000000000901') + '\n')
+    const d = decide(dirs, 'agent-team:at-acceptance')
+    assert.equal(d?.permissionDecision, 'deny')
+    assert.ok(d.permissionDecisionReason.includes('在 S6 里同段重派它的产者重出') && d.permissionDecisionReason.includes('到了 S7 再派'), d.permissionDecisionReason)
+    writeFileSync(log, line('2026-10-10T11:00:00Z', 'a0000000000000901') + '\n' + line('2026-10-10T13:00:00Z', 'a0000000000000902') + '\n')
+    assert.equal(decide(dirs, 'agent-team:at-acceptance'), null)
+  })
+})
+
+test('H2（复核 docs/61 §8）：契约基线在却读不出来——不认过期、放行，stderr 留痕', () => {
+  withRun({ stage: 'S7', artifacts: S7_READY }, (dirs) => {
+    writeFileSync(join(dirs.runDir, CONTRACT_BASE_FILE), '{"verify_base": {')
+    const r = run('readiness', dispatch('agent-team:at-acceptance'), undefined, dirs.projectDir)
+    assert.equal(decisionOf(r.stdout), null)
+    assert.ok(r.stderr.includes('契约基线在却读不出来'), r.stderr)
   })
 })
 

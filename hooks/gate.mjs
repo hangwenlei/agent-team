@@ -696,10 +696,16 @@ function contractCmp(ctx) {
 }
 
 // 对着上一版契约的验证段结论（contract-base.mjs 的 outdatedProducts）：【阶段】的收口阻碍与 H2 的前置共用（docs/61）。读不出基线、出错回空集。
-function outdatedSetOf(ctx) {
+// who：读不出基线时留痕用的名字（复核 docs/61 §8：H2 原来一声不响）；【阶段】不传——账本那一路已经为它留过痕（initialContractBase）。
+function outdatedSetOf(ctx, who = null) {
   try {
     const base = readContractBase(ctx.artifactBytes(CONTRACT_BASE_FILE))
-    if (!base) return new Set()
+    if (!base) {
+      if (who && ctx.artifactExists(CONTRACT_BASE_FILE)) {
+        process.stderr.write(`agent-team ${who}：契约基线在却读不出来，这一次不认对着上一版契约的结论。\n`)
+      }
+      return new Set()
+    }
     const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
     const log = logBytes ? readDispatchLog(logBytes.toString('utf8')) : null
     const diskSha = (n) => {
@@ -1647,7 +1653,7 @@ function main() {
       const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
       return logBytes ? dispatchedByStage(readDispatchLog(logBytes.toString('utf8'))) : null
     })()
-    const readinessOutdated = outdatedSetOf(ctx)
+    const readinessOutdated = outdatedSetOf(ctx, 'H2 就绪门禁')
     const r = decideReadiness({
       targetRole: target,
       stages: ctx.stages,
