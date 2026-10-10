@@ -42,6 +42,45 @@ function underAny(target, prefixes, base) {
   })
 }
 
+// M4r（docs/53，审查第 34 条那一格、docs/41 §4）：认领一个目录不连带它下面这几类位置——子目录里的 CLAUDE.md、CLAUDE.local.md
+// （Claude Code 在那个目录下干活时当成指令加载）、.claude（skill、命令与设置）、.git（git 当成仓库，hook 会被执行；文件形式的 .git
+// 同样指向一个仓库）、.agent-team（门禁从 cwd 往上认最近的项目根，嵌套一个就换掉了判据）。判的是前缀之下新出现的那一截：前缀本身
+// 写明了它的（用户在 S4 照 sensitive 批过，validateProject 对写明的这类前缀提醒）照放行，写明的那一截之下再出现的照拒。名字不分
+// 大小写比，哪一段都认（多拒一个大小写不同、平台不加载的名字，或者一个叫 CLAUDE.md 的目录，无害）。键是小写名字，what 是拒绝理由
+// 里的说法，way 是出路——.agent-team 不划给任何角色（/agent-team:at 的 S4：落在 .agent-team/ 下的一律不补），所以不给「写进你名下」。
+// 用 Map 查：普通对象按段名查会查到 constructor、toString 这类继承来的键。
+const PROMOTE_WAY =
+  '认领一个目录不连带它下面的 CLAUDE.md、CLAUDE.local.md、.claude、.git、.agent-team：要写，冒泡给派你的上级，由 PM 先问用户、' +
+  '在 .agent-team/project.json 的 paths 里把这个文件或目录本身写进你名下（你写不了 project.json）。'
+const GUARDED = new Map([
+  ['claude.md', { what: '这是一份 CLAUDE.md——Claude Code 在这个目录下干活时会把它当成指令加载', way: PROMOTE_WAY }],
+  ['claude.local.md', { what: '这是一份 CLAUDE.local.md——Claude Code 在这个目录下干活时会把它当成指令加载', way: PROMOTE_WAY }],
+  ['.claude', { what: '它在一个 .claude 目录里——里面的 skill、命令与设置会被 Claude Code 加载', way: PROMOTE_WAY }],
+  ['.git', { what: '它是 .git 或者在 .git 里——git 会把那里当成仓库，里面的 hook 会被执行', way: PROMOTE_WAY }],
+  ['.agent-team', { what: '它在一个 .agent-team 目录里——门禁会把那里当成另一个项目的根', way: '门禁不把它划给任何角色：别建它，冒泡给派你的上级。' }],
+])
+
+// 目标在某条前缀之下时：有一条前缀之下的那一截干净（或者目标正好就是前缀写明的那个文件）回 null，放行；否则回第一处这类位置的
+// { what, way }。调用方先用 underAny 判过「在前缀之下」。
+function guardedBelow(target, prefixes, base) {
+  let hit = null
+  for (const prefix of Array.isArray(prefixes) ? prefixes : []) {
+    if (typeof prefix !== 'string') continue
+    const full = norm(`${base}/${prefix}`)
+    if (target === full) return null
+    const dir = full.endsWith('/') ? full : `${full}/`
+    if (!target.startsWith(dir)) continue
+    const found = target
+      .slice(dir.length)
+      .split('/')
+      .map((seg) => GUARDED.get(seg.toLowerCase()))
+      .find(Boolean)
+    if (!found) return null
+    if (!hit) hit = found
+  }
+  return hit
+}
+
 // M2a：run 目录下的合法写入集与"这条路径归谁"曾经分别由 producesOf（只按
 // s.role === role 字面量比对，不认识 <role> 占位符）与 stageOwnerOfRunPath 各自
 // 回答（评审三轮 Important 2 引入 producesOf 时如此）。producers/<role> 模式落地
@@ -286,7 +325,8 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   //     PM 引去往一个账本说「不要建」的键上加前缀。M4f 起删了键第 2 步照样拒；此前删键之后它整段放行，所以这里从来不说
   //     「删了之后就能写」——对正想写别人代码的 at-qa 说这句，等于告诉它怎么绕过去。
   if (NO_PATHS_ROLES.includes(role)) {
-    if (!own.block.length && underAny(target, paths[role], base)) return { decision: 'allow' }
+    // M4r：它前缀之下的 CLAUDE.md、.claude 这几类同样不连带，照这一格的说法拒（不说怎么开口子）。
+    if (!own.block.length && underAny(target, paths[role], base) && !guardedBelow(target, paths[role], base)) return { decision: 'allow' }
     return {
       decision: 'deny',
       reason:
@@ -307,7 +347,12 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
   }
 
   const myPaths = paths[role]
-  if (underAny(target, myPaths, base)) return { decision: 'allow' }
+  if (underAny(target, myPaths, base)) {
+    // M4r：认领的目录之下新出现的 CLAUDE.md、.claude、.git、.agent-team 不随目录一起划出去（guardedBelow 头部）。
+    const guarded = guardedBelow(target, myPaths, base)
+    if (!guarded) return { decision: 'allow' }
+    return { decision: 'deny', reason: `${who} 不得写 ${fp}——${guarded.what}。${guarded.way}` }
+  }
 
   // 认领者查找只看别人条目里合法的前缀：别人条目里一个坏元素不该把拒绝理由变成「门禁异常」。也只看 H3 会拿来判
   // 人的键（花名册里、不是 PM 与主线程）：说「这条路径归 at-pm」「归拼错的键」，是在叫执行角色去找一个不存在的主人

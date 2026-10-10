@@ -34,7 +34,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （门禁留痕的判读表、Claude Code 的下限），判据对着代码与 README 核。两份都是活的，直接改。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
 - `CHANGELOG.md` — 每一版一行，最新的在最上面。
-- `docs/13`…`docs/52` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/53` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，它 §5 排的六轮到 `docs/48` 做完；之后从 `docs/00-开放边界.md` 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -140,6 +140,9 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   第 1 步、触达表的 `unrestricted` 与契约守卫是同一个函数（`hooks/lib/decide.mjs` 的 `exemptFromPaths`，`isContractWriter` 就是它）。
   正文那条判据同时核门禁行为（正文说拒，门禁就得真拒）。
   理由在 `docs/41`。
+- **认领一个目录不连带它下面会被自动加载或执行的位置**：H3 判认领的前缀之下新出现的那一截——`CLAUDE.md`、`CLAUDE.local.md`、`.claude`、`.git`、嵌套的
+  `.agent-team`（`hooks/lib/writepath.mjs` 的 `guardedBelow`，不分大小写、哪一段都认），落在上面就拒；前缀本身写明了的（S4 照 `sensitive` 问过用户补进去的）
+  照放行，`.agent-team` 不划给任何角色。拒绝理由不引 `project.json` 里的前缀。理由在 `docs/53`。
 - **新行为的自动化测试归 S5 的产者写**：照落盘清单定的位置写，实现记录带「测试」一节，PM 推进出 S5 之前读；`at-qa` 核缺测试、判「不通过：
   缺测试」、不写不冒泡；缺测试的回退回 S5，验收因为缺测试判不了的也回 S5（S5、S6、S7 各一轮）。不写测试只认两种情形——这一次没有新行为；
   契约第 1 节用户原话或第 4 节修订记录里用户说了不要——产者、架构师、`at-qa`、`/agent-team:at` 逐字同一句；契约第 3 节是 PM 自己写的、架构方案
