@@ -10,7 +10,7 @@
 // 入口只做「该检查项声明的前置校验」，不做统一校验——H1–H5 分布在三种
 // hook 事件上，输入形状不同（规格 §6 注记）。
 
-import { appendFileSync, closeSync, existsSync, fstatSync, openSync, readFileSync, readSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { basename, dirname, join, relative } from 'node:path'
 import { CHECKS, KNOWN_CHECKS } from './lib/checks.mjs'
@@ -1188,6 +1188,9 @@ function settleWords({ runDir, agentTeamDir, sessionId, state, stages, creating 
     }
     writeFileSync(pendingPath, `${JSON.stringify({ ...pending, bound: runId }, null, 2)}\n`)
     const own = join(runDir, USER_WORDS_FILE)
+    // 实测（docs/58）：建出这一趟的那一次是 PreToolUse，项目经理直接 Write runs/<id>/state.json，这时目录还不在（Write 落盘时才建）——先建它。
+    // 原来这里抛 ENOENT、被下面接住只留一行痕，项目一级那份已经标了 bound，这一趟从此不核第 1 节。
+    mkdirSync(runDir, { recursive: true })
     if (!existsSync(own)) writeFileSync(own, `${JSON.stringify({ ...pending, bound: runId, bound_at: new Date().toISOString() }, null, 2)}\n`)
   } catch (e) {
     process.stderr.write(`agent-team user-words：原话记录写不进（${quote(e?.message ?? e, { max: 120 })}），这一趟可能不核契约第 1 节。\n`)

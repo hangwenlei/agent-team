@@ -177,6 +177,31 @@ test('绑定：这个会话用 Write 建出新的一趟（state.json 写之前�
   })
 })
 
+test('绑定（实测 docs/58）：建出这一趟的那一次，run 目录还不在（Write 落盘时才建）——照样绑进去，之后第 1 节对不上照样说', () => {
+  // 真实会话里项目经理不先建目录，直接 Write runs/<id>/state.json：H6（PreToolUse）那一刻目录还不在。原来往里写原话记录抛 ENOENT、被吞掉，
+  // 项目一级那份却已经标了 bound——这一趟从此不核第 1 节。上面那几条判据的 createRun 先建了目录，测不到这一格。
+  const dirs = makeRun({ runId: 'r1', stage: 'S1' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r1'), { recursive: true, force: true })
+    run('user-words', expansion(ARGS, { session_id: 's-1' }), GATE, dirs.projectDir)
+    const runDir = join(dirs.projectDir, '.agent-team', 'runs', 'r1')
+    const state = stateOf('r1')
+    const d = decisionOf(run('rework', stateWrite(runDir, state, 's-1'), GATE, dirs.projectDir).stdout)
+    assert.equal(d, null, JSON.stringify(d))
+    // Write 落盘：建目录、写 state.json；再写指针。
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, 'state.json'), JSON.stringify(state, null, 2))
+    point(dirs.projectDir, 'r1')
+    assert.equal(pendingOf(dirs.projectDir).bound, 'r1')
+    assert.equal(boundOf(runDir).args, ARGS)
+    writeFileSync(join(runDir, '00-contract.md'), PARAPHRASED)
+    const c = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, dirs.projectDir).stdout)
+    assert.ok(c.includes(TALK), c)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
 test('核：第一段里写契约，第 1 节对不上原话——【契约】当场说第几行、两边各是什么、原话记在哪，改好之前推进不出第一段；只说一次', () => {
   freshRun(({ projectDir, runDir }) => {
     writeFileSync(join(runDir, '00-contract.md'), PARAPHRASED)
