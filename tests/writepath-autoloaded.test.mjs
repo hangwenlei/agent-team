@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs'
 import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { decideWritePath } from '../hooks/lib/writepath.mjs'
+import { entryProblems } from '../hooks/lib/project.mjs'
 import { run, decisionOf } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 
@@ -102,6 +103,46 @@ test('建了键的 at-qa 在自己前缀下写这几类——拒，照它那一�
   assert.equal(r.decision, 'deny')
   assert.ok(r.reason.includes('你不写 run 目录之外的文件'), r.reason)
   assert.ok(!r.reason.includes('写进你名下'), r.reason)
+})
+
+test('复核（docs/53 §8，中 1）：.agent-team 不认「写明了」——写明认领了嵌套的、或者项目根下的 .agent-team，照样拒；project.json 对任何深度的都报', () => {
+  const project = { paths: { 'at-backend': ['src/server/', 'src/server/.agent-team/', '.agent-team/'] } }
+  for (const f of ['/proj/src/server/.agent-team/project.json', '/proj/.agent-team/notes.md']) {
+    const r = call('at-backend', f, project)
+    assert.equal(r.decision, 'deny', f)
+    assert.ok(r.reason.includes('门禁不把它划给任何角色'), r.reason)
+  }
+  assert.equal(call('at-backend', '/proj/src/server/a.ts', project).decision, 'allow')
+  const nested = entryProblems('at-backend', ['src/server/.agent-team/'])
+  assert.ok(nested.fix.some((m) => m.includes('嵌套的 .agent-team')), JSON.stringify(nested))
+  const rootOne = entryProblems('at-backend', ['.agent-team/'])
+  assert.ok(rootOne.fix.some((m) => m.includes('那里的控制文件不走角色认领')), JSON.stringify(rootOne))
+})
+
+test('复核（docs/53 §8，低）：前缀带 .. 也按解析后的位置判——写明了与没写明照样分得开', () => {
+  const project = { paths: { 'at-backend': ['src/x/../server/', 'src/x/../server/docs/CLAUDE.md'] } }
+  assert.equal(call('at-backend', '/proj/src/server/CLAUDE.md', project).decision, 'deny')
+  assert.equal(call('at-backend', '/proj/src/server/docs/CLAUDE.md', project).decision, 'allow')
+  assert.equal(call('at-backend', '/proj/src/server/a.ts', project).decision, 'allow')
+})
+
+test('复核（docs/53 §8，低）：它已经写明划给了别的角色——说归谁、经上级协调，不给「写进你名下」', () => {
+  const project = { paths: { 'at-backend': ['src/'], 'at-frontend': ['src/web/', 'src/web/CLAUDE.md'] } }
+  const r = call('at-backend', '/proj/src/web/CLAUDE.md', project)
+  assert.equal(r.decision, 'deny')
+  assert.ok(r.reason.includes('它已经写明划给了 "at-frontend"') && r.reason.includes('冒泡给派你的上级'), r.reason)
+  assert.ok(!r.reason.includes('写进你名下'), r.reason)
+  // 没写明的那一方不算归它：at-frontend 的 src/web/ 之下那一截带着 CLAUDE.md。
+  const other = call('at-backend', '/proj/src/web/pages/CLAUDE.md', project)
+  assert.ok(other.reason.includes('写进你名下') && !other.reason.includes('写明划给了'), other.reason)
+})
+
+test('/agent-team:at 的 S4：执行角色为这几处冒泡上来的，.agent-team 一律不补，别的照 sensitive 先问用户、把它本身补进名下', () => {
+  const at = readFileSync(new URL('../commands/at.md', import.meta.url), 'utf8').replace(/\s+/g, '')
+  const k =
+    '门禁不让认领一个目录连带它下面的 `CLAUDE.md`、`CLAUDE.local.md`、`.claude`、`.git`、`.agent-team`：执行角色为这几处冒泡上来的，' +
+    '`.agent-team` 一律不补，别的同样照 `sensitive` 先问用户，批了就把那个文件或目录本身补进它名下。'
+  assert.ok(at.includes(k.replace(/\s+/g, '')), `commands/at.md 缺「${k}」`)
 })
 
 test('子进程：执行角色经门禁写自己认领目录下的 CLAUDE.md 被拒、写普通文件放行', () => {

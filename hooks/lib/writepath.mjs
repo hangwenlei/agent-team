@@ -35,11 +35,17 @@ function underAny(target, prefixes, base) {
   // decideWritePath 这边已经走不到它：第 8 步的 entryProblems 先拒掉值不是数组的
   // 条目并给出具体的理由，认领者查找先过 usablePrefixes（总是数组）。
   if (!Array.isArray(prefixes)) return false
-  return prefixes.some((prefix) => {
-    const full = norm(`${base}/${prefix}`)
-    const dir = full.endsWith('/') ? full : `${full}/`
-    return target === full || target.startsWith(dir)
-  })
+  return prefixes.some((prefix) => restUnder(target, prefix, base) !== null)
+}
+
+// 目标在一条前缀之下时，前缀之下那一截的各段（目标正好就是前缀写明的那个文件时是空数组）；不在它之下回 null。underAny 与 guardedBelow
+// 共用这一份（复核 docs/53 §8：两边各算一份时，guardedBelow 一条都对不上就放行）。
+function restUnder(target, prefix, base) {
+  if (typeof prefix !== 'string') return null
+  const full = norm(`${base}/${prefix}`)
+  if (target === full) return []
+  const dir = full.endsWith('/') ? full : `${full}/`
+  return target.startsWith(dir) ? target.slice(dir.length).split('/') : null
 }
 
 // M4r（docs/53，审查第 34 条那一格、docs/41 §4）：认领一个目录不连带它下面这几类位置——子目录里的 CLAUDE.md、CLAUDE.local.md
@@ -60,25 +66,26 @@ const GUARDED = new Map([
   ['.agent-team', { what: '它在一个 .agent-team 目录里——门禁会把那里当成另一个项目的根', way: '门禁不把它划给任何角色：别建它，冒泡给派你的上级。' }],
 ])
 
+// 调用方先用 underAny 判过「在前缀之下」，这里却一条前缀都对不上：两边口径不一，不放行。
+const NO_MATCH = { what: '门禁核不出它落在你认领的哪一条前缀之下', way: '冒泡给派你的上级，由 PM 看 .agent-team/project.json 的 paths。' }
+
 // 目标在某条前缀之下时：有一条前缀之下的那一截干净（或者目标正好就是前缀写明的那个文件）回 null，放行；否则回第一处这类位置的
-// { what, way }。调用方先用 underAny 判过「在前缀之下」。
+// { what, way }。.agent-team 不认「写明了」（复核 docs/53 §8）：相对项目根的整条路径上有一段是它，就拒——它不划给任何角色，写明认领了
+// 一个嵌套的 .agent-team 照样换掉门禁认的项目根。
 function guardedBelow(target, prefixes, base) {
+  const root = base.endsWith('/') ? base : `${base}/`
+  if (target.startsWith(root) && target.slice(root.length).split('/').some((seg) => seg.toLowerCase() === '.agent-team')) {
+    return GUARDED.get('.agent-team')
+  }
   let hit = null
   for (const prefix of Array.isArray(prefixes) ? prefixes : []) {
-    if (typeof prefix !== 'string') continue
-    const full = norm(`${base}/${prefix}`)
-    if (target === full) return null
-    const dir = full.endsWith('/') ? full : `${full}/`
-    if (!target.startsWith(dir)) continue
-    const found = target
-      .slice(dir.length)
-      .split('/')
-      .map((seg) => GUARDED.get(seg.toLowerCase()))
-      .find(Boolean)
+    const rest = restUnder(target, prefix, base)
+    if (rest === null) continue
+    const found = rest.map((seg) => GUARDED.get(seg.toLowerCase())).find(Boolean)
     if (!found) return null
     if (!hit) hit = found
   }
-  return hit
+  return hit ?? NO_MATCH
 }
 
 // M2a：run 目录下的合法写入集与"这条路径归谁"曾经分别由 producesOf（只按
@@ -351,6 +358,30 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
     // M4r：认领的目录之下新出现的 CLAUDE.md、.claude、.git、.agent-team 不随目录一起划出去（guardedBelow 头部）。
     const guarded = guardedBelow(target, myPaths, base)
     if (!guarded) return { decision: 'allow' }
+    // 复核（docs/53 §8）：它已经写明划给了别的角色时，出路不是「写进你名下」，是归那个角色（.agent-team 谁都不归）。
+    const owners =
+      guarded === GUARDED.get('.agent-team') || !isValidRoster(roster)
+        ? []
+        : Object.entries(paths)
+            .filter(
+              ([other, value]) =>
+                other !== role &&
+                Object.hasOwn(roster, other) &&
+                !exemptFromPaths(other) &&
+                !NO_PATHS_ROLES.includes(other) &&
+                other !== 'at-outsider' &&
+                underAny(target, usablePrefixes(value), base) &&
+                !guardedBelow(target, usablePrefixes(value), base),
+            )
+            .map(([other]) => other)
+    if (owners.length) {
+      return {
+        decision: 'deny',
+        reason:
+          `${who} 不得写 ${fp}——${guarded.what}。它已经写明划给了 ${owners.map((o) => quote(o)).join('、')}：` +
+          '跨角色的改动要经上级协调，不要自己动它，冒泡给派你的上级。',
+      }
+    }
     return { decision: 'deny', reason: `${who} 不得写 ${fp}——${guarded.what}。${guarded.way}` }
   }
 

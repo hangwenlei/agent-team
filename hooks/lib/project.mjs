@@ -100,6 +100,8 @@ export function prefixProblems(prefix, { platform = process.platform, label = '�
   const segs = segmentsOf(prefix, platform).map((s) => s.toLowerCase())
   if (segs[0] === '.agent-team') {
     out.fix.push(`${at} 落在 .agent-team 下——那里的控制文件不走角色认领`)
+  } else if (segs.includes('.agent-team')) {
+    out.fix.push(`${at} 落在一个嵌套的 .agent-team 下——门禁不把它划给任何角色，按这条前缀写进去的照样被拒`)
   }
   if (AUTOLOADED_DIRS.includes(segs[0]) || (segs.length === 1 && AUTOLOADED_FILES.includes(segs[0]))) {
     out.confirm.push(
