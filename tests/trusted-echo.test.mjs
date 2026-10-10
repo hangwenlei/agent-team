@@ -249,6 +249,8 @@ const SCENARIOS = [
       ['ledger', posted('at-pm', join(run, 'state.json'))],
       ['deliverable', returned('agent-team:at-product')],
       ['deliverable', returned('agent-team:at-backend', 'agent-team:at-architect')],
+      // M4y（docs/60）：派验证段的产者之前 H2 也拿它比磁盘，拒绝理由里带【契约】那一句。
+      ['readiness', dispatch('agent-team:at-qa', 'at-pm')],
     ],
     anchor: SHA_NOTE,
   },
@@ -261,6 +263,7 @@ const SCENARIOS = [
     calls: ({ run }) => [
       ['ledger', posted('at-pm', join(run, 'state.json'))],
       ['deliverable', returned('agent-team:at-product')],
+      ['readiness', dispatch('agent-team:at-qa', 'at-pm')],
     ],
     anchor: SHA_NOTE,
   },
