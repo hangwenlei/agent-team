@@ -24,7 +24,7 @@ import { decideRework, decideReworkBase, parseStateText, replayEdit } from './li
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { isBlankText } from './lib/text-norm.mjs'
 import { normalizeText } from './lib/text-norm.mjs'
-import { decideDeliverable, isBubbleStop, isKnownStage } from './lib/deliverable.mjs'
+import { BUBBLE_EXIT, BUBBLE_WHEN, decideDeliverable, isBubbleStop, isKnownStage } from './lib/deliverable.mjs'
 import {
   AGENT_ID_RE,
   bubbleOf,
@@ -62,7 +62,7 @@ import {
 } from './lib/contract-base.mjs'
 import { readGrants } from './lib/budget.mjs'
 import { askAnswers, promptAnswer, promptDeliver, planApprovals, approvalLine, approvalNotices } from './lib/approvals.mjs'
-import { acceptanceBlock, acceptanceOf, acceptanceVerdict, decideAcceptance, deliverLine, readDeliverApprovalEntries, readDeliverApprovals, verdictBlockerText, verdictStageNote } from './lib/verdict.mjs'
+import { ACCEPTANCE_ROLE, acceptanceBlock, acceptanceOf, acceptanceVerdict, decideAcceptance, deliverLine, readDeliverApprovalEntries, readDeliverApprovals, verdictBlockerText, verdictStageNote } from './lib/verdict.mjs'
 import { deliveredSnapshot, readSnapshot, makeDelivered, decideRedispatch, decideRedoWrite } from './lib/redo.mjs'
 import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispatch } from './lib/closing.mjs'
 import { computeReach } from './lib/reach.mjs'
@@ -717,6 +717,17 @@ function outdatedSetOf(ctx, who = null) {
   } catch {
     return new Set()
   }
+}
+
+// docs/62：验收角色在验收那一段停下时，验收结论第一行读不出——H5b 的拒绝理由（【阶段】给写者的那一句加冒泡的出口）；不用拦回 null。
+// 不在验收那一段、产物读不出、首行读得出（不论过没过）都不拦；缺、空由交付物核验那一支先说（走到这里时产物齐了），收口只在最后一段。
+function verdictStopReason(ctx, role) {
+  if (role !== ACCEPTANCE_ROLE) return null
+  const acc = acceptanceOf(ctx.stages)
+  if (!acc || ctx.state?.stage !== acc.stageId) return null
+  const bytes = ctx.artifactBytes(acc.name)
+  if (!bytes || acceptanceVerdict(bytes) !== null) return null
+  return `${verdictStageNote({ stages: ctx.stages, block: { name: acc.name, verdict: null }, writer: ACCEPTANCE_ROLE })}${BUBBLE_WHEN}，${BUBBLE_EXIT}`
 }
 
 // M3a Task 2：「已经走过的那几段，产者有没有交代」的措辞组装。decideCoverage
@@ -3130,6 +3141,19 @@ function main() {
     }
 
     if (r.ok) {
+      // docs/62（docs/46 §4「H5b 不核首行格式」）：验收角色在验收那一段停下、产物齐了，验收结论第一行却读不出——拦，叫它当场改（它有 Write，
+      // 省项目经理推进被 H6 拒之后再同段重派一次）。只核格式，不判过没过；冒泡的出口照旧（与产物缺、空那一支同一个 isBubbleStop）。
+      if (CHECK === 'stop-gate') {
+        const verdictStop = verdictStopReason(ctx, role)
+        if (verdictStop) {
+          if (isBubbleStop({ stopHookActive: input?.stop_hook_active, lastMessage: input?.last_assistant_message })) {
+            recordStop('bubble')
+            process.exit(0)
+          }
+          recordStop('block')
+          denyAndExit(verdictStop, spec.event)
+        }
+      }
       // M4d 实测（docs/38 §4 的 M5）：产物在、回复第一行却是冒泡标记的（执行角色把「卡在哪」写进了实现记录再冒泡），记成 bubble——门禁照旧算它交了
       // （只看在不在、空不空），但协调者进度不能因此说「名单上的都交了」。
       if (CHECK === 'stop-gate') recordStop(bubbleOf([input?.last_assistant_message]) !== null ? 'bubble' : 'pass')
