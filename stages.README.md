@@ -11,7 +11,7 @@
 
 | 读它的人 | 问的问题 | 实现 |
 |---|---|---|
-| H2 就绪门禁 | 这个角色**这次被派去做哪一段**（多段角色按派发者定），它的前置产物齐了吗；那一段早于 `state.stage`、它的产物这一轮已经交过吗（M3z）；这一趟收口了没有、`state.stage` 是不是最后一段（M4a） | `readiness.mjs`、`redo.mjs`、`closing.mjs` |
+| H2 就绪门禁 | 这个角色**这次被派去做哪一段**（多段角色按派发者定），它的前置产物齐了吗；那一段早于 `state.stage`、它的产物这一轮已经交过吗（M3z）；这一趟收口了没有、`state.stage` 是不是最后一段（M4a）；这个角色是不是验证段的产者——是的话派它之前核契约的账（`verifies`，M4y） | `readiness.mjs`、`redo.mjs`、`closing.mjs`、`stages.mjs` 的 `verifyStageOf` |
 | H3 写路径隔离 | run 目录下这条路径是**哪个阶段的产物、归谁**；那一段早于 `state.stage`、写者在当前段有没有活（M3z） | `writepath.mjs`、`redo.mjs` |
 | H5a/H5b 交付物校验 | `state.stage` 这一段的执行角色交付了吗 | `deliverable.mjs` |
 | H6 返工预算与收口 | 回退快照记哪几段的哪些产物、推进离开的段里还有没有上一轮的（M3y）；这份产物能不能在 `rework_base` 里标 `"accepted"`（`verifies`，M4a）；收口那一次最后一段的前置与产物齐没齐（M4a） | `rework-guard.mjs`、`closing.mjs` |
@@ -405,6 +405,9 @@ M4d（`docs/38`，全量审查第 17 条）：上面那句「推进本身照样�
 推进与补记的拒绝理由）对它们只给「产者这一轮重跑之后重写」。单一真源是 `hooks/lib/stages.mjs` 的 `isVerifyStage` 与
 `mayAcceptProduct`。只认布尔 `true`。起因：S6 测试不过回到 S5、修了后端，门禁自己把「06-test.md 标 accepted」列成出路，
 标了之后 at-qa 不重测就停下，没测过的改动进了验收。
+
+**验证段的产者派出去之前**（M4y，`docs/60`）：H2 派 `verifies` 段的产者（`at-qa`、`at-acceptance`）之前拿 `contract_sha` 对磁盘上的契约，
+对不上就拒，出路是【契约】那一句。按 `stages.mjs` 的 `verifyStageOf` 认，扩链时跟着 `verifies` 走。
 
 **收口标记**：`state.json` 的 `closed_at`（模板初值 null，收口时写 ISO 时间）。判「收没收口」只问 `hooks/lib/closing.mjs` 的
 `closedAt`。H6 在返工预算与快照判据之前判它：形状（null，或者 ISO 形状的时间；`"null"`、`"false"` 之类的字符串按形状拒，理由引出原值）；已收口之后 `closed_at`、`stage`、`history` 的条数都

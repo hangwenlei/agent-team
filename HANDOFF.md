@@ -34,7 +34,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （门禁留痕的判读表、Claude Code 的下限），判据对着代码与 README 核。两份都是活的，直接改。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
 - `CHANGELOG.md` — 每一版一行，最新的在最上面。
-- `docs/13`…`docs/59` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/60` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，它 §5 排的六轮到 `docs/48` 做完；之后从 `docs/00-开放边界.md` 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -117,7 +117,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （前台派发跑完时 H5a、后台完成时完成核验）读同一个标记（`bubbleReason`，M4d）。理由在 `docs/37`、`docs/38`。
 - **契约的账只认 `contract_sha`**：账本比对不看契约（`compareArtifacts` 排除 `CONTRACT_FILE`）；派发返回（H5a）与 PM 写 `state.json` 时拿
   `contract_sha` 比磁盘，对不上出【契约】——不报磁盘上算出来的值、不说「改成与磁盘一致」（照着磁盘改账就把漂移洗成了合法），合法修订的新值
-  只从写契约那一次的回传来。升级类别从 `ESCALATION_KINDS` 派生、正文不报总数。理由在 `docs/37`。
+  只从写契约那一次的回传来。H2 派验证段的产者（`stages.mjs` 的 `verifyStageOf`，按 `verifies` 派生）之前也比一遍，对不上就拒、出路是同一句【契约】
+  （`gate.mjs` 的 `contractCmp`，派发返回的【契约】与它共用；读不出契约不拦、留痕，`docs/60`）。升级类别从 `ESCALATION_KINDS` 派生、正文不报总数。理由在 `docs/37`。
 - **推进由 H6 在推进那一次核：一次只推一段、离开的那一段要交齐**（`hooks/lib/advance.mjs`，在 `rework-guard.mjs` 的 `decideReworkBase` 里接上）：
   叫到的产者各自那几份、固定产物都在，空白算没交，`"accepted"` 算交了；「叫到」= 写入前后的 `participantsOf` 并上门禁的派发记录（PM 少记一个人、
   先单独删名字都翻不成没叫过）；`trimmed` 里记着、值是这一段的免掉，只限按叫到的人展开产物的段里、不被任何段当前置的那几份（`mayWaive`）；

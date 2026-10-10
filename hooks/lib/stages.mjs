@@ -207,6 +207,15 @@ export function isVerifyStage(stage) {
   return isPlainObject(stage) && stage.verifies === true
 }
 
+/** M4y（docs/60）：这个角色是哪一个验证段的产者（阶段链上第一个），不是回 null。H2 派它之前核契约的账。 */
+export function verifyStageOf(stages, role) {
+  if (!isStageChain(stages) || typeof role !== 'string') return null
+  for (const id of Object.keys(stages)) {
+    if (isVerifyStage(stages[id]) && stageRoles(stages[id]).includes(role)) return id
+  }
+  return null
+}
+
 /** 返工轮里这份产物能不能在 rework_base 里标 "accepted"：链上最早产出它的那一段不是验证段。不是任何一段的产物、阶段链读不出来：
  * 能（这一条不管它——坏条目怎么处理由 H6 的别的判据定）。H6 与每一处给出「标 accepted」出路的回传都问它，口径只此一份。 */
 export function mayAcceptProduct(stages, name) {

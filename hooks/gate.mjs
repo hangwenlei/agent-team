@@ -73,7 +73,7 @@ import { validateProject } from './lib/project.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
 import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
-import { isPlainObject, isStageChain, isVerifyStage, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName } from './lib/stages.mjs'
+import { isPlainObject, isStageChain, isVerifyStage, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName, verifyStageOf } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
 import { USER_WORDS_FILE, WORDS_FIX, bindDecision, blankAtSession, finishBinding, pendingRecord, readWords, section1Mismatch, wordsMismatchText, wordsOf } from './lib/user-words.mjs'
@@ -675,13 +675,8 @@ function relayTail(why, swallowed = '咽掉之后没有任何人会再看见它'
 // state.json 时接上 relayTail，误投痕由调用点留，与账本比对同一个分工。
 // 复核（docs/37 §3）：契约在、这一次却读不出，说读不出、没核，不说它不在。
 function contractNoticeFor(ctx, recipientCanWriteState) {
-  const bytes = ctx.artifactBytes(CONTRACT_FILE)
   const recorded = ctx.state?.contract_sha
-  const cmp =
-    bytes === null && ctx.artifactExists(CONTRACT_FILE)
-      ? { ok: false, kind: 'unreadable' }
-      : compareContractSha({ recorded, actual: bytes ? sha256OfContract(bytes) : null })
-  const notice = contractCheckNotice(cmp, recorded)
+  const notice = contractCheckNotice(contractCmp(ctx), recorded)
   if (!notice) return null
   return recipientCanWriteState
     ? notice
@@ -690,6 +685,14 @@ function contractNoticeFor(ctx, recipientCanWriteState) {
           'contract_sha 住在 state.json 里、契约只有 PM 写得了：state.json 与契约，H3、H4 在 PreToolUse 上都把非 PM 拒掉',
           '咽掉了，PM 要到它自己下一次派发返回或写 state.json 时才会再看到它',
         )
+}
+
+// contract_sha 对磁盘上的契约（派发返回的【契约】与 H2 派验证段之前共用，docs/60）：契约在、这一次却读不出，回 unreadable。
+function contractCmp(ctx) {
+  const bytes = ctx.artifactBytes(CONTRACT_FILE)
+  return bytes === null && ctx.artifactExists(CONTRACT_FILE)
+    ? { ok: false, kind: 'unreadable' }
+    : compareContractSha({ recorded: ctx.state?.contract_sha, actual: bytes ? sha256OfContract(bytes) : null })
 }
 
 // M3a Task 2：「已经走过的那几段，产者有没有交代」的措辞组装。decideCoverage
@@ -1615,6 +1618,24 @@ function main() {
       atPath: join(ROOT, 'commands', 'at.md'),
     })
     if (closedRd.decision === 'deny') denyAndExit(closedRd.reason, spec.event)
+    // M4y（docs/60）：派验证段的产者（stages.json 里 verifies: true 的段）之前核契约的账——contract_sha 与磁盘上的契约对不上，拒。它对着契约验，
+    // 账没对上时验的是哪一份说不清；结论出来之后再处理账，那份结论对着的可能正是一份要恢复原样的契约（恢复之后没有修订块，契约基线不叫它重出）。
+    // 出路是【契约】那一句（contractCheckNotice，写 state.json、派发返回时同一句）；契约这一次读不出（被占着）不拦、留痕。
+    const verifyStage = verifyStageOf(ctx.stages, target)
+    if (verifyStage) {
+      const cmp = contractCmp(ctx)
+      if (cmp.kind === 'unreadable') {
+        process.stderr.write(`agent-team H2 就绪门禁：这一次读不出 ${CONTRACT_FILE}，派 ${target} 之前没核契约的账。\n`)
+      } else {
+        const notice = contractCheckNotice(cmp, ctx.state?.contract_sha)
+        if (notice) {
+          denyAndExit(
+            `agent-team H2 就绪门禁：${target} 是 ${verifyStage} 的产者，对着契约验——契约的账对上之前不派它。${notice}处理完再派 ${target}。`,
+            spec.event,
+          )
+        }
+      }
+    }
     const caller = callerOf(input)
     const reach = computeReach({ roster: loadRoster(), paths: {} })
     // M3y（docs/33，全量审查第 15 条）：「齐了没」与「前置在不在」按 freshness 判——返工轮里磁盘内容与 rework_base 记的 sha

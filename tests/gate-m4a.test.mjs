@@ -46,7 +46,8 @@ function fixture({ stage, history, reworkBase, files = R1, roster = ROSTER, extr
   const state = {
     run_id: '20261001-0900-fixture',
     stage,
-    contract_sha: 'PENDING',
+    // docs/60：契约在就记门禁按它算的 sha（走到验证段的 run 早该记上了；H2 派验证段的产者之前核这笔账）。
+    contract_sha: files['00-contract.md'] === undefined ? 'PENDING' : sha(files['00-contract.md']),
     roster,
     artifacts: {},
     rework: reworkFromHistory(history),
