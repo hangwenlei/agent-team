@@ -42,15 +42,23 @@ const INLINE_MAX = 300
 // 当成换行。用 fromCharCode 构造，不在源码里写 \u 转义——本仓库的写入工具会把那种转义换成真字符，
 // 真字符出现在正则字面量里就是语法错误（docs/27 记着这一次）。
 const LINE_SEPARATORS = [0x2028, 0x2029, 0x85].map((c) => String.fromCharCode(c))
-const LINE_SEPARATOR_RE = new RegExp(`[${LINE_SEPARATORS.join('')}]`, 'g')
 // 「不干净」：控制字符、DEL、上面几种行分隔符，以及孤立的代理项（不成对的半个表情——它进了
 // additionalContext，请求体就不是合法的 UTF-8；quote 走的 JSON.stringify 会把它写成转义）。
 const UNCLEAN_RE = new RegExp(
   `[\\u0000-\\u001f\\u007f${LINE_SEPARATORS.join('')}]|[\\ud800-\\udbff](?![\\udc00-\\udfff])|(?<![\\ud800-\\udbff])[\\udc00-\\udfff]`,
 )
 
-function escapeLineSeparators(s) {
-  return s.replace(LINE_SEPARATOR_RE, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
+// M4x（docs/59）：格式字符（Unicode 的 Cf：零宽字符、双向控制符、BOM、软连字符、标签字符……）与 C0 之外的控制字符（DEL、C1）
+// JSON.stringify 也不转义。它们显示时不占位置，或者改写周围文字的方向；标签字符整段不可见、模型却读得到。一个夹了零宽字符的
+// 「受信前缀」消不掉，却和真的长得一样。变体选择符（U+FE00–FE0F、U+E0100–E01EF）是组合记号、不是 Cf，同样不占位置，一串跟在表情后面
+// 就能藏进任意字节——一起算。写成码点：看得见，JSON 照样解析得回原值；代价是带变体选择符的表情显示成表情加一个码点。星平面的（标签字符、
+// 后一段变体选择符）写成一对代理项的转义。
+const HIDDEN_CLASS = `${LINE_SEPARATORS.join('')}\\p{Cf}\\x7f-\\x9f\\u{fe00}-\\u{fe0f}\\u{e0100}-\\u{e01ef}`
+const HIDDEN_RE = new RegExp(`[${HIDDEN_CLASS}]`, 'gu')
+const HAS_HIDDEN_RE = new RegExp(`[${HIDDEN_CLASS}]`, 'u')
+
+function escapeHidden(s) {
+  return s.replace(HIDDEN_RE, (c) => Array.from({ length: c.length }, (_, i) => '\\u' + c.charCodeAt(i).toString(16).padStart(4, '0')).join(''))
 }
 
 // 不是字符串的值的 JSON 写法：数字、布尔、null 不带引号，类型看得出来；对象里的字符串本来就带引号。
@@ -71,7 +79,8 @@ function jsonOf(value) {
  *   - 值里的受信前缀消去——一个受信块里，前缀只该出现在开头那一次；
  *   - 按码点截断到 max，超出的标「…」；
  *   - 字符串用 JSON.stringify 加引号，并转义换行、回车、控制字符与引号；不是字符串的值输出它的
- *     JSON 写法，数字与字符串分得出来。再补上 JSON.stringify 不管的几种 Unicode 行分隔符。
+ *     JSON 写法，数字与字符串分得出来。再补上 JSON.stringify 不管的几种 Unicode 行分隔符、格式字符与
+ *     DEL、C1 控制字符（写成码点，docs/59）。
  * 值永远待在同一行，字符串永远在一对引号里——伪造不出新的一行，也混不进门禁自己的话。
  * 深层嵌套、toString 被换掉的对象都不抛：quote 出错，门禁就会在拼拒绝理由时崩溃。
  */
@@ -82,7 +91,7 @@ export function quote(value, { max = QUOTE_MAX } = {}) {
   const s = clip(cleaned, max)
   // 复核（docs/57 §8）：非字符串值的 JSON 写法截过之后就不是合法的 JSON 了——留尾时，尾巴可能从某个字符串的中间开始，里面的话落到引号外面。
   // 截过的整段当成字符串再加一次引号；没截的照旧原样输出（数字与字符串分得出来）。
-  return escapeLineSeparators(json === null || s !== cleaned ? JSON.stringify(s) : s)
+  return escapeHidden(json === null || s !== cleaned ? JSON.stringify(s) : s)
 }
 
 // 太长的按码点截成「头…尾」（M4v，docs/57，docs/27 §4）：原来只留头，异常消息末尾的文件路径、长路径的最后一段（正好是要紧的文件名）被截掉。
@@ -96,23 +105,29 @@ function clip(s, max) {
 
 /**
  * 这次调用方自己给的参数（file_path、subagent_type……）与门禁由项目根拼出的路径用它：干净的字符串
- * 原样输出（与既有文案逐字一样），不是字符串、带控制字符或行分隔符、含受信前缀、或长过 max 的，
+ * 原样输出（与既有文案逐字一样），不是字符串、带控制字符、行分隔符或格式字符、含受信前缀、或长过 max 的，
  * 改用 quote。**磁盘上谁都写得进的值不用它**——干净的值不加引号，一句祈使句就能混进门禁的话里。
  */
 export function inline(value, { max = INLINE_MAX } = {}) {
-  if (typeof value === 'string' && value.length <= max && !UNCLEAN_RE.test(value) && !value.includes(TRUSTED_PREFIX)) {
+  if (
+    typeof value === 'string' &&
+    value.length <= max &&
+    !UNCLEAN_RE.test(value) &&
+    !HAS_HIDDEN_RE.test(value) &&
+    !value.includes(TRUSTED_PREFIX)
+  ) {
     return value
   }
   return quote(value, { max: Math.min(max, 120) })
 }
 
 /**
- * 要原样落盘的 JSON（触达表）用它：不能截断、不能改值，只换写法——几种 Unicode 行分隔符写成
+ * 要原样落盘的 JSON（触达表）用它：不能截断、不能改值，只换写法——几种 Unicode 行分隔符、格式字符与 DEL、C1 控制字符、变体选择符写成
  * \u 转义，受信前缀里的「账本回传」四个字也写成 \u 转义。结果仍是合法 JSON，解析出来与原值相同，
  * 但文本里不再有前缀的字面量。
  */
 export function safeJson(value, indent = 2) {
   const [head, tail] = [TRUSTED_PREFIX.slice(0, TRUSTED_PREFIX.length - 4), TRUSTED_PREFIX.slice(-4)]
   const escapedTail = [...tail].map((c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')).join('')
-  return escapeLineSeparators(JSON.stringify(value, null, indent)).split(TRUSTED_PREFIX).join(head + escapedTail)
+  return escapeHidden(JSON.stringify(value, null, indent)).split(TRUSTED_PREFIX).join(head + escapedTail)
 }

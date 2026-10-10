@@ -34,7 +34,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （门禁留痕的判读表、Claude Code 的下限），判据对着代码与 README 核。两份都是活的，直接改。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
 - `CHANGELOG.md` — 每一版一行，最新的在最上面。
-- `docs/13`…`docs/58` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/59` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，它 §5 排的六轮到 `docs/48` 做完；之后从 `docs/00-开放边界.md` 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -198,7 +198,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。
   那张表与理由在 `docs/27` §2.1，判据是 `tests/trusted-echo.test.mjs`——新拼一个外部值，它的入口清单跟着补。`quote` 太长的截成「头…尾」
   （头占上限的三分之二，`trusted.mjs` 的 `clip`，`docs/57`）：异常消息末尾的文件路径留得下；不是字符串的值截过之后整段再加一次引号（尾巴可能从
-  某个字符串的中间开始）。
+  某个字符串的中间开始）。看不见的字——格式字符（零宽、双向控制、BOM、标签字符……）、DEL 与 C1 控制字符、变体选择符——`quote` 与 `safeJson`
+  写成码点、`inline` 退到 `quote`（`escapeHidden`，`docs/59`）；trusted-echo 的 ⑥ 查所有输出里没有原样的，插件自己的「⚠️」扣掉再查。
 
 ## ⚠️ 注意事项 / 坑
 
