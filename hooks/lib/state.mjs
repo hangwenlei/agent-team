@@ -32,6 +32,52 @@ import { closedAt, lastStageId } from './closing.mjs'
 // SHA_RE 的单一真源在 contract-hash.mjs（M3s）。
 const RUN_ID_RE = /^\d{8}-\d{4}-[a-z0-9][a-z0-9-]*$/
 
+// M4t（docs/55，docs/18 §5、docs/32 §4）：state.json 的键——与 templates/state.json 逐项相同（tests/state-unknown-keys.test.mjs 钉着）。认不出的键门禁
+// 不读：拼成 trimed，整段裁掉不算数；拼成 stage_role，按段的判据退回整趟 roster——原来一声不吭，现在 validateState 报它。
+export const STATE_KEYS = [
+  'run_id',
+  'stage',
+  'contract_sha',
+  'roster',
+  'stage_roles',
+  'trimmed',
+  'artifacts',
+  'rework',
+  'rework_base',
+  'never_invoked',
+  'escalations',
+  'closed_at',
+  'history',
+]
+
+// 编辑距离（插入、删除、替换各算一步）。键名都很短，按行滚动的两行表就够。
+function editDistance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j)
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i]
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+    prev = cur
+  }
+  return prev[b.length]
+}
+
+// 认不出的键像哪个已知键：去掉下划线、连字符与空白，折成小写之后相同或只差一两步的那一个（取最近的）；都不像回 null，不瞎猜。
+function lookalikeKey(key) {
+  const squash = (s) => s.toLowerCase().replace(/[_\-\s]/g, '')
+  const k = squash(key)
+  if (!k) return null
+  let best = null
+  let bestDistance = 3
+  for (const known of STATE_KEYS) {
+    const d = editDistance(k, squash(known))
+    if (d < bestDistance) {
+      best = known
+      bestDistance = d
+    }
+  }
+  return best
+}
+
 export { REWORK_LIMIT }
 
 // 「返工计数是个合法的数」——H6 写时闸（hooks/lib/rework-guard.mjs 判据④）与下面
@@ -442,6 +488,16 @@ export function validateState(state, { stages, grants } = {}) {
         }
       }
     }
+  }
+
+  // M4t（docs/55）：认不出的键各报一行，像某个已知键的点出它。只报不拦（H6 不读这一条）。
+  for (const key of Object.keys(state)) {
+    if (STATE_KEYS.includes(key)) continue
+    const like = lookalikeKey(key)
+    p(
+      `认不出的键 ${quote(key)}：门禁不读它，它想写的那个字段等于没写——` +
+        (like ? `是不是 ${like}？` : `state.json 的键只有 ${STATE_KEYS.join('、')}。`),
+    )
   }
 
   // 上限按派生值判，不按写着的值：写着的值与派生值对不上由上面那一条报（改成派生值，H6 放行）；派生值越限只能问用户。

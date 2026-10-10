@@ -34,7 +34,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （门禁留痕的判读表、Claude Code 的下限），判据对着代码与 README 核。两份都是活的，直接改。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
 - `CHANGELOG.md` — 每一版一行，最新的在最上面。
-- `docs/13`…`docs/54` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/55` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，它 §5 排的六轮到 `docs/48` 做完；之后从 `docs/00-开放边界.md` 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -81,6 +81,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   按段拆开、同一个「叫到」口径，PM 在推进出那一段的同一次 Write 里记；`isStageDone` 的每一处调用、产者交代、at-qa/at-status/at-resume
   经 `hooks/lib/stages.mjs` 的 `participantsOf` 取（有字段、没这一段的键 = 还没记账 = 空集；没有字段的旧 run 退回 `roster`）。
   `compareArtifacts` 与 `decideReadiness` 仍传整趟 `roster`：当前段记账之前按段取是空集，前者漏报漂移、后者提前放行。理由在 `docs/32`。
+  `state.json` 里认不出的键（拼错的 `stage_roles`、`trimmed` 之类门禁不读）由 `validateState` 报、点出像的那一个，只报不拦；已知键的单一真源是
+  `hooks/lib/state.mjs` 的 `STATE_KEYS`，与模板逐项相同（`docs/55`）。
 - **返工轮靠回退那一刻的快照认上一轮的产物**：`state.json` 的 `rework_base`（`{ 产物名: sha 或 "accepted" }`）由回退那一次写入照磁盘记，
   之后到下一次回退为止原样带着；磁盘内容与它记的 sha 相同就是上一轮的，交没交、齐没齐的判据（`gate.mjs` 里 `isStageDone`、`decideDeliverable`、
   `decideReadiness` 的每一处调用，`tests/freshness-call-site.test.mjs` 钉着）都经 `hooks/lib/freshness.mjs`。接受原样要显式标 `"accepted"`，
