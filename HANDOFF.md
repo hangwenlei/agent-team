@@ -34,7 +34,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （门禁留痕的判读表、Claude Code 的下限），判据对着代码与 README 核。两份都是活的，直接改。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
 - `CHANGELOG.md` — 每一版一行，最新的在最上面。
-- `docs/13`…`docs/51` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/52` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，它 §5 排的六轮到 `docs/48` 做完；之后从 `docs/00-开放边界.md` 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -51,7 +51,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   「插件会加载的」清单的单一真源是 `scripts/lib/version-bump.mjs` 的 `PLUGIN_LOADED`）。main 没开分支保护，所以那是**事后**告警：
   先推功能分支、等 CI 全绿，再合进 main 推送。每挪一次，在 `CHANGELOG.md` 最上面加一行「- x.y.z：这一版改了什么」，版本检查核它；推 main、ci 的判据与
   版本检查都过了之后，`ci.yml` 的 `tag` 作业跑 `scripts/tag-release.mjs`：每一版打在 main 的 first-parent 历史上 `plugin.json` 第一次是它的提交（`v` 加版本号），
-  缺的都补上，已有的不挪。GITHUB_TOKEN 推不了指向「带着与 `main` 现在不同的工作流文件」的提交的 tag（推它等于创建或更新工作流）：那样的旧版作业
+  缺的都补上，已有的不挪；同一个作业接着给 3.3.1 起缺 GitHub Release 的各版建一条（`scripts/github-release.mjs`，与打 tag 同一份认法：tag 不在远端或指向
+  别处的不建、已有就不动、正文是 `CHANGELOG.md` 那一行，打 tag 那一步红了也跑；之前的各版不补，`docs/52`）。GITHUB_TOKEN 推不了指向「带着与 `main` 现在不同的工作流文件」的提交的 tag（推它等于创建或更新工作流）：那样的旧版作业
   补不上、会红，要有 `workflow` 权限的人在本地跑 `node scripts/tag-release.mjs --push`（不带 `--push` 只列不打）。M4l 起工作流的 push 只认分支，推 tag
   不触发 CI；M4l 之前的提交里的工作流不认这一条，一次推三个以内会起 CI。理由在 `docs/47` 与它的订正。
 - **`docs/11` §1–§4 原文一字不改，只追加 §5.x；带日期的实测记录正文不改，订正与收口写在旁边 —— 而且写在原话的标题底下**，只在新一节里指称它的收口，扫标题的人读不到。

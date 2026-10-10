@@ -46,6 +46,16 @@ export function latestChangelogVersion(text) {
   return m ? m[1] : null
 }
 
+/** CHANGELOG.md 里某一版那一行冒号后面的话（版本号整段比）；没有这一行给 null。GitHub Release 的正文用它（M4q，docs/52）。 */
+export function changelogEntry(text, version) {
+  if (typeof text !== 'string') return null
+  for (const line of text.split(/\r?\n/)) {
+    const m = CHANGELOG_LINE.exec(line)
+    if (m && m[1] === version) return m[2]
+  }
+  return null
+}
+
 function isPluginLoaded(path) {
   return PLUGIN_LOADED.some((p) => (p.endsWith('/') ? path.startsWith(p) : path === p))
 }

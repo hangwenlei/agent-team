@@ -10,24 +10,15 @@
 // docs/47 §0、§1.3 的订正，docs/48。
 
 import { execFileSync } from 'node:child_process'
-import { firstCommitPerVersion, planTags } from './lib/release.mjs'
+import { firstCommitPerVersion, planTags, pluginVersionEntries } from './lib/release.mjs'
 
 const push = process.argv.includes('--push')
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 const NL = String.fromCharCode(10)
 const TAB = String.fromCharCode(9)
 
-const shas = git('log', '--first-parent', '--reverse', '--format=%H', 'HEAD', '--', '.claude-plugin/plugin.json')
-  .split(NL)
-  .map((s) => s.trim())
-  .filter(Boolean)
-const entries = shas.map((sha) => {
-  let version = null
-  try {
-    version = JSON.parse(git('show', `${sha}:.claude-plugin/plugin.json`)).version
-  } catch {}
-  return { sha, version }
-})
+// first-parent 历史上改过 plugin.json 的提交与那一刻的版本（与 github-release.mjs 同一份认法，M4q 起抽进 lib）。
+const entries = pluginVersionEntries(git)
 
 // 远端已有的 tag：ls-remote 给出 refs/tags/x，附注 tag 另有一行 refs/tags/x^{}（剥开之后的提交）——取剥开之后的。
 const remote = new Map()
