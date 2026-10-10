@@ -284,6 +284,13 @@ const SCENARIOS = [
     calls: ({ run }) => [['ledger', posted('at-pm', join(run, 'state.json'))]],
   },
   {
+    // M4t（docs/55）：state.json 里认不出的键原样进【state.json】那一块。
+    name: 'validateState：state.json 里认不出的键是载荷',
+    disk: true,
+    state: (s, P) => ({ ...s, [P]: 1 }),
+    calls: ({ run }) => [['ledger', posted('at-pm', join(run, 'state.json'))]],
+  },
+  {
     name: 'validateState：stage 本身是载荷、history 末条合法',
     disk: true,
     state: (s, P) => ({ ...s, stage: P }),
