@@ -181,8 +181,9 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **契约第 1 节对着用户原话核**：`/agent-team:at` 带参数展开时（UserPromptExpansion，matcher 锚定 `^agent-team:at$`，从插件名来）记录器把原话、会话 id、
   那一刻已有的 run 记进项目一级的 `.agent-team/user-words.json`，不带参数的那一次清掉这个会话还挂着的那份。只在这个会话用 Write 建出一趟新 run 的
   `state.json` 的那一次（H6，写之前文件不在）绑进它的 run 目录——不晚绑（晚绑会跨会话绑错、回退到第一段时与契约基线卡死）；命令之前就有、没收口的
-  那一趟被写了（续跑）就作废，不论它自己带没带记录（`hooks/lib/user-words.mjs` 的 `bindDecision`，`gate.mjs` 的 `settleWords`；建 run 的那一次
-  run 目录还不在，先建它再写——真实会话里这一格坏过，`docs/58`）。第一段里写契约时
+  那一趟被写了（续跑）就作废，不论它自己带没带记录（`hooks/lib/user-words.mjs` 的 `bindDecision`，`gate.mjs` 的 `settleWords`；绑分两步：H6 只在项目一级那份
+  记 `binding`，同一次 Write 落盘之后账本才标 `bound`、写 run 目录那份，都只认项目经理——H6 那一刻 run 目录还不在、这次写入还可能被用户拒掉，
+  真实会话里这一格坏过，`docs/58`）。第一段里写契约时
   对不上说【契约】、【阶段】补句，推进出第一段时 H6 拒；比之前折空白、去格式字符（模型照抄不出不换行空格），整段引用块也认，按原话的行数往下认，
   对不上报码位。两份记录都是门禁专属（项目一级那份是唯一不在 `runs/<id>/` 下的，`PROJECT_GATE_FILES`）。记录器不拦任何东西、stdout 不写；失败时按
   `records` 说「原话没有记下」。理由在 `docs/50`（§9 是复核）。
@@ -224,7 +225,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   `claude rm` 只删 `~/.claude/jobs/<id>/`，转录不动。
 - 变异验证用 `cp` 备份与还原，不用 `git checkout` / `git restore`；备份放仓库外。
 - **夹具别比真实会话多做一步**：`docs/58` 那个 bug 就是因为子进程判据先建好了 run 目录、真实会话里项目经理直接 Write `runs/<id>/state.json`。
-  判一件「第一次」发生的事（建 run、写第一份文件），夹具照真实顺序造：门禁那一刻磁盘上还没有的，夹具也别先建出来。
+  判一件「第一次」发生的事（建 run、写第一份文件），夹具照真实顺序造：门禁那一刻磁盘上还没有的，夹具也别先建出来。PreToolUse 放行也不等于
+  落了盘（几道门禁并行、用户还能在权限确认里拒），要在落盘之后才成立的事放到同一次写入的 PostToolUse 上做。
 - 裸 `node --test`（仓库根，不带路径参数）；带路径参数会报出一个假的 `pass 0 / fail 1`。
 - 仓库里不要建 `scratchpad/`：它进了 `.gitignore`，但 `node --test` 照样递归收它下面的 `*.test.mjs`。
 - **绝不 `claude plugin enable` / `disable`**：`enable` 接管正在跑的会话，`disable` 不把工具面还回来。

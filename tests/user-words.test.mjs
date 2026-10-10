@@ -7,6 +7,7 @@ import { crashNotice } from '../hooks/lib/deny.mjs'
 import {
   USER_WORDS_FILE,
   bindDecision,
+  finishBinding,
   pendingRecord,
   readWords,
   section1Mismatch,
@@ -46,14 +47,31 @@ test('wordsOf：只认 /agent-team:at 这条命令展开、参数不是空白、
 
 test('readWords：读得出的记录；剥 BOM；形状不对回 null；runs_before 只留字符串，bound、dropped 不是字符串当 null', () => {
   const rec = pendingRecord({ at: '2026-10-07T00:00:00.000Z', sessionId: 's-1', args: '做一个待办应用', runsBefore: ['r0'] })
-  assert.deepEqual(rec, { at: '2026-10-07T00:00:00.000Z', session_id: 's-1', args: '做一个待办应用', runs_before: ['r0'], bound: null, dropped: null })
+  assert.deepEqual(rec, { at: '2026-10-07T00:00:00.000Z', session_id: 's-1', args: '做一个待办应用', runs_before: ['r0'], binding: null, bound: null, dropped: null })
   assert.deepEqual(readWords(Buffer.from(JSON.stringify(rec))), rec)
   assert.deepEqual(readWords(Buffer.from(BOM + JSON.stringify(rec))), rec)
-  assert.deepEqual(readWords(JSON.stringify({ ...rec, runs_before: ['r0', 3, null, 'r1'], bound: 5, dropped: [] })), { ...rec, runs_before: ['r0', 'r1'] })
+  assert.deepEqual(readWords(JSON.stringify({ ...rec, runs_before: ['r0', 3, null, 'r1'], binding: 7, bound: 5, dropped: [] })), { ...rec, runs_before: ['r0', 'r1'] })
+  assert.equal(readWords(JSON.stringify({ ...rec, binding: 'r1' })).binding, 'r1')
   assert.deepEqual(readWords(JSON.stringify({ ...rec, runs_before: 'r0' })), { ...rec, runs_before: [] })
   for (const bad of [null, '', '{', '[]', '"x"', JSON.stringify({ ...rec, args: '  ' }), JSON.stringify({ ...rec, args: 1 }), JSON.stringify({ ...rec, session_id: '' })]) {
     assert.equal(readWords(bad), null, String(bad))
   }
+})
+
+test('finishBinding（docs/58 §8）：binding 指着这一趟、同一个会话、还没绑也没作废才完成；binding 不挡下一次 bindDecision 改指', () => {
+  const same = (a, b) => a.toLowerCase() === b.toLowerCase()
+  const p = { ...pendingRecord({ at: 't', sessionId: 's-1', args: 'x', runsBefore: [] }), binding: 'r1' }
+  const ok = (over = {}, rec = p) => finishBinding(rec, { sessionId: 's-1', runId: 'r1', sameRun: same, ...over })
+  assert.equal(ok(), true)
+  assert.equal(ok({ runId: 'R1' }), true, '按 sameRun 比')
+  assert.equal(ok({ runId: 'r2' }), false)
+  assert.equal(ok({ sessionId: 's-2' }), false)
+  assert.equal(ok({ runId: '' }), false)
+  assert.equal(ok({}, { ...p, binding: null }), false)
+  assert.equal(ok({}, { ...p, bound: 'r1' }), false)
+  assert.equal(ok({}, { ...p, dropped: 'r0' }), false)
+  assert.equal(ok({}, null), false)
+  assert.equal(bindDecision(p, { sessionId: 's-1', runId: 'r2', sameRun: same, creating: true, firstStage: true, closed: false }), 'bind')
 })
 
 test('bindDecision：这个会话记下的、还没绑也没作废的——这个会话建出新的一趟（第一段）的那一次绑；记下之前就有的那一趟没收口就作废；别的一概不动', () => {
