@@ -10,7 +10,7 @@ import { dirname, resolve } from 'node:path'
 import { exoticPath, norm, underDir } from './path-norm.mjs'
 import { isControlFile } from './control-files.mjs'
 import { isContractWriter } from './contract-guard.mjs'
-import { stageRoles, expandProduces, isPlainObject, isStageChain } from './stages.mjs'
+import { stageRoles, expandProduces, isPlainObject, isStageChain, isRolePatternStage } from './stages.mjs'
 // 拒绝理由会被模型读到；角色名（hook 输入的 agent_type）、路径（tool_input）、project.json 的键与值
 // 一律过 inline / quote（M3s，docs/27）。
 import { inline, quote } from './trusted.mjs'
@@ -24,6 +24,22 @@ function ownProductsOf(stages, role) {
   const out = []
   for (const id of Object.keys(stages)) if (stageRoles(stages[id]).includes(role)) out.push(...expandProduces(stages[id], [role]))
   return out
+}
+
+// M4s（docs/54，docs/36 §5、docs/37 §5）：调用者是当前这一段的产者、这一段又不是执行段（交的是 run 目录里的规格，插件自带的链里是 S2 的 at-ui）
+// 时，叶子角色被拒的出路是把要落的写进这一段的产物——这一段不补 paths（/agent-team:at 的 S4 才照落盘清单补，执行段被拒时也补）。原来 H3 不知道
+// 当前段，一律给「由 PM 在 paths 里把它也列到你名下」。认不出这一段、调用者不是它的产者、这一段是执行段：回空串，照旧给原来的出路。stageId 来自
+// state.json，只在它是阶段链里的键时才用（拼进理由的是插件自己的段名与产物名）。
+function specStageWay(stages, stageId, role) {
+  if (!isStageChain(stages) || typeof stageId !== 'string' || !Object.hasOwn(stages, stageId)) return ''
+  const stage = stages[stageId]
+  if (isRolePatternStage(stage) || !stageRoles(stage).includes(role)) return ''
+  const own = expandProduces(stage, [role])
+  if (!own.length) return ''
+  return (
+    `这一段（${stageId}）你交的是 run 目录里的 ${own.join('、')}：要落的东西写进它们，这一段不为这个补 paths；` +
+    '确实要别的角色动的，写进去、冒泡给派你的上级。'
+  )
 }
 
 function underAny(target, prefixes, base) {
@@ -136,7 +152,7 @@ export function stageOwnerOfRunPath(stages, rd, target) {
   return null
 }
 
-export function decideWritePath({ role, filePath, project, runDir, stages, agentTeamDir, roster }) {
+export function decideWritePath({ role, filePath, project, runDir, stages, agentTeamDir, roster, stageId }) {
   if (typeof filePath !== 'string' || !filePath) return { decision: 'allow' }
   const who = inline(role)
   const fp = inline(filePath)
@@ -434,8 +450,9 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
         : '不要自己动它的文件，冒泡给派你的上级。'
     } else {
       way =
+        specStageWay(stages, stageId, role) ||
         '跨角色的改动要经上级协调，不要直接动别人的地盘。这份文件要是本来就该几个角色一起改（根级清单、构建配置、' +
-        '测试目录），冒泡给派你的上级，由 PM 在 .agent-team/project.json 的 paths 里把它也列到你名下（你写不了 project.json）。'
+          '测试目录），冒泡给派你的上级，由 PM 在 .agent-team/project.json 的 paths 里把它也列到你名下（你写不了 project.json）。'
     }
     return {
       decision: 'deny',
@@ -457,8 +474,9 @@ export function decideWritePath({ role, filePath, project, runDir, stages, agent
       // 第一轮复核：自己条目里「要改」档的前缀（不可见格式字符、首尾空白、反斜杠）原样引出来，读着像「认领了却说没人认领」。
       (own.fix.length ? `你的条目里还有要改的：${own.fix.slice(0, 3).join('；')}。` : '') +
       // 落到这里的只可能是有键的执行角色，它写不了 project.json（控制文件）。不拼 fixIt：没人认领也可能是这次
-      // 调用越界了，不一定是配置问题。
-      '确实要写这里，冒泡给派你的上级，由 PM 决定要不要在 .agent-team/project.json 的 paths 里把它划给某个角色' +
-      '（你写不了 project.json）。',
+      // 调用越界了，不一定是配置问题。M4s：规格段的产者照这一段给出路（specStageWay）。
+      (specStageWay(stages, stageId, role) ||
+        '确实要写这里，冒泡给派你的上级，由 PM 决定要不要在 .agent-team/project.json 的 paths 里把它划给某个角色' +
+          '（你写不了 project.json）。'),
   }
 }

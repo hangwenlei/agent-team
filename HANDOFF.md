@@ -34,7 +34,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （门禁留痕的判读表、Claude Code 的下限），判据对着代码与 README 核。两份都是活的，直接改。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
 - `CHANGELOG.md` — 每一版一行，最新的在最上面。
-- `docs/13`…`docs/53` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/54` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，它 §5 排的六轮到 `docs/48` 做完；之后从 `docs/00-开放边界.md` 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -104,7 +104,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   从 `PLUGIN_PREFIX` 派生。门禁按剥前缀的名字认 PM 不收紧。理由在 `docs/36`。
 - **根级文件共列，不加 `shared` 键**：根级清单、构建配置、顶层测试目录列给每个会改它们的 S5 产者；S3 的「落盘清单」与 S4「照清单补 `paths`」
   是对齐的那一步（加了 `shared` 也省不掉，前缀按字面比、S0 时文件还不存在）。S5 被拒的在实现记录里留「被写路径隔离拒绝」一节、标「已解决」，
-  PM、at-resume、at-qa 按它判交没交齐，执行段「齐了」时门禁提醒先读它（`IMPL_RECORD_NOTE`）。要改同一份文件的执行角色由架构师先后派，门禁不强制串行
+  PM、at-resume、at-qa 按它判交没交齐，执行段「齐了」时门禁提醒先读它（`IMPL_RECORD_NOTE`）。规格段的产者（S2 的 `at-ui`）被拒时，H3 与 H5b 按当前段给出路——写进这一段的产物、不补 `paths`
+  （`writepath.mjs` 的 `specStageWay`，`docs/54`）。要改同一份文件的执行角色由架构师先后派，门禁不强制串行
   （「还在跑」只能按停下行认，中断的子代理会让门禁一直拒；`tests/shared-worktree-prose.test.mjs` 钉着那一句）。理由在 `docs/36`、`docs/51` §1.2。
 - **冒泡的出口由门禁认，不改「交没交」**：H5b 在子代理已经被拦过一回（`stop_hook_active`）、最后一条回复的第一行以「冒泡：」开头时放它停下
   （`hooks/lib/deliverable.mjs` 的 `isBubbleStop`，标记的单一真源是 `BUBBLE_MARK`）；这一段的产物照旧算没交：下一段的前置（H2）与收口照常判缺、
