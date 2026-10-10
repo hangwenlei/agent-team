@@ -284,6 +284,20 @@ const SCENARIOS = [
     calls: ({ run }) => [['ledger', posted('at-pm', join(run, 'state.json'))]],
   },
   {
+    // M4u（docs/56 §8）：收口之后写 state.json 时的【派发】——这一趟派发记录里角色合法、段是载荷：段认不出，整条说成认不出的派发，载荷不进回传。
+    name: '这一趟收口之后，派发记录里的段（收口之后的【派发】）',
+    disk: true,
+    state: (s) => ({ ...s, stage: 'S8', closed_at: '2026-10-10T12:00:00Z', history: ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'].map((stage) => ({ stage, at: '2026-09-17T14:30:00Z' })) }),
+    calls: ({ run }, P) => {
+      writeFileSync(
+        join(run, 'dispatches.jsonl'),
+        JSON.stringify({ kind: 'dispatch', at: 't', agent_id: 'a0000000000000019', tool_use_id: null, role: 'at-backend', stage: P, caller: 'at-pm', caller_id: null, mode: 'background' }) + '\n',
+      )
+      return [['ledger', posted('at-pm', join(run, 'state.json'))]]
+    },
+    anchor: (all) => all.includes('这一趟收口了') && all.includes('一条认不出角色或段的派发'),
+  },
+  {
     // M4t（docs/55）：state.json 里认不出的键原样进【state.json】那一块。
     name: 'validateState：state.json 里认不出的键是载荷',
     disk: true,

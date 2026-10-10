@@ -262,10 +262,16 @@ function runStateOf(dir) {
 // 复核（docs/43 §8）：停下行按 agent_id 在所有 run 的派发记录里认——这一趟、收了口的也算（agent_id 本身唯一），见过它不是「拦」的停下就算停了。
 // state.json 读不出的那一趟照样列：判不出收没收口，宁可多报。
 // M4n（docs/49，审查第 24 条）：指针切走之后，那一趟的人停下时门禁按 agent_id 认回那一趟（停下行记回那一趟、不按这一趟核），说法跟着改。
-function inflightElsewhere(ctx) {
-  const logs = runLogs(ctx)
+// 门禁见过它不是「拦」的停下的 agent_id（所有 run 的派发记录里认）。【派发】的两处共用：写 current-run 时、收口之后写 state.json 时。
+function finishedAgents(logs) {
   const finished = new Set()
   for (const { log } of logs) for (const [agentId, outcomes] of log.stops) if (outcomes.some((o) => o !== 'block')) finished.add(agentId)
+  return finished
+}
+
+function inflightElsewhere(ctx) {
+  const logs = runLogs(ctx)
+  const finished = finishedAgents(logs)
   const roster = loadRoster()
   const out = []
   for (const { id, dir, log, current } of logs) {
@@ -279,6 +285,35 @@ function inflightElsewhere(ctx) {
     }
   }
   return out
+}
+
+// M4u（docs/56，docs/35 §5、docs/38 §2.7）：这一趟收口之后写 state.json 时，这一趟派发记录里门禁没见停下的派发（最后一回是「拦」的也算没停）。
+// 不拦收口：「还在跑」只能按停下行认，中断的子代理永远没有停下行，拦了就收不了口（docs/51 §1.2 同一个理由）——照实说，叫项目经理等、照实告诉用户。
+// 角色与段只在花名册、阶段链认得它们时说出来（派发记录 Bash 写得进）。
+function inflightHere(ctx) {
+  const logs = runLogs(ctx)
+  const here = logs.find((l) => l.current)
+  if (!here) return []
+  const finished = finishedAgents(logs)
+  const roster = loadRoster()
+  return here.log.dispatches
+    .filter((d) => !finished.has(d.agent_id))
+    .map((d) => {
+      const known = isPlainObject(roster) && Object.hasOwn(roster, d.role) && isKnownStage(ctx.stages, d.stage)
+      return { role: known ? d.role : null, stage: known ? d.stage : null }
+    })
+}
+
+// 复核（docs/56 §8）：不许诺完成通知会到（协调者派出去的人，交互模式下通知回到协调者），也不说「停下之后就不再列」——收口之后门禁不再记停下行
+// （recordStop、recordElsewhere 对收了口的那一趟都不记），这份名单不会变短。
+function closingInflightNotice(list) {
+  if (!list.length) return null
+  const lines = list.map((x) => `  - ${x.role ? `${x.role}（${x.stage}）` : '一条认不出角色或段的派发'}`)
+  return (
+    `【派发】这一趟收口了，下面这些派发门禁没见它们在收口之前停下：\n${lines.join('\n')}\n` +
+    '收口之后门禁不再核这一趟，也不再记它们停下（这份名单不会变短）：它们之后交的东西不计入这一趟，还在改的项目文件也没人核。' +
+    '向用户汇报时照实说这几个——可能还在跑，也可能早已中断（会话断过、被停掉、被平台的续跑上限放过）；它们那一份没算进这一趟。'
+  )
 }
 
 function inflightNotice(list) {
@@ -2434,6 +2469,11 @@ function main() {
       contractUnreadable: kind === 'state' && bytes === null && ctx.artifactExists(CONTRACT_FILE),
       dispatched: dispatchedNow,
     })
+    // M4u（docs/56）：这一趟已经收口时，列出门禁没见停下的派发（不拦，见 inflightHere）。
+    if (kind === 'state' && closedAt(ctx.state) !== null) {
+      const inflight = closingInflightNotice(inflightHere(ctx))
+      if (inflight) notices.push(inflight)
+    }
     // M4g（docs/42，审查第 28 条）：run 进行中 PM 补了 paths、照【触达表】重写 reach.json 时也核（没有 run 的那条缝在上面）。
     if (kind === 'reach') {
       const reachNotice = reachNoticeFor(filePath, ctx.project, isContractWriter(input.agent_type))
