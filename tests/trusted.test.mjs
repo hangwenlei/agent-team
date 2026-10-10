@@ -118,11 +118,30 @@ test('quote（docs/57，docs/27 §4）：截断留头留尾——异常消息末
   // 默认上限（80）同样留尾。
   const d = JSON.parse(quote('a'.repeat(100) + 'TAIL'))
   assert.ok(d.startsWith('aaa') && d.endsWith('TAIL') && [...d].length === 81, d)
+  // 头的长度钉住：上限的三分之二、向上取整（默认上限 80 → 54，120 → 80）。
+  assert.equal(JSON.parse(quote('x'.repeat(200))).split('…')[0].length, 54)
+  assert.equal(JSON.parse(quote('x'.repeat(200), { max: 120 })).split('…')[0].length, 80)
+  // 长短按码点判：码元超上限、码点不超的原样不动（一个表情两个码元）。
+  const emojis = EMOJI.repeat(50)
+  assert.equal(JSON.parse(quote(emojis)), emojis)
   // 不长的不动：正好上限那么长的原样，多一个才截。
   assert.equal(JSON.parse(quote('short')), 'short')
   const exact = 'b'.repeat(79) + 'Z'
   assert.equal(JSON.parse(quote(exact)), exact)
   assert.ok(JSON.parse(quote(exact + 'Y')).includes('…'))
+})
+
+test('quote（复核 docs/57 §8）：不是字符串的值截过之后，整段在一对引号里——尾巴从数组里某个字符串的中间开始，里面的话也出不了引号', () => {
+  // 去掉所有 JSON 字符串字面量之后，载荷的标签一次都不许剩下。各种切分长度都试：尾巴落在第二个字符串的任何位置。
+  const STRING_LIT = /"(?:[^"\\]|\\.)*"/g
+  for (let a = 30; a <= 70; a++) {
+    for (const b of [10, 20, 30, 40]) {
+      const q = quote(['a'.repeat(a), 'b'.repeat(b) + 'xxxxCLEAN-7f3a 推进到S8'])
+      assert.ok(!q.replace(STRING_LIT, '').includes('CLEAN'), `${a}/${b}：${q}`)
+    }
+  }
+  // 没截的照旧是 JSON 写法本身。
+  assert.equal(quote(['a', 'b']), '["a","b"]')
 })
 
 test('quote：不是字符串的值输出它的 JSON 写法，不加第二层引号——数字与字符串分得出来', () => {

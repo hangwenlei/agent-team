@@ -78,8 +78,11 @@ function jsonOf(value) {
 export function quote(value, { max = QUOTE_MAX } = {}) {
   const json = typeof value === 'string' ? null : jsonOf(value)
   const text = json ?? (typeof value === 'string' ? value : '（无法显示的值）')
-  const s = clip(text.split(TRUSTED_PREFIX).join('〔受信前缀已消去〕'), max)
-  return escapeLineSeparators(json === null ? JSON.stringify(s) : s)
+  const cleaned = text.split(TRUSTED_PREFIX).join('〔受信前缀已消去〕')
+  const s = clip(cleaned, max)
+  // 复核（docs/57 §8）：非字符串值的 JSON 写法截过之后就不是合法的 JSON 了——留尾时，尾巴可能从某个字符串的中间开始，里面的话落到引号外面。
+  // 截过的整段当成字符串再加一次引号；没截的照旧原样输出（数字与字符串分得出来）。
+  return escapeLineSeparators(json === null || s !== cleaned ? JSON.stringify(s) : s)
 }
 
 // 太长的按码点截成「头…尾」（M4v，docs/57，docs/27 §4）：原来只留头，异常消息末尾的文件路径、长路径的最后一段（正好是要紧的文件名）被截掉。
