@@ -1703,6 +1703,8 @@ function main() {
       stages: ctx.stages,
       agentTeamDir: ctx.agentTeamDir,
       roster: loadRoster(),
+      // M4s（docs/54）：叶子角色在规格段被拒时按这一段给出路。
+      stageId: ctx.state?.stage,
     })
     // M4i 复核（docs/44 §8，低-8）：主会话被设置或 --agent 换掉时（带 agent_type、不是项目经理、没有 agent_id），拒绝理由末尾说身份——
     // 它没有上级，「冒泡给上级」对它不成立；它第一次撞上的往往就是写控制文件这一下（selfCheckIdentity 对别的调用者返回空串）。

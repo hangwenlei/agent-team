@@ -195,6 +195,11 @@ export function isRolePatternStage(stage) {
   return isPlainObject(stage) && Array.isArray(stage.produces) && stage.produces.some((p) => typeof p === 'string' && p.includes('<role>'))
 }
 
+// M4s（docs/54）：这个角色在哪一段是执行段的产者（它有 paths、在别的段会被写路径隔离拒）。H5b 在规格段给它补「被拒了的写进这一段的产物」。
+export function producesInRolePatternStage(stages, role) {
+  return isStageChain(stages) && Object.values(stages).some((s) => isRolePatternStage(s) && stageRoles(s).includes(role))
+}
+
 // M4a（docs/35）：验证段——stages.json 里写着 "verifies": true 的段。它的产物是对上游当时那一版的结论（测试报告、验收报告、
 // 交付报告）：返工轮里上游可能已经变了，上一轮那份不再对应现在的东西，所以一律重新出，rework_base 里不许标 "accepted"。
 // 只认布尔 true——这是 H6 的判据，写成 "true" 或 1 的不算（stages.json 是插件自己的文件，判据钉着它的取值）。

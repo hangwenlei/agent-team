@@ -89,7 +89,7 @@
 // 一次，结果逐字等于 stage.produces 本身——这条改动对那些阶段是零行为差异
 // （tests/deliverable.test.mjs 现有各条据此必须仍然全绿，不改签名）。
 // 哪些阶段属于这一类，去 stages.json 看，不要在这里抄一份清单。
-import { expandProduces, isRolePatternStage, stageRoles } from './stages.mjs'
+import { expandProduces, isRolePatternStage, producesInRolePatternStage, stageRoles } from './stages.mjs'
 import { VERIFY_REDO_SELF, splitByAccept } from './freshness.mjs'
 
 // 「这个阶段 id 在不在阶段链里」。M3v（docs/30）起门禁自检的追加句与 unknown-stage 的修法（hooks/lib/fail-open.mjs）也要
@@ -127,6 +127,8 @@ export const BUBBLE_EXIT =
   '——门禁认这一行、放你停下；这一段的产物照旧算没交，上级读你的回复来定。已经这样写过、又被拦回来的，把那条回复原样再发一遍' +
   `再停下（第一行仍是「${BUBBLE_MARK}…」），只回一句「已冒泡」不算。`
 const IMPL_DENIAL_NOTE = '被写路径隔离拒了的，照你的正文把被拒的路径与拒绝原文写进实现记录的「被写路径隔离拒绝」一节——写了就能停。'
+// M4s（docs/54，docs/37 §5）：规格段里、也在执行段干活的角色（S2 的 at-ui）——被拒的出路是把要落的写进这一段的产物，与 H3 在这一段给的出路一致。
+const specDenialNote = (own) => `被写路径隔离拒了的，这一段不为这个补 paths：要落的东西写进 ${own.join('、')}——写了就能停。`
 
 export function isBubbleStop({ stopHookActive, lastMessage } = {}) {
   if (stopHookActive !== true) return false
@@ -184,7 +186,11 @@ export function decideDeliverable({ role, stageId, stages, artifactExists, artif
   // 一层两条分支永远同时成立或同时不成立的判断，删掉任何一层都测不出行为差异
   // （Task 5 的教训：变异测试要能证明每一层都必要）。
   if (missing.length === 0 && stale.length === 0 && blank.length === 0) return { ok: true }
-  const denial = isRolePatternStage(stage) ? IMPL_DENIAL_NOTE : ''
+  const denial = isRolePatternStage(stage)
+    ? IMPL_DENIAL_NOTE
+    : producesInRolePatternStage(stages, role)
+      ? specDenialNote(produces)
+      : ''
   const gone = [missing.length ? `${missing.join('、')} 还没有写到磁盘上` : '', blank.length ? `${blank.join('、')} 是空文件` : '']
     .filter(Boolean)
     .join('，')
