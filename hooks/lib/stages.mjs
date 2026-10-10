@@ -209,7 +209,7 @@ export function isVerifyStage(stage) {
 
 /** M4y（docs/60）：这个角色是哪一个验证段的产者（阶段链上第一个），不是回 null。H2 派它之前核契约的账。 */
 export function verifyStageOf(stages, role) {
-  if (!isStageChain(stages) || typeof role !== 'string') return null
+  if (!isStageChain(stages)) return null
   for (const id of Object.keys(stages)) {
     if (isVerifyStage(stages[id]) && stageRoles(stages[id]).includes(role)) return id
   }

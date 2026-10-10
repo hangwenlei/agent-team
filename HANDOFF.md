@@ -117,7 +117,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （前台派发跑完时 H5a、后台完成时完成核验）读同一个标记（`bubbleReason`，M4d）。理由在 `docs/37`、`docs/38`。
 - **契约的账只认 `contract_sha`**：账本比对不看契约（`compareArtifacts` 排除 `CONTRACT_FILE`）；派发返回（H5a）与 PM 写 `state.json` 时拿
   `contract_sha` 比磁盘，对不上出【契约】——不报磁盘上算出来的值、不说「改成与磁盘一致」（照着磁盘改账就把漂移洗成了合法），合法修订的新值
-  只从写契约那一次的回传来。H2 派验证段的产者（`stages.mjs` 的 `verifyStageOf`，按 `verifies` 派生）之前也比一遍，对不上就拒、出路是同一句【契约】
+  只从写契约那一次的回传来。H2 派验证段的产者（`stages.mjs` 的 `verifyStageOf`，按 `verifies` 派生，只核花名册里派得到的）之前也比一遍，排在 H2 最后，对不上就拒、出路是同一句【契约】
   （`gate.mjs` 的 `contractCmp`，派发返回的【契约】与它共用；读不出契约不拦、留痕，`docs/60`）。升级类别从 `ESCALATION_KINDS` 派生、正文不报总数。理由在 `docs/37`。
 - **推进由 H6 在推进那一次核：一次只推一段、离开的那一段要交齐**（`hooks/lib/advance.mjs`，在 `rework-guard.mjs` 的 `decideReworkBase` 里接上）：
   叫到的产者各自那几份、固定产物都在，空白算没交，`"accepted"` 算交了；「叫到」= 写入前后的 `participantsOf` 并上门禁的派发记录（PM 少记一个人、

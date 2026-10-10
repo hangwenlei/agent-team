@@ -1618,24 +1618,6 @@ function main() {
       atPath: join(ROOT, 'commands', 'at.md'),
     })
     if (closedRd.decision === 'deny') denyAndExit(closedRd.reason, spec.event)
-    // M4y（docs/60）：派验证段的产者（stages.json 里 verifies: true 的段）之前核契约的账——contract_sha 与磁盘上的契约对不上，拒。它对着契约验，
-    // 账没对上时验的是哪一份说不清；结论出来之后再处理账，那份结论对着的可能正是一份要恢复原样的契约（恢复之后没有修订块，契约基线不叫它重出）。
-    // 出路是【契约】那一句（contractCheckNotice，写 state.json、派发返回时同一句）；契约这一次读不出（被占着）不拦、留痕。
-    const verifyStage = verifyStageOf(ctx.stages, target)
-    if (verifyStage) {
-      const cmp = contractCmp(ctx)
-      if (cmp.kind === 'unreadable') {
-        process.stderr.write(`agent-team H2 就绪门禁：这一次读不出 ${CONTRACT_FILE}，派 ${target} 之前没核契约的账。\n`)
-      } else {
-        const notice = contractCheckNotice(cmp, ctx.state?.contract_sha)
-        if (notice) {
-          denyAndExit(
-            `agent-team H2 就绪门禁：${target} 是 ${verifyStage} 的产者，对着契约验——契约的账对上之前不派它。${notice}处理完再派 ${target}。`,
-            spec.event,
-          )
-        }
-      }
-    }
     const caller = callerOf(input)
     const reach = computeReach({ roster: loadRoster(), paths: {} })
     // M3y（docs/33，全量审查第 15 条）：「齐了没」与「前置在不在」按 freshness 判——返工轮里磁盘内容与 rework_base 记的 sha
@@ -1679,6 +1661,26 @@ function main() {
       callerCanWriteState: isContractWriter(input?.agent_type),
     })
     if (rd.decision === 'deny') denyAndExit(rd.reason, spec.event)
+
+    // M4y（docs/60）：派验证段的产者（stages.json 里 verifies: true 的段）之前核契约的账——contract_sha 与磁盘上的契约对不上，拒。它对着契约验，
+    // 账没对上时验的是哪一份说不清；结论出来之后再处理账，那份结论对着的可能正是一份要恢复原样的契约（恢复之后没有修订块，契约基线不叫它重出）。
+    // 出路是【契约】那一句（contractCheckNotice，写 state.json、派发返回时同一句）；契约这一次读不出（被占着）不拦、留痕。
+    // 复核（docs/60 §8）：排在最后——收口、别的一趟、前置、重做那几条的出路先走，先处理账、处理完照样派不出去的不说「再派」；只核花名册里派得到的角色
+    // （项目经理是最后一段的产者，没人派得到它）；调用者写不了 state.json 时给转给 PM 的那一版（与派发返回的【契约】同一个分支）。
+    const verifyStage = verifyStageOf(ctx.stages, target)
+    const dispatchable = Object.values(roster).some((v) => isPlainObject(v) && Array.isArray(v.can_delegate_to) && v.can_delegate_to.includes(target))
+    if (verifyStage && dispatchable) {
+      const cmp = contractCmp(ctx)
+      if (cmp.kind === 'unreadable') {
+        process.stderr.write(`agent-team H2 就绪门禁：这一次读不出 ${CONTRACT_FILE}，派 ${target} 之前没核契约的账。\n`)
+      } else {
+        const notice = contractCheckNotice(cmp, ctx.state?.contract_sha)
+        if (notice) {
+          const head = `agent-team H2 就绪门禁：${target} 是 ${verifyStage} 的产者，对着契约验——契约的账对上之前不派它。`
+          denyAndExit(isContractWriter(input?.agent_type) ? `${head}${notice}处理完再派 ${target}。` : head + contractNoticeFor(ctx, false), spec.event)
+        }
+      }
+    }
   }
 
   if (CHECK === 'writepath') {

@@ -5,7 +5,7 @@
 // 出路照用【契约】那一句（写 state.json、派发返回时同一句，hooks/lib/ledger.mjs 的 contractCheckNotice）；不报磁盘上算出来的值。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmodSync, cpSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, decisionOf } from './helpers/gate-runner.mjs'
@@ -17,7 +17,7 @@ const OTHER_SHA = 'sha256:' + 'b'.repeat(64)
 const dispatch = (target, caller = 'agent-team:at-pm') => ({
   hook_event_name: 'PreToolUse',
   tool_name: 'Agent',
-  agent_type: caller,
+  ...(caller === null ? {} : { agent_type: caller }),
   tool_input: { subagent_type: target, prompt: 'x' },
 })
 const S6_READY = ['00-contract.md', '01-prd.md', '03-arch.md', '04-dispatch.md']
@@ -25,7 +25,7 @@ const S7_READY = [...S6_READY, '06-test.md']
 
 // 造一趟 run：artifacts 里的文件都在；contract 是 'match'（记的就是磁盘上的）、'drift'（记的是别的合法值）、'pending'、'invalid'、
 // 'missing'（记着值、契约不在）、'unstarted'（PENDING、契约不在）。
-function withRun({ stage, artifacts, contract }, body, gate = undefined) {
+function withRun({ stage, artifacts, contract, tweak = (s) => s }, body, gate = undefined) {
   const files = contract === 'missing' || contract === 'unstarted' ? artifacts.filter((a) => a !== '00-contract.md') : artifacts
   const dirs = makeRun({ runId: 'r1', stage, artifacts: files })
   try {
@@ -34,8 +34,8 @@ function withRun({ stage, artifacts, contract }, body, gate = undefined) {
     const state = JSON.parse(readFileSync(statePath, 'utf8'))
     const disk = files.includes('00-contract.md') ? sha256OfContract(readFileSync(join(runDir, '00-contract.md'))) : null
     state.contract_sha = { match: disk, drift: OTHER_SHA, pending: 'PENDING', invalid: 'not-a-sha', missing: OTHER_SHA, unstarted: 'PENDING' }[contract]
-    writeFileSync(statePath, JSON.stringify(state))
-    return body({ ...dirs, disk, gate })
+    writeFileSync(statePath, JSON.stringify(tweak(state)))
+    return body({ ...dirs, runDir, disk, gate })
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })
@@ -135,6 +135,8 @@ test('verifyStageOf（docs/60）：验证段的产者回那一段（链上第一
   assert.equal(verifyStageOf(stages, 'at-acceptance'), 'S7')
   for (const role of ['at-product', 'at-architect', 'at-backend']) assert.equal(verifyStageOf(stages, role), null, role)
   assert.equal(verifyStageOf(null, 'at-qa'), null)
+  // 阶段链形状坏了（有一段不是对象）：不判——与同文件别的辅助函数同一个口径。
+  assert.equal(verifyStageOf({ S6: { role: 'at-qa', produces: ['06-test.md'], verifies: true }, S7: 'broken' }, 'at-qa'), null)
   assert.equal(verifyStageOf(stages, { toString: 1 }), null)
   const custom = { A: { producers: ['x', 'y'], produces: ['a.md'], verifies: true }, B: { role: 'y', produces: ['b.md'], verifies: true } }
   assert.equal(verifyStageOf(custom, 'y'), 'A', '链上第一个')
@@ -160,5 +162,82 @@ test('H2（docs/60）：契约在却读不出——不拦，stderr 说这一次�
     } finally {
       chmodSync(p, 0o644)
     }
+  })
+})
+
+// ——— 复核（docs/60 §8） ———
+
+test('H2（复核 docs/60 §8）：顺序——收口、前置、重做那几条先说；账对不上时也不许诺一条走不通的「处理完再派」', () => {
+  const S8_FILES = [...S7_READY, '07-acceptance.md']
+  // 已收口：收口那一句。
+  withRun({ stage: 'S8', artifacts: S8_FILES, contract: 'drift', tweak: (s) => ({ ...s, closed_at: '2026-10-10T12:00:00Z' }) }, (dirs) => {
+    const { d } = decide(dirs, 'agent-team:at-qa')
+    assert.equal(d?.permissionDecision, 'deny')
+    assert.ok(d.permissionDecisionReason.includes('收口') && !d.permissionDecisionReason.includes('处理完再派'), d.permissionDecisionReason)
+  })
+  // 前置缺：前置那一句。
+  withRun({ stage: 'S6', artifacts: S6_READY.filter((a) => a !== '04-dispatch.md'), contract: 'drift' }, (dirs) => {
+    const { d } = decide(dirs, 'agent-team:at-qa')
+    assert.equal(d?.permissionDecision, 'deny')
+    assert.ok(d.permissionDecisionReason.includes('04-dispatch.md') && !d.permissionDecisionReason.includes('处理完再派'), d.permissionDecisionReason)
+  })
+  // 这一轮已经交过、不记回退就重派：重做那一句（先处理账、处理完照样派不出去）。
+  withRun({ stage: 'S8', artifacts: S8_FILES, contract: 'drift' }, (dirs) => {
+    const test06 = sha256OfContract(readFileSync(join(dirs.runDir, '06-test.md')))
+    writeFileSync(join(dirs.runDir, 'delivered.json'), JSON.stringify({ stage: 'S8', products: { '06-test.md': test06 } }))
+    const { d } = decide(dirs, 'agent-team:at-qa')
+    assert.equal(d?.permissionDecision, 'deny')
+    assert.ok(!d.permissionDecisionReason.includes('处理完再派'), d.permissionDecisionReason)
+  })
+})
+
+test('H2（复核 docs/60 §8）：顺序——派它的是别的一趟的人：说那一趟不是当前 run，不说契约的账', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5' })
+  try {
+    const at = join(dirs.projectDir, '.agent-team')
+    const r2 = join(at, 'runs', 'r2')
+    mkdirSync(r2, { recursive: true })
+    for (const f of S6_READY) writeFileSync(join(r2, f), `fixture ${f}\n`)
+    const st = JSON.parse(readFileSync(join(at, 'runs', 'r1', 'state.json'), 'utf8'))
+    writeFileSync(join(r2, 'state.json'), JSON.stringify({ ...st, run_id: 'r2', stage: 'S6', contract_sha: OTHER_SHA, history: [{ stage: 'S6', at: '2026-10-10T12:00:00Z' }] }))
+    // r1 的项目经理派出过一个架构师（门禁的派发记录记在 r1），之后指针切到 r2。
+    const launched = { hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_use_id: 'toolu_01AAAA', tool_input: { subagent_type: 'agent-team:at-architect', description: 'x', prompt: 'y' }, tool_response: { isAsync: true, status: 'async_launched', agentId: 'a0000000000000601', description: 'x', prompt: 'y' } }
+    run('deliverable', launched, undefined, dirs.projectDir)
+    writeFileSync(join(at, 'current-run'), 'r2')
+    const input = { ...dispatch('agent-team:at-qa', 'agent-team:at-architect'), agent_id: 'a0000000000000601' }
+    const d = decisionOf(run('readiness', input, undefined, dirs.projectDir).stdout)
+    assert.equal(d?.permissionDecision, 'deny')
+    assert.ok(d.permissionDecisionReason.includes('不是当前 run') && !d.permissionDecisionReason.includes('【契约】'), d.permissionDecisionReason)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('H2（复核 docs/60 §8）：主线程（没有 agent_type）派、裸名、S5 提前派 at-qa——账对不上照样拒', () => {
+  withRun({ stage: 'S6', artifacts: S6_READY, contract: 'drift' }, (dirs) => {
+    for (const [target, caller] of [['agent-team:at-qa', null], ['at-qa', 'agent-team:at-pm']]) {
+      const { d } = decide(dirs, target, caller)
+      assert.equal(d?.permissionDecision, 'deny', `${target} / ${caller}`)
+      assert.ok(d.permissionDecisionReason.includes('处理完再派 at-qa'), d.permissionDecisionReason)
+    }
+  })
+  withRun({ stage: 'S5', artifacts: S6_READY, contract: 'drift' }, (dirs) => {
+    const { d } = decide(dirs, 'agent-team:at-qa')
+    assert.equal(d?.permissionDecision, 'deny', 'S5 提前派')
+    assert.ok(d.permissionDecisionReason.includes('处理完再派'), d.permissionDecisionReason)
+  })
+})
+
+test('H2（复核 docs/60 §8）：调用者写不了 state.json——给转给 PM 的那一版，不许诺「处理完再派」；派项目经理（没人派得到它）不在这里说契约的账', () => {
+  withRun({ stage: 'S6', artifacts: S6_READY, contract: 'drift' }, (dirs) => {
+    const { d } = decide(dirs, 'agent-team:at-qa', 'agent-team:at-architect')
+    assert.equal(d?.permissionDecision, 'deny')
+    assert.ok(d.permissionDecisionReason.includes('【契约】') && d.permissionDecisionReason.includes('这一条你改不了'), d.permissionDecisionReason)
+    assert.ok(!d.permissionDecisionReason.includes('处理完再派'), d.permissionDecisionReason)
+  })
+  withRun({ stage: 'S4', artifacts: ['00-contract.md', '01-prd.md', '03-arch.md'], contract: 'drift' }, (dirs) => {
+    const { d } = decide(dirs, 'agent-team:at-pm')
+    assert.ok(d === null || !d.permissionDecisionReason.includes('【契约】'), JSON.stringify(d))
   })
 })
