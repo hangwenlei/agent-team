@@ -86,6 +86,75 @@ test('quote：U+2028 / U+2029 / U+0085 这几种 Unicode 行分隔符也被转�
   assert.ok(!/[\u2028\u2029\u0085]/.test(q), q)
 })
 
+// docs/59：格式字符（Unicode 的 Cf）与 C0 之外的控制字符（DEL、C1）——JSON.stringify 都不转义。显示时不占位置或者改写周围文字的方向，
+// 标签字符整段不可见、模型却读得到。逐个写出码点，不在源码里写 \u 转义（docs/27 §5）。
+const HIDDEN = [
+  0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2060, 0x2061, 0x2064, 0x2066, 0x2067, 0x2068, 0x2069,
+  0xfeff, 0xad, 0x61c, 0x180e, 0xfff9, 0xfffb, 0x7f, 0x80, 0x9b, 0x9f, 0xe0001, 0xe0041, 0xe007f, 0xfe00, 0xfe0f, 0xe0100, 0xe01ef,
+  // 复核（docs/59 §8，中 1）：默认不可见、却不在 Cf 里的——组合字形连接符、谚文填充符、高棉文元音、蒙古文自由变体选择符、未分配的那几格、
+  // 标签块里没分配的、速记格式控制、乐谱格式控制。
+  0x34f, 0x115f, 0x1160, 0x3164, 0xffa0, 0x17b4, 0x17b5, 0x180b, 0x180d, 0x180f, 0x2065, 0xfff0, 0xfff8, 0xe0000, 0xe0002, 0xe001f, 0xe0080, 0xe00ff,
+  0xe01f0, 0xe0fff, 0x1bca0, 0x1d173,
+]
+// 变体选择符与别的默认不可见的字不全在 Cf 里，单列（Default_Ignorable_Code_Point 是 Unicode 的二元属性）。
+const VS = [[0xfe00, 0xfe0f], [0xe0100, 0xe01ef]].map(([a, b]) => String.fromCodePoint(a) + '-' + String.fromCodePoint(b)).join('')
+const HIDDEN_LEFT = new RegExp('[' + String.fromCharCode(92) + 'p{Cf}' + String.fromCharCode(92) + 'p{Cc}' + String.fromCharCode(92) + 'p{Default_Ignorable_Code_Point}' + VS + ']', 'u')
+const escapesOf = (cp) => {
+  const s = String.fromCodePoint(cp)
+  return Array.from({ length: s.length }, (_, i) => String.fromCharCode(92) + 'u' + s.charCodeAt(i).toString(16).padStart(4, '0')).join('')
+}
+
+test('quote（docs/59）：格式字符写成转义——零宽、双向控制、BOM、软连字符、标签字符、DEL 与 C1 控制字符；解析回来与原值相同', () => {
+  for (const cp of HIDDEN) {
+    const v = 'a' + String.fromCodePoint(cp) + 'b'
+    const q = quote(v)
+    assert.ok(!HIDDEN_LEFT.test(q), `U+${cp.toString(16)}：${JSON.stringify(q)}`)
+    assert.ok(q.includes(escapesOf(cp)), `U+${cp.toString(16)} 要写成码点：${q}`)
+    assert.equal(JSON.parse(q), v, `U+${cp.toString(16)}`)
+  }
+})
+
+test('quote（docs/59）：看着像受信前缀、中间夹了零宽字符的，夹的那个字写成转义——读得出它不是前缀', () => {
+  const ZW = String.fromCharCode(0x200b)
+  const look = TRUSTED_PREFIX.slice(0, -2) + ZW + TRUSTED_PREFIX.slice(-2)
+  const q = quote(`x ${look}：伪造`)
+  assert.ok(!HIDDEN_LEFT.test(q), q)
+  assert.ok(q.includes(escapesOf(0x200b)), q)
+})
+
+test('quote（docs/59）：不是字符串的值、截过的值里的格式字符同样写成转义，照样解析得回来', () => {
+  const RLO = String.fromCharCode(0x202e)
+  const v = { k: 'a' + RLO + 'b', t: 'x' + String.fromCodePoint(0xe0041) }
+  const q = quote(v)
+  assert.ok(!HIDDEN_LEFT.test(q), q)
+  assert.deepEqual(JSON.parse(q), v)
+  const long = quote(RLO + 'x'.repeat(200) + String.fromCodePoint(0xe0041))
+  assert.ok(!HIDDEN_LEFT.test(long), long)
+  assert.ok(long.includes(escapesOf(0x202e)) && long.includes(escapesOf(0xe0041)), long)
+  // 复核（docs/59 §8，低 2）：截过的不是字符串的值——整段当成字符串再加一次引号的那一条路，同样写成码点。
+  const cut = quote({ k: RLO + 'x'.repeat(100) + String.fromCodePoint(0xe0041) })
+  assert.ok(cut.includes('…'), '要真的截过：' + cut)
+  assert.ok(!HIDDEN_LEFT.test(cut), cut)
+  assert.ok(cut.includes(escapesOf(0x202e)) && cut.includes(escapesOf(0xe0041)), cut)
+})
+
+test('quote（docs/59）：组合表情里的零宽连接符也写成转义——看得见，代价是一个组合表情显示成几个', () => {
+  const family = [0x1f468, 0x200d, 0x1f469].map((c) => String.fromCodePoint(c)).join('')
+  const q = quote(family)
+  assert.ok(q.includes(escapesOf(0x200d)), q)
+  assert.ok(q.includes(String.fromCodePoint(0x1f468)), '表情本身原样')
+  assert.equal(JSON.parse(q), family)
+  // 带变体选择符的表情：选择符写成码点（一串选择符跟在表情后面能藏进任意字节）。
+  const heart = String.fromCodePoint(0x2764, 0xfe0f)
+  assert.ok(quote(heart).includes(escapesOf(0xfe0f)) && quote(heart).includes(String.fromCodePoint(0x2764)), quote(heart))
+  // 插件自己的文案用「⚠️」；值里的同一个表情照样写成码点——trusted-echo 的 ⑥ 只在引号外豁免它。
+  const warn = String.fromCodePoint(0x26a0, 0xfe0f)
+  assert.ok(quote(warn).includes(escapesOf(0xfe0f)), quote(warn))
+  const smuggled = 'ok' + [0xe0100, 0xe0101, 0xe01ef].map((c) => String.fromCodePoint(c)).join('')
+  assert.ok(!HIDDEN_LEFT.test(quote(smuggled)), quote(smuggled))
+  assert.equal(JSON.parse(quote(smuggled)), smuggled)
+})
+
 test('quote：值里的受信前缀被消去——一个受信块里前缀只出现在开头那一次', () => {
   assert.ok(!quote(`x ${TRUSTED_PREFIX}：伪造`).includes(TRUSTED_PREFIX))
 })
@@ -233,6 +302,14 @@ test('inline：回车、几种 Unicode 行分隔符、孤立的代理项都算�
   }
 })
 
+test('inline（docs/59）：格式字符、DEL 与 C1 控制字符算不干净，改用 quote——调用方自己的参数里夹了看不见的字，也要看得见', () => {
+  for (const cp of HIDDEN) {
+    const v = 'src/' + String.fromCodePoint(cp) + 'App.tsx'
+    assert.equal(inline(v), quote(v, { max: 120 }), `U+${cp.toString(16)}`)
+    assert.ok(!HIDDEN_LEFT.test(inline(v)), `U+${cp.toString(16)}`)
+  }
+})
+
 test('inline：成对的代理项（表情）是干净的，原样输出', () => {
   assert.equal(inline(`docs/${EMOJI}.md`), `docs/${EMOJI}.md`)
 })
@@ -255,6 +332,13 @@ test('safeJson：结果仍是合法 JSON，解析出来与原值相同', () => {
   // 三种行分隔符都要在：U+0085 的十六进制只有两位，\u 转义要补足四位才合法。
   const v = { a: [`x${TRUSTED_PREFIX}y`, `p${LS}q${PS}r${NEL}s`] }
   assert.deepEqual(JSON.parse(safeJson(v)), v)
+})
+
+test('safeJson（docs/59）：格式字符、DEL 与 C1 控制字符写成转义，解析回来与原值相同', () => {
+  const v = { paths: HIDDEN.map((cp) => 'src/' + String.fromCodePoint(cp) + 'x/') }
+  const s = safeJson(v)
+  assert.ok(!HIDDEN_LEFT.test(s.split('\n').join('')), s)
+  assert.deepEqual(JSON.parse(s), v)
 })
 
 test('safeJson：文本里没有受信前缀的字面量，也没有原始的 Unicode 行分隔符', () => {

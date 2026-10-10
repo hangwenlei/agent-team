@@ -33,8 +33,9 @@ export const AT_COMMAND = `${PLUGIN_PREFIX}at`
 const BOM = String.fromCharCode(0xfeff)
 const BS = String.fromCharCode(92)
 const TAB = String.fromCharCode(9)
-// 格式字符（零宽空格与连接符、双向控制、软连字符、BOM……）：看不见，模型照抄时留不留没准。
-const FORMAT_RE = new RegExp(BS + 'p{Cf}', 'gu')
+// 格式字符（零宽空格与连接符、双向控制、软连字符、BOM……）与别的默认不可见的字（变体选择符、组合字形连接符、谚文填充符……）：看不见，
+// 模型照抄时留不留没准——表情后面的 U+FE0F 尤其常见（复核 docs/59 §8）。
+const FORMAT_RE = new RegExp('[' + BS + 'p{Cf}' + BS + 'p{Default_Ignorable_Code_Point}]', 'gu')
 // 空白：制表符与 Unicode 的空格分隔符（不换行空格、全角空格、窄空格……），连续几个算一个。
 const SPACES_RE = new RegExp('[' + TAB + BS + 'p{Zs}]+', 'gu')
 
@@ -193,18 +194,22 @@ export function section1Mismatch(contractText, args) {
   return out
 }
 
-/** 对不上的那一句（H6 的拒绝理由、写契约时的【契约】、【阶段】的补句共用）。原话与契约里的行都是磁盘上的值，过 quote。 */
+/**
+ * 对不上的那一句（H6 的拒绝理由、写契约时的【契约】、【阶段】的补句共用）。原话与契约里的行都是磁盘上的值，过 quote。
+ * 引之前去掉比对时本来就不计的那些看不见的字（复核 docs/59 §8）：quote 会把它们写成码点转义，照抄进第 1 节就成了几个可见的字，反倒对不上。
+ */
 export function wordsMismatchText(m) {
+  const shown = (s) => quote(typeof s === 'string' ? s.replace(FORMAT_RE, '') : s)
   const head =
     '契约第 1 节对不上用户在 /agent-team:at 后面写的原话（门禁在用户发出那条命令时记下了它，原样在这一趟 run 目录的 ' +
     `${USER_WORDS_FILE} 里，args 那一项）：`
   if (!m || m.kind === 'no-section') return head + '契约里切不出第 1 节（「## 1. 用户原话」那一行）'
-  if (m.kind === 'short') return head + `第 1 节到第 ${m.line} 行就没了，原话从这一行起还有 ${quote(m.want)} 等`
-  if (m.kind === 'extra') return head + `原话之后、下一个编号节标题之前还多出一行 ${quote(m.got)}`
+  if (m.kind === 'short') return head + `第 1 节到第 ${m.line} 行就没了，原话从这一行起还有 ${shown(m.want)} 等`
+  if (m.kind === 'extra') return head + `原话之后、下一个编号节标题之前还多出一行 ${shown(m.got)}`
   const where = typeof m.col === 'number' ? `（从第 ${m.col} 个字起不一样：原话是 ${m.wantCode}，这里是 ${m.gotCode}）` : ''
-  return head + `第 1 节第 ${m.line} 行应是 ${quote(m.want)}，现在是 ${quote(m.got)}${where}`
+  return head + `第 1 节第 ${m.line} 行应是 ${shown(m.want)}，现在是 ${shown(m.got)}${where}`
 }
 
 export const WORDS_FIX =
-  '照那段话逐字抄进第 1 节（行尾空白不计，空白的写法不计，整段写成引用块也认），你的理解写第 2 节；用户在那条命令之后改了需求的，修订写进第 4 节' +
+  '照那段话逐字抄进第 1 节（行尾空白不计，空白的写法不计，零宽字符、变体选择符这类看不见的字不计，整段写成引用块也认），你的理解写第 2 节；用户在那条命令之后改了需求的，修订写进第 4 节' +
   '「修订记录」，第 1 节照原话留着'

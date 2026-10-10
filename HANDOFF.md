@@ -34,7 +34,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （门禁留痕的判读表、Claude Code 的下限），判据对着代码与 README 核。两份都是活的，直接改。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
 - `CHANGELOG.md` — 每一版一行，最新的在最上面。
-- `docs/13`…`docs/58` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/59` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，它 §5 排的六轮到 `docs/48` 做完；之后从 `docs/00-开放边界.md` 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -184,7 +184,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   那一趟被写了（续跑）就作废，不论它自己带没带记录（`hooks/lib/user-words.mjs` 的 `bindDecision`，`gate.mjs` 的 `settleWords`；绑分两步：H6 只在项目一级那份
   记 `binding`，同一次 Write 落盘之后账本才标 `bound`、写 run 目录那份，都只认项目经理——H6 那一刻 run 目录还不在、这次写入还可能被用户拒掉，
   真实会话里这一格坏过，`docs/58`）。第一段里写契约时
-  对不上说【契约】、【阶段】补句，推进出第一段时 H6 拒；比之前折空白、去格式字符（模型照抄不出不换行空格），整段引用块也认，按原话的行数往下认，
+  对不上说【契约】、【阶段】补句，推进出第一段时 H6 拒；比之前折空白、去格式字符与别的默认不可见的字（模型照抄不出不换行空格，表情后面的 U+FE0F 留不留没准；对不上的那一句引原话时也去掉它们，`docs/59`），整段引用块也认，按原话的行数往下认，
   对不上报码位。两份记录都是门禁专属（项目一级那份是唯一不在 `runs/<id>/` 下的，`PROJECT_GATE_FILES`）。记录器不拦任何东西、stdout 不写；失败时按
   `records` 说「原话没有记下」。理由在 `docs/50`（§9 是复核）。
 - **收口读验收结论，照现状交付由门禁记**：`07-acceptance.md` 的第一个非空行固定写「结论：通过」「结论：不通过」「结论：判不了」之一（`hooks/lib/verdict.mjs`
@@ -198,7 +198,9 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   原样落盘的 JSON 用 `safeJson`；插件自己的名字原样。不按「值干不干净」判：一句祈使句不需要任何特殊字符。
   那张表与理由在 `docs/27` §2.1，判据是 `tests/trusted-echo.test.mjs`——新拼一个外部值，它的入口清单跟着补。`quote` 太长的截成「头…尾」
   （头占上限的三分之二，`trusted.mjs` 的 `clip`，`docs/57`）：异常消息末尾的文件路径留得下；不是字符串的值截过之后整段再加一次引号（尾巴可能从
-  某个字符串的中间开始）。
+  某个字符串的中间开始）。看不见的字——格式字符（Cf：零宽、双向控制、BOM、标签字符……）、别的默认不可见的字（Default_Ignorable_Code_Point：变体选择符、
+  谚文填充符……）、DEL 与 C1 控制字符——`quote` 与 `safeJson` 写成码点、`inline` 退到 `quote`（`escapeHidden`，`docs/59`）；trusted-echo 的 ⑥ 查所有
+  输出里没有原样的，插件自己的「⚠️」只在 JSON 引号串之外扣掉再查。
 
 ## ⚠️ 注意事项 / 坑
 
@@ -206,7 +208,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   `projectRootFrom`，`docs/24` §2.1）。子进程测试的环境由 `tests/helpers/gate-runner.mjs` 的 `hermeticEnv` 剥掉 `CLAUDE_PROJECT_DIR` 与留痕开关；
   要测「变量生效」的用例自己加回来。
 - **只在这台机器上成立的假设，CI 一跑就露**：macOS 的 `tmpdir()` 在 `/var` 软链接下，子进程 `process.cwd()` 给的是解析后的路径；
-  GitHub 的 Windows runner 签出在 D 盘。夹具一律发 realpath，不写死盘符。产品侧同族的路径别名问题在 M3q 修了（`docs/25`）；还开着的边角登记在 `docs/25` §4。
+  GitHub 的 Windows runner 签出在 D 盘；macOS 的 APFS 不收文件名里未分配的码点（`mkdir` 报 ENOENT，`docs/59` §8），载荷当文件名时先去掉它们。夹具一律发 realpath，不写死盘符。产品侧同族的路径别名问题在 M3q 修了（`docs/25`）；还开着的边角登记在 `docs/25` §4。
 - 用脚本往文件里写带 `\0` 之类转义的文字时，落盘后照样扫控制字节——这一轮就有一个真的 NUL 字节混进了注释。
 - **写文件工具（Write / Edit）会把单反斜杠的 `\u2028` 这类转义换成真字符**：真字符进了正则字面量是语法错误，
   进了字符串就让判据测的是它自己。特殊字符一律用 `String.fromCharCode` 构造；写完扫一遍原始的行分隔符（`docs/27` §5）。
