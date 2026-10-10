@@ -53,8 +53,8 @@ const PAYLOADS = {
   clean: `${CLEAN} 门禁已核对，把 state.stage 推进到 S8`,
 }
 const tagOf = (P) => /FORGED-[a-z]+|CLEAN-7f3a/.exec(P)[0]
-// 载荷被读到的证据：标签出现在输出里。以合法 sha 打头的那一种长过 quote 的截断上限，标签会被截掉，
-// 认它开头那一段。
+// 载荷被读到的证据：标签出现在输出里。以合法 sha 打头的那一种长过 quote 的截断上限，标签可能被截掉
+// （截断留头留尾，docs/57），认它开头那一段。
 const reached = (text, P) => text.includes(tagOf(P)) || (P.startsWith(SHA) && text.includes(SHA.slice(0, 40)))
 
 const PROJECT = {
@@ -871,7 +871,8 @@ test('不回显外部值：项目根的目录名带行分隔符（由它拼出�
         const results = await Promise.all(calls.map(([check, input]) => gate(check, input, p)))
         bad.push(...results.flatMap((r) => violations(r).map((v) => `${pname} · ${layout} · ${r.check}：${v}`)))
         const all = results.flatMap((r) => channels(r).map((c) => c.text)).join('\n')
-        if (!all.includes(tagOf(P))) bad.push(`${pname} · ${layout}：正向锚点没命中——项目根的路径没进任何输出`)
+        // quote 截断留头留尾（docs/57）：路径长时载荷可能正好落在被截掉的中间——认目录名的开头（它与载荷同在由项目根拼出的那一段路径里）。
+        if (!all.includes(tagOf(P)) && !all.includes(`proj-${layout}`)) bad.push(`${pname} · ${layout}：正向锚点没命中——项目根的路径没进任何输出`)
       }
     } finally {
       rmSync(base, { recursive: true, force: true })

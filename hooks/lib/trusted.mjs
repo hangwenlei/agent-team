@@ -82,9 +82,13 @@ export function quote(value, { max = QUOTE_MAX } = {}) {
   return escapeLineSeparators(json === null ? JSON.stringify(s) : s)
 }
 
+// 太长的按码点截成「头…尾」（M4v，docs/57，docs/27 §4）：原来只留头，异常消息末尾的文件路径、长路径的最后一段（正好是要紧的文件名）被截掉。
+// 头占三分之二、尾占剩下的；受信前缀在截之前已经消去，中间隔着「…」，头尾拼不回一个前缀。
 function clip(s, max) {
   const chars = [...s]
-  return chars.length > max ? chars.slice(0, max).join('') + '…' : s
+  if (chars.length <= max) return s
+  const head = Math.ceil((max * 2) / 3)
+  return chars.slice(0, head).join('') + '…' + chars.slice(chars.length - (max - head)).join('')
 }
 
 /**

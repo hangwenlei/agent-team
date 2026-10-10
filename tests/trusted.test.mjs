@@ -98,10 +98,31 @@ test('quote：太长的值被截断，并标出截断', () => {
 
 test('quote：截断按码点算，不把一个表情劈成两半', () => {
   // 'x' 打头，截断点落在奇数个码元上：按码元切就会切进一个代理对中间，JSON.stringify 随后写出
-  // 字面的 \ud83d。只用汉字测不出来——汉字只占一个码元。
-  const q = quote('x' + EMOJI.repeat(100))
-  assert.ok(!q.includes('\\ud83d'), q.slice(-24))
-  assert.ok(JSON.parse(q).endsWith(EMOJI + '…'))
+  // 字面的 \ud83d。只用汉字测不出来——汉字只占一个码元。头尾两个切点都要按码点切（docs/57）。
+  for (const s of ['x' + EMOJI.repeat(100), EMOJI.repeat(100) + 'x', 'x' + EMOJI.repeat(100) + 'x']) {
+    const q = quote(s)
+    assert.ok(!q.includes('\\ud83d') && !q.includes('\\ude00'), q)
+    assert.ok(JSON.parse(q).includes(EMOJI + '…' + EMOJI) || JSON.parse(q).includes('…'), q)
+  }
+})
+
+test('quote（docs/57，docs/27 §4）：截断留头留尾——异常消息末尾的文件名、长路径的最后一段看得见；头多尾少，一共不超过上限再加一个「…」', () => {
+  const path = 'C:\\Users\\someone\\Desktop\\a-rather-long-project-name\\.agent-team\\runs\\20261010-1200-something\\state.json'
+  const msg = `ENOENT: no such file or directory, open '${path}'`
+  const q = JSON.parse(quote(msg, { max: 120 }))
+  assert.ok(msg.length > 120, String(msg.length))
+  assert.ok(q.startsWith('ENOENT: no such file or directory') && q.endsWith("state.json'"), q)
+  assert.equal([...q].length, 121)
+  const [head, tail] = q.split('…')
+  assert.ok(head.length > tail.length, q)
+  // 默认上限（80）同样留尾。
+  const d = JSON.parse(quote('a'.repeat(100) + 'TAIL'))
+  assert.ok(d.startsWith('aaa') && d.endsWith('TAIL') && [...d].length === 81, d)
+  // 不长的不动：正好上限那么长的原样，多一个才截。
+  assert.equal(JSON.parse(quote('short')), 'short')
+  const exact = 'b'.repeat(79) + 'Z'
+  assert.equal(JSON.parse(quote(exact)), exact)
+  assert.ok(JSON.parse(quote(exact + 'Y')).includes('…'))
 })
 
 test('quote：不是字符串的值输出它的 JSON 写法，不加第二层引号——数字与字符串分得出来', () => {
