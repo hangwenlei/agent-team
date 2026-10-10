@@ -14,6 +14,8 @@
 // 第 1 节「用户选续跑」那一支），作废：之后另起的一趟抄的是用户的消息，不是这条命令的参数。替它收口的那一次不作废（收口之后照常建新的一趟）。
 // 复核（docs/50 §9）：原来不是建它的那一次也绑（账本在第一段里写 state.json、契约时）——别的会话在命令之后建的一趟被这个会话续跑时会绑错，
 // 别的会话推进出第一段之后回退到第一段时晚绑，与契约基线互相卡死（第 1 节照哪一份都过不去）。
+// 绑分两步（docs/58 §8）：bindDecision 说绑时 H6 只记 binding（这一刻 run 目录还不在、这次写入还可能被用户拒掉）；同一次 Write 落盘之后账本问
+// finishBinding，才标 bound、写 run 一级那份。
 // 核（section1Mismatch）：第 1 节标题之后（跳过空行）逐行就是原话，之后到下一个编号节标题之间只有空行。行尾空白、BOM、CRLF 不计；整段写成
 // 引用块（每行一个「>」或「> 」）也认——真实会话里两种写法都有（docs/50 §1）。按原话的行数往下认，原话里自带的「## 2. …」不会把它切断。
 // 复核（docs/50 §9）：比之前两边都把空白变体（不换行空格、全角空格、制表符这类）折成一个普通空格、连续空白算一个，去掉零宽与格式字符——
@@ -61,7 +63,7 @@ export function blankAtSession(input) {
 
 /** 项目一级那份记录的样子。 */
 export function pendingRecord({ at, sessionId, args, runsBefore }) {
-  return { at, session_id: sessionId, args, runs_before: Array.isArray(runsBefore) ? runsBefore.filter((n) => typeof n === 'string') : [], bound: null, dropped: null }
+  return { at, session_id: sessionId, args, runs_before: Array.isArray(runsBefore) ? runsBefore.filter((n) => typeof n === 'string') : [], binding: null, bound: null, dropped: null }
 }
 
 /** 读一份记录（两级同一个形状，run 一级多一个 bound_at 也照读）；读不出、形状不对回 null。 */
@@ -83,6 +85,7 @@ export function readWords(bytes) {
     session_id: v.session_id,
     args: v.args,
     runs_before: Array.isArray(v.runs_before) ? v.runs_before.filter((n) => typeof n === 'string') : [],
+    binding: typeof v.binding === 'string' ? v.binding : null,
     bound: typeof v.bound === 'string' ? v.bound : null,
     dropped: typeof v.dropped === 'string' ? v.dropped : null,
   }
@@ -99,6 +102,18 @@ export function bindDecision(pending, { sessionId, runId, sameRun = (a, b) => a 
   if (typeof runId !== 'string' || runId === '') return null
   if (pending.runs_before.some((n) => sameRun(n, runId))) return closed === true ? null : 'drop'
   return creating === true && firstStage === true ? 'bind' : null
+}
+
+/**
+ * 实测（docs/58，§8 是复核）：绑分两步。H6（PreToolUse）判了 'bind' 只在项目一级记下 binding（打算绑到哪一趟）——那一刻 run 目录还不在，这次写入
+ * 也还可能被用户的权限确认拒掉；同一次写入落盘之后（PostToolUse，账本），binding 指着的正是这一趟、同一个会话、还没绑也没作废，才标 bound、写 run 目录
+ * 那一份。这一步回 true 表示该完成。被拒的写入没有 PostToolUse，binding 留着、下一次建 run 时照常改指新的那一趟。
+ */
+export function finishBinding(pending, { sessionId, runId, sameRun = (a, b) => a === b }) {
+  if (!pending || pending.bound !== null || pending.dropped !== null || pending.binding === null) return false
+  if (typeof sessionId !== 'string' || pending.session_id !== sessionId) return false
+  if (typeof runId !== 'string' || runId === '') return false
+  return sameRun(pending.binding, runId)
 }
 
 // 比之前的样子：去掉格式字符，空白折成一个普通空格，去掉行尾空白。

@@ -61,15 +61,17 @@ function cleanup(dirs) {
 
 // 建一趟新 run：目录、state.json（第一段）、指针。viaGate：照项目经理的做法用 Write 写 state.json，先经 H6（写之前文件不在——建出它的那一次）；
 // 否则直接落盘（Bash 写的、门禁没见到建的那一次）。
+// 复核（docs/58 §8）：照真实会话的顺序——H6（PreToolUse，目录还不在），落盘（Write 建目录、写 state.json），账本（PostToolUse，绑的第二步），再写指针。
 function createRun(projectDir, id, { sid = 's-1', viaGate = true } = {}) {
   const dir = join(projectDir, '.agent-team', 'runs', id)
-  mkdirSync(dir, { recursive: true })
   const state = stateOf(id)
   if (viaGate) {
     const d = decisionOf(run('rework', stateWrite(dir, state, sid), GATE, projectDir).stdout)
     assert.equal(d, null, '建 run 的那一次 H6 放行：' + JSON.stringify(d))
   }
+  mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'state.json'), JSON.stringify(state, null, 2))
+  if (viaGate) run('ledger', posted(join(dir, 'state.json'), sid), GATE, projectDir)
   point(projectDir, id)
   return dir
 }
@@ -174,6 +176,92 @@ test('绑定：这个会话用 Write 建出新的一趟（state.json 写之前�
     writeFileSync(join(runDir, '00-contract.md'), QUOTED)
     const q = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
     assert.ok(!q.includes(TALK), q)
+  })
+})
+
+// 真实形状（复核 docs/58 §8）：at-init 之后的项目——.agent-team 下只有 project.json，没有 runs/、没有 current-run。
+function bareProject(body) {
+  const dirs = makeRun({ runId: 'r1', stage: 'S1' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs'), { recursive: true, force: true })
+    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+    return body(dirs)
+  } finally {
+    cleanup(dirs)
+  }
+}
+
+test('绑定（实测 docs/58）：建出这一趟的那一次，连 runs/ 都还不在（Write 落盘时才建）——H6 只记下打算绑到哪一趟，落盘之后账本绑上；之后第 1 节对不上照样说', () => {
+  // 真实会话里项目经理不先建目录，直接 Write runs/<id>/state.json：H6（PreToolUse）那一刻目录还不在。原来往里写原话记录抛 ENOENT、被吞掉，
+  // 项目一级那份却已经标了 bound——这一趟从此不核第 1 节。原来的 createRun 先建了目录，测不到这一格。
+  bareProject(({ projectDir }) => {
+    run('user-words', expansion(ARGS, { session_id: 's-1' }), GATE, projectDir)
+    const runDir = join(projectDir, '.agent-team', 'runs', 'r1')
+    const state = stateOf('r1')
+    const d = decisionOf(run('rework', stateWrite(runDir, state, 's-1'), GATE, projectDir).stdout)
+    assert.equal(d, null, JSON.stringify(d))
+    // H6 那一刻：只记 binding，不建目录、不标 bound。
+    assert.ok(!existsSync(join(projectDir, '.agent-team', 'runs')), 'H6 不该建目录')
+    assert.equal(pendingOf(projectDir).binding, 'r1')
+    assert.equal(pendingOf(projectDir).bound, null)
+    // Write 落盘：建目录、写 state.json；同一次写入的账本完成绑定；再写指针。
+    mkdirSync(runDir, { recursive: true })
+    writeFileSync(join(runDir, 'state.json'), JSON.stringify(state, null, 2))
+    run('ledger', posted(join(runDir, 'state.json')), GATE, projectDir)
+    point(projectDir, 'r1')
+    assert.equal(pendingOf(projectDir).bound, 'r1')
+    assert.equal(pendingOf(projectDir).binding, null)
+    assert.equal(boundOf(runDir).args, ARGS)
+    writeFileSync(join(runDir, '00-contract.md'), PARAPHRASED)
+    const c = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
+    assert.ok(c.includes(TALK), c)
+  })
+})
+
+test('绑定（复核 docs/58 §8，中 1）：H6 放行了、这次 Write 却没落盘（用户在权限确认里拒了）——什么都不留；换个 run id 再建，绑到新的那一趟', () => {
+  bareProject(({ projectDir }) => {
+    run('user-words', expansion(ARGS, { session_id: 's-1' }), GATE, projectDir)
+    const r1 = join(projectDir, '.agent-team', 'runs', 'r1')
+    assert.equal(decisionOf(run('rework', stateWrite(r1, stateOf('r1'), 's-1'), GATE, projectDir).stdout), null)
+    // 没落盘：没有 PostToolUse。runs/ 下不多出目录，记录还没绑。
+    assert.ok(!existsSync(join(projectDir, '.agent-team', 'runs')), '被拒的写入不该留下目录')
+    assert.equal(pendingOf(projectDir).bound, null)
+    const r2 = createRun(projectDir, 'r2')
+    assert.equal(pendingOf(projectDir).bound, 'r2')
+    assert.equal(boundOf(r2).args, ARGS)
+    assert.ok(!existsSync(r1))
+  })
+})
+
+test('绑定（复核 docs/58 §8）：别的角色的写入不记 binding（H3 拒它，几道门禁并行）；落盘之后的那一步也只认项目经理、同一个会话、binding 指着的那一趟', () => {
+  bareProject(({ projectDir }) => {
+    run('user-words', expansion(ARGS, { session_id: 's-1' }), GATE, projectDir)
+    const r1 = join(projectDir, '.agent-team', 'runs', 'r1')
+    run('rework', { ...stateWrite(r1, stateOf('r1'), 's-1'), agent_type: 'agent-team:at-backend' }, GATE, projectDir)
+    assert.equal(pendingOf(projectDir).binding, null)
+    // 项目经理记下 binding 之后：文件不在磁盘上的、别的会话、别的角色、别的一趟、不是 runs/<id>/state.json 的落盘都不完成它。
+    run('rework', stateWrite(r1, stateOf('r1'), 's-1'), GATE, projectDir)
+    run('ledger', posted(join(r1, 'state.json')), GATE, projectDir)
+    assert.ok(!existsSync(r1), '文件不在：不完成、不建目录')
+    mkdirSync(r1, { recursive: true })
+    writeFileSync(join(r1, 'state.json'), JSON.stringify(stateOf('r1'), null, 2))
+    run('ledger', posted(join(r1, 'state.json'), 's-2'), GATE, projectDir)
+    run('ledger', { ...posted(join(r1, 'state.json')), agent_type: 'agent-team:at-backend' }, GATE, projectDir)
+    const r9 = join(projectDir, '.agent-team', 'runs', 'r9')
+    mkdirSync(r9, { recursive: true })
+    writeFileSync(join(r9, 'state.json'), JSON.stringify(stateOf('r9'), null, 2))
+    run('ledger', posted(join(r9, 'state.json')), GATE, projectDir)
+    writeFileSync(join(r1, '00-contract.md'), VERBATIM)
+    run('ledger', posted(join(r1, '00-contract.md')), GATE, projectDir)
+    const elsewhere = join(projectDir, '.agent-team', 'archive', 'r1')
+    mkdirSync(elsewhere, { recursive: true })
+    writeFileSync(join(elsewhere, 'state.json'), JSON.stringify(stateOf('r1'), null, 2))
+    run('ledger', posted(join(elsewhere, 'state.json')), GATE, projectDir)
+    assert.equal(pendingOf(projectDir).bound, null)
+    assert.equal(pendingOf(projectDir).binding, 'r1')
+    for (const d of [r1, r9, elsewhere]) assert.ok(!existsSync(join(d, USER_WORDS_FILE)), d)
+    run('ledger', posted(join(r1, 'state.json')), GATE, projectDir)
+    assert.equal(pendingOf(projectDir).bound, 'r1')
   })
 })
 

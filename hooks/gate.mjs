@@ -76,7 +76,7 @@ import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
 import { isPlainObject, isStageChain, isVerifyStage, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
-import { USER_WORDS_FILE, WORDS_FIX, bindDecision, blankAtSession, pendingRecord, readWords, section1Mismatch, wordsMismatchText, wordsOf } from './lib/user-words.mjs'
+import { USER_WORDS_FILE, WORDS_FIX, bindDecision, blankAtSession, finishBinding, pendingRecord, readWords, section1Mismatch, wordsMismatchText, wordsOf } from './lib/user-words.mjs'
 import { GATE_CHECK_PATH, gateCheckReason, isGateCheck, selfCheckIdentity } from './lib/gate-check.mjs'
 import {
   SECOND_WRITE_NOTE,
@@ -1155,8 +1155,8 @@ function runClosed(dir) {
 }
 
 // M4o（docs/50，审查第 20 条修法 A）：项目一级那份原话记录（记录器在 /agent-team:at 展开时写的）这一次怎么办——bindDecision 说作废就标上 dropped
-// （记下之前就有的这一趟没收口却被写了：续跑了它，这条命令的需求被搁下了）；说绑、这一趟又还没有自己那份，就绑：先把项目一级那份标上 bound，
-// 再写 run 目录那份（后一步写不进时，记录不会一直挂着、被下一趟绑上——那样这一趟只是不核）。creating：这一次是这个会话用 Write 建出这一趟的
+// （记下之前就有的这一趟没收口却被写了：续跑了它，这条命令的需求被搁下了）；说绑，就只记下打算绑到哪一趟（binding），落盘之后由账本绑上
+// （finishWordsBinding，docs/58 §8）。creating：这一次是这个会话用 Write 建出这一趟的
 // state.json（H6 里写之前文件还不在）——只有那一次绑。账本（项目经理在当前这一趟写 state.json、契约）只作废，H6（任何一趟的 state.json）作废与绑都做。
 // 复核（docs/50 §9）：原来账本在第一段里写 state.json、契约时也绑，run 目录里有就直接返回、不判作废——晚绑会跨会话绑错、回退到第一段时与契约
 // 基线互相卡死，续跑一趟自带记录的旧 run 不作废。写不进只是这一趟不核，留痕。
@@ -1186,9 +1186,37 @@ function settleWords({ runDir, agentTeamDir, sessionId, state, stages, creating 
       process.stderr.write(`agent-team user-words：${quote(runId)} 是那条命令之前就有的一趟、这次被续跑了，那条命令的原话记录作废。\n`)
       return
     }
-    writeFileSync(pendingPath, `${JSON.stringify({ ...pending, bound: runId }, null, 2)}\n`)
+    // 实测（docs/58，§8 是复核）：这里是 PreToolUse——run 目录还不在（项目经理直接 Write runs/<id>/state.json，落盘时才建），这次写入也还可能被
+    // 用户的权限确认拒掉。原来这里就标 bound、往 run 目录里写：目录不在时抛 ENOENT 被接住，项目一级那份却已经标了 bound，这一趟从此不核第 1 节；
+    // 先建目录再写，写入被拒时又留下一个只有原话记录的空壳。现在只记 binding（打算绑到哪一趟），落盘之后由账本完成（finishWordsBinding）。
+    writeFileSync(pendingPath, `${JSON.stringify({ ...pending, binding: runId }, null, 2)}\n`)
+  } catch (e) {
+    process.stderr.write(`agent-team user-words：原话记录写不进（${quote(e?.message ?? e, { max: 120 })}），这一趟可能不核契约第 1 节。\n`)
+  }
+}
+
+// M4w（docs/58 §8）：绑的第二步。项目经理 Write 的正是 .agent-team/runs/<id>/state.json、已经落盘，项目一级那份的 binding 指着这一趟、同一个会话、
+// 还没绑也没作废（finishBinding）——标上 bound，再写 run 目录那份（前一步先做：后一步写不进时，记录不会一直挂着被下一趟绑上，这一趟只是不核）。
+// 按路径认，不经运行上下文：这一刻 current-run 多半还没写（/agent-team:at 第 1 节先写 state.json、再写指针）。
+function finishWordsBinding(input, filePath) {
+  if (!isContractWriter(input?.agent_type) || typeof filePath !== 'string') return
+  const runDir = dirname(filePath)
+  const runsDir = dirname(runDir)
+  const agentTeamDir = dirname(runsDir)
+  const same = (a, b) => (process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase())
+  if (!same(basename(filePath), 'state.json') || !same(basename(runsDir), 'runs') || !same(basename(agentTeamDir), '.agent-team')) return
+  const pendingPath = join(agentTeamDir, USER_WORDS_FILE)
+  let pending = null
+  try {
+    pending = readWords(readFileSync(pendingPath))
+  } catch {}
+  const runId = basename(runDir)
+  const sameRun = (a, b) => norm(join(runsDir, a)) === norm(join(runsDir, b))
+  if (!finishBinding(pending, { sessionId: input.session_id, runId, sameRun }) || !existsSync(filePath)) return
+  try {
+    writeFileSync(pendingPath, `${JSON.stringify({ ...pending, binding: null, bound: runId }, null, 2)}\n`)
     const own = join(runDir, USER_WORDS_FILE)
-    if (!existsSync(own)) writeFileSync(own, `${JSON.stringify({ ...pending, bound: runId, bound_at: new Date().toISOString() }, null, 2)}\n`)
+    if (!existsSync(own)) writeFileSync(own, `${JSON.stringify({ ...pending, binding: null, bound: runId, bound_at: new Date().toISOString() }, null, 2)}\n`)
   } catch (e) {
     process.stderr.write(`agent-team user-words：原话记录写不进（${quote(e?.message ?? e, { max: 120 })}），这一趟可能不核契约第 1 节。\n`)
   }
@@ -2022,7 +2050,10 @@ function main() {
       }
       // M4o 复核（docs/50 §9）：放行之前处理项目一级那份原话记录——这个会话建出这一趟 state.json 的那一次（写之前它不在）绑，续跑命令之前就有的那一趟
       // 作废（settleWords）。排在所有拒绝之后：被拒的写入不绑。
-      settleWords({ runDir, agentTeamDir, sessionId: input.session_id, state: after, stages: stagesForRework, creating: before === null && beforeText === null })
+      // 复核（docs/58 §8）：只认项目经理的写入——别的角色写 state.json 被 H3 拒，几道门禁并行，H6 这边不能先替它记下 binding。
+      if (isContractWriter(input.agent_type)) {
+        settleWords({ runDir, agentTeamDir, sessionId: input.session_id, state: after, stages: stagesForRework, creating: before === null && beforeText === null })
+      }
 
       // M4k（docs/46，docs/35 §5「收口不读验收结论」）：验收结论首行——推进出验收那一段与收口时，不是「结论：通过」、又没有门禁记下的
       // 照现状交付批准（approvals.jsonl 里 sha 等于它现在的 sha），拒（hooks/lib/verdict.mjs）。排在最后：对着上一版契约的结论先重出，
@@ -2059,6 +2090,9 @@ function main() {
       input.tool_name === 'NotebookEdit'
         ? input?.tool_input?.notebook_path
         : input?.tool_input?.file_path
+
+    // M4w（docs/58 §8）：原话记录绑的第二步——建出这一趟的那一次 Write 落盘之后。排在读运行上下文之前：这一刻 current-run 多半还没写。
+    finishWordsBinding(input, filePath)
 
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
     if (!ctx.ok) {
