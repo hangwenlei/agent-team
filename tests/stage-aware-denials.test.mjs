@@ -57,6 +57,54 @@ test('H5b：at-ui 在 S2 没交齐——拦截文案补「被拒了的写进这�
   assert.ok(impl.reason.includes('「被写路径隔离拒绝」一节') && !impl.reason.includes('这一段不为这个补 paths'), impl.reason)
 })
 
+test('复核（docs/54 §8，中 1）：协调者——「没人认领」那一支同样给这一段的产物（S2 的 at-product、S3 的 at-architect，后者的产物是数组形式）；「归别人」那一支照旧是协调者的说法', () => {
+  const project = { paths: { ...PROJECT.paths, 'at-product': ['docs/product/'], 'at-architect': ['docs/arch/'] } }
+  const c = (role, f, stageId) =>
+    decideWritePath({ roster: ROSTER, role, filePath: f, project, runDir: RUN, stages: STAGES, agentTeamDir: AT, stageId })
+  const prod = c('at-product', '/proj/nowhere/x.md', 'S2')
+  assert.ok(prod.reason.includes('这一段（S2）你交的是 run 目录里的 01-prd.md：要落的东西写进它们'), prod.reason)
+  const arch = c('at-architect', '/proj/nowhere/x.md', 'S3')
+  assert.ok(arch.reason.includes('这一段（S3）你交的是 run 目录里的 03-arch.md、03-alignment.md：要落的东西写进它们'), arch.reason)
+  for (const [role, stageId] of [['at-product', 'S2'], ['at-architect', 'S3']]) {
+    const r = c(role, '/proj/src/web/App.tsx', stageId)
+    assert.ok(r.reason.includes('这是认领者的活') && !r.reason.includes('这一段（'), `${role}：${r.reason}`)
+  }
+})
+
+test('复核（docs/54 §8，中 2）：H5b 那一句只列还没交的那几份——只缺一份时只点它；返工轮里只有一份还旧，同样只点它', () => {
+  const only = (name) => (p) => p !== name
+  const one = decideDeliverable({ role: 'at-ui', stageId: 'S2', stages: STAGES, artifactExists: only('02-wireframe.html') })
+  assert.ok(one.reason.includes('要落的东西写进 02-wireframe.html——写了就能停。'), one.reason)
+  const stale = decideDeliverable({
+    role: 'at-ui',
+    stageId: 'S2',
+    stages: STAGES,
+    artifactExists: () => true,
+    artifactStale: (p) => p === '02-ui-spec.md',
+  })
+  assert.equal(stale.ok, false)
+  assert.ok(stale.reason.includes('被写路径隔离拒了的，这一段不为这个补 paths：要落的东西写进 02-ui-spec.md——写了就能停。'), stale.reason)
+})
+
+test('子进程（复核 docs/54 §8）：state 在 S5 时 at-ui 被拒——照旧是执行段的出路，门禁传的是真的当前段', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S5', roster: ['at-product', 'at-ui'], project: PROJECT })
+  try {
+    const input = { tool_name: 'Write', agent_type: 'agent-team:at-ui', tool_input: { file_path: join(dirs.projectDir, 'src', 'web', 'App.tsx'), content: 'x' } }
+    const d = decisionOf(run('writepath', input, undefined, dirs.projectDir).stdout)
+    assert.equal(d?.permissionDecision, 'deny')
+    assert.ok(d.permissionDecisionReason.includes('列到你名下') && !d.permissionDecisionReason.includes('这一段（'), d.permissionDecisionReason)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+test('正文（复核 docs/54 §8）：at-product 不再说「列到你名下」那句是给实现那一段的', () => {
+  const prod = readFileSync(new URL('../agents/at-product.md', import.meta.url), 'utf8').replace(/\s+/g, '')
+  assert.ok(!prod.includes('「列到你名下」那句是给实现那一段的'), 'at-product.md')
+  assert.ok(prod.includes('代码路径留到实现那一段（门禁在这一段给它的拒绝理由也这样说）。'), 'at-product.md')
+})
+
 test('子进程：state 停在 S2 时 at-ui 写别人认领的文件，拒绝理由给这一段的规格', () => {
   const dirs = makeRun({ runId: 'r1', stage: 'S2', roster: ['at-product', 'at-ui'], project: PROJECT })
   try {

@@ -186,10 +186,12 @@ export function decideDeliverable({ role, stageId, stages, artifactExists, artif
   // 一层两条分支永远同时成立或同时不成立的判断，删掉任何一层都测不出行为差异
   // （Task 5 的教训：变异测试要能证明每一层都必要）。
   if (missing.length === 0 && stale.length === 0 && blank.length === 0) return { ok: true }
+  // 复核（docs/54 §8）：规格段那一句只列还没交的那几份——列全部再说「写了就能停」，只缺一份时不成立。
+  const pending = produces.filter((p) => missing.includes(p) || blank.includes(p) || stale.includes(p))
   const denial = isRolePatternStage(stage)
     ? IMPL_DENIAL_NOTE
     : producesInRolePatternStage(stages, role)
-      ? specDenialNote(produces)
+      ? specDenialNote(pending)
       : ''
   const gone = [missing.length ? `${missing.join('、')} 还没有写到磁盘上` : '', blank.length ? `${blank.join('、')} 是空文件` : '']
     .filter(Boolean)
