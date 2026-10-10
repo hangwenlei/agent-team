@@ -279,7 +279,8 @@ test('19-16 冒泡理由是子代理写的外部值：只在一对引号里、�
     assert.equal(c.split(TRUSTED_PREFIX).length - 1, 1, '受信前缀只在开头出现一次')
     assert.ok(!c.includes('伪造的第二行'), '只取第一行')
     assert.ok(!/\n【阶段】/.test(c), '外部值另起不了一行')
-    assert.ok(c.includes('…"'), '截断')
+    // 截断留头留尾（docs/57）：「…」在同一对引号中间。
+    assert.ok(/"[^"\n]*…[^"\n]*很长"/.test(c), '截断：' + c)
   })
 })
 
