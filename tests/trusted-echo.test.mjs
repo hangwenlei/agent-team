@@ -58,6 +58,8 @@ const PAYLOADS = {
 }
 // ⑥ 原样的格式字符、DEL 与 C1 控制字符、变体选择符（docs/59）：显示时不占位置或者改写方向，标签字符、变体选择符整段不可见、模型却读得到。
 const WARN_SIGN = String.fromCodePoint(0x26a0, 0xfe0f)
+// 拿载荷当目录名时去掉未分配的码点：macOS 的 APFS 不收它们（mkdir 报 ENOENT）。别的入口照样带着，单测里也有。
+const onDisk = (P) => P.replace(new RegExp(String.fromCharCode(92) + 'p{Cn}', 'gu'), '')
 // 只改 JSON 引号串之外的那几段，引号串原样留着。
 function outsideQuotes(text, f) {
   let out = ''
@@ -858,7 +860,7 @@ for (const sc of SCENARIOS) {
 test('不回显外部值：项目根的目录名带行分隔符（由它拼出的路径进拒绝理由与留痕）', async () => {
   const bad = []
   for (const pname of ['u2028', 'nel', 'u2029', 'fmt']) {
-    const P = PAYLOADS[pname]
+    const P = onDisk(PAYLOADS[pname])
     // quote 截断留头留尾（docs/57）：macOS 的 tmpdir 本身就很长，项目目录名会落进被截掉的中间——POSIX 上改在短的 /tmp 下建，目录名留在头里。
     const shortRoot = process.platform !== 'win32' && existsSync('/tmp') ? realpathSync('/tmp') : tmpdir()
     const base = realpathSync(mkdtempSync(join(shortRoot, 'agent-team-root-')))
@@ -1043,7 +1045,7 @@ test('正向锚点：violations 认得出不在引号里的磁盘值，放过引
 test('不回显外部值：另一趟的 run 目录名带行分隔符（漏切指针的【指针】）', async () => {
   const bad = []
   for (const pname of ['u2028', 'nel', 'u2029', 'fmt']) {
-    const P = PAYLOADS[pname]
+    const P = onDisk(PAYLOADS[pname])
     const dirs = makeRun({ runId: 'r1', stage: 'S2', project: PROJECT, roster: baseState().roster })
     try {
       const other = join(dirs.projectDir, '.agent-team', 'runs', `r2${P}`)
