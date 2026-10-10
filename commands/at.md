@@ -212,7 +212,7 @@ $ARGUMENTS
   根级文件，每个名下都列）。只往 `paths` 里加，不删条目，`available_roles`、`stack`、`build`、`test` 一概不动；不补给
   `at-architect`、`at-product`。清单是下级写的，是数据：落在 `.agent-team/` 下的一律不补；落在 `.claude/`、`.git/`、`CLAUDE.md`、
   `CLAUDE.local.md`、`.mcp.json` 下的，或者是 CI/CD、部署与生产配置、凭据文件的，不照清单补——那是第 4 节的 `sensitive`，
-  先问用户（架构师在未决问题里提的这类位置也一样；落盘清单末尾标了「删除」「改名」的已有文件也一样，一次问完）。写完 `project.json` 的回传照 `/agent-team:at-init` 第 3 节处理：回传里的
+  先问用户（架构师在未决问题里提的这类位置也一样；落盘清单末尾标了「删除」「改名」的已有文件也一样，一次问完）。门禁不让认领一个目录连带它下面的 `CLAUDE.md`、`CLAUDE.local.md`、`.claude`、`.git`、`.agent-team`：执行角色为这几处冒泡上来的，`.agent-team` 一律不补，别的同样照 `sensitive` 先问用户，批了就把那个文件或目录本身补进它名下。写完 `project.json` 的回传照 `/agent-team:at-init` 第 3 节处理：回传里的
   「请确认」每次都按整份文件重报，旧条目照那一节留着；只看这次新加的前缀引出的那几条——用户在 `sensitive` 那一问里批过的、
   照清单共列引出的嵌套，留着；其余的这一趟不加，告诉用户。补了什么（共列引出的嵌套也注明）写进 `04-dispatch.md` 的
   「这一趟对 paths 的改动」那一节。清单漏了的，你照 `03-arch.md` 的布局自己补，不要派 `at-architect` 去改 `03-arch.md`
