@@ -69,7 +69,10 @@ function lookalikeKey(key) {
   let best = null
   let bestDistance = 3
   for (const known of STATE_KEYS) {
-    const d = editDistance(k, squash(known))
+    const kk = squash(known)
+    // 编辑距离不小于长度差：差得已经不比眼下最好的近，就不算（复核 docs/55 §8：一个几兆的键原来要算好几秒）。
+    if (Math.abs(k.length - kk.length) >= bestDistance) continue
+    const d = editDistance(k, kk)
     if (d < bestDistance) {
       best = known
       bestDistance = d

@@ -40,6 +40,53 @@ test('拼错的键：报它、点出像的那一个已知键（下划线、大�
   }
 })
 
+test('复核（docs/55 §8）：每个已知键少一个字母、多一个字母都点得出它；分隔符写成连字符、空白也认', () => {
+  for (const key of STATE_KEYS) {
+    const letters = [...key].map((c, i) => [c, i]).filter(([c]) => /[a-z]/.test(c))
+    const [, at] = letters[Math.floor(letters.length / 2)]
+    for (const typo of [key.slice(0, at) + key.slice(at + 1), key + 'x']) {
+      const [line] = unknownLines({ ...base(), [typo]: 1 })
+      assert.ok(line && line.includes(`是不是 ${key}？`), `${typo}：${line}`)
+    }
+  }
+  for (const typo of ['stge-role', 'stge role']) {
+    const [line] = unknownLines({ ...base(), [typo]: 1 })
+    assert.ok(line.includes('是不是 stage_roles？'), `${typo}：${line}`)
+  }
+})
+
+test('复核（docs/55 §8）：前面多一截的不算像（xyzstage 不说成 stage）；已知键两两之间至少差四步（所以最近的那一个只有一个）', () => {
+  // abcstag 与 stage 长度只差二、真要差四步：不能把前面那一截白白删掉算成像。
+  for (const k of ['xyzstage', 'abcstag']) {
+    const [line] = unknownLines({ ...base(), [k]: 1 })
+    assert.ok(!line.includes('是不是'), `${k}：${line}`)
+  }
+  const squash = (s) => s.toLowerCase().replace(/[_\-\s]/g, '')
+  const dist = (a, b) => {
+    let prev = Array.from({ length: b.length + 1 }, (_, j) => j)
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i]
+      for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1))
+      prev = cur
+    }
+    return prev[b.length]
+  }
+  for (const a of STATE_KEYS) for (const b of STATE_KEYS) if (a < b) assert.ok(dist(squash(a), squash(b)) >= 4, `${a} 与 ${b} 太像`)
+})
+
+test('复核（docs/55 §8）：认不出的键与别的问题同时在——各报各的', () => {
+  const lines = validateState({ ...base(), run_id: 'bad', trimed: {} }, { stages: STAGES }).problems
+  assert.ok(lines.some((m) => m.includes('run_id 不是')) && lines.some((m) => m.includes('认不出的键 "trimed"')), lines.join(' | '))
+})
+
+test('复核（docs/55 §8）：很长的键不拖慢门禁（长度差已经够大的不算编辑距离）', () => {
+  const huge = 'k'.repeat(8 * 1024 * 1024)
+  const t0 = Date.now()
+  const [line] = unknownLines({ ...base(), [huge]: 1 })
+  assert.ok(line.includes('认不出的键') && !line.includes('是不是'), line.slice(0, 80))
+  assert.ok(Date.now() - t0 < 2000, `用了 ${Date.now() - t0}ms`)
+})
+
 test('不像任何已知键的：照样报、不瞎猜，列出 state.json 的键', () => {
   const [line] = unknownLines({ ...base(), notes: 'x' })
   assert.ok(line.includes('认不出的键 "notes"') && !line.includes('是不是'), line)
