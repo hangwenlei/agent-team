@@ -695,6 +695,24 @@ function contractCmp(ctx) {
     : compareContractSha({ recorded: ctx.state?.contract_sha, actual: bytes ? sha256OfContract(bytes) : null })
 }
 
+// 对着上一版契约的验证段结论（contract-base.mjs 的 outdatedProducts）：【阶段】的收口阻碍与 H2 的前置共用（docs/61）。读不出基线、出错回空集。
+function outdatedSetOf(ctx) {
+  try {
+    const base = readContractBase(ctx.artifactBytes(CONTRACT_BASE_FILE))
+    if (!base) return new Set()
+    const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
+    const log = logBytes ? readDispatchLog(logBytes.toString('utf8')) : null
+    const diskSha = (n) => {
+      if (!ctx.artifactExists(n)) return { exists: false, sha: null }
+      const b = ctx.artifactBytes(n)
+      return { exists: true, sha: b ? sha256OfContract(b) : null }
+    }
+    return new Set(outdatedProducts({ stages: ctx.stages, base, diskSha, lastDispatchAt: lastDispatchAtOf(ctx.stages, log) }))
+  } catch {
+    return new Set()
+  }
+}
+
 // M3a Task 2：「已经走过的那几段，产者有没有交代」的措辞组装。decideCoverage
 // （hooks/lib/coverage.mjs）本身是纯函数、只回结构化数据；拼成人话、决定要不要发，
 // 放在调用它的这一层，与上面 buildDriftNotice 同一个手法、同一个理由。
@@ -1629,6 +1647,7 @@ function main() {
       const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
       return logBytes ? dispatchedByStage(readDispatchLog(logBytes.toString('utf8'))) : null
     })()
+    const readinessOutdated = outdatedSetOf(ctx)
     const r = decideReadiness({
       targetRole: target,
       stages: ctx.stages,
@@ -1645,6 +1664,10 @@ function main() {
       callerReach: Object.hasOwn(reach, caller) ? reach[caller].reachableRoles : null,
       callerCanWriteState: isContractWriter(input?.agent_type),
       trimmedAway: (sid) => wholeStageTrimmed(ctx.stages, sid, ctx.state, null, readinessDispatched),
+      // M4z（docs/61，docs/45 §4「只把住推进与收口」）：对着上一版契约的验证段结论不算交了的前置、不让它那一段判齐——与 H6、【阶段】同一份
+      // outdatedProducts，出路同一份 outdatedFix（看当前段）。
+      artifactOutdated: (n) => readinessOutdated.has(n),
+      outdatedOut: (names) => outdatedFix(ctx.stages, names, ctx.state?.stage).text,
     })
     if (r.decision === 'deny') denyAndExit(r.reason, spec.event)
 
@@ -2422,22 +2445,7 @@ function main() {
     })()
     // M4j 复核（docs/45 §8，F6）：对着上一版契约的验证段结论也是收口阻碍——与 H6 的契约判据同一份 outdatedProducts，【阶段】不说「该收口了」，
     // 出路与 H6 同一份 outdatedFix（看当前段）。
-    const outdatedNow = (() => {
-      try {
-        const base = readContractBase(ctx.artifactBytes(CONTRACT_BASE_FILE))
-        if (!base) return new Set()
-        const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
-        const log = logBytes ? readDispatchLog(logBytes.toString('utf8')) : null
-        const diskSha = (n) => {
-          if (!ctx.artifactExists(n)) return { exists: false, sha: null }
-          const b = ctx.artifactBytes(n)
-          return { exists: true, sha: b ? sha256OfContract(b) : null }
-        }
-        return new Set(outdatedProducts({ stages: ctx.stages, base, diskSha, lastDispatchAt: lastDispatchAtOf(ctx.stages, log) }))
-      } catch {
-        return new Set()
-      }
-    })()
+    const outdatedNow = outdatedSetOf(ctx)
     const blockers0 =
       stageDone && closedAt(ctx.state) === null && ctx.state?.stage === lastStageId(ctx.stages)
         ? closeBlockers({

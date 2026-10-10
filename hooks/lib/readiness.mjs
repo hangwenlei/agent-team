@@ -76,6 +76,10 @@ export function decideReadiness({
   callerCanWriteState = false,
   // M4h（docs/43，审查第 38 条）：这一段是不是整段裁掉了（调用方用 advance.mjs 的 wholeStageTrimmed 判）。缺的前置是它的产物时，拒绝理由说清。
   trimmedAway = () => false,
+  // M4z（docs/61）：这份产物是不是对着上一版契约的验证段结论（调用方用 contract-base.mjs 的 outdatedProducts 判），与它的出路（outdatedFix 的那一句）。
+  // 这样的产物不让它那一段判齐、不算交了的前置——修订之后、回退之前派下一段，对着的是一份过期的结论。缺的、还旧的先说。
+  artifactOutdated = () => false,
+  outdatedOut = () => '',
 }) {
   if (!stages || typeof stages !== 'object') return { decision: 'allow' }
 
@@ -152,13 +156,15 @@ export function decideReadiness({
     // expectedArtifacts / isStageDone 那几处——没有 targetRole 概念、只答「这一趟
     // 该有哪些产物」——才继续成立。produces 本身为空的阶段那条已知边界不受影响，
     // 仍是上面 Minor 3 那条，本次没有改动它。
-    const done = expandProduces(stage, stageRolesInRun(stage, inRun)).every((p) => artifactExists(p))
+    const done = expandProduces(stage, stageRolesInRun(stage, inRun)).every((p) => artifactExists(p) && !artifactOutdated(p))
     if (done) continue
 
     const requires = stage.requires || []
     const stale = requires.filter((r) => artifactStale(r))
     const missing = requires.filter((r) => !artifactExists(r) && !stale.includes(r))
-    if (missing.length === 0 && stale.length === 0) return { decision: 'allow' }
+    // 只在缺的、还旧的都没有时才说它（下面那一支），所以不用再排掉那两类。
+    const outdated = requires.filter((r) => artifactOutdated(r))
+    if (missing.length === 0 && stale.length === 0 && outdated.length === 0) return { decision: 'allow' }
 
     const named = (list) =>
       list
@@ -167,6 +173,17 @@ export function decideReadiness({
           return from ? `${m}（${from} 的产物）` : m
         })
         .join('、')
+
+    if (missing.length === 0 && stale.length === 0) {
+      return {
+        decision: 'deny',
+        reason:
+          `${targetRole} 现在要做的是 ${stageId}，但它的前置 ${named(outdated)} 是对着上一版契约的结论（契约在那之后改过需求，它还没有重出）：` +
+          (callerCanWriteState
+            ? `${outdatedOut(outdated)}，再派 ${targetRole}。`
+            : '怎么重出由项目经理定，把这一点写进你的回报冒泡给派你的人。'),
+      }
+    }
 
     // M4h（docs/43，审查第 38 条）：缺的前置是整段裁掉的那一段的产物（例：S2 整段裁掉之后在 S3 派架构师，缺 01-prd.md）——那一段是 PM 自己
     // 裁掉的，「先跑完」走不通。说清是整段裁掉，给两条路（回退到那一段补回来，或者把要它当前置的段一起裁掉）；派发者改不了 state.json 的冒泡。
