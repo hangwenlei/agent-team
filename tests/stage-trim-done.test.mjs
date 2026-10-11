@@ -80,8 +80,12 @@ test('调用点（docs/76）：hooks 下每一处 isStageDone 调用都传 state
       const args = text.slice(i, j)
       where.add(name)
       assert.ok(/(?:^|[{,\s])state\s*:\s*ctx\.state\s*(?:[,}]|$)/m.test(args), `${name}：state 没传 ctx.state——${args.slice(0, 160)}`)
-      assert.ok(/artifactStale\s*:\s*fresh\.isStale\b/.test(args), `${name}：artifactStale 没传 fresh.isStale——${args.slice(0, 160)}`)
-      assert.ok(/running\s*:\s*runningRolesIn\(ctx,\s*ctx\.state\?\.stage\)/.test(args), `${name}：running 没传——${args.slice(0, 160)}`)
+      assert.ok(/artifactStale\s*:\s*fresh\.isStale\s*(?:,|\})/.test(args), `${name}：artifactStale 没传 fresh.isStale——${args.slice(0, 160)}`)
+      assert.ok(/running\s*:\s*runningRolesIn\(ctx,\s*ctx\.state\?\.stage\)\s*(?:,|\})/.test(args), `${name}：running 没传——${args.slice(0, 160)}`)
+      // docs/77 §8：值后面直接收尾已经核了；键只出现一次（重复的键后一个生效）。
+      for (const key of ['state', 'artifactStale', 'running']) {
+        assert.equal((args.match(new RegExp('(?:^|[{,\\s])' + key + '\\s*:', 'gm')) || []).length, 1, `${name}：${key} 写了不止一次——${args.slice(0, 160)}`)
+      }
     }
   }
   assert.deepEqual([...where], ['hooks/gate.mjs'])

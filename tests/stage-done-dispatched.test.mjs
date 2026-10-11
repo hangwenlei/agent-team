@@ -38,9 +38,24 @@ test('isStageDone（docs/77）：这一段记了账时并上派发记录——�
   const trimmed = { ...BASE, trimmed: { 'at-frontend': 'S5' } }
   assert.equal(isStageDone({ ...base, state: trimmed, dispatched }), true)
   assert.equal(isStageDone({ ...base, state: trimmed, dispatched, running: new Set(['at-frontend']) }), false)
-  // 旧 run（没有 stage_roles）：整趟 roster 并上派发记录。
+})
+
+// 复核（docs/77 §8，中 1）：旧 run 的 roster 与 stage_roles 一样是推进那一次才累加的，段中途照样是没记账；项目经理在段中途先单独记下这一段、
+// 记的人里一个产者都没有（`[]`、只有协调者）也是。这两种并上派发记录，会在协调者只派出一部分人时提前判齐——不并，与改动前一样。
+test('isStageDone（docs/77 §8）：旧 run 不并派发记录；这一段的记录里一个产者都没有的也不并——协调者只派出一部分人时不提前判齐', () => {
+  const only5 = only('05-impl/at-backend.md')
   const legacy = { stage: 'S5', roster: ['at-architect', 'at-backend'] }
-  assert.equal(isStageDone({ ...base, roster: participantsOf(legacy, 'S5'), state: legacy, dispatched }), false)
+  const dispatched = { S5: ['at-backend', 'at-frontend'] }
+  const run5 = (state) => isStageDone({ stage: 'S5', stages: STAGES, artifactExists: only5, roster: participantsOf(state, 'S5'), state, dispatched })
+  assert.equal(run5(legacy), true)
+  const legacyS2 = { stage: 'S2', roster: [] }
+  assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: only('01-prd.md'), roster: participantsOf(legacyS2, 'S2'), state: legacyS2, dispatched: { S2: ['at-product'] } }), false)
+  const early = (s5) => ({ ...BASE, stage_roles: { ...BASE.stage_roles, S5: s5 } })
+  const backendOnly = { S5: ['at-backend'] }
+  for (const s5 of [[], ['at-architect']]) {
+    const st = early(s5)
+    assert.equal(isStageDone({ stage: 'S5', stages: STAGES, artifactExists: only5, roster: participantsOf(st, 'S5'), state: st, dispatched: backendOnly }), false, JSON.stringify(s5))
+  }
 })
 
 test('isStageDone（docs/77）：这一段还没记账（stage_roles 没有这一段的数组）不并派发记录——协调者只派出一部分人时不提前判齐', () => {
@@ -52,12 +67,13 @@ test('isStageDone（docs/77）：这一段还没记账（stage_roles 没有这�
 })
 
 // 派发记录：架构师在 S5 派出 at-backend 与 at-frontend，两个都停下了（放行）。
-function dispatchLog(roles) {
+// running：没有停下行（还在跑）的角色。
+function dispatchLog(roles, running = []) {
   const lines = []
   roles.forEach((role, i) => {
     const id = `a00000000000000${i}${role === 'at-frontend' ? 'f' : 'b'}`
     lines.push(dispatchLine({ at: '2026-10-11T10:00:00.000Z', agentId: id, toolUseId: null, role, stage: 'S5', caller: 'at-architect', callerId: ARCH_ID, mode: 'background' }))
-    lines.push(stopLine({ at: '2026-10-11T10:05:00.000Z', agentId: id, role, stage: 'S5', outcome: 'pass' }))
+    if (!running.includes(role)) lines.push(stopLine({ at: '2026-10-11T10:05:00.000Z', agentId: id, role, stage: 'S5', outcome: 'pass' }))
   })
   return lines.join('\n') + '\n'
 }
@@ -94,6 +110,12 @@ test('【阶段】（docs/77）：派发记录里有、stage_roles 没记的 at-
   assert.ok(!s.ledger.includes('【阶段】S5 的产物已经齐了'), s.ledger)
   assert.ok(s.denied, '推进应当被拒：' + s.reason)
   assert.match(s.reason, /05-impl\/at-frontend\.md/)
+  // 复核（docs/77 §8，中 2）：它派出去了、还在跑（没有停下行）——同样不说齐了。
+  const live = scene({ files: { 'dispatches.jsonl': dispatchLog(['at-backend', 'at-frontend'], ['at-frontend']) } })
+  assert.ok(!live.ledger.includes('【阶段】S5 的产物已经齐了'), live.ledger)
+  // 复核（docs/77 §8，中 1）：项目经理在段中途先单独记下 S5、只记了协调者——派出去的 at-backend 交了也不说齐了（at-frontend 可能还没派）。
+  const early = scene({ state: { ...BASE, stage_roles: { ...BASE.stage_roles, S5: ['at-architect'] } }, files: { 'dispatches.jsonl': dispatchLog(['at-backend']) } })
+  assert.ok(!early.ledger.includes('【阶段】S5 的产物已经齐了'), early.ledger)
 })
 
 test('【阶段】（docs/77）：它交了、或者叫到之后又裁掉（trimmed 记着 S5、已经停下）——说 S5 齐了，推进也放行', () => {
@@ -104,6 +126,13 @@ test('【阶段】（docs/77）：它交了、或者叫到之后又裁掉（trim
   const trimmed = scene({ state: { ...BASE, trimmed: { 'at-frontend': 'S5' } }, files: { 'dispatches.jsonl': log } })
   assert.ok(trimmed.ledger.includes('【阶段】S5 的产物已经齐了'), trimmed.ledger)
   assert.ok(!trimmed.denied, trimmed.reason)
+  // 复核（docs/77 §8，低 3）：同一段里它先有一次被中断（没有停下行）、重派的那一次停下了——按这个角色最近的一次认，不算还在跑。
+  const again =
+    dispatchLine({ at: '2026-10-11T09:00:00.000Z', agentId: 'a0000000000000f04', toolUseId: null, role: 'at-frontend', stage: 'S5', caller: 'at-architect', callerId: ARCH_ID, mode: 'background' }) +
+    '\n' +
+    log
+  const redo = scene({ state: { ...BASE, trimmed: { 'at-frontend': 'S5' } }, files: { 'dispatches.jsonl': again } })
+  assert.ok(redo.ledger.includes('【阶段】S5 的产物已经齐了'), redo.ledger)
 })
 
 // 调用点：每一处 isStageDone 调用都传 dispatched: dispatchedByStageOf(ctx)。扫描面与 tests/stage-trim-done.test.mjs 的调用点判据同一个写法
@@ -130,7 +159,9 @@ test('调用点（docs/77）：hooks 下每一处 isStageDone 调用都传 dispa
       }
       const args = text.slice(i, j)
       where.add(name)
-      assert.ok(/dispatched\s*:\s*dispatchedByStageOf\(ctx\)/.test(args), `${name}：dispatched 没传——${args.slice(0, 200)}`)
+      // 复核（docs/77 §8，中 2）：值后面直接收尾（`, dispatched: null` 接在后面、`&& null` 都算不对），键只出现一次（重复的键后一个生效）。
+      assert.ok(/\bdispatched\s*:\s*dispatchedByStageOf\(ctx\)\s*(?:,|\})/.test(args), `${name}：dispatched 没传——${args.slice(0, 200)}`)
+      assert.equal((args.match(/\bdispatched\s*:/g) || []).length, 1, `${name}：dispatched 写了不止一次——${args.slice(0, 200)}`)
     }
   }
   assert.deepEqual([...where], ['hooks/gate.mjs'])
@@ -151,7 +182,8 @@ const note = (taskId, toolUseId) =>
   `<task-id>${taskId}</task-id>\n<tool-use-id>${toolUseId}</tool-use-id>\n<status>completed</status>\n` +
   '<summary>Agent "x" finished</summary>\n<result>派完了。</result>\n</task-notification>'
 
-function progress({ frontendStops, frontendFile = null, extraState = {}, stages = null }) {
+// earlierFrontend：同一个协调者先派过一次 at-frontend、那一次被中断（没有停下行），再派的那一次照 frontendStops 停下。
+function progress({ frontendStops, frontendFile = null, extraState = {}, stages = null, earlierFrontend = false }) {
   const dirs = makeRun({
     runId: 'r1',
     stage: 'S5',
@@ -180,6 +212,7 @@ function progress({ frontendStops, frontendFile = null, extraState = {}, stages 
     writeFileSync(statePath, JSON.stringify({ ...JSON.parse(readFileSync(statePath, 'utf8')), ...extraState }))
     const ARCH = 'agent-team:at-architect'
     run('deliverable', post(ARCH, 'a00000000000000a5', { toolUseId: 'toolu_01A5' }), gate, dirs.projectDir)
+    if (earlierFrontend) run('deliverable', post('agent-team:at-frontend', 'a00000000000000f4', { caller: ARCH, callerId: 'a00000000000000a5', toolUseId: 'toolu_01F4' }), gate, dirs.projectDir)
     run('deliverable', post('agent-team:at-frontend', 'a00000000000000f5', { caller: ARCH, callerId: 'a00000000000000a5', toolUseId: 'toolu_01F5' }), gate, dirs.projectDir)
     run('deliverable', post('agent-team:at-backend', 'a00000000000000b5', { caller: ARCH, callerId: 'a00000000000000a5', toolUseId: 'toolu_01B5' }), gate, dirs.projectDir)
     // 真实顺序：它没交、被 H5b 拦一回，再以冒泡停下（项目经理随后决定这一趟不要它、写进 trimmed——夹具里 trimmed 先写好，门禁那几步不看它）。
@@ -216,4 +249,60 @@ test('进度（docs/77）：免不免与推进同一个口径——空文件免�
   stages.S6.requires = [...stages.S6.requires, '05-impl/at-frontend.md']
   const required = progress({ frontendStops: true, stages })
   assert.match(required, /05-impl\/at-frontend\.md 还没有——它停下时冒泡了/)
+})
+
+// 复核（docs/77 §8，低 1、低 2、低 3）。
+test('进度（docs/77 §8）：空文件而且还是上一轮的不免；不随参与者变的固定产物不免；同一段里先有一次被中断、重派的那一次停下了照样免', () => {
+  const blankStale = progress({ frontendStops: true, frontendFile: '', extraState: { rework_base: { '05-impl/at-frontend.md': sha256OfContract(Buffer.from('')) } } })
+  assert.match(blankStale, /05-impl\/at-frontend\.md 是空文件——它停下时冒泡了/)
+  const stages = JSON.parse(JSON.stringify(STAGES))
+  stages.S5.produces = ['05-impl/<role>.md', '05-summary.md']
+  const fixed = progress({ frontendStops: true, stages })
+  assert.match(fixed, /at-frontend（后台派发）：05-impl\/at-frontend\.md 没交，trimmed 里记着它在 S5 裁掉了，这一份免了，05-summary\.md 还没有/)
+  const redo = progress({ frontendStops: true, earlierFrontend: true })
+  assert.match(redo, /at-frontend（后台派发）：05-impl\/at-frontend\.md 没交，trimmed 里记着它在 S5 裁掉了，这一份免了\n/)
+})
+
+// 复核（docs/77 §8，中 2）：交付物核验（前台派发的协调者跑完）与完成核验那两处调用的行为——S5 记了 [at-architect, at-backend]，架构师派出的 at-frontend
+// 没记账、还在跑，at-backend 交了：两处都报进度，不说「停在旧阶段」、不沉默。
+test('交付物核验与完成核验（docs/77 §8）：派了没记、还在跑的人让这一段不齐——协调者返回时报进度，不说停在旧阶段', () => {
+  const ARCH = 'agent-team:at-architect'
+  const each = (body) => {
+    const dirs = makeRun({
+      runId: 'r1',
+      stage: 'S5',
+      artifacts: ['00-contract.md', '01-prd.md', '03-arch.md', '04-dispatch.md'],
+      roster: ['at-architect', 'at-backend'],
+      stage_roles: { S3: ['at-architect'], S5: ['at-architect', 'at-backend'] },
+    })
+    try {
+      return body(dirs, join(dirs.projectDir, '.agent-team', 'runs', 'r1'))
+    } finally {
+      rmSync(dirs.projectDir, { recursive: true, force: true })
+      rmSync(dirs.pluginDir, { recursive: true, force: true })
+    }
+  }
+  const ctxOf = (r) => (r.stdout ? JSON.parse(r.stdout).hookSpecificOutput?.additionalContext ?? '' : '')
+  // 架构师派出两个人：at-backend 写完、停下；at-frontend 还在跑。
+  const work = (dirs, runDir, archId) => {
+    run('deliverable', post('agent-team:at-backend', 'a00000000000000b7', { caller: ARCH, callerId: archId, toolUseId: 'toolu_01B7' }), GATE, dirs.projectDir)
+    run('deliverable', post('agent-team:at-frontend', 'a00000000000000f7', { caller: ARCH, callerId: archId, toolUseId: 'toolu_01F7' }), GATE, dirs.projectDir)
+    mkdirSync(join(runDir, '05-impl'), { recursive: true })
+    writeFileSync(join(runDir, '05-impl', 'at-backend.md'), '# 实现记录\n')
+    run('stop-gate', stopped('agent-team:at-backend', 'a00000000000000b7', false, '写好了。'), GATE, dirs.projectDir)
+  }
+  const bg = each((dirs, runDir) => {
+    run('deliverable', post(ARCH, 'a00000000000000a7', { toolUseId: 'toolu_01A7' }), GATE, dirs.projectDir)
+    work(dirs, runDir, 'a00000000000000a7')
+    return ctxOf(run('completion', { hook_event_name: 'UserPromptSubmit', prompt: note('a00000000000000a7', 'toolu_01A7') }, GATE, dirs.projectDir))
+  })
+  assert.match(bg, /交付物核验（S5 进度）/)
+  assert.match(bg, /at-frontend（后台派发）：05-impl\/at-frontend\.md 还没有——门禁还没见它停下：可能还在跑/)
+  const fg = each((dirs, runDir) => {
+    work(dirs, runDir, 'a00000000000000a8')
+    const done = { status: 'completed', prompt: 'y', agentId: 'a00000000000000a8', agentType: ARCH, content: [{ type: 'text', text: '回报。' }], totalDurationMs: 1 }
+    return ctxOf(run('deliverable', { hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_use_id: 'toolu_01A8', tool_input: { subagent_type: ARCH, description: 'x', prompt: 'y' }, tool_response: done }, GATE, dirs.projectDir))
+  })
+  assert.match(fg, /交付物核验（S5 进度）/)
+  assert.ok(!fg.includes('停在旧阶段'), fg)
 })

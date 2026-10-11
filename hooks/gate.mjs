@@ -1627,8 +1627,10 @@ function runningRolesIn(ctx, stageId) {
     const bytes = ctx.artifactBytes(DISPATCHES_FILE)
     if (!bytes || typeof stageId !== 'string') return out
     const log = readDispatchLog(bytes.toString('utf8'))
-    for (const d of log.dispatches) {
-      if (d.stage !== stageId) continue
+    // docs/77 §8：按这个角色在这一段最近的一次派发认——同一段里先有一次被中断（永远没有停下行）、重派的那一次停下了，不算还在跑。
+    const latest = new Map()
+    for (const d of log.dispatches) if (d.stage === stageId) latest.set(d.role, d)
+    for (const d of latest.values()) {
       const last = lastStop(log, d.agent_id)
       if (last === null || last === 'block') out.add(d.role)
     }
@@ -1656,8 +1658,9 @@ function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, reci
     byRole.set(d.role, d)
   }
   // docs/77：叫到之后又裁掉（trimmed 记着这一段）、已经停下的人，没交的那几份里 mayWaive 许的写成免了（waived）——与 isStageDone、推进同一个口径；
-  // 还旧的、还在跑的不免。
+  // 还旧的、还在跑的、不随参与者变的固定产物不免（复核 docs/77 §8：空文件先判成 blank，还旧要单独问）。
   const running = runningRolesIn(ctx, stageId)
+  const fixed = new Set(expandProduces(stage, []))
   const rows = [...byRole.values()].map((d) => {
     const waivable = trimmedAt(ctx.state, d.role, stageId) && !running.has(d.role)
     return {
@@ -1666,7 +1669,8 @@ function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, reci
       stop: lastStop(log, d.agent_id),
       items: expandProduces(stage, [d.role]).map((name) => {
         const st = !ctx.artifactExists(name) ? 'missing' : fresh.isBlank(name) ? 'blank' : fresh.isStale(name) ? 'stale' : 'ok'
-        return { name, state: waivable && (st === 'missing' || st === 'blank') && mayWaive(ctx.stages, stageId, name) ? 'waived' : st }
+        const waive = waivable && (st === 'missing' || st === 'blank') && !fixed.has(name) && !fresh.isStale(name) && mayWaive(ctx.stages, stageId, name)
+        return { name, state: waive ? 'waived' : st }
       }),
     }
   })
