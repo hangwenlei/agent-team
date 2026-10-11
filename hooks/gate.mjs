@@ -388,13 +388,15 @@ function staleReachFor(ctx, writerIsPm = true) {
   const report = validateProject(ctx.project, { roster })
   if (report.block.length || report.plugin.length) return null
   let text
+  let unreadable = false
   try {
     text = readFileSync(join(ctx.agentTeamDir, 'reach.json'), 'utf8')
   } catch (err) {
-    if (err?.code !== 'ENOENT') return null
+    // docs/88：在、却读不出来（不是 ENOENT）——原来不核、一声不吭；现在说这一次没有核。只读一次：短暂占用时多说一次，照着重写一份正确的也无害。
+    unreadable = err?.code !== 'ENOENT'
     text = null
   }
-  const notice = reachStaleNotice({ text, expected: computeReach({ roster, paths: ctx.project.paths }) })
+  const notice = reachStaleNotice({ text, expected: computeReach({ roster, paths: ctx.project.paths }), unreadable })
   return notice && !writerIsPm ? `${notice}\nreach.json 是编排层的控制文件，只有项目经理该改它：把这一段原样冒泡给派你的人，不要自己重写。` : notice
 }
 
