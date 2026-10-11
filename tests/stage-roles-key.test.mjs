@@ -4,11 +4,12 @@
 // 不在，这一次是照现行模板写的）不带 stage_roles，H6 拒；写入之前有 stage_roles、这次写入把它去掉了，H6 也拒。旧 run 从来没有这个键，两条都碰不到它。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { decideStageRolesKey } from '../hooks/lib/rework-guard.mjs'
 import { run, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
+import { USER_WORDS_FILE } from '../hooks/lib/user-words.mjs'
 
 const NEW = { run_id: '20261011-1500-demo', stage: 'S1', contract_sha: 'PENDING', roster: [], stage_roles: {}, trimmed: {}, artifacts: {}, rework: {}, rework_base: {}, never_invoked: [], escalations: [], closed_at: null, history: [{ stage: 'S1', at: '2026-10-11T15:00:00Z' }] }
 const without = (o, k) => Object.fromEntries(Object.entries(o).filter(([key]) => key !== k))
@@ -22,8 +23,15 @@ test('decideStageRolesKey（docs/78）：建 run 的那一次不带 stage_roles 
   const dropped = decideStageRolesKey({ before: NEW, after: without(NEW, 'stage_roles'), creating: false })
   assert.equal(dropped.ok, false)
   assert.match(dropped.reason, /去掉/)
-  // 值写坏了（不是对象）不归这一条——validateState 报；只管键在不在。
-  assert.equal(decideStageRolesKey({ before: NEW, after: { ...NEW, stage_roles: [] }, creating: false }).ok, true)
+  // 复核（docs/78 §8，中 1）：认值不只认键——按段判的消费方（participantsOf）把不是对象的值当成旧 run、退回整趟 roster，与没有这个键一样。
+  for (const v of [[], null, 'S2']) {
+    assert.equal(decideStageRolesKey({ before: null, after: { ...NEW, stage_roles: v }, creating: true }).ok, false, JSON.stringify(v))
+    assert.equal(decideStageRolesKey({ before: NEW, after: { ...NEW, stage_roles: v }, creating: false }).ok, false, JSON.stringify(v))
+  }
+  // 写入之前的值本来就坏了（不是对象）：消费方早已把它当旧 run，这一次去掉或改成对象都放行（与【state.json】叫改成对象的出路不打架）。
+  const broken = { ...NEW, stage_roles: [] }
+  assert.equal(decideStageRolesKey({ before: broken, after: without(NEW, 'stage_roles'), creating: false }).ok, true)
+  assert.equal(decideStageRolesKey({ before: broken, after: NEW, creating: false }).ok, true)
   const legacy = without(NEW, 'stage_roles')
   assert.equal(decideStageRolesKey({ before: legacy, after: legacy, creating: false }).ok, true)
   assert.equal(decideStageRolesKey({ before: legacy, after: NEW, creating: false }).ok, true)
@@ -75,6 +83,60 @@ test('H6（docs/78）：有 stage_roles 的一趟，这次写入把它去掉了�
       rmSync(dirs.projectDir, { recursive: true, force: true })
       rmSync(dirs.pluginDir, { recursive: true, force: true })
     }
+  }
+})
+
+// 复核（docs/78 §8，中 2）：Edit 也走这一条——Edit 建 run（old_string 为空串、文件不在）不带拒、带了放行；Edit 去掉键拒。
+test('H6（docs/78 §8）：Edit 建 run 不带 stage_roles 拒、带了放行；Edit 把它去掉拒', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S1' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r1'), { recursive: true, force: true })
+    const statePath = join(dirs.projectDir, '.agent-team', 'runs', '20261011-1500-demo', 'state.json')
+    const edit = (old_string, new_string) => ({ hook_event_name: 'PreToolUse', tool_name: 'Edit', agent_type: 'agent-team:at-pm', session_id: 's-1', tool_input: { file_path: statePath, old_string, new_string } })
+    assert.equal(decisionOf(run('rework', edit('', JSON.stringify(without(NEW, 'stage_roles'), null, 2)), GATE, dirs.projectDir)).permissionDecision, 'deny')
+    assert.notEqual(decisionOf(run('rework', edit('', JSON.stringify(NEW, null, 2)), GATE, dirs.projectDir)).permissionDecision, 'deny')
+    // 落盘之后（照真实顺序：Write 建目录、写文件），再用 Edit 去掉那一行。
+    mkdirSync(join(statePath, '..'), { recursive: true })
+    writeFileSync(statePath, JSON.stringify(NEW, null, 2))
+    const d = decisionOf(run('rework', edit('  "stage_roles": {},\n', ''), GATE, dirs.projectDir))
+    assert.equal(d.permissionDecision, 'deny', JSON.stringify(d))
+    assert.match(d.permissionDecisionReason, /stage_roles/)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 复核（docs/78 §8，中 2）：建 run 因为缺 stage_roles 被拒，原话记录里不留打算绑到哪一趟（binding）——那一趟没建出来。这一条排在原话绑定之前。
+test('H6（docs/78 §8）：/agent-team:at 之后建 run 不带 stage_roles 被拒——项目一级的原话记录不记 binding', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S1' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r1'), { recursive: true, force: true })
+    const expansion = { hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'agent-team:at', command_args: '做一个待办应用', command_source: 'plugin', prompt: '/agent-team:at 做一个待办应用', session_id: 's-1' }
+    run('user-words', expansion, GATE, dirs.projectDir)
+    const statePath = join(dirs.projectDir, '.agent-team', 'runs', '20261011-1500-demo', 'state.json')
+    assert.equal(decisionOf(run('rework', write(statePath, without(NEW, 'stage_roles')), GATE, dirs.projectDir)).permissionDecision, 'deny')
+    const words = JSON.parse(readFileSync(join(dirs.projectDir, '.agent-team', USER_WORDS_FILE), 'utf8'))
+    assert.equal(words.binding ?? null, null, JSON.stringify(words))
+    assert.ok(!existsSync(join(statePath, '..')))
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
+})
+
+// 复核（docs/78 §8，低 4）：认「建 run」要这一趟的目录还不在、或者是空的——state.json 丢了、目录里还有别的文件时照着重建，不是建 run（旧 run 重建不被逼着加键）。
+test('H6（docs/78 §8）：run 目录里还有别的文件、state.json 丢了——不带 stage_roles 的重建照常放行', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['00-contract.md'], roster: [] })
+  try {
+    const statePath = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const now = JSON.parse(readFileSync(statePath, 'utf8'))
+    rmSync(statePath)
+    const d = decisionOf(run('rework', write(statePath, now), GATE, dirs.projectDir))
+    assert.notEqual(d.permissionDecision, 'deny', JSON.stringify(d))
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
   }
 })
 

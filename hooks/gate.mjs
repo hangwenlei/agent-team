@@ -2187,9 +2187,17 @@ function main() {
       const r = decideRework({ before, after, stages: stagesForRework, grants: readGrants(approvalsText, stagesForRework) })
       if (!r.ok) denyAndExit(r.reason + (r.budget ? approvalDiagnostic(filePath) : ''), spec.event)
 
-      // docs/78：新 run 的 stage_roles——建 run 的那一次（写之前 state.json 不在）要带着它，写入之前有的不许去掉（hooks/lib/rework-guard.mjs 的
-      // decideStageRolesKey）。认「建 run」与 settleWords 同一个条件。
-      const sk = decideStageRolesKey({ before, after, creating: before === null && beforeText === null })
+      // docs/78：新 run 的 stage_roles——建 run 的那一次要带着它（值是对象），写入之前是对象的不许去掉、改成别的（hooks/lib/rework-guard.mjs 的
+      // decideStageRolesKey）。复核（docs/78 §8）：认「建 run」比 settleWords 多一条——写之前读不到 state.json，而且这一趟的目录还不在、或者是空的：
+      // state.json 丢了、目录里还有别的文件时照着重建不是建 run（旧 run 不被逼着加键）；文件被别的进程锁住读不到时目录也不空。
+      const runDirFresh = (() => {
+        try {
+          return readdirSync(dirname(filePath)).length === 0
+        } catch (err) {
+          return err?.code === 'ENOENT'
+        }
+      })()
+      const sk = decideStageRolesKey({ before, after, creating: before === null && beforeText === null && runDirFresh })
       if (!sk.ok) denyAndExit(sk.reason, spec.event)
 
       // M3y（docs/33，全量审查第 15 条）：rework_base——回退那一次写入照磁盘记下各份产物的 sha，之后原样带着，推进离开一段时
