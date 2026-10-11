@@ -20,7 +20,7 @@ import { projectRootFrom, readProjectConfig, readRunContext, RUN_ID } from './li
 import { candidateStages, decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
-import { decideRework, decideReworkBase, parseStateText, replayEdit } from './lib/rework-guard.mjs'
+import { decideRework, decideReworkBase, decideStageRolesKey, parseStateText, replayEdit } from './lib/rework-guard.mjs'
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { isBlankText } from './lib/text-norm.mjs'
 import { normalizeText } from './lib/text-norm.mjs'
@@ -2186,6 +2186,11 @@ function main() {
 
       const r = decideRework({ before, after, stages: stagesForRework, grants: readGrants(approvalsText, stagesForRework) })
       if (!r.ok) denyAndExit(r.reason + (r.budget ? approvalDiagnostic(filePath) : ''), spec.event)
+
+      // docs/78：新 run 的 stage_roles——建 run 的那一次（写之前 state.json 不在）要带着它，写入之前有的不许去掉（hooks/lib/rework-guard.mjs 的
+      // decideStageRolesKey）。认「建 run」与 settleWords 同一个条件。
+      const sk = decideStageRolesKey({ before, after, creating: before === null && beforeText === null })
+      if (!sk.ok) denyAndExit(sk.reason, spec.event)
 
       // M3y（docs/33，全量审查第 15 条）：rework_base——回退那一次写入照磁盘记下各份产物的 sha，之后原样带着，推进离开一段时
       // 那一段里不许还有上一轮的产物。规则在 decideReworkBase（hooks/lib/rework-guard.mjs 的 M3y 一节），这里只做 I/O：

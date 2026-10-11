@@ -49,9 +49,9 @@ $ARGUMENTS
 - 建目录 `.agent-team/runs/<run_id>/`。
 - 照 `${CLAUDE_PLUGIN_ROOT}/templates/state.json` 写 `.agent-team/runs/<run_id>/state.json`。
   模板的顶层键**照着写，一个都不要省**：除 `trimmed`、`stage_roles`、`rework_base` 与 `closed_at` 以外，少任何一个都会被账本回传报成
-  状态不合法；这四个少了**不会**报——校验对它们是向后兼容的（都是后加的字段，更早落盘的
-  run 里没有它们），但那是给旧 run 留的口子，不是让新 run 省掉它们的理由：新 run 少了 `stage_roles`，
-  门禁就按旧 run 的整趟口径判，一声不吭。逐个填法如下：
+  状态不合法；这四个少了账本**不会**报——校验对它们是向后兼容的（都是后加的字段，更早落盘的
+  run 里没有它们），但那是给旧 run 留的口子，不是让新 run 省掉它们的理由。`stage_roles` 另有一道：建 run 那一次少了 `stage_roles`，门禁拒这次写入
+  （少了它，门禁会按旧 run 的整趟口径判这一趟）；之后每次写 `state.json` 都带着它，去掉它的写入同样被拒。逐个填法如下：
   `run_id` 填你上面生成的那个 run id（**必须与目录名逐字相同**），`stage` 填 `S1`，
   `history` 填一条 `{ "stage": "S1", "at": "<ISO 时间>" }`，`contract_sha` 保持
   `PENDING`，`roster` 与 `never_invoked` 先留空数组，`artifacts`、`rework`、`stage_roles`、`trimmed` 与 `rework_base`

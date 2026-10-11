@@ -277,6 +277,23 @@ function decideChainInvariant({ before, after, stages }) {
  *   before：磁盘上的原文（文件不在时为 null）。
  * @returns {string|null}
  */
+// docs/78（docs/32 §4「新 run 漏写 stage_roles 时静默退回整趟口径」）：按段判的门禁（【阶段】、推进、产者交代……）认 state.json 有没有 stage_roles
+// 这个键——没有就当更早落盘的 run、按整趟 roster 判，validateState 对缺失不报（旧 run 本来就没有）。拿 closed_at、rework_base 在不在认新旧不准：旧 run
+// 在新插件下续跑，回退会写进 rework_base、收口会写进 closed_at。门禁看得准的是两个时刻：建 run 的那一次（creating：写之前 state.json 不在，这一次照
+// 现行模板写）不带它，拒；写入之前有它、这次写入把它去掉了，拒。旧 run 从来没有这个键，两条都碰不到它。只管键在不在，值的形状归 validateState。
+export const STAGE_ROLES_CREATE =
+  'agent-team H6 返工预算：这次写入建的是一趟新 run，state.json 里要有 stage_roles 这个键（先写成 {}，推进出一段时把那一段叫到的人记进去）。' +
+  '少了它，按段判齐、判交没交齐的门禁会把这一趟当成更早的 run、按整趟 roster 判，不再提醒。照 /agent-team:at 第 1 节的模板把顶层键写全，再写一次。'
+export const STAGE_ROLES_DROP =
+  'agent-team H6 返工预算：写入之前的 state.json 有 stage_roles，这次写入把它去掉了。它按段记这一趟叫到了谁，去掉之后按段判的门禁会退回整趟 roster。' +
+  '把写入之前的 stage_roles 原样带上（这一次要记的人并进对应的那一段），再写一次。'
+export function decideStageRolesKey({ before, after, creating = false }) {
+  if (!isPlainObject(after) || Object.hasOwn(after, 'stage_roles')) return { ok: true }
+  if (creating) return { ok: false, reason: STAGE_ROLES_CREATE }
+  if (isPlainObject(before) && Object.hasOwn(before, 'stage_roles')) return { ok: false, reason: STAGE_ROLES_DROP }
+  return { ok: true }
+}
+
 export function replayEdit({ before, oldString, newString, replaceAll = false }) {
   if (typeof oldString !== 'string' || typeof newString !== 'string') return null
   if (before === null || before === undefined) return oldString === '' ? newString : null

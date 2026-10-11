@@ -269,7 +269,8 @@ test('rework：磁盘上还没有这份 state.json（本趟第一次建）→ �
   try {
     const p = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
     rmSync(p, { force: true })
-    const fresh = { stage: 'S1', history: [{ stage: 'S1', at: 't' }], rework: {} }
+    // docs/78：建 run 的那一次要带着 stage_roles（照模板写成 {}），不带的 H6 拒（tests/stage-roles-key.test.mjs）。
+    const fresh = { stage: 'S1', history: [{ stage: 'S1', at: 't' }], rework: {}, stage_roles: {} }
     const { stdout } = run(
       'rework',
       { tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: p, content: JSON.stringify(fresh) } },
