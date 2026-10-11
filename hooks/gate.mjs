@@ -24,7 +24,7 @@ import { decideRework, decideReworkBase, parseStateText, replayEdit } from './li
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { isBlankText } from './lib/text-norm.mjs'
 import { normalizeText } from './lib/text-norm.mjs'
-import { BUBBLE_EXIT, BUBBLE_WHEN, decideDeliverable, isBubbleStop, isKnownStage } from './lib/deliverable.mjs'
+import { BUBBLE_MARK, decideDeliverable, isBubbleStop, isKnownStage } from './lib/deliverable.mjs'
 import {
   AGENT_ID_RE,
   bubbleOf,
@@ -727,7 +727,17 @@ function verdictStopReason(ctx, role) {
   if (!acc || ctx.state?.stage !== acc.stageId) return null
   const bytes = ctx.artifactBytes(acc.name)
   if (!bytes || acceptanceVerdict(bytes) !== null) return null
-  return `${verdictStageNote({ stages: ctx.stages, block: { name: acc.name, verdict: null }, writer: ACCEPTANCE_ROLE })}${BUBBLE_WHEN}，${BUBBLE_EXIT}`
+  return verdictStageNote({ stages: ctx.stages, block: { name: acc.name, verdict: null }, writer: ACCEPTANCE_ROLE }) + verdictBubbleTail(acc.stageId)
+}
+
+// 复核（docs/62 §8）：这一支的冒泡尾巴单写——走到这里产物已经写了（不说「就不写」）；它在、不是空的，推进的交齐判据算它交了，挡推进的是 H6 读首行
+// （不说「产物照旧算没交」）。认的还是同一个 isBubbleStop。
+function verdictBubbleTail(stageId) {
+  return (
+    `验收结论确实写不出来、要上级定的（契约有问题、判据缺输入），把你最后一条回复的第一行写成「${BUBBLE_MARK}<一句话理由>」，下面写清缺什么、` +
+    `要上级定什么，再停下——门禁认这一行、放你停下；推进出 ${stageId} 照旧会被拒，项目经理读你的回复来定。已经这样写过、又被拦回来的，把那条回复` +
+    `原样再发一遍再停下（第一行仍是「${BUBBLE_MARK}…」）。`
+  )
 }
 
 // M3a Task 2：「已经走过的那几段，产者有没有交代」的措辞组装。decideCoverage

@@ -46,9 +46,12 @@ test('H5b（docs/62）：at-acceptance 在 S7 停下、07-acceptance.md 第一�
     assert.ok(r.stderr.includes('07-acceptance.md') && r.stderr.includes('第一行读不出验收结论'), r.stderr)
     for (const l of VERDICT_LINES) assert.ok(r.stderr.includes(`「${l}」`), l)
     assert.ok(r.stderr.includes(BUBBLE_MARK), '冒泡的出口照旧：' + r.stderr)
-    // 派发记录记下这一回停下是拦。
-    const log = readFileSync(join(dirs.runDir, 'dispatches.jsonl'), 'utf8')
-    assert.ok(log.includes('"outcome":"block"') && log.includes('"role":"at-acceptance"'), log)
+    // 复核（docs/62 §8）：冒泡有条件（写不出来、要上级定的）；不许诺「停下不改」这条走不通的路，不说「就不写」「产物算没交」。
+    assert.ok(r.stderr.includes('验收结论确实写不出来、要上级定的'), r.stderr)
+    assert.ok(r.stderr.includes('不改，你停下时门禁会拦回来') && !r.stderr.includes('项目经理要再派你一次'), r.stderr)
+    assert.ok(!r.stderr.includes('就不写') && !r.stderr.includes('算没交'), r.stderr)
+    // 派发记录记下这一回停下是拦——恰好一行，没有先记一行放行。
+    assert.deepEqual(outcomesOf(dirs.runDir), ['block'])
   })
 })
 
@@ -61,14 +64,23 @@ test('H5b（docs/62）：首行是三种之一——放行；不通过、判不�
   }
 })
 
+const outcomesOf = (runDir) =>
+  readFileSync(join(runDir, 'dispatches.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((v) => v.kind === 'stop').map((v) => v.outcome)
+
 test('H5b（docs/62）：被拦过一回、最后一条回复第一行是「冒泡：」——放它停下', () => {
   inRun({ verdict: '# 验收报告\n' }, (dirs) => {
     const r = run('stop-gate', stop(ACC, { active: true, message: `${BUBBLE_MARK}契约第 3 条与第 5 条冲突，结论写不出来。` }), GATE, dirs.projectDir)
     assert.equal(r.status, 0, r.stderr)
+    assert.deepEqual(outcomesOf(dirs.runDir), ['bubble'], '冒泡记一行 bubble（否则完成核验与【派发】把它当还没停下）')
+  })
+  // 第一次停下（没被拦过）就带着冒泡：照拦——标记只在被拦过一回之后才认。
+  inRun({ verdict: '# 验收报告\n' }, (dirs) => {
+    const r = run('stop-gate', stop(ACC, { message: `${BUBBLE_MARK}写不出来。` }), GATE, dirs.projectDir)
+    assert.equal(r.status, 2, r.stderr)
   })
 })
 
-test('H5b（docs/62）：只管验收角色在验收那一段——at-qa 的测试报告不核首行；at-acceptance 不在验收那一段停下、这一趟收了口的不核', () => {
+test('H5b（docs/62）：只管验收角色在验收那一段——at-qa 的测试报告不核首行、at-qa 在 S7 停下不核；at-acceptance 不在验收那一段（S6、收了口停在 S8）停下不核', () => {
   inRun({ stage: 'S6', verdict: null, files: ['00-contract.md', '01-prd.md', '03-arch.md', '04-dispatch.md', '06-test.md'] }, (dirs) => {
     writeFileSync(join(dirs.runDir, '06-test.md'), '# 测试报告\n')
     assert.equal(run('stop-gate', stop('agent-team:at-qa'), GATE, dirs.projectDir).status, 0)
@@ -84,6 +96,19 @@ test('H5b（docs/62）：只管验收角色在验收那一段——at-qa 的测�
   inRun({ stage: 'S8', verdict: '# 验收报告\n', files: [...S7_FILES, '08-delivery.md'], extra: { closed_at: '2026-10-10T12:00:00Z' } }, (dirs) => {
     const r = run('stop-gate', stop(ACC), GATE, dirs.projectDir)
     assert.ok(!r.stderr.includes('第一行读不出验收结论'), r.stderr)
+  })
+})
+
+test('H5a（复核 docs/62 §8）：前台派发跑完那一刻（PostToolUse:Agent）不走这一支——首行坏的 at-acceptance 照常回传、不拦、不说首行', () => {
+  inRun({ verdict: '# 验收报告\n' }, (dirs) => {
+    const done = {
+      hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_use_id: 'toolu_01R20A', agent_type: 'at-pm',
+      tool_input: { subagent_type: ACC, description: 'x', prompt: 'y' },
+      tool_response: { status: 'completed', prompt: 'y', agentId: 'a0000000000000072', agentType: ACC, content: [{ type: 'text', text: '验收写完了。' }], totalDurationMs: 1 },
+    }
+    const r = run('deliverable', done, GATE, dirs.projectDir)
+    assert.equal(r.status, 0, r.stderr)
+    assert.ok(!r.stdout.includes('第一行读不出验收结论') && !r.stderr.includes('BUG'), r.stdout + r.stderr)
   })
 })
 
