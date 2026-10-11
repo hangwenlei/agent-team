@@ -157,3 +157,15 @@ test('docs/68 §8：挂着的用例的几种同义说法，at-qa、at-acceptance
   for (let i = at.indexOf('以后都不算'); i >= 0; i = at.indexOf('以后都不算', i + 1)) assert.ok(i > from && i < to, `「以后都不算」出现在 S6 那一条之外：${at.slice(i - 30, i + 30)}`)
   for (const p of ['agents/at-qa.md', 'agents/at-acceptance.md']) assert.ok(!read(p).includes('以后都不算'), p)
 })
+
+// docs/70：真实会话 M17 里验收把契约第 1 节的「走到收口」列成一条、写「流程项……不在业务验收范围」——三种结论之外的第四种。管流程的话不是做出来的东西，
+// 归项目经理照着走，不列进逐条。写在「你判什么」那一节、紧跟在「逐条只有三种」那一句后面。
+const ACC_PROCESS = '契约第 1 节里管流程的话（走到哪一段停、要不要收口、先别派谁）不是做出来的东西，归项目经理照着走，不列进逐条。'
+test('docs/70：验收角色——契约第 1 节里管流程的话不列进逐条，紧跟在「逐条只有三种」那一句后面', () => {
+  const body = bodyOf('at-acceptance')
+  const from0 = body.indexOf('## 你判什么')
+  const next0 = body.indexOf('\n## ', from0 + 1)
+  const s = body.slice(from0, next0 < 0 ? body.length : next0)
+  assert.ok(has(s, ACC_THREE + ACC_PROCESS), '「你判什么」那一节：管流程的话那一句不在、或者没紧跟在「逐条只有三种」后面')
+  assert.equal(stripWs(read('agents/at-acceptance.md')).split(stripWs('管流程的话')).length - 1, 1, '「管流程的话」只许出现在那一句里')
+})
