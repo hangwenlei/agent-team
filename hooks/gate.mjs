@@ -1059,7 +1059,9 @@ function unusedDeliverApproval(ctx, base) {
   const ab = ctx.artifactBytes(APPROVALS_FILE)
   if (!ab) return null
   const text = ab.toString('utf8')
-  for (const def of [acceptanceOf(ctx.stages), testStageOf(ctx.stages)]) {
+  const testDef = testStageOf(ctx.stages)
+  // 复核（docs/66 §8 第二次）：测试报告的批准只在停在测试那一段时盖那次修订——没用掉就推进了的，不让它一直挂到 S7、吞掉之后真的改需求。
+  for (const def of [acceptanceOf(ctx.stages), testDef && ctx.state?.stage === testDef.stageId ? testDef : null]) {
     if (!def) continue
     const bytes = ctx.artifactExists(def.name) ? ctx.artifactBytes(def.name) : null
     if (!bytes) continue
@@ -1321,8 +1323,9 @@ function acceptanceOnDisk(ctx, name, kind = 'acceptance') {
         const b = ctx.artifactExists(n) ? ctx.artifactBytes(n) : null
         return b ? { exists: true, sha: sha256OfContract(b) } : { exists: false, sha: null }
       }
-      outdated = outdatedProducts({ stages: ctx.stages, base, diskSha, lastDispatchAt: lastDispatchAtOf(ctx.stages, log) }).some(
-        (n) => !isContractWriter(producerOfName(ctx.stages, n)?.role),
+      // 复核（docs/66 §8 第二次）：测试报告那一路只看它自己——旧的验收结论对着上一版契约，要走到验收那一段才重出，停在测试那一段时重出不了，算进来就绕圈。
+      outdated = outdatedProducts({ stages: ctx.stages, base, diskSha, lastDispatchAt: lastDispatchAtOf(ctx.stages, log) }).some((n) =>
+        kind === 'test' ? n === name : !isContractWriter(producerOfName(ctx.stages, n)?.role),
       )
     }
   } catch {}
@@ -2201,7 +2204,7 @@ function main() {
         },
         dispatched,
       })
-      if (!tv.ok) denyAndExit(tv.reason, spec.event)
+      if (!tv.ok) denyAndExit(tv.reason + approvalDiagnostic(filePath), spec.event)
 
       // M4k（docs/46，docs/35 §5「收口不读验收结论」）：验收结论首行——推进出验收那一段与收口时，不是「结论：通过」、又没有门禁记下的
       // 照现状交付批准（approvals.jsonl 里 sha 等于它现在的 sha），拒（hooks/lib/verdict.mjs）。排在最后：对着上一版契约的结论先重出，

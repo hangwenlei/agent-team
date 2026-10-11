@@ -75,8 +75,10 @@ export function testBlockText(block) {
     return (
       `${block.name} 第一行是「结论：不通过」，测试没过不能推进出 ${block.stageId}：照 /agent-team:at 第 3 节的「回退」记回到 ${block.implStage ?? '实现那一段'}` +
       '（测试没过、缺测试都回那里；根因在更早一段的，回到那一段），修好之后重新走到这里。没过的那几条不修、要带着它们往下走的（项目里本来就挂着的用例、' +
-      '不稳定的用例、返工预算耗尽），那是用户的决定：照 /agent-team:at 第 4 节先往 escalations 记一条（answer 写空串），再用 AskUserQuestion 问——一道单选题' +
-      `（multiSelect 设 false），那一项的标签逐字写「${DELIVER_LABEL}」；用户选了它，门禁记下这条批准（只对现在这份 ${block.name} 有效），再推进`
+      '不稳定的用例、返工预算耗尽），那是用户的决定：照 /agent-team:at 第 4 节先往 escalations 记一条（answer 写空串；kind 照问的那一类记——返工预算耗尽是' +
+      ' budget-exhausted，要用户在没过的用例与契约之间取舍的是 contract-conflict），再用 AskUserQuestion 问——一道单选题' +
+      `（multiSelect 设 false），那一项的标签逐字写「${DELIVER_LABEL}」；用户选了它，门禁记下这条批准（只对现在这份 ${block.name} 有效），再推进。` +
+      `问不了用户的（工具面里没有 AskUserQuestion），请用户在对话里单独发一条只写「${DELIVER_LABEL}」的消息`
     )
   }
   return (
@@ -113,7 +115,8 @@ export function testStageNote({ block, writer }) {
     )
   }
   if (writer === TEST_ROLE) {
-    return `测试结论是「结论：不通过」：推进出 ${block.stageId} 会被拒，项目经理会照回退回到 ${block.implStage ?? '实现那一段'}——回报时照实说。`
+    return `测试结论是「结论：不通过」：推进出 ${block.stageId} 会被拒，项目经理会回退到 ${block.implStage ?? '实现那一段'}、或者问用户要不要照现状交付——回报时照实说` +
+      '（这一趟之前就挂着的用例逐条注明）。'
   }
   return `推进出 ${block.stageId} 会被 H6 拒：${testBlockText(block)}。`
 }

@@ -203,6 +203,8 @@ test('照现状交付（复核 docs/66 §8）：拒绝理由里给这条出路�
     const why = advance(fx).permissionDecisionReason
     assert.ok(why.includes('「照现状交付」') && why.includes('只对现在这份 06-test.md 有效'), why)
     assert.ok(why.includes('根因在更早一段的，回到那一段'), why)
+    // 复核（docs/66 §8 第二次）：escalation 的 kind 照问的那一类记；问不了用户的走对话里单独发那一句。
+    assert.ok(why.includes('budget-exhausted') && why.includes('contract-conflict') && why.includes('单独发一条只写「照现状交付」的消息'), why)
   })
   inS6('结论：跑不起来：缺 Docker\n', (fx) => {
     const c = ctxOf(run('approval-ask', asked('照现状交付'), GATE, fx.projectDir))
@@ -270,7 +272,7 @@ test('【阶段】（复核 docs/66 §8）：at-qa 写的是不通过——给�
   inS6('结论：不通过：缺测试\n', (fx) => {
     const byQa = { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'agent-team:at-qa', tool_input: { file_path: join(fx.runDir, '06-test.md') } }
     const c = ctxOf(run('ledger', byQa, GATE, fx.projectDir))
-    assert.ok(c.includes('测试结论是「结论：不通过」') && c.includes('回报时照实说') && !c.includes('会被 H6 拒'), c)
+    assert.ok(c.includes('测试结论是「结论：不通过」') && c.includes('回报时照实说') && c.includes('或者问用户要不要照现状交付') && c.includes('这一趟之前就挂着的用例逐条注明') && !c.includes('会被 H6 拒'), c)
   })
   inS6('# 旧格式的测试报告\n', (fx) => {
     writeFileSync(join(fx.runDir, '07-acceptance.md'), '结论：通过\n')
@@ -279,5 +281,82 @@ test('【阶段】（复核 docs/66 §8）：at-qa 写的是不通过——给�
     const byPm = { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'agent-team:at-pm', tool_input: { file_path: fx.statePath } }
     const c = ctxOf(run('ledger', byPm, GATE, fx.projectDir))
     assert.ok(!c.includes('推进出 S6'), c)
+  })
+})
+
+// ——— 复核（docs/66 §8 第二次） ———
+
+const postedContract = (fx) => ({ hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'agent-team:at-pm', tool_input: { file_path: join(fx.runDir, '00-contract.md') } })
+const CONTRACT2 = ['# 00 契约', '', '## 1. 用户原话', '', '> 做一个计数工具。', '', '## 2. PM 的理解（可改）', '', '- 命令行。', '', '## 4. 修订记录', ''].join(NL)
+const putBase = (fx, extra = {}) => {
+  writeFileSync(join(fx.runDir, '00-contract.md'), CONTRACT2)
+  writeFileSync(join(fx.runDir, 'contract-base.json'), JSON.stringify({ section1: '> 做一个计数工具。', body_sha: bodyShaOf(CONTRACT2), revisions: [], verify_base: {}, revised_at: null, ...extra }))
+}
+const baseOf = (fx) => JSON.parse(readFileSync(join(fx.runDir, 'contract-base.json'), 'utf8'))
+const shaText = (s) => sha256OfContract(Buffer.from(s))
+
+test('照现状交付（复核 docs/66 §8 第二次，高 1）：改过需求、回退到 S6 重测不通过——旧的验收结论对着上一版契约不算到测试报告头上，记得下；给用户看的那一行不点名产物', () => {
+  inS6(FAIL, (fx) => {
+    // 改需求那一刻门禁记下了当时的 06、07；之后回到 S6，at-qa 重测写了新的 06（内容不同）；07 还是旧的那一份（要走到 S7 才重出）。
+    writeFileSync(join(fx.runDir, '07-acceptance.md'), '结论：通过' + NL)
+    putBase(fx, { revisions: ['### 2026-10-10 · 用户主动提出'], verify_base: { '06-test.md': shaText('结论：通过' + NL + '旧的' + NL), '07-acceptance.md': shaText('结论：通过' + NL) }, revised_at: '2026-10-10T11:00:00Z' })
+    const r = run('approval-ask', asked('照现状交付'), GATE, fx.projectDir)
+    assert.ok(ctxOf(r).includes('已记下照现状交付的批准') && ctxOf(r).includes('06-test.md'), ctxOf(r))
+    assert.ok(JSON.parse(r.stdout).systemMessage.includes('只对批准那一刻的那份结论有效'), r.stdout)
+  })
+})
+
+test('照现状交付（复核 docs/66 §8 第二次，中 4）：测试报告的批准没用掉就推进了——停在 S7 时它不盖那次修订（改需求照常算）', () => {
+  inS6(FAIL, (fx) => {
+    putBase(fx)
+    run('approval-ask', asked('照现状交付'), GATE, fx.projectDir)
+    const hist = H('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7')
+    writeFileSync(fx.statePath, JSON.stringify({ ...fx.state, stage: 'S7', stage_roles: { ...fx.state.stage_roles, S7: ['at-acceptance'] }, history: hist, rework: reworkFromHistory(hist) }))
+    writeFileSync(join(fx.runDir, '00-contract.md'), CONTRACT2 + '### 2026-10-10 · 用户主动提出' + NL + '**改动**：加一条：能导出。' + NL)
+    run('ledger', postedContract(fx), GATE, fx.projectDir)
+    const base = baseOf(fx)
+    assert.deepEqual(base.deliver_used ?? [], [], JSON.stringify(base))
+    assert.ok(Object.hasOwn(base.verify_base, '06-test.md'), JSON.stringify(base))
+  })
+})
+
+test('照现状交付（复核 docs/66 §8 第二次）：验收结论那份批准已经用过，测试报告这一份照样盖它那一次修订', () => {
+  inS6(FAIL, (fx) => {
+    writeFileSync(join(fx.runDir, '07-acceptance.md'), '结论：不通过' + NL + '旧的' + NL)
+    const used07 = shaText('结论：不通过' + NL + '旧的' + NL)
+    putBase(fx, { deliver_used: [used07] })
+    writeFileSync(join(fx.runDir, 'approvals.jsonl'), JSON.stringify({ at: '2026-10-10T10:00:00Z', source: 'ask', kind: 'deliver-as-is', product: '07-acceptance.md', sha: used07 }) + NL)
+    run('approval-ask', asked('照现状交付'), GATE, fx.projectDir)
+    writeFileSync(join(fx.runDir, '00-contract.md'), CONTRACT2 + '### 2026-10-10 · 升级 #2（kind: budget-exhausted）' + NL + '**用户裁决**：照现状交付。' + NL)
+    run('ledger', postedContract(fx), GATE, fx.projectDir)
+    assert.deepEqual(baseOf(fx).deliver_used, [used07, shaText(FAIL)])
+  })
+})
+
+test('照现状交付（复核 docs/66 §8 第二次）：对话里单独发「照现状交付」那一路在 S6 同样绑测试报告；测试报告那一路「已经记过」「还是上一轮的」「对着上一版契约」各说测试报告', () => {
+  inS6(FAIL, (fx) => {
+    run('approval-prompt', { hook_event_name: 'UserPromptSubmit', prompt: '照现状交付' }, GATE, fx.projectDir)
+    assert.equal(approvalsOf(fx.runDir)[0]?.product, '06-test.md')
+    const dup = ctxOf(run('approval-ask', asked('照现状交付'), GATE, fx.projectDir))
+    assert.ok(dup.includes('这一份测试报告的照现状交付已经记过了'), dup)
+  })
+  inS6(FAIL, (fx) => {
+    writeFileSync(fx.statePath, JSON.stringify({ ...fx.state, rework_base: { '06-test.md': shaText(FAIL) } }))
+    const stale = ctxOf(run('approval-ask', asked('照现状交付'), GATE, fx.projectDir))
+    assert.ok(stale.includes('测试报告还是上一轮的'), stale)
+  })
+  inS6(FAIL, (fx) => {
+    putBase(fx, { revisions: ['### 2026-10-10 · 用户主动提出'], verify_base: { '06-test.md': shaText(FAIL) }, revised_at: '2026-10-10T11:00:00Z' })
+    const od = ctxOf(run('approval-ask', asked('照现状交付'), GATE, fx.projectDir))
+    assert.ok(od.includes('测试报告对着上一版契约'), od)
+  })
+})
+
+test('复核（docs/66 §8 第二次，低 7）：H6 因为测试报告不通过拒、而门禁找不到进行中的 run 时——拒绝理由补一句用户的批准会记不下', () => {
+  inS6(FAIL, (fx) => {
+    rmSync(join(fx.projectDir, '.agent-team', 'current-run'))
+    const d = advance(fx)
+    assert.equal(d?.permissionDecision, 'deny', JSON.stringify(d))
+    assert.ok(d.permissionDecisionReason.includes('「结论：不通过」') && d.permissionDecisionReason.includes('用户的回答会记不下'), d.permissionDecisionReason)
   })
 })

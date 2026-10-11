@@ -259,7 +259,7 @@ export function systemMessage(kind, { cause, check } = {}) {
       return 'agent-team 返工批准：这次的回答没有记成批准，项目经理已收到原因。'
     // M4k（docs/46）：同两个记录器记下的照现状交付批准。
     case 'deliver-recorded':
-      return 'agent-team 照现状交付：已记下你的批准（只对现在这份验收结论有效），项目经理已收到。'
+      return 'agent-team 照现状交付：已记下你的批准（只对批准那一刻的那份结论有效），项目经理已收到。'
     case 'deliver-skipped':
       return 'agent-team 照现状交付：这次的回答没有记成批准，项目经理已收到原因。'
     case 'input':
