@@ -24,6 +24,7 @@ import { PLUGIN_PREFIX, stripPluginPrefix } from './decide.mjs'
 // M3z（docs/34）：上限的单一真源挪到 budget.mjs（limitOf 要它，留在这里就成了环）；这里原样再导出，既有的 import 不用改。
 import { REWORK_LIMIT, limitOf } from './budget.mjs'
 import { closedAt, lastStageId } from './closing.mjs'
+import { mayWaive, trimmedAt } from './advance.mjs'
 
 // validateState 的问题文案会进受信回传【state.json】；state.json 是写得进它的任何人都能写的，
 // 键名与值一律过 quote（M3s，docs/27）——阶段名也一样：它在这里是 state.json 里写着的那个值，
@@ -321,7 +322,9 @@ export function rejectTo(kind) {
  * （tests/stage-done-call-site.test.mjs）。当前段还没记账时传进来的是 []：produces 每一条都随参与者展开的段（对象形式，
  * 或数组里每条都含 <role>）展开为空、答 false；不含 <role> 的条目与传进来的是谁无关，原样保留，照磁盘判。
  */
-export function isStageDone({ stage, stages, artifactExists, roster }) {
+// docs/76（docs/32 §4「叫到之后又裁掉」）：state 给了时，叫到之后又裁掉的角色（trimmed 里记着它、值是这一段）那几份 mayWaive 许的产物免掉——与推进判据
+// （advance.mjs 的 departureNeeds）同一个口径；不随参与者变的固定产物不免。不给 state 的照旧（等它们）。
+export function isStageDone({ stage, stages, artifactExists, roster, state = null }) {
   // stage 来自 state.json：不是字符串、或者不是 stages 自己的键，就不算完成（M3s，docs/27 §3）。
   // 此前拿它直接做属性键，{"toString":1} 这样的对象会让 ToPropertyKey 抛异常——ledger 与
   // deliverable 整条崩掉，本该报出这个坏值的【state.json】也跟着消失。
@@ -331,9 +334,18 @@ export function isStageDone({ stage, stages, artifactExists, roster }) {
   // 「这一阶段在这一趟里的产出角色」走 stages.mjs 的 stageRolesInRun，不在这里自己
   // 再写一遍 roster 过滤——Task 3 评审发现 1：这段逻辑原本在这里和 expectedArtifacts
   // 各有一份逐字同构的实现，现已收敛成一处。
-  const names = expandProduces(current, stageRolesInRun(current, roster))
+  const participants = stageRolesInRun(current, roster)
+  const names = expandProduces(current, participants)
   if (names.length === 0) return false
-  return names.every((p) => artifactExists(p))
+  const fixed = new Set(expandProduces(current, []))
+  const excused = new Set()
+  if (isPlainObject(state)) {
+    for (const r of participants) {
+      if (!trimmedAt(state, r, stage)) continue
+      for (const n of expandProduces(current, [r])) if (!fixed.has(n) && mayWaive(stages, stage, n)) excused.add(n)
+    }
+  }
+  return names.every((p) => excused.has(p) || artifactExists(p))
 }
 
 // M3z（docs/34，全量审查第 16 条）：多一个 grants（门禁记下的返工批准，budget.mjs 的 readGrants）与一个返回值 budget——按 history 的

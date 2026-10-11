@@ -2615,6 +2615,7 @@ function main() {
       stages: ctx.stages,
       artifactExists: fresh.artifactCurrent,
       roster: participantsOf(ctx.state, ctx.state?.stage),
+      state: ctx.state,
     })
     // 【返工】：写 state.json 时，当前段与更早段还是上一轮的产物（hooks/lib/ledger.mjs 那一段）。
     const reworkStale = kind === 'state' ? staleByStage({ stages: ctx.stages, stageId: ctx.state?.stage, isStale: fresh.isStale }) : null
@@ -3077,6 +3078,7 @@ function main() {
               stages: ctx.stages,
               artifactExists: fresh.artifactCurrent,
               roster: participantsOf(ctx.state, ctx.state?.stage),
+              state: ctx.state,
             })
             if (!done) {
               const p = progressOf({ ctx, fresh, log, coordinator: d.role, coordinatorId: taskId, stageId: d.stage, recipientIsPm, selfDone: r.skipped === undefined })
@@ -3445,6 +3447,7 @@ function main() {
         stages: ctx.stages,
         artifactExists: fresh.artifactCurrent,
         roster: participantsOf(ctx.state, ctx.state?.stage),
+        state: ctx.state,
       })
       // 'unknown-stage'：state.stage 缺失、不是字符串，或不在阶段链里——交付物核验这一次没做，在它改对之前每一次都不做。
       // M3v（docs/30）订正：上一版这里写的是「ledger 那条路径会给出细节」「SubagentStop 上没有 additionalContext 这条

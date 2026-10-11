@@ -61,7 +61,8 @@ export function dispatchedIn(sid, dispatched) {
   return Array.isArray(who) ? who.filter((r) => typeof r === 'string') : []
 }
 
-const trimmedAt = (state, role, sid) => isPlainObject(state?.trimmed) && Object.hasOwn(state.trimmed, role) && state.trimmed[role] === sid
+// docs/76：isStageDone 也用它（叫到之后又裁掉的免除，与推进同一个口径）。
+export const trimmedAt = (state, role, sid) => isPlainObject(state?.trimmed) && Object.hasOwn(state.trimmed, role) && state.trimmed[role] === sid
 
 // 整段裁掉：这一段的产者都在 trimmed 里、记的就是这一段（PM 裁掉了它们——测试那一段要用户的话，/agent-team:at 第 4 节），这一趟在这一段一个都没叫过（calledIn，
 // 写入前后取并集），而且没有一个是 PM——PM 不裁自己的段。推进（departureNeeds）与收口（closing.mjs 的 trimmedAway）共用这一份：
