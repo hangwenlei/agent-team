@@ -43,6 +43,12 @@ function paragraphFrom(text, head) {
   const end = rest.findIndex((l) => l.trim() === '')
   return (end < 0 ? rest : rest.slice(0, end)).join('\n')
 }
+// 以 head 开头的那一行是一段的开头：前一行是空行（或者它是第一行）。paragraphFrom 只往下找段尾，紧贴着往上加一行它看不见（docs/86 §8）。
+function startsParagraph(text, head) {
+  const lines = text.split('\n')
+  const i = lines.findIndex((l) => l.trimStart().startsWith(head))
+  return i === 0 || (i > 0 && lines[i - 1].trim() === '')
+}
 // commands/at.md「各段的具体做法」里以 head 开头的那一条（到下一条「- **」或下一个标题为止）。
 function bulletOf(text, head) {
   const lines = text.split('\n')
@@ -100,7 +106,9 @@ const ACC_NO_TESTS =
 // docs/86（docs/85 §4「at-acceptance 不认那两种情形」）：用户在契约里说了这部分不要测试的，没有测试不算缺——照上一句回 S5 补测试就违背了用户的话。
 // 紧跟在上一句后面；口径与不写测试那一句相同（只认契约第 1 节原话、第 4 节修订块里用户的原话或裁决）。没有新行为的那一种，这一句本来就碰不到。
 const ACC_USER_NO_TESTS =
-  '用户说了这部分不要测试的（只认契约第 1 节用户原话、第 4 节修订块里用户的原话或裁决），没有自动化测试不算缺，不回 `S5`：照读得到的产出判，' +
+  // 复核（docs/86 §8）：排除项与不写测试那一句同形——照现状交付那几块本身就是第 4 节里用户的裁决，不写明就被读成「用户说了不要测试」。
+  '用户说了这部分不要测试的（只认契约第 1 节用户原话、第 4 节修订块里用户的原话或裁决——「对契约的影响」是项目经理写的，不算；用户答复「照现状交付」的' +
+  '那几块也不算），没有自动化测试不算缺，不回 `S5`：照读得到的产出判，' +
   '判不出来的照样写判不了、引用户那一句，要不要照现状交付由项目经理问用户。'
 // 那两句所在的那一段整段钉（空白不计）：段里另加一句放宽（「用户没说的也照产出判、不回 S5」）也红。
 const ACC_NO_BASH_PARA =
@@ -125,6 +133,22 @@ const AT_S67 =
   '- **S6 测试、S7 验收**：【阶段】说齐了、推进被放行，只说明结论交了，不说明过了。推进之前读结论：`06-test.md` 判不通过（含「不通过：缺测试」）、' +
   '`07-acceptance.md` 有没过或判不了的条目的，照下面「回退」或第 4 节处理，不要推进；写着环境跑不起来的，照第 4 节 `env-blocked` 问用户。'
 const AT_BACK = '`06-test.md` 报新行为缺自动化测试的也算 S6 没过、回 S5，S7 验收因为缺测试判不了的同样回 S5、不回 S6——S5、S6、S7 各记一轮返工；'
+// 复核（docs/86 §8，中 1）：验收照「用户说了不要测试」写的判不了，项目经理那一侧原来只有回 S5（缺测试）、回 S6（补跑）两条路——紧跟一句接上照现状交付。
+const AT_BACK_USER =
+  '契约里用户说了那部分不要测试（只认第 1 节原话、第 4 节修订块里用户的原话或裁决，照现状交付的那几块不算）、验收照读得到的产出判不了的，不是缺测试，' +
+  '不回 S5 也不回 S6，照第 4 节问用户要不要照现状交付；'
+const AT_CLOSE_USER = '或者是用户说了不要测试的那部分、用户定了照现状交付的'
+// 「回退」那一段整段钉（空白不计）：段里另加一句「用户说了不要测试、验收判不了的也照上面回 S5」也红（复核时只钉包含，那一刀全绿）。
+const AT_BACK_PARA =
+  '驳回之后要回到更早的一段重做（需求理解错回 S2、设计错回 S3、实现错回 S5；S6 测试没过回 S5；' +
+  AT_BACK +
+  AT_BACK_USER +
+  'S7 验收判不了、要人补跑测试，回 S6——S6、S7 各记一轮返工，与「S6 测试没过回 S5」共用 S6 的额度；`at-qa` 冒泡说没开跑、因为 S5 没交齐的' +
+  '（核过实现记录确实没交齐），回 S5、不回 S6——拒绝还在，`at-qa` 还是开不了跑；`06-test.md` 写着因为环境跑不起来的（缺工具、服务或权限），' +
+  '不回退重跑——同一个环境再跑一遍也一样，照第 4 节 `env-blocked` 问用户），**先记回退，再派**。门禁会拦不记回退的重做：' +
+  '派一个执行角色、而它在要重做的那一段的产物这一轮已经交过，拦在派发那一帧；执行角色改它在更早一段已经交过的产物、' +
+  '而它在当前段没有活，拦在写入那一帧；只改 `stage`、不往 `history` 追加，H6 拒。' +
+  '回退是一次 `state.json` 的写入，**用同一次 Write** 改掉这几样：'
 
 const RESUME_S5 = '「测试」一节缺了、或者有新行为没有测试又不属于那一条列的两种情形的，同样不算——照同一节 `S5` 那一条处理、在 `S5` 里重派。'
 // 挂在「产物齐了」那一条里：「不管展开出来是不是空集」那一条有 M4c 的判据不许出现「停在 S6」（tests/shared-paths-prose.test.mjs）。
@@ -200,6 +224,12 @@ test('M4f：/agent-team:at「回退」——06-test.md 报缺测试算 S6 没过
   const at = read('commands/at.md')
   const back = at.slice(at.indexOf('### 回退'), at.indexOf('回退是一次 `state.json` 的写入'))
   assert.ok(has(back, AT_BACK), back.slice(0, 200))
+  assert.ok(has(back, AT_BACK + AT_BACK_USER), '「回退」里缺测试回 S5 那一句后面紧跟「用户说了不要测试、验收判不了的照第 4 节问」')
+  const para = paragraphFrom(at, '驳回之后要回到更早的一段重做')
+  assert.ok(para !== null && startsParagraph(at, '驳回之后要回到更早的一段重做'), 'commands/at.md 缺「驳回之后要回到更早的一段重做」那一段，或者它之上紧贴着另加了一行')
+  assert.equal(stripWs(para), stripWs(AT_BACK_PARA), '「回退」那一段与约定的不一致（整段比对，空白不计）')
+  const close = at.slice(at.indexOf('**一、验收没过不收口。**'), at.indexOf('**二、'))
+  assert.ok(close.length > 0 && has(close, AT_CLOSE_USER), '收口第一步认用户说了不要测试、定了照现状交付的那一种')
 })
 
 test('M4f at-qa：核新行为有没有测试那一段整段就是这一段；「S5 没交齐」的条件里没有「测试」一节；写文件那一句与红线整句在', () => {
@@ -207,6 +237,7 @@ test('M4f at-qa：核新行为有没有测试那一段整段就是这一段；�
   const para = paragraphFrom(qa, '**新行为有没有自动化测试，也要核**')
   assert.ok(para !== null, 'agents/at-qa.md 缺那一段')
   assert.equal(stripWs(para), stripWs(QA_TESTS), '那一段与约定的不一致（整段比对，空白不计）')
+  assert.ok(startsParagraph(qa, '**新行为有没有自动化测试，也要核**'), '那一段之上紧贴着另加了一行（Markdown 里是同一段）')
   assert.ok(has(qa, QA_S5_GATE), '「S5 没交齐」那一句变了——缺测试不该让 at-qa 冒泡「没开跑」')
   assert.ok(has(qa, QA_WRITE), '「你没有 paths 条目」那一句变了')
   assert.ok(has(qa, QA_RED), '红线里「对你更紧一层」那一条变了')
@@ -220,6 +251,7 @@ test('M4f at-acceptance：红线的出路是写进 07-acceptance.md、不用冒�
   const para = paragraphFrom(acc, '业务验收看的是产出符不符合契约')
   assert.ok(para !== null, 'agents/at-acceptance.md 缺「业务验收看的是产出符不符合契约」那一段')
   assert.equal(stripWs(para), stripWs(ACC_NO_BASH_PARA), '那一段与约定的不一致（整段比对，空白不计）')
+  assert.ok(startsParagraph(acc, '业务验收看的是产出符不符合契约'), '那一段之上紧贴着另加了一行（Markdown 里是同一段）')
 })
 
 test('M4f at-resume：停在 S5 的，「测试」一节照那两种情形判；停在 S6、S7 的，「产物齐了」那一条里先读结论', () => {
