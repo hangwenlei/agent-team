@@ -9,6 +9,7 @@ import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 import { bodyShaOf } from '../hooks/lib/contract-base.mjs'
+import { dispatchLine } from '../hooks/lib/completion.mjs'
 
 const NL = String.fromCharCode(10)
 const sha = (s) => sha256OfContract(Buffer.from(s, 'utf8'))
@@ -129,6 +130,7 @@ test('契约基线（docs/71）：验收整段裁掉、停在 S8 批了照现状
     run('ledger', posted(join(fx.runDir, '00-contract.md')), GATE, fx.projectDir)
     const base = JSON.parse(readFileSync(join(fx.runDir, 'contract-base.json'), 'utf8'))
     assert.deepEqual(base.deliver_used, [sha(ENV)], JSON.stringify(base))
+    assert.equal(close(fx), null, '记了那条答复之后收口放行')
   })
 })
 
@@ -146,4 +148,81 @@ test('正文（docs/71）：/agent-team:at 第 6 节——验收整段裁掉的�
     '第 6 节那一句',
   )
   assert.ok(!flat(s6).includes(flat('这一步跳过')), '第 6 节还写着这一步跳过')
+})
+
+// ——— 复核（docs/71 §8） ———
+
+const BASE = (fx) => writeFileSync(join(fx.runDir, 'contract-base.json'), JSON.stringify({ section1: '> 做一个待办清单。', body_sha: bodyShaOf(CONTRACT), revisions: [], verify_base: {}, revised_at: null }))
+const reviseNeed = (fx) => {
+  writeFileSync(join(fx.runDir, '00-contract.md'), CONTRACT + '### 2026-10-11 · 用户主动提出' + NL + '**改动**：加一条：能导出。' + NL)
+  run('ledger', posted(join(fx.runDir, '00-contract.md')), GATE, fx.projectDir)
+  return JSON.parse(readFileSync(join(fx.runDir, 'contract-base.json'), 'utf8'))
+}
+test('契约基线（复核中 1）：停在 S6 时批了、没用掉就推进的测试报告批准，到 S8（验收整段裁掉）不吞掉一次真改需求；没记段的旧批准行同样不算', () => {
+  for (const stage of ['S6', undefined]) {
+    withRun(TRIMMED, { '06-test.md': FAIL }, (fx) => {
+      BASE(fx)
+      writeFileSync(join(fx.runDir, 'approvals.jsonl'), JSON.stringify({ at: '2026-10-11T09:00:00Z', source: 'ask', kind: 'deliver-as-is', product: '06-test.md', sha: sha(FAIL), ...(stage ? { stage } : {}) }) + NL)
+      const base = reviseNeed(fx)
+      assert.deepEqual(base.deliver_used ?? [], [], JSON.stringify(base))
+      assert.ok(Object.hasOwn(base.verify_base, '06-test.md'), JSON.stringify(base))
+      assert.equal(close(fx)?.permissionDecision, 'deny', '测试报告对着上一版契约，收口拒')
+    })
+  }
+})
+
+test('「叫过」（复核中 2）：at-acceptance 在 S7 被派过（派发记录里有）、stage_roles 漏记、trimmed 里却写着——不算整段裁掉：收口照验收结论判、【阶段】不列测试报告、批准绑验收结论', () => {
+  const run7 = { ...TRIMMED, stage_roles: { S6: ['at-qa'] } }
+  const line = dispatchLine({ at: '2026-10-11T10:00:00.000Z', agentId: 'a0000000000000a07', toolUseId: null, role: 'at-acceptance', stage: 'S7', caller: 'at-pm', callerId: null, mode: 'background' })
+  withRun(run7, { '06-test.md': ENV, '07-acceptance.md': '结论：通过' + NL, 'dispatches.jsonl': line + NL }, (fx) => {
+    assert.equal(close(fx), null, '叫过验收的不读测试报告')
+    const c = ctxOf(run('ledger', posted(join(fx.runDir, 'state.json')), GATE, fx.projectDir).stdout)
+    assert.ok(c.includes('该收口了') && !c.includes('06-test.md（'), c)
+  })
+  withRun(run7, { '06-test.md': ENV, '07-acceptance.md': '结论：不通过' + NL, 'dispatches.jsonl': line + NL }, (fx) => {
+    run('approval-ask', asked('照现状交付'), GATE, fx.projectDir)
+    assert.deepEqual(approvalsOf(fx.runDir).map((v) => v.product), ['07-acceptance.md'])
+  })
+})
+
+test('「叫过」（复核中 2）：写入前 stage_roles 记着 at-acceptance、同一次写入删掉它、补 trimmed 并收口——写入前叫过，不算整段裁掉，不读测试报告', () => {
+  const called = { ...TRIMMED, roster: ['at-qa', 'at-acceptance'], stage_roles: { S6: ['at-qa'], S7: ['at-acceptance'] }, trimmed: {} }
+  withRun(called, { '06-test.md': ENV, '07-acceptance.md': '结论：通过' + NL }, (fx) => {
+    const w = stateWrite(fx.runDir, (s) => ({ ...s, stage_roles: { S6: ['at-qa'], S7: [] }, roster: ['at-qa'], trimmed: { 'at-acceptance': 'S7' }, never_invoked: [], closed_at: '2026-10-11T12:00:00Z' }))
+    const d = decisionOf(run('rework', w, GATE, fx.projectDir).stdout)
+    assert.ok(!d || !String(d.permissionDecisionReason).includes('收口读测试报告'), JSON.stringify(d))
+  })
+})
+
+test('H6（复核低 3）：收口那一次写入才把验收记成整段裁掉——拒绝理由补一句先单独一次 Write 把 trimmed 记上再问', () => {
+  const late = { ...TRIMMED, trimmed: {} }
+  withRun(late, { '06-test.md': ENV }, (fx) => {
+    const w = stateWrite(fx.runDir, (s) => ({ ...s, trimmed: { 'at-acceptance': 'S7' }, never_invoked: [], closed_at: '2026-10-11T12:00:00Z' }))
+    const why = decisionOf(run('rework', w, GATE, fx.projectDir).stdout)?.permissionDecisionReason ?? ''
+    assert.ok(why.includes('收口读测试报告') && why.includes('先单独一次 Write 把 trimmed 记上（不写 closed_at），再问用户'), why)
+  })
+  withRun(TRIMMED, { '06-test.md': ENV }, (fx) => assert.ok(!close(fx).permissionDecisionReason.includes('先单独一次 Write'), '写入前就裁掉了的不说'))
+})
+
+test('记录器（复核低 4）：停在 S6、验收已经整段裁掉、测试报告跑不起来——照现状交付照样记下（绑测试报告、记段 S6），不说「之后验收结论写成再问」', () => {
+  const s6 = { stage: 'S6', history: H(...CHAIN.slice(0, 6)), roster: ['at-qa'], stage_roles: { S6: ['at-qa'] }, trimmed: { 'at-acceptance': 'S7' } }
+  withRun(s6, { '06-test.md': ENV }, (fx) => {
+    const c = ctxOf(run('approval-ask', asked('照现状交付'), GATE, fx.projectDir).stdout)
+    assert.ok(c.includes('已记下照现状交付的批准') && !c.includes('之后验收结论写成'), c)
+    assert.deepEqual(approvalsOf(fx.runDir).map((v) => [v.product, v.stage]), [['06-test.md', 'S6']])
+  })
+})
+
+test('出路（复核低 6）：不通过回实现那一段、跑不起来回测试那一段重测、读不出叫 at-qa 照格式重写', () => {
+  withRun(TRIMMED, { '06-test.md': FAIL }, (fx) => assert.ok(close(fx).permissionDecisionReason.includes('记回到 S5 修好、重测')))
+  withRun(TRIMMED, { '06-test.md': ENV }, (fx) => assert.ok(close(fx).permissionDecisionReason.includes('记回到 S6 重测（环境好了之后）')))
+  withRun(TRIMMED, { '06-test.md': 'test' + NL }, (fx) => assert.ok(close(fx).permissionDecisionReason.includes('让 at-qa 照格式重写第一行')))
+})
+
+test('H6（复核低 7）：收口因为测试报告被拒、而门禁找不到进行中的 run 时——拒绝理由补一句用户的批准会记不下', () => {
+  withRun(TRIMMED, { '06-test.md': ENV }, (fx) => {
+    rmSync(join(fx.projectDir, '.agent-team', 'current-run'))
+    const why = close(fx)?.permissionDecisionReason ?? ''
+    assert.ok(why.includes('收口读测试报告') && why.includes('用户的回答会记不下'), why)
+  })
 })

@@ -1061,14 +1061,22 @@ function unusedDeliverApproval(ctx, base) {
   const text = ab.toString('utf8')
   const testDef = testStageOf(ctx.stages)
   // 复核（docs/66 §8 第二次）：测试报告的批准只在停在测试那一段时盖那次修订——没用掉就推进了的，不让它一直挂到 S7、吞掉之后真的改需求。
-  // docs/71：验收那一段整段裁掉、走过测试那一段的，收口读测试报告——那里批的照现状交付同样盖记它的那一次修订。
-  for (const def of [acceptanceOf(ctx.stages), testDef && (ctx.state?.stage === testDef.stageId || acceptanceTrimmedPastTest(ctx)) ? testDef : null]) {
+  // docs/71：验收那一段整段裁掉、走过测试那一段的，收口读测试报告——那里批的照现状交付同样盖记它的那一次修订。复核（docs/71 §8，中 1）：只认走过测试那一段
+  // 之后才记的（批准行的 stage 不是测试那一段）——停在测试那一段时批了、没用掉就推进的，不让它一直挂到收口、吞掉之后真的改需求（与 docs/66 §8 同一个口径）。
+  const atTest = Boolean(testDef) && ctx.state?.stage === testDef.stageId
+  const trimmedPast = Boolean(testDef) && !atTest && acceptanceTrimmedPastTest(ctx)
+  const defs = [
+    { def: acceptanceOf(ctx.stages), counts: () => true },
+    { def: atTest ? testDef : null, counts: () => true },
+    { def: trimmedPast ? testDef : null, counts: (e) => typeof e.stage === 'string' && e.stage !== testDef.stageId },
+  ]
+  for (const { def, counts } of defs) {
     if (!def) continue
     const bytes = ctx.artifactExists(def.name) ? ctx.artifactBytes(def.name) : null
     if (!bytes) continue
     const now = sha256OfContract(bytes)
     if (Array.isArray(base.deliver_used) && base.deliver_used.includes(now)) continue
-    if (readDeliverApprovalEntries(text, def.name).some((e) => e.sha === now)) return now
+    if (readDeliverApprovalEntries(text, def.name).some((e) => e.sha === now && counts(e))) return now
   }
   return null
 }
@@ -1344,20 +1352,26 @@ function acceptanceOnDisk(ctx, name, kind = 'acceptance', envNeedsApproval = fal
   }
 }
 
-// docs/71：验收那一段整段裁掉、已经走过测试那一段——收口读测试报告，照现状交付的批准绑在它上面（跑不起来也要批准）。出意外当不是。
-function acceptanceTrimmedPastTest(ctx) {
+// docs/71：验收那一段整段裁掉（「叫过」并上派发记录）——收口读测试报告，照现状交付的批准绑在它上面（跑不起来也要批准）。出意外当不是。
+function acceptanceTrimmedNow(ctx) {
   try {
     const acc = acceptanceOf(ctx.stages)
-    const ts = testStageOf(ctx.stages)
-    if (!acc || !ts || !isStageChain(ctx.stages)) return false
-    const ids = Object.keys(ctx.stages)
-    if (ids.indexOf(ctx.state?.stage) <= ids.indexOf(ts.stageId)) return false
+    if (!acc || !testStageOf(ctx.stages) || !isStageChain(ctx.stages)) return false
     const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
     const dispatched = logBytes ? dispatchedByStage(readDispatchLog(logBytes.toString('utf8'))) : null
     return wholeStageTrimmed(ctx.stages, acc.stageId, ctx.state, null, dispatched)
   } catch {
     return false
   }
+}
+
+// 而且已经走过测试那一段。
+function acceptanceTrimmedPastTest(ctx) {
+  const ts = testStageOf(ctx.stages)
+  if (!ts || !isStageChain(ctx.stages)) return false
+  const ids = Object.keys(ctx.stages)
+  if (ids.indexOf(ctx.state?.stage) <= ids.indexOf(ts.stageId)) return false
+  return acceptanceTrimmedNow(ctx)
 }
 
 function gateFileReason(checked, exotic) {
@@ -2908,7 +2922,7 @@ function main() {
           const testDefNow = testStageOf(ctx.stages)
           const acceptance =
             testDefNow && ctx.state?.stage === testDefNow.stageId
-              ? acceptanceOnDisk(ctx, testDefNow.name, 'test')
+              ? acceptanceOnDisk(ctx, testDefNow.name, 'test', acceptanceTrimmedNow(ctx))
               : testDefNow && acceptanceTrimmedPastTest(ctx)
                 ? acceptanceOnDisk(ctx, testDefNow.name, 'test', true)
                 : acceptanceDef
@@ -2917,7 +2931,10 @@ function main() {
           for (const p of planApprovals({ items: found.items, state: ctx.state, stages: ctx.stages, grants, acceptance })) {
             if (p.deliver && typeof p.sha === 'string') {
               try {
-                appendFileSync(file, sep + deliverLine({ at: new Date().toISOString(), source: ask ? 'ask' : 'prompt', product: p.name, sha: p.sha }) + '\n')
+                appendFileSync(
+                  file,
+                  sep + deliverLine({ at: new Date().toISOString(), source: ask ? 'ask' : 'prompt', product: p.name, sha: p.sha, stage: typeof ctx.state?.stage === 'string' ? ctx.state.stage : undefined }) + '\n',
+                )
                 sep = ''
                 out.push(p)
               } catch {

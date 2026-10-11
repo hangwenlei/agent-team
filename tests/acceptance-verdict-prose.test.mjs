@@ -58,7 +58,8 @@ test('M4k：/agent-team:at——第 3 节 S7 验收结论的第一行（排在 S
   assert.ok(has(s1, AT_PREV), '第 1 节替旧 run 收口没算照现状交付的批准')
 })
 
-const PM_CLOSE = `验收没过不收口（门禁读 \`07-acceptance.md\` 的第一行；没过的，只有用户经规范标签「${DELIVER_LABEL}」批准过才放行）。`
+// docs/71 §8：验收那一段整段裁掉的读测试报告的第一行。
+const PM_CLOSE = `验收没过不收口（门禁读 \`07-acceptance.md\` 的第一行，验收那一段整段裁掉的读 \`06-test.md\` 的第一行；没过的，只有用户经规范标签「${DELIVER_LABEL}」批准过才放行）。`
 test('M4k：项目经理的红线——验收没过不收口，门禁读第一行、照现状交付要用户经规范标签批准', () => {
   assert.ok(has(bodyOf('at-pm'), PM_CLOSE))
 })

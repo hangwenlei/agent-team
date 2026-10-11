@@ -63,8 +63,9 @@ export function deliverIntent(answer) {
 }
 
 /** approvals.jsonl 里照现状交付的一行（不带换行）：sha 是批准那一刻磁盘上那份验收结论的 sha。 */
-export function deliverLine({ at, source, product, sha }) {
-  return JSON.stringify({ at, source, kind: DELIVER_KIND, product, sha })
+// 复核（docs/71 §8）：记下批准那一刻停在哪一段（stage）——验收整段裁掉时，契约基线只认走过测试那一段之后才记的测试报告批准。
+export function deliverLine({ at, source, product, sha, stage }) {
+  return JSON.stringify({ at, source, kind: DELIVER_KIND, product, sha, ...(typeof stage === 'string' ? { stage } : {}) })
 }
 
 /**
@@ -83,7 +84,7 @@ export function readDeliverApprovalEntries(text, name) {
       continue
     }
     if (!isPlainObject(v) || v.kind !== DELIVER_KIND || v.product !== name || typeof v.sha !== 'string' || !SHA_RE.test(v.sha)) continue
-    out.push({ at: typeof v.at === 'string' ? v.at : null, sha: v.sha })
+    out.push({ at: typeof v.at === 'string' ? v.at : null, sha: v.sha, stage: typeof v.stage === 'string' ? v.stage : null })
   }
   return out
 }
