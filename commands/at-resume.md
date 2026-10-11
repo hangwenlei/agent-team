@@ -51,7 +51,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 展开之后：
 
-- **展开出来是空集 → 不算齐了。** 空集只说明这一段还没记账（`stage_roles` 里还没有这一段；旧 run 是
+- **展开出来是空集 → 不算齐了。** 空集只说明这一段还没记账（`stage_roles` 里还没有这一段、或者这一段记的是 `[]`；旧 run 是
   `roster` 里还没有这一段的产者——PM 在推进出一段时才记它），不说明没人干过活。`stage` 还等于这一段，就说明它
   还没推进出去：`history` 里有它只说明进过，`artifacts` 里有哈希只说明产物交过。S5 去看 `04-dispatch.md` 的分工；
   S2 先看 `01-prd.md` 在不在，在就不要重派 `at-product`——`at-ui` 那两份（`02-ui-spec.md`、`02-wireframe.html`）只在这一趟要用 `at-ui` 时才算缺，
