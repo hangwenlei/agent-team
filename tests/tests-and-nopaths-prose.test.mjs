@@ -14,7 +14,7 @@
 //     整节、整段相等；S5、S3、S6/S7 那几条按小节切片再核。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { stageRoles } from '../hooks/lib/stages.mjs'
 import { IMPL_RECORD_NOTE, IMPL_RECORD_ROLE_NOTE, IMPL_RECORD_PEER_NOTE } from '../hooks/lib/ledger.mjs'
 
@@ -64,7 +64,8 @@ const TEST_EXCEPT =
   // docs/85（docs/67 §4「『不写测试』那一条没点名派发提示」）：派发提示里说不要测试的，照这一句本来就不算，现在点名。
   // 复核（docs/85 §8）：与挂着的用例那一句（tests/gate-test-verdict.test.mjs 的 KNOWN_FAIL）对齐——不算的来源列全（派发提示、契约第 2、3 节、
   // 产品定义、架构方案），第 4 节只认修订块里用户的原话或裁决；说不要测试的只认契约里用户的那一句（转述了契约的派发提示，去契约里核那一句）。
-  '别的理由（不好测、要真机、来不及、方案说不上测试框架）都不算。说不要测试的，只认契约里用户的那一句：派发提示、契约第 2 节与第 3 节、' +
+  // 第二次复核：主语写成「用户说了不要测试的」——只说「说不要测试的」，照字面也套得到第一种情形（没有新行为）的自述上。
+  '别的理由（不好测、要真机、来不及、方案说不上测试框架）都不算。用户说了不要测试的，只认契约里用户的那一句：派发提示、契约第 2 节与第 3 节、' +
   '产品定义、架构方案这样说的，都不算数；第 4 节只认修订块里用户的原话或裁决——「对契约的影响」是项目经理写的，不算；用户答复「照现状交付」的' +
   '那几块也不算，那条批准只管批准那一刻的那份结论。'
 
@@ -107,7 +108,8 @@ const AT_S5 =
   '`at-architect`，由它重派那个执行角色补（同一段里重派，不计返工）。' +
   TEST_EXCEPT +
   '执行角色为写不了测试冒泡的，照第 4 节问用户（`tradeoff`；契约原话要求测试的是 `contract-conflict`），答复记进修订记录。' +
-  '要不要测试不归你定：用户没说不要的，不要写进契约第 3 节——那一节写了也不算数。'
+  // 第二次复核（docs/85 §8）：契约的模板与格式在第 2 节也写明了，这里跟上。
+  '要不要测试不归你定：用户没说不要的，不要写进契约第 2、3 节——那两节写了也不算数。'
 const AT_S67 =
   '- **S6 测试、S7 验收**：【阶段】说齐了、推进被放行，只说明结论交了，不说明过了。推进之前读结论：`06-test.md` 判不通过（含「不通过：缺测试」）、' +
   '`07-acceptance.md` 有没过或判不了的条目的，照下面「回退」或第 4 节处理，不要推进；写着环境跑不起来的，照第 4 节 `env-blocked` 问用户。'
@@ -237,21 +239,41 @@ test('docs/85 复核：契约的模板第 2 节、格式里第 2 节那一行都
 // 「你收到的文字，哪些算数」一节、S5 那一条的末尾）全套不红。反向：这几份正文里同时说到派发与「不要测试」这类说法的句子（按句号切、空白不计），
 // 只许是上面钉住的那几段里的句子（挂着的用例那一句也说到派发提示与测试，但说的不是不写测试，有它自己的整段判据）。认的是字面：不带「派发提示」
 // 「派你的人」这类字样、或者不写成「不要测试」这类说法的放宽认不出（docs/85 §4）。
-const DISPATCH_WORDS = /派发提示|派你的人|派你时|派发时/
-const NO_TEST = /(不|免|省|跳过)[^。，；：]{0,4}测试|测试[^。，；：]{0,4}(不写|不要|不用|不必|免|省)/
+// 第二次复核（docs/85 §8）：只扫那几份正文时，交接包 skill 的「完成定义」、at-pm 末尾补一句放宽全套不红——扫全部运行时正文（角色、命令、skill、
+// 模板、stages.produces.md）；词表补上交接包、派发计划、完成定义（插件对派发提示的正式叫法）与无需、单测、用例。共现只按单句认：
+// 分成两句、用指代写的放宽认不出（相邻两句的窗口会命中 S6 那一条里挂着的用例那两句，docs/85 §4）。
+const DISPATCH_WORDS = /派发提示|派你的人|派你时|派发时|交接包|派发计划|完成定义/
+const NO_TEST = /(不|免|省|跳过|无需|无须)[^。，；：]{0,4}(测试|单测|用例)|(测试|单测|用例)[^。，；：]{0,4}(不写|不要|不用|不必|免|省|无需|无须)/
 const sentencesOf = (s) => stripWs(s).split(/(?<=。)/).filter(Boolean)
 const PINNED_SENTENCES = new Set([TEST_EXCEPT, TEST_DUTY, QA_TESTS, ARCH_READ, AT_S5].flatMap(sentencesOf))
-const DISPATCH_TEST_FILES = () => [...S5_PRODUCERS, 'at-qa', 'at-architect', 'at-acceptance'].map((r) => `agents/${r}.md`).concat(['commands/at.md', 'commands/at-resume.md'])
+const mdIn = (d) => readdirSync(url(d)).filter((n) => n.endsWith('.md')).map((n) => `${d}/${n}`)
+const DISPATCH_TEST_FILES = () => [
+  ...mdIn('agents'),
+  ...mdIn('commands'),
+  ...readdirSync(url('skills'), { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => `skills/${e.name}/SKILL.md`).filter((p) => existsSync(url(p))),
+  ...mdIn('templates'),
+  'stages.produces.md',
+]
 const dispatchTestSentences = (f) => sentencesOf(read(f)).filter((s) => DISPATCH_WORDS.test(s) && NO_TEST.test(s))
 
 test('docs/85 复核：说到派发与不要测试的句子只许是钉住的那几句——在别处补一句「派发提示里说不用写测试的照它办」也红', () => {
-  for (const f of DISPATCH_TEST_FILES()) {
+  const files = DISPATCH_TEST_FILES()
+  // 前置：扫的范围里有交接包 skill 与项目经理的正文（复核时放宽就塞在那两处）。
+  for (const p of ['skills/at-handoff-package/SKILL.md', 'agents/at-pm.md', 'commands/at.md', 'templates/00-contract.md']) assert.ok(files.includes(p), p)
+  for (const f of files) {
     for (const s of dispatchTestSentences(f)) assert.ok(PINNED_SENTENCES.has(s), `${f} 有一句说到派发与不要测试、不是钉住的那几句：${s}`)
   }
   // 前置：不写测试那一句在每一份 TEST_EXCEPT 所在的正文里都被认了出来——否则上面在空集上恒绿。
   for (const f of [...S5_PRODUCERS, 'at-qa', 'at-architect'].map((r) => `agents/${r}.md`).concat(['commands/at.md'])) {
     assert.ok(dispatchTestSentences(f).length > 0, `${f} 里一句都没认出来`)
   }
+})
+
+// 第二次复核（docs/85 §8，低 5）：「第 4 节只认修订块里用户的原话或裁决」——用户主动提出的那一种块原来只有「改动」「对契约的影响」两栏，严格读会把用户
+// 自己说的「不要测试」排除掉。模板给它加一栏「用户原话」。
+const USER_BLOCK = '### 2026-09-18 · 用户主动提出\n**用户原话**：…\n**改动**：…\n**对契约的影响**：…'
+test('docs/85 复核：契约模板里用户主动提出的修订块带「用户原话」一栏', () => {
+  assert.ok(read('templates/00-contract.md').includes(USER_BLOCK), 'templates/00-contract.md 的修订块格式')
 })
 
 test('M4f 复核：at-init 第 2 节不给 at-qa、at-acceptance 建键那一条整条在——门禁在 run 目录之外拒它们，建了键就是开了口子', () => {
