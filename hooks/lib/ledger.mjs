@@ -135,18 +135,20 @@ export function reachCheckNotice({ writtenText, expected }) {
 
 // docs/79（docs/42 §4、docs/29 §5「reach.json 写完之后会落后」）：每趟开头写 current-run 时，磁盘上的 reach.json 与门禁按当前 project.json 与花名册
 // 算的那一份比——project.json 在它之后被改过（两趟之间手改）、写坏了、被删了，/agent-team:at-status 照它报会报错。text 是 reach.json 的原文，不在为 null。
-export function reachStaleNotice({ text, expected }) {
-  const diff = text === null ? 'missing' : reachDiff(text, expected)
+// unreadable：reach.json 在、却读不出来（被占用、它是个目录……）——这一次没有核，照样给出正确的那一份（docs/88；原来一声不吭，at-status 照它报时也读不出）。
+export function reachStaleNotice({ text, expected, unreadable = false }) {
+  const diff = unreadable ? 'unreadable' : text === null ? 'missing' : reachDiff(text, expected)
   if (diff === null) return null
   const why = {
     missing: '不在',
     invalid: '不是一份合法的 JSON（写坏了，或者被截断了）',
     dup: '里有写了不止一次的键（JSON 只认最后一个，照原文读的人可能读到前一遍）',
     differ: '与门禁按当前 project.json 与花名册算出来的不一样（project.json 在它写成之后改过、插件更新之后算法或花名册变了，或者当初手抄出错）',
+    unreadable: '在、却读不出来（多半是被别的程序短暂占用，或者它不是一个文件），这一次没有核',
   }[diff]
   return (
     `【触达表】.agent-team/reach.json ${why}——/agent-team:at-status 报各角色实际能写到哪里时读的就是它。` +
-    `把下面这份 JSON 原样重写进 .agent-team/reach.json：\n${safeJson(expected)}`
+    `把下面这份 JSON 原样重写进 .agent-team/reach.json${diff === 'unreadable' ? '（写不进去就告诉用户，不要自己删它或改名）' : ''}：\n${safeJson(expected)}`
   )
 }
 
