@@ -6,7 +6,8 @@ import assert from 'node:assert/strict'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { run, GATE, decisionOf } from './helpers/gate-runner.mjs'
+import { fileURLToPath } from 'node:url'
+import { run, GATE, decisionOf, hermeticEnv } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { computeReach } from '../hooks/lib/reach.mjs'
 
@@ -20,7 +21,8 @@ const NOT_MATCHED = '没收到核对结果不等于对上了'
 
 // 写 reach.json（落盘之后的账本）。run：有没有一趟 run；project：project.json 的内容（null 是不在）；reach：reach.json 的原文（DIR 是建成目录）。
 const DIR = Symbol('dir')
-function write({ run: withRun = true, project = TEMPLATE, reach = GOOD, writer = 'agent-team:at-pm', roster = null } = {}) {
+// failProjectReads：门禁子进程读 project.json 时失败几次（预加载 tests/fixtures/fail-project-read.cjs；Infinity 是一直失败，null 是不加载）。
+function write({ run: withRun = true, project = TEMPLATE, reach = GOOD, writer = 'agent-team:at-pm', roster = null, failProjectReads = null } = {}) {
   let projectDir, cleanup
   if (withRun) {
     const dirs = makeRun({ runId: 'r1', stage: 'S1', project: project ?? null })
@@ -48,7 +50,10 @@ function write({ run: withRun = true, project = TEMPLATE, reach = GOOD, writer =
     const target = join(projectDir, '.agent-team', 'reach.json')
     if (reach === DIR) mkdirSync(target)
     else writeFileSync(target, reach)
-    return ctxOf(run('ledger', posted(target, writer), gate, projectDir))
+    if (failProjectReads === null) return ctxOf(run('ledger', posted(target, writer), gate, projectDir))
+    const preload = new URL('./fixtures/fail-project-read.cjs', import.meta.url)
+    const env = { ...hermeticEnv(), ...(Number.isFinite(failProjectReads) ? { AGENT_TEAM_TEST_PROJECT_READ_FAILS: String(failProjectReads) } : {}) }
+    return ctxOf(run('ledger', posted(target, writer), gate, projectDir, env, { nodeArgs: ['-r', fileURLToPath(preload)] }))
   } finally {
     cleanup()
     if (plugin) rmSync(plugin, { recursive: true, force: true })
@@ -66,6 +71,8 @@ test('reach.json 核对（docs/83）：project.json 有阻断——说这一次�
 test('reach.json 核对（docs/83）：花名册读不出（插件问题）——说这一次没有核、不要照它改，告诉用户重装或更新插件', () => {
   const c = write({ roster: '{ 坏了' })
   assert.ok(c.includes(UNCHECKED) && c.includes('花名册读不出') && c.includes(NOT_MATCHED), c)
+  // 复核（docs/83 §8）：出路与写 project.json 那一次看齐——重装或更新插件之后新开会话再跑 at-init；刚写的这一份不当成上一份配置。
+  assert.ok(c.includes('新开一个会话再跑 /agent-team:at-init 落盘') && c.includes('不要把它当成上一份配置'), c)
   assert.ok(!c.includes('把下面这份 JSON 原样重写进'), c)
 })
 
@@ -85,6 +92,16 @@ test('reach.json 核对（docs/83）：对得上照旧不出声；不是项目�
   assert.ok(!write({}).includes('【触达表】'))
   const c = write({ writer: 'agent-team:at-backend', project: null, run: false })
   assert.ok(c.includes(UNCHECKED) && c.includes('原样冒泡给派你的人'), c)
+})
+
+// 复核（docs/83 §8，中）：没有 run 时（at-init）project.json 这一刻读不出（被短暂占用）——重读最多三次：读到了照常核，一直读不到说这一次没有核。
+test('reach.json 核对（docs/83 §8）：at-init 时 project.json 被短暂占用——重读读到了照常核；一直读不到说这一次没有核、过一会儿再写', () => {
+  const once = write({ run: false, reach: '{}', failProjectReads: 1 })
+  assert.ok(once.includes('把下面这份 JSON 原样重写进 .agent-team/reach.json'), once)
+  const always = write({ run: false, reach: '{}', failProjectReads: Infinity })
+  assert.ok(always.includes(UNCHECKED) && always.includes('project.json 这一刻读不出来') && always.includes(NOT_MATCHED), always)
+  const other = write({ run: false, reach: '{}', failProjectReads: Infinity, writer: 'agent-team:at-backend' })
+  assert.ok(other.includes('不要自己写 project.json 或 reach.json'), other)
 })
 
 test('正文（docs/83）：/agent-team:at-init 说清收到「这一次没有核」的不算对上', () => {

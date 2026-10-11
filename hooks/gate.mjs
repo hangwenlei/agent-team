@@ -331,46 +331,51 @@ function inflightNotice(list) {
 
 // 写的人不是 PM（没有 run 时 H3 对谁都放行）：那一段改成叫它原样冒泡——reach.json 是控制文件，只有 PM 该改它（M4g 复核，低-8）。
 // docs/83（docs/42 §4「不核的几种时候一声不吭」）：核不了时也说一段——这一次没有核、为什么、怎么办。/agent-team:at-init 说「没再收到【触达表】就是
-// 对上了」，一声不吭会被读成对上。核不了的原因：project.json 不在或不是对象、有阻断、花名册读不出（插件问题）、刚写的 reach.json 读不出。
+// 对上了」，一声不吭会被读成对上。核不了的原因：project.json 不在、这一刻读不出（调用方认）、有阻断、花名册读不出（插件问题）、刚写的 reach.json 读不出。
+// 复核（docs/83 §8）：有阻断、花名册读不出的说法与写 project.json 那一次的【触达表】看齐（不说「算得不对」；插件问题给「重装、新开会话再跑 at-init」）；
+// 写的人不是项目经理的，这几种都归项目经理（它写不了 project.json 也写不了 reach.json）。
 const REACH_UNCHECKED = '【触达表】这一次没有核刚写进 .agent-team/reach.json 的那一份：'
 const REACH_NOT_MATCHED = '没收到核对结果不等于对上了。'
+const REACH_FOR_OTHERS = '\n这件事归项目经理：把这一段原样冒泡给派你的人，不要自己写 project.json 或 reach.json。'
+function reachUnchecked(body, writerIsPm) {
+  return REACH_UNCHECKED + body + REACH_NOT_MATCHED + (writerIsPm ? '' : REACH_FOR_OTHERS)
+}
+const REACH_PROJECT_MISSING =
+  '.agent-team/project.json 不在——触达表是照它算的。先跑 /agent-team:at-init 写好它，写它那一次的【触达表】给出正确的那一份，照它重写 reach.json；'
+const REACH_PROJECT_UNREADABLE =
+  '.agent-team/project.json 这一刻读不出来（多半是被别的程序短暂占用）——触达表是照它算的。过一会儿原样再写一次 reach.json；'
 function reachNoticeFor(filePath, project, writerIsPm = true) {
-  const forWriter = (notice) =>
-    notice && !writerIsPm ? `${notice}\nreach.json 是编排层的控制文件，只有项目经理该改它：把这一段原样冒泡给派你的人，不要自己重写。` : notice
-  if (project === null || project === undefined) {
-    return forWriter(
-      REACH_UNCHECKED +
-        '.agent-team/project.json 不在——触达表是照它算的。先照 /agent-team:at-init 第 2、3 节写好 project.json，写它那一次的【触达表】给出正确的那一份，' +
-        '照它重写 reach.json；' +
-        REACH_NOT_MATCHED,
-    )
-  }
-  if (!isPlainObject(project)) return forWriter(REACH_UNCHECKED + '.agent-team/project.json 不是一个 JSON 对象，照它算不出触达表。先改好 project.json；' + REACH_NOT_MATCHED)
+  if (project === null || project === undefined) return reachUnchecked(REACH_PROJECT_MISSING, writerIsPm)
+  // 两个调用方只传对象或 null（readJson、ctx.project 都拒非对象），这一支是防御。
+  if (!isPlainObject(project)) return reachUnchecked('.agent-team/project.json 不是一个 JSON 对象，照它算不出触达表。先改好 project.json；', writerIsPm)
   const roster = loadRoster()
   const report = validateProject(project, { roster })
   if (report.plugin.length) {
-    return forWriter(
-      REACH_UNCHECKED + '插件的花名册读不出，照它算的触达表是空的、不对。不要照它改 reach.json，保持原样；告诉用户重装或更新 agent-team 插件——' + REACH_NOT_MATCHED,
+    return reachUnchecked(
+      '插件的花名册读不出，门禁算不出触达表。不要照着改 reach.json；插件重装（或有新版本时更新）之后，新开一个会话再跑 /agent-team:at-init 落盘——' +
+        '刚写进去的这一份没核过，不要把它当成上一份配置；',
+      writerIsPm,
     )
   }
   if (report.block.length) {
-    return forWriter(
-      REACH_UNCHECKED +
-        'project.json 有阻断，照它算的触达表不准。先把 project.json 改到没有阻断，改完那一次的【触达表】会给出正确的那一份，照它重写 reach.json；' +
-        REACH_NOT_MATCHED,
+    return reachUnchecked(
+      'project.json 有阻断，有阻断时门禁不核 reach.json。先把 project.json 改到没有阻断，改完那一次的【触达表】会给出正确的那一份，照它重写 reach.json；',
+      writerIsPm,
     )
   }
   let text
   try {
     text = readFileSync(filePath, 'utf8')
   } catch (err) {
-    return forWriter(REACH_UNCHECKED + `它落盘之后读不出来（${quote(err?.message ?? err, { max: 120 })}）。再写一次；` + REACH_NOT_MATCHED)
+    // 异常消息里的路径是项目根拼出来的，不经谁写的内容；照规矩还是过 quote。
+    return reachUnchecked(`它落盘之后读不出来（${quote(err?.message ?? err, { max: 120 })}）。再写一次；`, writerIsPm)
   }
-  return forWriter(reachCheckNotice({ writtenText: text, expected: computeReach({ roster, paths: project.paths }) }))
+  const notice = reachCheckNotice({ writtenText: text, expected: computeReach({ roster, paths: project.paths }) })
+  return notice && !writerIsPm ? `${notice}\nreach.json 是编排层的控制文件，只有项目经理该改它：把这一段原样冒泡给派你的人，不要自己重写。` : notice
 }
 
 // docs/79：每趟开头写 current-run 时核磁盘上的 reach.json 是不是落后（措辞在 hooks/lib/ledger.mjs 的 reachStaleNotice）。project.json 不在、有阻断或
-// 插件问题时不核（同 reachNoticeFor）；reach.json 在、却读不出来（占用之类）也不核——只有不在（ENOENT）才说「不在」。复核（docs/79 §8）：写指针的人
+// 插件问题时不核、也不说（同一次回传里【project.json】【插件】已经说了；写 reach.json 那一刻的 reachNoticeFor 在这几种时候说「这一次没有核」，docs/83）；reach.json 在、却读不出来（占用之类）也不核——只有不在（ENOENT）才说「不在」。复核（docs/79 §8）：写指针的人
 // 不是项目经理时（没有 run 的那一刻 H3 对谁都放行），与 reachNoticeFor 同一个口径叫它原样冒泡。
 function staleReachFor(ctx, writerIsPm = true) {
   if (!isPlainObject(ctx.project)) return null
@@ -2469,11 +2474,28 @@ function main() {
       }
       // M4g（docs/42，审查第 28 条）：/agent-team:at-init 写 reach.json 时按设计没有 run——触达表的判据只有花名册与 project.json，与
       // run 无关，照上面 project.json 那条缝的理由核它（对不上才说话）。project.json 读不出时落到下面那条缝（它在别处被弄坏）。
+      // docs/83 §8：写 reach.json 那一条缝重读过 project.json 的，下面「它在别处被弄坏」那一条缝用它，不再读第二轮（各停两次）。
+      let projectReread = null
       if (isReachJson(filePath, ctx.agentTeamDir)) {
-        const project = readProjectConfig(ROOT_PROJECT)
-        // docs/83：project.json 不在也说（核不了）；在却读不出的照旧落到下面那条缝（它在别处被弄坏）。
-        const missing = !project.ok && !existsSync(join(ROOT_PROJECT, '.agent-team', 'project.json'))
-        const reachNotice = project.ok || missing ? reachNoticeFor(filePath, project.ok ? project.value : null, isContractWriter(input.agent_type)) : null
+        let project = readProjectConfig(ROOT_PROJECT)
+        const projectFile = join(ROOT_PROJECT, '.agent-team', 'project.json')
+        // docs/83：project.json 不在也说（核不了）。
+        const missing = !project.ok && !existsSync(projectFile)
+        // docs/83 §8：在、这一刻却读不出（杀毒、索引器的短暂占用）——照写 project.json 那一条缝重读（readProjectText，最多三次）：读到对象照常核；
+        // 一直读不到，说这一次没有核；读得到却解析不出的照旧落到下面「它在别处被弄坏」那一条缝（那一段说 project.json 的问题）。
+        let unreadable = false
+        if (!project.ok && !missing) {
+          const again = readProjectText(projectFile)
+          projectReread = again
+          if (isPlainObject(again.value)) project = { ok: true, value: again.value }
+          else unreadable = again.text === null
+        }
+        const writerIsPm = isContractWriter(input.agent_type)
+        const reachNotice = unreadable
+          ? reachUnchecked(REACH_PROJECT_UNREADABLE, writerIsPm)
+          : project.ok || missing
+            ? reachNoticeFor(filePath, project.ok ? project.value : null, writerIsPm)
+            : null
         if (reachNotice) {
           if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
           emitHookJson(spec.event, { contexts: [reachNotice] })
@@ -2520,7 +2542,7 @@ function main() {
         underDir(filePath, ctx.agentTeamDir) &&
         !isProjectJson(filePath, ctx.agentTeamDir)
       ) {
-        const { value, text } = readProjectText(join(ctx.agentTeamDir, 'project.json'))
+        const { value, text } = projectReread ?? readProjectText(join(ctx.agentTeamDir, 'project.json'))
         if (text !== null && value === null) {
           // no-run 不留痕，与上面那条缝同一个理由：不把人指向 current-run 去查一个不存在的问题。
           if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
