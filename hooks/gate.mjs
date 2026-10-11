@@ -330,19 +330,43 @@ function inflightNotice(list) {
 }
 
 // 写的人不是 PM（没有 run 时 H3 对谁都放行）：那一段改成叫它原样冒泡——reach.json 是控制文件，只有 PM 该改它（M4g 复核，低-8）。
+// docs/83（docs/42 §4「不核的几种时候一声不吭」）：核不了时也说一段——这一次没有核、为什么、怎么办。/agent-team:at-init 说「没再收到【触达表】就是
+// 对上了」，一声不吭会被读成对上。核不了的原因：project.json 不在或不是对象、有阻断、花名册读不出（插件问题）、刚写的 reach.json 读不出。
+const REACH_UNCHECKED = '【触达表】这一次没有核刚写进 .agent-team/reach.json 的那一份：'
+const REACH_NOT_MATCHED = '没收到核对结果不等于对上了。'
 function reachNoticeFor(filePath, project, writerIsPm = true) {
-  if (!isPlainObject(project)) return null
+  const forWriter = (notice) =>
+    notice && !writerIsPm ? `${notice}\nreach.json 是编排层的控制文件，只有项目经理该改它：把这一段原样冒泡给派你的人，不要自己重写。` : notice
+  if (project === null || project === undefined) {
+    return forWriter(
+      REACH_UNCHECKED +
+        '.agent-team/project.json 不在——触达表是照它算的。先照 /agent-team:at-init 第 2、3 节写好 project.json，写它那一次的【触达表】给出正确的那一份，' +
+        '照它重写 reach.json；' +
+        REACH_NOT_MATCHED,
+    )
+  }
+  if (!isPlainObject(project)) return forWriter(REACH_UNCHECKED + '.agent-team/project.json 不是一个 JSON 对象，照它算不出触达表。先改好 project.json；' + REACH_NOT_MATCHED)
   const roster = loadRoster()
   const report = validateProject(project, { roster })
-  if (report.block.length || report.plugin.length) return null
+  if (report.plugin.length) {
+    return forWriter(
+      REACH_UNCHECKED + '插件的花名册读不出，照它算的触达表是空的、不对。不要照它改 reach.json，保持原样；告诉用户重装或更新 agent-team 插件——' + REACH_NOT_MATCHED,
+    )
+  }
+  if (report.block.length) {
+    return forWriter(
+      REACH_UNCHECKED +
+        'project.json 有阻断，照它算的触达表不准。先把 project.json 改到没有阻断，改完那一次的【触达表】会给出正确的那一份，照它重写 reach.json；' +
+        REACH_NOT_MATCHED,
+    )
+  }
   let text
   try {
     text = readFileSync(filePath, 'utf8')
-  } catch {
-    return null
+  } catch (err) {
+    return forWriter(REACH_UNCHECKED + `它落盘之后读不出来（${quote(err?.message ?? err, { max: 120 })}）。再写一次；` + REACH_NOT_MATCHED)
   }
-  const notice = reachCheckNotice({ writtenText: text, expected: computeReach({ roster, paths: project.paths }) })
-  return notice && !writerIsPm ? `${notice}\nreach.json 是编排层的控制文件，只有项目经理该改它：把这一段原样冒泡给派你的人，不要自己重写。` : notice
+  return forWriter(reachCheckNotice({ writtenText: text, expected: computeReach({ roster, paths: project.paths }) }))
 }
 
 // docs/79：每趟开头写 current-run 时核磁盘上的 reach.json 是不是落后（措辞在 hooks/lib/ledger.mjs 的 reachStaleNotice）。project.json 不在、有阻断或
@@ -2447,7 +2471,9 @@ function main() {
       // run 无关，照上面 project.json 那条缝的理由核它（对不上才说话）。project.json 读不出时落到下面那条缝（它在别处被弄坏）。
       if (isReachJson(filePath, ctx.agentTeamDir)) {
         const project = readProjectConfig(ROOT_PROJECT)
-        const reachNotice = project.ok ? reachNoticeFor(filePath, project.value, isContractWriter(input.agent_type)) : null
+        // docs/83：project.json 不在也说（核不了）；在却读不出的照旧落到下面那条缝（它在别处被弄坏）。
+        const missing = !project.ok && !existsSync(join(ROOT_PROJECT, '.agent-team', 'project.json'))
+        const reachNotice = project.ok || missing ? reachNoticeFor(filePath, project.ok ? project.value : null, isContractWriter(input.agent_type)) : null
         if (reachNotice) {
           if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
           emitHookJson(spec.event, { contexts: [reachNotice] })
