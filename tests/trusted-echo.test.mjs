@@ -728,6 +728,20 @@ const SCENARIOS = [
     anchor: UNREADABLE,
   },
   {
+    // docs/75：project.json 原文里重复的键与外层路径进【project.json】的「要改」那一档，两样都是磁盘上的值。
+    name: 'project.json 原文里重复的键与外层路径（docs/75）',
+    disk: true,
+    raw: {
+      'project.json': (P) => {
+        const s = JSON.stringify(PROJECT)
+        const k = JSON.stringify(P)
+        return s.slice(0, -1) + ',' + k + ':{' + k + ':1,' + k + ':2}}'
+      },
+    },
+    calls: ({ p }) => [['ledger', posted('at-pm', join(p, '.agent-team', 'project.json'))]],
+    anchor: (all) => all.includes('写了不止一次'),
+  },
+  {
     name: 'project.json 写成坏 JSON 短文',
     disk: true,
     raw: { 'project.json': (P) => P.slice(0, 18) },

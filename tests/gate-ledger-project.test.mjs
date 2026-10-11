@@ -700,3 +700,24 @@ test('M4g 复核：非 PM 写坏 reach.json（没有 run 时 H3 对谁都放行�
     assert.ok(pm.includes('【触达表】刚写进') && !pm.includes('只有项目经理该改它'), pm)
   })
 })
+
+// docs/75（docs/74 §4「只看 state.json」）：project.json 里同一个对象写了不止一次的键（paths 写两遍、paths 里一个角色写两遍），JSON 只认最后一个——
+// 前一遍里的前缀悄悄丢掉，执行角色写那里会被写路径隔离拒。PM 写 project.json 时（有 run、没有 run 两条路）并进【project.json】的「要改」那一档；
+// 写 current-run、state.json 时不重复报。
+test('docs/75：PM 写的 project.json 里重复了键——【project.json】的「要改」里报它（没有 run、有 run 两条路）；写 current-run 时不报', () => {
+  withoutRun((p) => {
+    const raw = '{"paths":{"at-backend":["src/"]},' + JSON.stringify(TEMPLATE).slice(1)
+    writeFileSync(join(p, '.agent-team', 'project.json'), raw)
+    const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p))
+    assert.ok(sectionOf(ctx, '要改（')?.includes('键 "paths" 写了不止一次'), ctx)
+  })
+  withRun(TEMPLATE, (p) => {
+    const file = join(p, '.agent-team', 'project.json')
+    const text = JSON.stringify(TEMPLATE).replace('"paths":{', '"paths":{"at-backend":["lib/"],')
+    writeFileSync(file, text)
+    const ctx = ctxOf(run('ledger', posted(file), undefined, p))
+    assert.ok(sectionOf(ctx, '要改（')?.includes('键 "at-backend" 写了不止一次（在 "paths" 里）'), ctx)
+    const ptr = ctxOf(run('ledger', posted(join(p, '.agent-team', 'current-run')), undefined, p))
+    assert.ok(!ptr.includes('写了不止一次'), ptr)
+  })
+})

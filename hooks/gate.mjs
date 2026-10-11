@@ -1397,6 +1397,20 @@ function gateFileReason(checked, exotic) {
 
 // M3z：H6 因为返工预算拒绝时，补一句「用户的批准会不会记不下」——记录器记在 current-run 指向的那一趟 run 里，读不到运行状态、
 // 或者这份 state.json 不在那一趟里时，照拒绝理由问了也白问。出任何意外都只是不补。
+// docs/75：project.json 原文里重复的键（JSON.parse 只认最后一个——前一遍里的前缀悄悄丢掉，执行角色写那里会被拒）。读不到给空。
+function projectDupLines(file) {
+  try {
+    return duplicateKeyLines(readFileSync(file, 'utf8'))
+  } catch {
+    return []
+  }
+}
+
+// 把重复键那几行并进 validateProject 报告的「要改」那一档。
+function withDupFix(report, dups) {
+  return dups.length ? { ...report, fix: [...(Array.isArray(report?.fix) ? report.fix : []), ...dups] } : report
+}
+
 function approvalDiagnostic(stateFile) {
   try {
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
@@ -2345,7 +2359,7 @@ function main() {
               kind: 'project',
               reach: computeReach({ roster, paths: project.value.paths }),
               // M3u（docs/29）：形状问题三档全报，排在【触达表】之前。
-              projectReport: validateProject(project.value, { roster }),
+              projectReport: withDupFix(validateProject(project.value, { roster }), projectDupLines(filePath)),
             }),
           })
         }
@@ -2554,7 +2568,8 @@ function main() {
         }
       } else {
         const full = validateProject(ctx.project, { roster: loadRoster() })
-        projectReport = kind === 'state' ? { block: full.block, plugin: full.plugin } : full
+        // docs/75：写 project.json 本身那一次，原文里重复的键并进「要改」（写 current-run、state.json 时不重复报）。
+        projectReport = kind === 'state' ? { block: full.block, plugin: full.plugin } : kind === 'project' ? withDupFix(full, projectDupLines(filePath)) : full
       }
     }
 
