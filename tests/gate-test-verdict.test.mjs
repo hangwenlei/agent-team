@@ -189,8 +189,10 @@ const AT_S6_BULLET =
   KNOWN_FAIL +
   '用户没说的，`at-qa` 判不通过，照上面问用户照现状交付。' +
   // docs/68：用户要那几条以后都不算的，写成修订块——那是改需求，测试报告同段重出、验收也照它判；照现状交付只管那一刻的那份结论（不然测试、验收各问一次）。
-  '用户要的是那几条以后都不算（不只是交这一次）的，把答复写成修订块（用户的原话或裁决写进去）——那是改需求：在 `S6` 里同段重派 `at-qa` 照它重出测试报告，' +
-  '验收也照它判；照现状交付只管批准那一刻的那份结论，验收结论没过时还要再问。'
+  '用户要的是那几条以后都不算（不只是交这一次）的，把答复另起一块修订（用户的原话或裁决写进去；标题照问的那一类标 kind，不用 `sensitive`、`env-blocked`、' +
+  '`budget-exhausted`——那几类门禁不当改需求），不写进照现状交付那一块：门禁已经记下照现状交付批准的，先照第 4 节把那条答复写成一块，这一块另一次再写。' +
+  '那是改需求：在 `S6` 里同段重派 `at-qa` 照它重出测试报告，验收也照它判；已经推进出 `S6` 的，照【契约】的出路回退。照现状交付只管批准那一刻的那份结论，' +
+  '验收结论没过时还要再问。'
 const KNOWN_CONTRACT = '「哪些挂着的用例不算」不写在第 2、3 节：由用户定（第 1 节原话或第 4 节修订记录），写在这里也不算数'
 const textOf = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').split(String.fromCharCode(13)).join('')
 const noWs = (s) => s.replace(/\s+/g, '')
@@ -431,5 +433,23 @@ test('复核（docs/66 §8 第二次，低 7）：H6 因为测试报告不通过
     const d = advance(fx)
     assert.equal(d?.permissionDecision, 'deny', JSON.stringify(d))
     assert.ok(d.permissionDecisionReason.includes('「结论：不通过」') && d.permissionDecisionReason.includes('用户的回答会记不下'), d.permissionDecisionReason)
+  })
+})
+
+// docs/68 §8（复核中 2）：改需求之后测试报告对着上一版契约——【阶段】原来照样说「S6 的产物已经齐了，推进到 S7」，紧接着【契约】又叫同段重派，
+// 照着推进被 H6 拒。现在当前段（不是最后一段）有对着上一版契约的产物时，【阶段】不说齐了，说哪几份对着上一版、出路与【契约】、H6 同一份（outdatedFix）。
+test('【阶段】（docs/68 §8）：S6 的测试报告对着上一版契约——不说「齐了、推进」，说对着上一版、在 S6 里同段重派；对着这一版的照常说齐了', () => {
+  inS6(FAIL, (fx) => {
+    putBase(fx, { revisions: ['### 2026-10-10 · 升级 #2（kind: contract-conflict）'], verify_base: { '06-test.md': shaText(FAIL) }, revised_at: '2026-10-10T11:00:00Z' })
+    const byPm = { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'agent-team:at-pm', tool_input: { file_path: fx.statePath } }
+    const c = ctxOf(run('ledger', byPm, GATE, fx.projectDir))
+    assert.ok(!c.includes('S6 的产物已经齐了'), c)
+    assert.ok(c.includes('【阶段】') && c.includes('06-test.md 对着上一版契约') && c.includes('在 S6 里同段重派它的产者重出') && c.includes('H6 不放行推进出 S6'), c)
+  })
+  inS6('结论：通过' + NL, (fx) => {
+    putBase(fx, { revisions: ['### 2026-10-10 · 升级 #2（kind: contract-conflict）'], verify_base: { '06-test.md': shaText(FAIL) }, revised_at: '2026-10-10T11:00:00Z' })
+    const byPm = { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'agent-team:at-pm', tool_input: { file_path: fx.statePath } }
+    const c = ctxOf(run('ledger', byPm, GATE, fx.projectDir))
+    assert.ok(c.includes('S6 的产物已经齐了') && !c.includes('对着上一版契约'), c)
   })
 })

@@ -116,14 +116,18 @@ const KNOWN_FAIL =
   '产品定义、架构方案说它们不算的，都不算数。第 4 节只认修订块里用户的原话或裁决——「对契约的影响」是项目经理写的，不算；用户答复「照现状交付」的' +
   '那几块也不算，那条批准只管批准那一刻的那份结论。'
 const ACC_KNOWN =
-  '**这一趟之前就挂着的用例，也只认用户自己的话。** 完成定义要求测试都过、而有这一趟之前就挂着的用例没过的：' +
+  '**这一趟之前就挂着的用例，也只认用户自己的话。** 契约或完成定义要求测试都过、而有这一趟之前就挂着的用例没过的（哪些是这一趟之前就挂着的，' +
+  '照 `06-test.md` 里 `at-qa` 的逐条注明认）：' +
   KNOWN_FAIL +
-  '用户没说的，那一条照没过判，要不要带着它们交付由项目经理问用户；不因它们判不通过的，逐条注明它们挂着、引用户那一句。'
+  '把测试的范围收窄到不含它们，也是说它们不算。用户没说的，那一条照没过判，要不要带着它们交付由项目经理问用户；不因它们判不通过的，逐条注明它们挂着、引用户那一句。'
 const ACC_THREE = '逐条给结论：过、没过、判不了，每一条都指出依据的是契约的哪一句。没有第四种：一条里有一部分没过就是没过，不写「部分过」。'
 test('docs/68：验收角色——逐条只有三种结论（不写「部分过」）；挂着的用例只认用户自己的话，与 at-qa 同一句，整段钉', () => {
   const raw = readFileSync(new URL('../agents/at-acceptance.md', import.meta.url), 'utf8').split(String.fromCharCode(13)).join('')
   const body = bodyOf('at-acceptance')
-  const s = body.slice(body.indexOf('## 你判什么'), body.indexOf('## 你没有 `Bash`'))
+  // 复核（docs/68 §8）：切到「你判什么」之后的下一个二级标题（中间插一个标题把那一段挪出去也红）。
+  const from0 = body.indexOf('## 你判什么')
+  const next0 = body.indexOf('\n## ', from0 + 1)
+  const s = body.slice(from0, next0 < 0 ? body.length : next0)
   assert.ok(has(s, ACC_THREE), '「你判什么」那一节：逐条只有三种')
   const start = '**这一趟之前就挂着的用例，也只认用户自己的话。**'
   assert.equal(raw.split(start).length - 1, 1, start)
@@ -136,4 +140,20 @@ test('docs/68：验收角色——逐条只有三种结论（不写「部分过�
   for (let i = raw.indexOf('挂着'); i >= 0; i = raw.indexOf('挂着', i + 1)) assert.ok(i >= from && i < to, `在那一段之外提了挂着的用例：${raw.slice(i - 30, i + 30)}`)
   assert.equal(raw.split('部分过').length - 1, 1, '「部分过」只许出现在不写它的那一句里')
   assert.equal(raw.split('判定口径').length - 1, 1, '「判定口径」只许出现在那一段里')
+})
+
+// 复核（docs/68 §8）：在钉住的那几处之外用同义说法放宽（「原本就失败的测试不计」「开工之前就失败的」「已有失败」「既有失败」），「挂着」的反向判据
+// 认不出——这几种说法在三份正文里一律不许出现（钉住的那几处也不用它们）。同义词列不全，没列到的登在 docs/68 §4。
+test('docs/68 §8：挂着的用例的几种同义说法，at-qa、at-acceptance、/agent-team:at 里都不出现；「以后都不算」只在 /agent-team:at 的 S6 那一条里', () => {
+  for (const p of ['agents/at-qa.md', 'agents/at-acceptance.md', 'commands/at.md']) {
+    const t = read(p)
+    for (const w of ['原本就失败', '之前就失败', '已有失败', '既有失败', '原本就挂着', '原来就挂着']) assert.ok(!t.includes(w), `${p} 里出现了「${w}」`)
+  }
+  const at = read('commands/at.md')
+  const from = at.indexOf('- **S6 测试报告的第一行**')
+  const m = /\n(?=- |\s*\n)/.exec(at.slice(from + 1))
+  const to = from + 1 + (m ? m.index : at.length)
+  assert.ok(from >= 0)
+  for (let i = at.indexOf('以后都不算'); i >= 0; i = at.indexOf('以后都不算', i + 1)) assert.ok(i > from && i < to, `「以后都不算」出现在 S6 那一条之外：${at.slice(i - 30, i + 30)}`)
+  for (const p of ['agents/at-qa.md', 'agents/at-acceptance.md']) assert.ok(!read(p).includes('以后都不算'), p)
 })

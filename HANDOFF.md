@@ -181,7 +181,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   修订块标题认：`kind:` 全是 `ADMIN_KINDS`（敏感操作批准、环境阻塞、返工预算的答复）的不算，别的都算，门禁不读内容。第 1 节变了，或者验证段的
   结论跟修订那一刻一样、它的产者在修订之前派出去之后才交（对着上一版契约），写契约时【契约】当场说，H6 不放行推进与收口，【阶段】的收口阻碍也
   列它（`hooks/lib/contract-base.mjs` 的 `decideContractBase`，排在 H6 别的判据之后），H2 不把它们当交了的前置、不让它那一段判齐（`gate.mjs` 的
-  `outdatedSetOf`，【阶段】与 H2 共用，`docs/61`）。出路看当前段（`outdatedFix`：早于当前段的回退、当前段的同段
+  `outdatedSetOf`，【阶段】与 H2 共用，`docs/61`；当前段不是最后一段时【阶段】也不说它那一段齐了、改说出路，`docs/68` §8）。出路看当前段（`outdatedFix`：早于当前段的回退、当前段的同段
   重派、后面的段走到时照常重出）。改第 1 节不算修订；回退之后 `rework_base` 接手，不另起一套新鲜度口径。推进出第一段之前不核（S1 里转写错了
   可以改）。理由在 `docs/45`。
 - **契约第 1 节对着用户原话核**：`/agent-team:at` 带参数展开时（UserPromptExpansion，matcher 锚定 `^agent-team:at$`，从插件名来）记录器把原话、会话 id、
