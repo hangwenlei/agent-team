@@ -154,7 +154,7 @@ test('M4g 复核：写契约时的漂移回传、契约的格式与模板都分�
 })
 
 const STATUS_LINES = [
-  '当前阶段:    <stage>（<这一段谁在干：有 producers 的段（S2、S5）推进出去之前 stage_roles 里还没有这一段、返工轮里记的是上一轮的人——S5 照 04-dispatch.md ' +
+  '当前阶段:    <stage>（<这一段谁在干：有 producers 的段（S2、S5）推进出去之前 stage_roles 里还没有这一段（或者记的是 `[]` 或者只记了不是这一段产者的协调者）、返工轮里记的是上一轮的人——S5 照 04-dispatch.md ' +
     '的分工写，S2 写 at-product 与磁盘上已有产物的 at-ui，都标「本段未记账」；没有 stage_roles 的旧 run 看 roster；其余写那一段的 role>）',
   '契约:        <contract_sha 里 `sha256:` 之后的前 12 位；是 PENDING 就写 PENDING>，磁盘上<在/不在>',
   '产物:        逐阶段列，每个后面标 ✓ / ✗（按磁盘）；当前段之后、还没走到的段整段写「未到」，不标 ✗',
