@@ -406,6 +406,9 @@ M4d（`docs/38`，全量审查第 17 条）：上面那句「推进本身照样�
 `mayAcceptProduct`。只认布尔 `true`。起因：S6 测试不过回到 S5、修了后端，门禁自己把「06-test.md 标 accepted」列成出路，
 标了之后 at-qa 不重测就停下，没测过的改动进了验收。
 
+**测试那一段的测试报告**（`docs/66`）：第一个产者里有 `at-qa` 的验证段（`test-verdict.mjs` 的 `testStageOf`，按 `verifies` 与产者派生）的第一份产物，推进出
+这一段的那一次 H6 读它的首行；不通过回到它之前最近的执行段。扩链时跟着走。
+
 **验证段的产者派出去之前**（M4y，`docs/60`）：H2 派 `verifies` 段的产者（`at-qa`、`at-acceptance`）之前拿 `contract_sha` 对磁盘上的契约，
 对不上就拒，出路是【契约】那一句。按 `stages.mjs` 的 `verifyStageOf` 认，扩链时跟着 `verifies` 走。
 

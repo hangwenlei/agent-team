@@ -62,6 +62,7 @@ import {
 } from './lib/contract-base.mjs'
 import { readGrants } from './lib/budget.mjs'
 import { askAnswers, promptAnswer, promptDeliver, planApprovals, approvalLine, approvalNotices } from './lib/approvals.mjs'
+import { TEST_ROLE, decideTestVerdict, testBlock, testStageNote, testStageOf, testVerdict } from './lib/test-verdict.mjs'
 import { ACCEPTANCE_ROLE, acceptanceBlock, acceptanceOf, acceptanceVerdict, decideAcceptance, deliverLine, readDeliverApprovalEntries, readDeliverApprovals, verdictBlockerText, verdictStageNote } from './lib/verdict.mjs'
 import { deliveredSnapshot, readSnapshot, makeDelivered, decideRedispatch, decideRedoWrite } from './lib/redo.mjs'
 import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispatch } from './lib/closing.mjs'
@@ -722,12 +723,27 @@ function outdatedSetOf(ctx, who = null) {
 // docs/62：验收角色在验收那一段停下时，验收结论第一行读不出——H5b 的拒绝理由（【阶段】给写者的那一句加冒泡的出口）；不用拦回 null。
 // 不在验收那一段、产物读不出、首行读得出（不论过没过）都不拦；缺、空由交付物核验那一支先说（走到这里时产物齐了），收口只在最后一段。
 function verdictStopReason(ctx, role) {
+  if (role === TEST_ROLE) return testStopReason(ctx)
   if (role !== ACCEPTANCE_ROLE) return null
   const acc = acceptanceOf(ctx.stages)
   if (!acc || ctx.state?.stage !== acc.stageId) return null
   const bytes = ctx.artifactBytes(acc.name)
   if (!bytes || acceptanceVerdict(bytes) !== null) return null
   return verdictStageNote({ stages: ctx.stages, block: { name: acc.name, verdict: null }, writer: ACCEPTANCE_ROLE }) + verdictBubbleTail(acc.stageId)
+}
+
+// docs/66：at-qa 在测试那一段停下时，测试报告第一行读不出——同一个写法（【阶段】给写者的那一句加冒泡的出口）。
+function testStopReason(ctx) {
+  const ts = testStageOf(ctx.stages)
+  if (!ts || ctx.state?.stage !== ts.stageId) return null
+  const bytes = ctx.artifactBytes(ts.name)
+  if (!bytes || testVerdict(bytes) !== null) return null
+  return (
+    testStageNote({ block: { ...ts, verdict: null }, writer: TEST_ROLE }) +
+    `测试结论确实写不出来、要上级定的（S5 没交齐、红线里的敏感操作），把你最后一条回复的第一行写成「${BUBBLE_MARK}<一句话理由>」，下面写清缺什么、` +
+    `要上级定什么，再停下——门禁认这一行、放你停下；推进出 ${ts.stageId} 照旧会被拒，项目经理读你的回复来定。已经这样写过、又被拦回来的，把那条回复` +
+    `原样再发一遍再停下（第一行仍是「${BUBBLE_MARK}…」）。`
+  )
 }
 
 // 复核（docs/62 §8）：这一支的冒泡尾巴单写——走到这里产物已经写了（不说「就不写」）；它在、不是空的，推进的交齐判据算它交了，挡推进的是 H6 读首行
@@ -2160,6 +2176,23 @@ function main() {
         settleWords({ runDir, agentTeamDir, sessionId: input.session_id, state: after, stages: stagesForRework, creating: before === null && beforeText === null })
       }
 
+      // docs/66（docs/46 §4「测试报告的结论不读」）：推进出测试那一段的那一次读测试报告首行——不通过的拒（回退到实现那一段）、读不出的拒（同段重派
+      // at-qa 照格式写）；跑不起来的放行（正文里 env-blocked 那一问）。只在那一次读：之后由验收结论管，已经走过测试那一段的旧 run 不受牵连。
+      const tv = decideTestVerdict({
+        before,
+        after,
+        stages: stagesForRework,
+        bytesOf: (name) => {
+          try {
+            return readFileSync(join(runDir, name))
+          } catch {
+            return null
+          }
+        },
+        dispatched,
+      })
+      if (!tv.ok) denyAndExit(tv.reason, spec.event)
+
       // M4k（docs/46，docs/35 §5「收口不读验收结论」）：验收结论首行——推进出验收那一段与收口时，不是「结论：通过」、又没有门禁记下的
       // 照现状交付批准（approvals.jsonl 里 sha 等于它现在的 sha），拒（hooks/lib/verdict.mjs）。排在最后：对着上一版契约的结论先重出，
       // 读它的首行才有意义。批准读同一个目录下的 approvals.jsonl（上面读过；读不出来当一条都没有——更严的一侧）。
@@ -2559,6 +2592,23 @@ function main() {
         return null
       }
     })()
+    // docs/66：测试那一段齐了、测试报告首行不通过或读不出——【阶段】那一句补上（与 H6 同一份 testBlock）。写者分 at-qa 与别人。
+    const testNote = (() => {
+      try {
+        const ts = testStageOf(ctx.stages)
+        if (!ts || !stageDone || ctx.state?.stage !== ts.stageId || closedAt(ctx.state) !== null || outdatedNow.has(ts.name)) return null
+        const block = testBlock({
+          stages: ctx.stages,
+          state: ctx.state,
+          prior: undefined,
+          bytesOf: (n) => (ctx.artifactExists(n) ? ctx.artifactBytes(n) : null),
+          dispatched: dispatchedNow,
+        })
+        return block ? testStageNote({ block, writer: callerOf(input) }) || null : null
+      } catch {
+        return null
+      }
+    })()
     const blockers = (() => {
       if (!Array.isArray(blockers0)) return blockers0
       const od = blockers0.filter((b) => b.why === 'outdated').map((b) => b.name)
@@ -2583,7 +2633,8 @@ function main() {
       projectReport,
       reworkStale,
       closeBlockers: blockers,
-      acceptanceNote,
+      // 测试那一段与验收那一段不会同时是当前段：两句共用一个位置。
+      acceptanceNote: acceptanceNote ?? testNote,
       wordsNote: wordsMismatch && kind !== 'contract' ? `${wordsMismatchText(wordsMismatch)}。推进出 ${firstStageId} 会被拒：${WORDS_FIX}。` : null,
       budget: validation ? validation.budget : [],
       grants,

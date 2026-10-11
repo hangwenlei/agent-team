@@ -76,7 +76,7 @@ test('M4j 账本：改需求的修订——重拍快照、说哪几份对着上�
   withRun({ stage: 'S8', history: upTo('S8') }, ({ projectDir, runDir }) => {
     writeFileSync(join(runDir, '00-contract.md'), V1)
     putBase(runDir)
-    writeFileSync(join(runDir, '06-test.md'), 'test v1' + NL)
+    writeFileSync(join(runDir, '06-test.md'), '结论：通过' + NL + 'test v1' + NL)
     writeFileSync(join(runDir, '07-acceptance.md'), 'acc v1' + NL)
     writeFileSync(join(runDir, '00-contract.md'), ADMIN)
     const admin = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
@@ -92,7 +92,7 @@ test('M4j 账本：改需求的修订——重拍快照、说哪几份对着上�
       c,
     )
     const b = baseOf(runDir)
-    assert.deepEqual(b.verify_base, { '06-test.md': sha('test v1' + NL), '07-acceptance.md': sha('acc v1' + NL) })
+    assert.deepEqual(b.verify_base, { '06-test.md': sha('结论：通过' + NL + 'test v1' + NL), '07-acceptance.md': sha('acc v1' + NL) })
     assert.ok(typeof b.revised_at === 'string' && b.body_sha === bodyShaOf(user), JSON.stringify(b))
     const again = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
     assert.ok(!again.includes('契约改了'), again)
@@ -119,7 +119,7 @@ test('M4j 账本：第 1 节变了说【契约】；只改第 1 节不算修订�
   withRun({ stage: 'S8', history: upTo('S8') }, ({ projectDir, runDir }) => {
     writeFileSync(join(runDir, '00-contract.md'), V1)
     putBase(runDir)
-    writeFileSync(join(runDir, '06-test.md'), 'test v1' + NL)
+    writeFileSync(join(runDir, '06-test.md'), '结论：通过' + NL + 'test v1' + NL)
     writeFileSync(join(runDir, '00-contract.md'), DRIFTED)
     const c = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
     assert.ok(
@@ -138,7 +138,7 @@ test('M4j 账本（复核 F11）：已经收口的 run 上改契约——只说�
     writeFileSync(statePath, JSON.stringify({ ...JSON.parse(readFileSync(statePath, 'utf8')), closed_at: '2026-10-06T12:00:00Z' }))
     writeFileSync(join(runDir, '00-contract.md'), V1)
     putBase(runDir)
-    writeFileSync(join(runDir, '06-test.md'), 'test v1' + NL)
+    writeFileSync(join(runDir, '06-test.md'), '结论：通过' + NL + 'test v1' + NL)
     writeFileSync(join(runDir, '00-contract.md'), USER)
     const c = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
     assert.ok(c.includes('【契约】这一趟已经收口：收口之后改契约') && !c.includes('「回退」'), c)
@@ -158,13 +158,13 @@ const s6Run = { stage: 'S6', history: upTo('S6'), roster: ['at-qa'], stage_roles
 test('M4j H6：推进出 S6 时对着上一版契约的测试报告拒，出路是同段重派（复核 F1）；重出之后放行；第 1 节变了也拒', () => {
   withRun(s6Run, ({ projectDir, runDir }) => {
     writeFileSync(join(runDir, '00-contract.md'), V1)
-    writeFileSync(join(runDir, '06-test.md'), 'test v1' + NL)
-    putBase(runDir, { verify_base: { '06-test.md': sha('test v1' + NL) }, revised_at: '2026-10-06T10:30:00.000Z' })
+    writeFileSync(join(runDir, '06-test.md'), '结论：通过' + NL + 'test v1' + NL)
+    putBase(runDir, { verify_base: { '06-test.md': sha('结论：通过' + NL + 'test v1' + NL) }, revised_at: '2026-10-06T10:30:00.000Z' })
     const d = decisionOf(run('rework', advanceS6(runDir), GATE, projectDir).stdout)
     assert.equal(d?.permissionDecision, 'deny', JSON.stringify(d))
     assert.ok(d.permissionDecisionReason.includes('契约在 06-test.md 写成之后改过') && d.permissionDecisionReason.includes('在 S6 里同段重派它的产者重出'), d.permissionDecisionReason)
     assert.ok(!d.permissionDecisionReason.includes('「回退」'), d.permissionDecisionReason)
-    writeFileSync(join(runDir, '06-test.md'), 'test v2' + NL)
+    writeFileSync(join(runDir, '06-test.md'), '结论：通过' + NL + 'test v2' + NL)
     assert.equal(decisionOf(run('rework', advanceS6(runDir), GATE, projectDir).stdout), null, '重出之后放行')
     writeFileSync(join(runDir, '00-contract.md'), DRIFTED)
     const drift = decisionOf(run('rework', advanceS6(runDir), GATE, projectDir).stdout)
@@ -175,7 +175,7 @@ test('M4j H6：推进出 S6 时对着上一版契约的测试报告拒，出路�
 test('M4j H6（复核 F4）：修订之前派出去、之后才交的测试报告也算对着上一版契约；修订之后重派过的放行', () => {
   withRun(s6Run, ({ projectDir, runDir }) => {
     writeFileSync(join(runDir, '00-contract.md'), USER)
-    writeFileSync(join(runDir, '06-test.md'), 'test written after revision' + NL)
+    writeFileSync(join(runDir, '06-test.md'), '结论：通过' + NL + 'test written after revision' + NL)
     putBase(runDir, { body_sha: bodyShaOf(USER), revisions: ['### 2026-10-06 · 用户主动提出'], verify_base: {}, revised_at: '2026-10-06T10:30:00.000Z' })
     writeFileSync(join(runDir, 'dispatches.jsonl'), qaDispatch(PAST) + NL)
     const d = decisionOf(run('rework', advanceS6(runDir), GATE, projectDir).stdout)
@@ -192,8 +192,8 @@ test('M4j H6（复核 K01）：返工轮里推进出 S6，测试报告既是上�
   withRun({ stage: 'S6', history, roster: ['at-qa'], stage_roles: { S6: ['at-qa'] } }, ({ projectDir, runDir }) => {
     const statePath = join(runDir, 'state.json')
     writeFileSync(join(runDir, '00-contract.md'), V1)
-    writeFileSync(join(runDir, '06-test.md'), 'test v1' + NL)
-    const t1 = sha('test v1' + NL)
+    writeFileSync(join(runDir, '06-test.md'), '结论：通过' + NL + 'test v1' + NL)
+    const t1 = sha('结论：通过' + NL + 'test v1' + NL)
     writeFileSync(statePath, JSON.stringify({ ...JSON.parse(readFileSync(statePath, 'utf8')), rework: reworkFromHistory(history), rework_base: { '06-test.md': t1 } }))
     putBase(runDir, { verify_base: { '06-test.md': t1 }, revised_at: '2026-10-06T10:30:00.000Z' })
     const now = JSON.parse(readFileSync(statePath, 'utf8'))
@@ -208,7 +208,7 @@ test('M4j H6（复核 K01）：返工轮里推进出 S6，测试报告既是上�
 test('M4j H6（复核 F7）：基线带 BOM 照样读；读不出来不拦、留一行痕', () => {
   withRun(s6Run, ({ projectDir, runDir }) => {
     writeFileSync(join(runDir, '00-contract.md'), DRIFTED)
-    writeFileSync(join(runDir, '06-test.md'), 'test v1' + NL)
+    writeFileSync(join(runDir, '06-test.md'), '结论：通过' + NL + 'test v1' + NL)
     writeFileSync(join(runDir, 'contract-base.json'), BOM + JSON.stringify({ section1: '> 做一个待办清单。', body_sha: bodyShaOf(V1), revisions: [], verify_base: {}, revised_at: null }))
     const d = decisionOf(run('rework', advanceS6(runDir), GATE, projectDir).stdout)
     assert.ok(d?.permissionDecision === 'deny' && d.permissionDecisionReason.includes('契约第 1 节是用户原话'), JSON.stringify(d))
@@ -226,8 +226,8 @@ test('M4j H6（复核 F7）：基线带 BOM 照样读；读不出来不拦、留
 test('M4j 【阶段】（复核 F6）：S8 齐了、却有对着上一版契约的结论——收口阻碍里列它与出路，不说该收口了', () => {
   withRun({ stage: 'S8', history: upTo('S8'), roster: ['at-qa', 'at-acceptance'], stage_roles: { S6: ['at-qa'], S7: ['at-acceptance'] } }, ({ projectDir, runDir }) => {
     writeFileSync(join(runDir, '00-contract.md'), USER)
-    for (const [f, t] of [['06-test.md', 'test v1'], ['07-acceptance.md', 'acc v2'], ['08-delivery.md', 'del v2']]) writeFileSync(join(runDir, f), t + NL)
-    putBase(runDir, { body_sha: bodyShaOf(USER), revisions: ['### 2026-10-06 · 用户主动提出'], verify_base: { '06-test.md': sha('test v1' + NL) }, revised_at: '2026-10-06T10:30:00.000Z' })
+    for (const [f, t] of [['06-test.md', '结论：通过' + NL + 'test v1'], ['07-acceptance.md', 'acc v2'], ['08-delivery.md', 'del v2']]) writeFileSync(join(runDir, f), t + NL)
+    putBase(runDir, { body_sha: bodyShaOf(USER), revisions: ['### 2026-10-06 · 用户主动提出'], verify_base: { '06-test.md': sha('结论：通过' + NL + 'test v1' + NL) }, revised_at: '2026-10-06T10:30:00.000Z' })
     const c = ctxOf(run('ledger', posted(join(runDir, 'state.json')), GATE, projectDir).stdout)
     assert.ok(c.includes('06-test.md（对着上一版契约：契约在它写成之后改过——照 /agent-team:at 第 3 节的「回退」记回到 S6，让产者对着这一版重出）'), c)
   })
