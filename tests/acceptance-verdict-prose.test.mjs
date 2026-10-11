@@ -160,12 +160,36 @@ test('docs/68 §8：挂着的用例的几种同义说法，at-qa、at-acceptance
 
 // docs/70：真实会话 M17 里验收把契约第 1 节的「走到收口」列成一条、写「流程项……不在业务验收范围」——三种结论之外的第四种。管流程的话不是做出来的东西，
 // 归项目经理照着走，不列进逐条。写在「你判什么」那一节、紧跟在「逐条只有三种」那一句后面。
-const ACC_PROCESS = '契约第 1 节里管流程的话（走到哪一段停、要不要收口、先别派谁）不是做出来的东西，归项目经理照着走，不列进逐条。'
+// 复核（docs/70 §8）：范围是契约与产品定义（第 4 节修订块里也常有「走到收口」）；不静默——在逐条之后单列一行、引原话（认错了看得见）。
+const ACC_PROCESS =
+  '契约与产品定义里管流程的话（走到哪一段停、要不要收口、先别派谁）不是做出来的东西，归项目经理照着走，不列进逐条；' +
+  '在逐条之后单列一行「没判的（管流程的话）：」，引那几句原话。'
 test('docs/70：验收角色——契约第 1 节里管流程的话不列进逐条，紧跟在「逐条只有三种」那一句后面', () => {
   const body = bodyOf('at-acceptance')
   const from0 = body.indexOf('## 你判什么')
   const next0 = body.indexOf('\n## ', from0 + 1)
   const s = body.slice(from0, next0 < 0 ? body.length : next0)
   assert.ok(has(s, ACC_THREE + ACC_PROCESS), '「你判什么」那一节：管流程的话那一句不在、或者没紧跟在「逐条只有三种」后面')
-  assert.equal(stripWs(read('agents/at-acceptance.md')).split(stripWs('管流程的话')).length - 1, 1, '「管流程的话」只许出现在那一句里')
+  // 复核（docs/70 §8）：「流程」只许出现在那一句里；M17 写过的几种说法（「不在业务验收范围」「不在范围」「流程项」）整份里不许出现。
+  const flat = stripWs(read('agents/at-acceptance.md'))
+  const at = flat.indexOf(stripWs(ACC_PROCESS))
+  for (let i = flat.indexOf('流程'); i >= 0; i = flat.indexOf('流程', i + 1)) assert.ok(i >= at && i < at + stripWs(ACC_PROCESS).length, `「流程」出现在那一句之外：${flat.slice(i - 20, i + 20)}`)
+  for (const w of ['不在业务验收范围', '不在范围', '流程项']) assert.ok(!flat.includes(w), `出现了「${w}」`)
+})
+
+// 复核（docs/70 §8）：项目经理那一侧——/agent-team:at 第 3 节开头写明管流程的话由它照着走、停下等用户不算打断；第 1 节替上一趟收口之前看契约有没有说先别收口；
+// at-pm 的「什么时候打断用户」那一节点到它。括号里的例子与验收那一句同一份。
+const PM_FLOW =
+  '**契约与产品定义里管流程的话（走到哪一段停、要不要收口、先别派谁）由你照着走**：走到用户说的那一段就停下，告诉用户现在停在哪、怎么接着走' +
+  '（`/agent-team:at-resume`）；用户说先别派谁的，停在派它之前，等用户下一句；用户说先别收口的，不收口。停下等用户不算打断用户。验收不判这些话。'
+test('docs/70 §8：项目经理那一侧——第 3 节开头照着走管流程的话；第 1 节替上一趟收口看先别收口；at-pm 的打断用户那一节点到它', () => {
+  const at = read('commands/at.md')
+  const s3 = at.slice(at.indexOf('## 3. 逐段推进'), at.indexOf('## 4.'))
+  assert.ok(stripWs(s3).startsWith(stripWs('## 3. 逐段推进' + PM_FLOW)), '第 3 节开头那一段')
+  const s1 = at.slice(at.indexOf('## 1. 建 run'), at.indexOf('## 2.'))
+  assert.ok(has(s1, '交付文档也在、那一趟的契约里没说先别收口：照第 6 节第二、四步'), '第 1 节替上一趟收口的条件')
+  assert.ok(has(s1, '验收没过或判不了、交付文档不在、契约里说了先别收口、收口被 H6 拒——都是收不了口'), '第 1 节收不了口的几种')
+  const pm = bodyOf('at-pm')
+  const sec = pm.slice(pm.indexOf('## 什么时候打断用户'))
+  assert.ok(has(sec.slice(0, sec.indexOf('\n## ', 1) < 0 ? sec.length : sec.indexOf('\n## ', 1)), '契约里管流程的话（走到哪一段停、要不要收口、先别派谁）照着停下等用户，不算打断用户（`/agent-team:at` 第 3 节开头）。'), 'at-pm 打断用户那一节')
 })
