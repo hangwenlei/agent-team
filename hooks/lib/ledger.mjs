@@ -104,23 +104,48 @@ export function pluginNotice(report) {
 // M4g（docs/42，审查第 28 条）：PM 照【触达表】把 JSON 手抄进 .agent-team/reach.json，原来没有任何东西核它（/agent-team:at-status 照它报，
 // 抄错了就报错）。写完之后门禁按当前 project.json 与花名册重算、与写进去的比：语义上相同（键序、BOM、CRLF 不算不同）不吭声；不同、或者
 // 写进去的不是合法 JSON，给出正确的那一份。expected 是门禁算的，原样落盘的 JSON 走 safeJson（docs/27 §2.1）。
-export function reachCheckNotice({ writtenText, expected }) {
+// reach.json 的原文与门禁算的那一份比：null 是对得上（语义相同，键序、BOM、CRLF 不算不同）；invalid、dup、differ 是三种对不上。
+function reachDiff(text, expected) {
   let parsed
   try {
-    parsed = JSON.parse(normalizeText(writtenText ?? ''))
+    parsed = JSON.parse(normalizeText(text ?? ''))
   } catch {
     parsed = undefined
   }
   // docs/75 §8：抄重了键的（JSON 只认最后一个，按 Read 读原文的人可能读到前一遍）也算对不上，给出正确的那一份。
-  const dup = parsed !== undefined && duplicateKeys(typeof writtenText === 'string' ? writtenText : '').length > 0
-  if (parsed !== undefined && !dup && isDeepStrictEqual(parsed, expected)) return null
+  const dup = parsed !== undefined && duplicateKeys(typeof text === 'string' ? text : '').length > 0
+  if (parsed === undefined) return 'invalid'
+  if (dup) return 'dup'
+  return isDeepStrictEqual(parsed, expected) ? null : 'differ'
+}
+
+export function reachCheckNotice({ writtenText, expected }) {
+  const diff = reachDiff(writtenText, expected)
+  if (diff === null) return null
   return (
     '【触达表】刚写进 .agent-team/reach.json 的' +
-    (parsed === undefined
+    (diff === 'invalid'
       ? '不是一份合法的 JSON（写坏了，或者被截断了）。'
-      : dup
+      : diff === 'dup'
         ? '里有写了不止一次的键（JSON 只认最后一个，照原文读的人可能读到前一遍）。'
         : '与门禁按当前 project.json 与花名册算出来的不一样（手抄出错，或者是照旧的 project.json 算的）。') +
+    `把下面这份 JSON 原样重写进 .agent-team/reach.json：\n${safeJson(expected)}`
+  )
+}
+
+// docs/79（docs/42 §4、docs/29 §5「reach.json 写完之后会落后」）：每趟开头写 current-run 时，磁盘上的 reach.json 与门禁按当前 project.json 与花名册
+// 算的那一份比——project.json 在它之后被改过（两趟之间手改）、写坏了、被删了，/agent-team:at-status 照它报会报错。text 是 reach.json 的原文，不在为 null。
+export function reachStaleNotice({ text, expected }) {
+  const diff = text === null ? 'missing' : reachDiff(text, expected)
+  if (diff === null) return null
+  const why = {
+    missing: '不在',
+    invalid: '不是一份合法的 JSON（写坏了，或者被截断了）',
+    dup: '里有写了不止一次的键（JSON 只认最后一个，照原文读的人可能读到前一遍）',
+    differ: '与门禁按当前 project.json 与花名册算出来的不一样（project.json 在它写成之后改过、插件更新之后算法或花名册变了，或者当初手抄出错）',
+  }[diff]
+  return (
+    `【触达表】.agent-team/reach.json ${why}——/agent-team:at-status 报各角色实际能写到哪里时读的就是它。` +
     `把下面这份 JSON 原样重写进 .agent-team/reach.json：\n${safeJson(expected)}`
   )
 }

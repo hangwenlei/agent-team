@@ -662,6 +662,15 @@ const SCENARIOS = [
     anchor: (all, P) => P.includes(':') || reached(all, P),
   },
   {
+    // docs/79 §8：每趟开头写 current-run 时核磁盘上的 reach.json，给出的「正确那一份」里同样有 project.json 的前缀——同一个入口，换一个时机。
+    name: 'project.paths 的元素（每趟开头写 current-run 时的【触达表】核对）',
+    disk: true,
+    project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, 'at-backend': ['src/server/', P] } }),
+    raw: { 'reach.json': () => '{}' },
+    calls: ({ p }) => [['ledger', posted('at-pm', join(p, '.agent-team', 'current-run'))]],
+    anchor: (all, P) => P.includes(':') || (reached(all, P) && all.includes('重写进 .agent-team/reach.json')),
+  },
+  {
     // M4b 第二轮复核：「没人认领」与「归 X」两支会把调用者自己条目里「要改」档的前缀说出来（own.fix）。载荷末尾加一个空格，
     // 落进「首尾有空白」那一档；同一份 project.json 写一次，【project.json】的要改档也喂到。
     name: 'project.paths 的元素落在要改档（H3「没人认领」那一支的 own.fix 与【project.json】）',

@@ -69,7 +69,7 @@ import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispat
 import { computeReach } from './lib/reach.mjs'
 import { validateState, isStageDone, duplicateKeyLines } from './lib/state.mjs'
 import { CONTRACT_FILE, compareContractSha, sha256OfContract, shaOrNote } from './lib/contract-hash.mjs'
-import { buildLedgerNotices, brokenProjectNotice, contractCheckNotice, reachCheckNotice, IMPL_RECORD_NOTE } from './lib/ledger.mjs'
+import { buildLedgerNotices, brokenProjectNotice, contractCheckNotice, reachCheckNotice, reachStaleNotice, IMPL_RECORD_NOTE } from './lib/ledger.mjs'
 import { validateProject } from './lib/project.mjs'
 import { compareArtifacts } from './lib/artifact-drift.mjs'
 import { decideCoverage } from './lib/coverage.mjs'
@@ -341,6 +341,25 @@ function reachNoticeFor(filePath, project, writerIsPm = true) {
     return null
   }
   const notice = reachCheckNotice({ writtenText: text, expected: computeReach({ roster, paths: project.paths }) })
+  return notice && !writerIsPm ? `${notice}\nreach.json 是编排层的控制文件，只有项目经理该改它：把这一段原样冒泡给派你的人，不要自己重写。` : notice
+}
+
+// docs/79：每趟开头写 current-run 时核磁盘上的 reach.json 是不是落后（措辞在 hooks/lib/ledger.mjs 的 reachStaleNotice）。project.json 不在、有阻断或
+// 插件问题时不核（同 reachNoticeFor）；reach.json 在、却读不出来（占用之类）也不核——只有不在（ENOENT）才说「不在」。复核（docs/79 §8）：写指针的人
+// 不是项目经理时（没有 run 的那一刻 H3 对谁都放行），与 reachNoticeFor 同一个口径叫它原样冒泡。
+function staleReachFor(ctx, writerIsPm = true) {
+  if (!isPlainObject(ctx.project)) return null
+  const roster = loadRoster()
+  const report = validateProject(ctx.project, { roster })
+  if (report.block.length || report.plugin.length) return null
+  let text
+  try {
+    text = readFileSync(join(ctx.agentTeamDir, 'reach.json'), 'utf8')
+  } catch (err) {
+    if (err?.code !== 'ENOENT') return null
+    text = null
+  }
+  const notice = reachStaleNotice({ text, expected: computeReach({ roster, paths: ctx.project.paths }) })
   return notice && !writerIsPm ? `${notice}\nreach.json 是编排层的控制文件，只有项目经理该改它：把这一段原样冒泡给派你的人，不要自己重写。` : notice
 }
 
@@ -2836,6 +2855,9 @@ function main() {
     if (isPointer) {
       const inflight = inflightNotice(inflightElsewhere(ctx))
       if (inflight) notices.push(inflight)
+      // docs/79：每趟开头核 reach.json 是不是落后（staleReachFor 上方）。
+      const stale = staleReachFor(ctx, isContractWriter(input.agent_type))
+      if (stale) notices.push(stale)
     }
 
     // M3a Task 2：产者交代判据的触发点是「state.stage 推进出去时」（设计 §3.2），
