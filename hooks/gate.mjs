@@ -1619,6 +1619,23 @@ function withoutOwn(cmp, own) {
 }
 
 // M4h（docs/43，审查第 14 条的 S2 进度）：selfDone——返回的协调者自己也是这一段的产者、它那几份交了（S2 的 at-product）。
+// docs/76 §8：这一趟在 stageId 这一段派出去、门禁还没见它停下（最后一回是「拦」也算没停）的角色——isStageDone 不免它们那几份（还在干活，别催推进）。
+// 读不出派发记录给空集。
+function runningRolesIn(ctx, stageId) {
+  const out = new Set()
+  try {
+    const bytes = ctx.artifactBytes(DISPATCHES_FILE)
+    if (!bytes || typeof stageId !== 'string') return out
+    const log = readDispatchLog(bytes.toString('utf8'))
+    for (const d of log.dispatches) {
+      if (d.stage !== stageId) continue
+      const last = lastStop(log, d.agent_id)
+      if (last === null || last === 'block') out.add(d.role)
+    }
+  } catch {}
+  return out
+}
+
 function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, recipientIsPm, selfDone = false }) {
   const stage = ctx.stages?.[stageId]
   if (!isPlainObject(stage) || !coordinatorId) return null
@@ -2616,6 +2633,8 @@ function main() {
       artifactExists: fresh.artifactCurrent,
       roster: participantsOf(ctx.state, ctx.state?.stage),
       state: ctx.state,
+      artifactStale: fresh.isStale,
+      running: runningRolesIn(ctx, ctx.state?.stage),
     })
     // 【返工】：写 state.json 时，当前段与更早段还是上一轮的产物（hooks/lib/ledger.mjs 那一段）。
     const reworkStale = kind === 'state' ? staleByStage({ stages: ctx.stages, stageId: ctx.state?.stage, isStale: fresh.isStale }) : null
@@ -3079,6 +3098,8 @@ function main() {
               artifactExists: fresh.artifactCurrent,
               roster: participantsOf(ctx.state, ctx.state?.stage),
               state: ctx.state,
+              artifactStale: fresh.isStale,
+              running: runningRolesIn(ctx, ctx.state?.stage),
             })
             if (!done) {
               const p = progressOf({ ctx, fresh, log, coordinator: d.role, coordinatorId: taskId, stageId: d.stage, recipientIsPm, selfDone: r.skipped === undefined })
@@ -3448,6 +3469,8 @@ function main() {
         artifactExists: fresh.artifactCurrent,
         roster: participantsOf(ctx.state, ctx.state?.stage),
         state: ctx.state,
+        artifactStale: fresh.isStale,
+        running: runningRolesIn(ctx, ctx.state?.stage),
       })
       // 'unknown-stage'：state.stage 缺失、不是字符串，或不在阶段链里——交付物核验这一次没做，在它改对之前每一次都不做。
       // M3v（docs/30）订正：上一版这里写的是「ledger 那条路径会给出细节」「SubagentStop 上没有 additionalContext 这条

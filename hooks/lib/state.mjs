@@ -323,8 +323,10 @@ export function rejectTo(kind) {
  * 或数组里每条都含 <role>）展开为空、答 false；不含 <role> 的条目与传进来的是谁无关，原样保留，照磁盘判。
  */
 // docs/76（docs/32 §4「叫到之后又裁掉」）：state 给了时，叫到之后又裁掉的角色（trimmed 里记着它、值是这一段）那几份 mayWaive 许的产物免掉——与推进判据
-// （advance.mjs 的 departureNeeds）同一个口径；不随参与者变的固定产物不免。不给 state 的照旧（等它们）。
-export function isStageDone({ stage, stages, artifactExists, roster, state = null }) {
+// （advance.mjs 的 departureNeeds）同一个口径；不随参与者变的固定产物不免。不给 state 的照旧（等它们）。复核（docs/76 §8）：还是上一轮的不免
+// （artifactStale——推进那一次 H6 照样按还旧拒，免掉就成了【阶段】说齐、H6 拒）；还在跑的不免（running：派出去了、门禁还没见它停下——裁掉之后又派回来，
+// trimmed 不会自己清掉，免掉就成了它还在干活、门禁却催推进）。H6 那一侧不看还在跑（中断的子代理永远没有停下行，按它拦会一直拒），只这里不催。
+export function isStageDone({ stage, stages, artifactExists, roster, state = null, artifactStale = null, running = null }) {
   // stage 来自 state.json：不是字符串、或者不是 stages 自己的键，就不算完成（M3s，docs/27 §3）。
   // 此前拿它直接做属性键，{"toString":1} 这样的对象会让 ToPropertyKey 抛异常——ledger 与
   // deliverable 整条崩掉，本该报出这个坏值的【state.json】也跟着消失。
@@ -341,8 +343,12 @@ export function isStageDone({ stage, stages, artifactExists, roster, state = nul
   const excused = new Set()
   if (isPlainObject(state)) {
     for (const r of participants) {
-      if (!trimmedAt(state, r, stage)) continue
-      for (const n of expandProduces(current, [r])) if (!fixed.has(n) && mayWaive(stages, stage, n)) excused.add(n)
+      if (!trimmedAt(state, r, stage) || (running && running.has(r))) continue
+      for (const n of expandProduces(current, [r])) {
+        if (fixed.has(n) || !mayWaive(stages, stage, n)) continue
+        if (typeof artifactStale === 'function' && artifactStale(n)) continue
+        excused.add(n)
+      }
     }
   }
   return names.every((p) => excused.has(p) || artifactExists(p))

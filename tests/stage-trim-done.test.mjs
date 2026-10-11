@@ -10,6 +10,8 @@ import { isStageDone } from '../hooks/lib/state.mjs'
 import { participantsOf } from '../hooks/lib/stages.mjs'
 import { run, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
+import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
+import { dispatchLine } from '../hooks/lib/completion.mjs'
 
 const STAGES = JSON.parse(readFileSync(new URL('../stages.json', import.meta.url), 'utf8'))
 const S5_STATE = {
@@ -52,16 +54,19 @@ test('【阶段】（docs/76）：S5 里叫到之后又裁掉一个执行角色�
   }
 })
 
-test('调用点（docs/76）：hooks 下每一处 isStageDone 调用都传 state（不传就退回原来那种等裁掉的人的口径）', () => {
+// 复核（docs/76 §8）：调用点判据核值不只核键（state 传成 null 也该红），扫描面认任何写法的调用（不只 `isStageDone({`）、跳过定义与注释；
+// 列举调用所在的文件，不报总数。
+test('调用点（docs/76）：hooks 下每一处 isStageDone 调用都传 state: ctx.state、artifactStale: fresh.isStale、running: runningRolesIn(…)，调用只在 hooks/gate.mjs 里', () => {
   const HOOKS = new URL('../hooks/', import.meta.url)
   const files = [
-    ...readdirSync(HOOKS).filter((f) => f.endsWith('.mjs')).map((f) => new URL(f, HOOKS)),
-    ...readdirSync(new URL('lib/', HOOKS)).filter((f) => f.endsWith('.mjs')).map((f) => new URL(`lib/${f}`, HOOKS)),
+    ...readdirSync(HOOKS).filter((x) => x.endsWith('.mjs')).map((x) => ['hooks/' + x, new URL(x, HOOKS)]),
+    ...readdirSync(new URL('lib/', HOOKS)).filter((x) => x.endsWith('.mjs')).map((x) => ['hooks/lib/' + x, new URL('lib/' + x, HOOKS)]),
   ]
-  let calls = 0
-  for (const u of files) {
-    const text = readFileSync(u, 'utf8')
-    for (let i = text.indexOf('isStageDone({'); i >= 0; i = text.indexOf('isStageDone({', i + 1)) {
+  const where = new Set()
+  for (const [name, u] of files) {
+    // 去掉行注释（// 之后到行尾），块注释里不写 isStageDone 调用。
+    const text = readFileSync(u, 'utf8').split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '')).join('\n')
+    for (let i = text.indexOf('isStageDone('); i >= 0; i = text.indexOf('isStageDone(', i + 1)) {
       if (text.slice(Math.max(0, i - 9), i) === 'function ') continue // 定义本身不算调用
       let depth = 0
       let j = i + 'isStageDone('.length
@@ -73,11 +78,52 @@ test('调用点（docs/76）：hooks 下每一处 isStageDone 调用都传 state
         }
       }
       const args = text.slice(i, j)
-      calls++
-      assert.ok(/\bstate\s*:/.test(args), `${u.pathname.split('/hooks/')[1]}：${args.slice(0, 120)}`)
+      where.add(name)
+      assert.ok(/(?:^|[{,\s])state\s*:\s*ctx\.state\s*(?:[,}]|$)/m.test(args), `${name}：state 没传 ctx.state——${args.slice(0, 160)}`)
+      assert.ok(/artifactStale\s*:\s*fresh\.isStale\b/.test(args), `${name}：artifactStale 没传 fresh.isStale——${args.slice(0, 160)}`)
+      assert.ok(/running\s*:\s*runningRolesIn\(ctx,\s*ctx\.state\?\.stage\)/.test(args), `${name}：running 没传——${args.slice(0, 160)}`)
     }
   }
-  assert.ok(calls >= 3, `前置：扫到的调用太少（${calls}）`)
+  assert.deepEqual([...where], ['hooks/gate.mjs'])
+})
+
+test('isStageDone（docs/76 §8）：免掉的那份还是上一轮的（artifactStale）不免；那个角色在这一段还在跑（running）不免；旧 run 没有 stage_roles 照样免', () => {
+  const roster = participantsOf(S5_STATE, 'S5')
+  const only = (...names) => (n) => names.includes(n)
+  const base = { stage: 'S5', stages: STAGES, artifactExists: only('05-impl/at-backend.md'), roster, state: S5_STATE }
+  assert.equal(isStageDone(base), true)
+  assert.equal(isStageDone({ ...base, artifactStale: (n) => n === '05-impl/at-frontend.md' }), false)
+  assert.equal(isStageDone({ ...base, running: new Set(['at-frontend']) }), false)
+  assert.equal(isStageDone({ ...base, running: new Set(['at-product']) }), true)
+  const legacy = { stage: 'S5', roster: ['at-architect', 'at-backend', 'at-frontend'], trimmed: { 'at-frontend': 'S5' } }
+  assert.equal(isStageDone({ stage: 'S5', stages: STAGES, artifactExists: only('05-impl/at-backend.md'), roster: participantsOf(legacy, 'S5'), state: legacy }), true)
+})
+
+test('【阶段】（docs/76 §8）：返工轮里免掉的那份还是上一轮的、或者那个角色在这一段还在跑（派发记录里没有停下行）——都不说 S5 齐了', () => {
+  const ledger = (extraState, files) => {
+    const dirs = makeRun({ runId: 'r1', stage: 'S5', artifacts: ['00-contract.md', '01-prd.md', '03-arch.md', '04-dispatch.md', '05-impl/at-backend.md'], roster: S5_STATE.roster })
+    try {
+      const runDir = join(dirs.projectDir, '.agent-team', 'runs', 'r1')
+      const statePath = join(runDir, 'state.json')
+      for (const [n, c] of Object.entries(files)) writeFileSync(join(runDir, n), c)
+      const now = JSON.parse(readFileSync(statePath, 'utf8'))
+      writeFileSync(statePath, JSON.stringify({ ...now, ...S5_STATE, ...extraState }))
+      const posted = { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'agent-team:at-pm', tool_input: { file_path: statePath } }
+      const out = run('ledger', posted, GATE, dirs.projectDir).stdout
+      return out.trim() ? JSON.parse(out).hookSpecificOutput?.additionalContext ?? '' : ''
+    } finally {
+      rmSync(dirs.projectDir, { recursive: true, force: true })
+      rmSync(dirs.pluginDir, { recursive: true, force: true })
+    }
+  }
+  const OLD = 'old frontend\n'
+  // 返工轮：at-frontend 那份在磁盘上、与 rework_base 记的一样（上一轮的）。
+  const stale = ledger({ rework_base: { '05-impl/at-frontend.md': sha256OfContract(Buffer.from(OLD)) } }, { '05-impl/at-frontend.md': OLD })
+  assert.ok(!stale.includes('【阶段】S5 的产物已经齐了'), stale)
+  // 派发记录里 at-frontend 在 S5 派出去了、没有停下行（还在跑）。
+  const line = dispatchLine({ at: '2026-10-11T10:00:00.000Z', agentId: 'a0000000000000f05', toolUseId: null, role: 'at-frontend', stage: 'S5', caller: 'at-architect', callerId: 'a0000000000000a05', mode: 'background' })
+  const running = ledger({}, { 'dispatches.jsonl': line + '\n' })
+  assert.ok(!running.includes('【阶段】S5 的产物已经齐了'), running)
 })
 
 test('isStageDone（docs/76）：免哪几份与推进同一个口径——被后面某段当前置的不免（S2 的 01-prd.md）、不被当前置的免（02-*）；不随参与者变的固定产物不免', () => {
