@@ -85,8 +85,8 @@ export function mayBeStateFile(filePath) {
 //   - runs/*/delivered.json：交付快照（hooks/lib/redo.mjs）。改得了它，不记回退的重做就拦不住。
 // Bash 照样写得进（与 state.json 同一档：那是一次需要刻意去做的伪造，不是顺手绕过）。
 //   - runs/*/dispatches.jsonl（M4d，docs/38，全量审查第 19 条）：派发记录——H5a 记团队角色的每一次派发（谁、哪一段、谁派的、前台还是后台），
-//     H5b 每拦一回记一行。完成核验（UserPromptSubmit）靠它把完成通知对回角色与段、认出「平台静默放行」。改得了它，完成核验就会核错人、
-//     说错成因（只是说错，不放行任何东西）。
+//     H5b 每拦一回记一行。完成核验（UserPromptSubmit）靠它把完成通知对回角色与段、认出「平台静默放行」，并记下每一条回传的指纹（told 行，
+//     docs/82：同一条通知再来、结论没变时只说一句）。改得了它，完成核验就会核错人、说错成因、该整段报的只说一句（只是说错，不放行任何东西）。
 //   - runs/*/contract-base.json（M4j，docs/45，审查第 20 条）：契约基线——推进出第一段时契约第 1 节的原文、每一次改需求的修订那一刻
 //     验证段各份结论的 sha（hooks/lib/contract-base.mjs）。改得了它，第 1 节就能悄悄改写、对着上一版契约的结论就能收口。
 //   - runs/*/user-words.json 与项目一级的 user-words.json（M4o，docs/50，审查第 20 条修法 A）：用户在 /agent-team:at 后面写的原话——
