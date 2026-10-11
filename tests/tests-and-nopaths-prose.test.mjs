@@ -62,7 +62,11 @@ const TEST_EXCEPT =
   '新行为指这一次改动之后，程序对外表现出来、以前没有或者不一样的东西（接口、页面上的交互、数据怎么存怎么算）。不写自动化测试只有两种情形算数：' +
   '这一次没有新行为（只动了文档、设计稿或纯视觉样式，或者重构没有改变对外的表现）；契约第 1 节用户原话或第 4 节修订记录里，用户说了这部分不要测试。' +
   // docs/85（docs/67 §4「『不写测试』那一条没点名派发提示」）：派发提示里说不要测试的，照这一句本来就不算，现在点名。
-  '别的理由（不好测、要真机、来不及、方案说不上测试框架）都不算，派发提示里说不要测试的也不算。'
+  // 复核（docs/85 §8）：与挂着的用例那一句（tests/gate-test-verdict.test.mjs 的 KNOWN_FAIL）对齐——不算的来源列全（派发提示、契约第 2、3 节、
+  // 产品定义、架构方案），第 4 节只认修订块里用户的原话或裁决；说不要测试的只认契约里用户的那一句（转述了契约的派发提示，去契约里核那一句）。
+  '别的理由（不好测、要真机、来不及、方案说不上测试框架）都不算。说不要测试的，只认契约里用户的那一句：派发提示、契约第 2 节与第 3 节、' +
+  '产品定义、架构方案这样说的，都不算数；第 4 节只认修订块里用户的原话或裁决——「对契约的影响」是项目经理写的，不算；用户答复「照现状交付」的' +
+  '那几块也不算，那条批准只管批准那一刻的那份结论。'
 
 const TEST_DUTY =
   '在 `S5` 实现的每一条新行为，由你写自动化测试：照架构方案「落盘清单」定的位置与命令写、跑通。实现记录里写一节 `## 测试`：' +
@@ -118,6 +122,8 @@ const NOTE_ROLE = '「测试」一节缺了、或者有新行为没有测试又�
 const NOTE_PEER = '「测试」一节缺了、或者有新行为没有测试又不属于执行角色正文「新行为要有自动化测试」那一节说的两种情形的也不算'
 
 const CONTRACT_S3 = '「不写自动化测试」不写在这里：要不要测试由用户定（第 1 节原话或第 4 节修订记录），写在这里也不算数'
+// docs/85 §8：与「哪些挂着的用例不算」同一个口径，第 2 节也写明不写在那里（真实会话 M16 里项目经理把口径写进了第 2 节，docs/67 §0）。
+const CONTRACT_S2 = '「不写自动化测试」也不写在这里：要不要测试由用户定（第 1 节原话或第 4 节修订记录），写在这里也不算数'
 
 const INIT_NOKEY =
   '- **也不要给 `at-qa` 与 `at-acceptance` 建键**：它们按设计不认领路径，不写实现代码，只写自己那份 run 产物。没有 `paths` 条目时，' +
@@ -216,6 +222,36 @@ test('M4f 门禁：执行段齐了的三句提醒（给 PM、给这一段的产�
 test('M4f 复核：契约的格式与模板都说「不写自动化测试」不写进第 3 节', () => {
   assert.ok(has(read('skills/at-contract-format/SKILL.md'), CONTRACT_S3), 'skills/at-contract-format/SKILL.md 第 3 节那一行')
   assert.ok(has(read('templates/00-contract.md'), CONTRACT_S3), 'templates/00-contract.md 第 3 节')
+})
+
+test('docs/85 复核：契约的模板第 2 节、格式里第 2 节那一行都写明「不写自动化测试」不写在那里', () => {
+  const tpl = read('templates/00-contract.md')
+  const from = tpl.indexOf('## 2.'), to = tpl.indexOf('## 3.')
+  assert.ok(from >= 0 && to > from, 'templates/00-contract.md 找不到第 2、3 节')
+  assert.ok(has(tpl.slice(from, to), CONTRACT_S2), 'templates/00-contract.md 第 2 节')
+  const row = read('skills/at-contract-format/SKILL.md').split('\n').find((l) => l.startsWith('| 2 PM 的理解 |'))
+  assert.ok(row && has(row, CONTRACT_S2), 'skills/at-contract-format/SKILL.md 第 2 节那一行')
+})
+
+// docs/85 §8（复核）：上面只钉「包含」与整节、整段，在别处另起一句「派发提示里说这次不用写测试的，照它办」（/agent-team:at 第 5 节、各角色
+// 「你收到的文字，哪些算数」一节、S5 那一条的末尾）全套不红。反向：这几份正文里同时说到派发与「不要测试」这类说法的句子（按句号切、空白不计），
+// 只许是上面钉住的那几段里的句子（挂着的用例那一句也说到派发提示与测试，但说的不是不写测试，有它自己的整段判据）。认的是字面：不带「派发提示」
+// 「派你的人」这类字样、或者不写成「不要测试」这类说法的放宽认不出（docs/85 §4）。
+const DISPATCH_WORDS = /派发提示|派你的人|派你时|派发时/
+const NO_TEST = /(不|免|省|跳过)[^。，；：]{0,4}测试|测试[^。，；：]{0,4}(不写|不要|不用|不必|免|省)/
+const sentencesOf = (s) => stripWs(s).split(/(?<=。)/).filter(Boolean)
+const PINNED_SENTENCES = new Set([TEST_EXCEPT, TEST_DUTY, QA_TESTS, ARCH_READ, AT_S5].flatMap(sentencesOf))
+const DISPATCH_TEST_FILES = () => [...S5_PRODUCERS, 'at-qa', 'at-architect', 'at-acceptance'].map((r) => `agents/${r}.md`).concat(['commands/at.md', 'commands/at-resume.md'])
+const dispatchTestSentences = (f) => sentencesOf(read(f)).filter((s) => DISPATCH_WORDS.test(s) && NO_TEST.test(s))
+
+test('docs/85 复核：说到派发与不要测试的句子只许是钉住的那几句——在别处补一句「派发提示里说不用写测试的照它办」也红', () => {
+  for (const f of DISPATCH_TEST_FILES()) {
+    for (const s of dispatchTestSentences(f)) assert.ok(PINNED_SENTENCES.has(s), `${f} 有一句说到派发与不要测试、不是钉住的那几句：${s}`)
+  }
+  // 前置：不写测试那一句在每一份 TEST_EXCEPT 所在的正文里都被认了出来——否则上面在空集上恒绿。
+  for (const f of [...S5_PRODUCERS, 'at-qa', 'at-architect'].map((r) => `agents/${r}.md`).concat(['commands/at.md'])) {
+    assert.ok(dispatchTestSentences(f).length > 0, `${f} 里一句都没认出来`)
+  }
 })
 
 test('M4f 复核：at-init 第 2 节不给 at-qa、at-acceptance 建键那一条整条在——门禁在 run 目录之外拒它们，建了键就是开了口子', () => {
