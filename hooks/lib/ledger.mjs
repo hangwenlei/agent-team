@@ -16,7 +16,7 @@
 // reach.mjs、state.mjs、project.mjs。
 import { compareContractSha, shaOrNote } from './contract-hash.mjs'
 import { inline, quote, safeJson } from './trusted.mjs'
-import { nextStage } from './state.mjs'
+import { nextStage, duplicateKeys } from './state.mjs'
 import { approvalTargetFor, askUserText, limitOf, REWORK_LIMIT } from './budget.mjs'
 import { isPlainObject, isStageChain, productsOfStage, stageRoles, isRolePatternStage } from './stages.mjs'
 import { VERIFY_REDO, splitByAccept } from './freshness.mjs'
@@ -111,12 +111,16 @@ export function reachCheckNotice({ writtenText, expected }) {
   } catch {
     parsed = undefined
   }
-  if (parsed !== undefined && isDeepStrictEqual(parsed, expected)) return null
+  // docs/75 §8：抄重了键的（JSON 只认最后一个，按 Read 读原文的人可能读到前一遍）也算对不上，给出正确的那一份。
+  const dup = parsed !== undefined && duplicateKeys(typeof writtenText === 'string' ? writtenText : '').length > 0
+  if (parsed !== undefined && !dup && isDeepStrictEqual(parsed, expected)) return null
   return (
     '【触达表】刚写进 .agent-team/reach.json 的' +
     (parsed === undefined
       ? '不是一份合法的 JSON（写坏了，或者被截断了）。'
-      : '与门禁按当前 project.json 与花名册算出来的不一样（手抄出错，或者是照旧的 project.json 算的）。') +
+      : dup
+        ? '里有写了不止一次的键（JSON 只认最后一个，照原文读的人可能读到前一遍）。'
+        : '与门禁按当前 project.json 与花名册算出来的不一样（手抄出错，或者是照旧的 project.json 算的）。') +
     `把下面这份 JSON 原样重写进 .agent-team/reach.json：\n${safeJson(expected)}`
   )
 }
