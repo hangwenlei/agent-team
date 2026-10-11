@@ -26,6 +26,7 @@ import { BUBBLE_MARK, bubbleReason } from './deliverable.mjs'
 import { isPlainObject } from './stages.mjs'
 import { quote } from './trusted.mjs'
 import { CAP_FACT } from './retry-budget.mjs'
+import { SHA_RE } from './contract-hash.mjs'
 
 export const AGENT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 const TOOL_USE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/
@@ -138,15 +139,23 @@ export function stopLine({ at, agentId, role, stage, outcome }) {
   return JSON.stringify({ kind: 'stop', at, agent_id: agentId, role, stage, outcome })
 }
 
+// docs/82（docs/38 §5「重复通知会重复回传」）：完成核验对一个子代理的完成通知回传过什么——那一段回传的指纹。平台对同一个 task-id 会送不止一条通知，
+// 同一个 agent_id 再来一条、指纹相同时完成核验只说一句短的（gate.mjs 的完成核验那一支）。
+export function toldLine({ at, agentId, role, stage, sha }) {
+  return JSON.stringify({ kind: 'told', at, agent_id: agentId, role, stage, sha })
+}
+
 /**
- * dispatches.jsonl 的原文 → { dispatches: [派发行，按原顺序], stops: Map(agent_id → [结果，按原顺序]), blocks: Map(agent_id → 拦过几回) }。
+ * dispatches.jsonl 的原文 → { dispatches: [派发行，按原顺序], stops: Map(agent_id → [结果，按原顺序]), blocks: Map(agent_id → 拦过几回),
+ * told: Map(agent_id → 完成核验最后一次回传的指纹) }。
  * 解析不出、形状不对的行跳过——这个文件 Edit/Write 写不进，Bash 写得进；角色名与段名照样不可信，用的一方再拿花名册与阶段链核（gate.mjs）。
  */
 export function readDispatchLog(text) {
   const dispatches = []
   const stops = new Map()
   const blocks = new Map()
-  if (typeof text !== 'string') return { dispatches, stops, blocks }
+  const told = new Map()
+  if (typeof text !== 'string') return { dispatches, stops, blocks, told }
   for (const line of text.split('\n')) {
     if (!line.trim()) continue
     let v
@@ -162,9 +171,9 @@ export function readDispatchLog(text) {
       if (!stops.has(v.agent_id)) stops.set(v.agent_id, [])
       stops.get(v.agent_id).push(v.outcome)
       if (v.outcome === 'block') blocks.set(v.agent_id, (blocks.get(v.agent_id) ?? 0) + 1)
-    }
+    } else if (v.kind === 'told' && typeof v.sha === 'string' && SHA_RE.test(v.sha)) told.set(v.agent_id, v.sha)
   }
-  return { dispatches, stops, blocks }
+  return { dispatches, stops, blocks, told }
 }
 
 /** 这个子代理最后一回停下的结果（pass、bubble、block）；门禁没见它停下过返回 null。 */

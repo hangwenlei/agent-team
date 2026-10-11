@@ -41,6 +41,7 @@ import {
   readDispatchLog,
   reportTexts,
   stopLine,
+  toldLine,
 } from './lib/completion.mjs'
 import { mayWaive, dispatchedIn, wholeStageTrimmed, trimmedAt } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
@@ -3102,10 +3103,32 @@ function main() {
     const contexts = []
     const seen = new Set()
     let otherLogs = null
+    // docs/82（docs/38 §5「重复通知会重复回传」）：平台对同一个 task-id 会送不止一条完成通知。每一条核完之后，它在 contexts 里那一截与派发记录里
+    // 上一次回传的指纹（told 行）比：相同就换成一句短的——不改成一声不吭，项目经理会把门禁没说话读成「核过了、没问题」；不同（第一次、结论变了）
+    // 照常整段报，并记下这一次的指纹。什么都没说的（交齐了）不记。只对这一趟派发记录里有的派发做；写不进派发记录只留痕，下一次照常整段报。
+    let pending = null
+    const settle = () => {
+      if (!pending) return
+      const { agentId, role, stage, start } = pending
+      pending = null
+      const piece = contexts.slice(start)
+      if (!piece.length) return
+      const sha = sha256OfContract(Buffer.from(piece.join('\n'), 'utf8'))
+      if (log.told.get(agentId) === sha) {
+        contexts.splice(
+          start,
+          piece.length,
+          `交付物核验：${role}（${stage}）这条完成通知门禁之前已经核过一次、结论没变——照那一次的回传处理（同一个子代理的完成通知平台会送不止一条；那一次的回传已经不在上下文里的，跑 /agent-team:at-status 核一遍）。`,
+        )
+        return
+      }
+      appendDispatchLog(ctx.runDir, toldLine({ at: new Date().toISOString(), agentId, role, stage, sha }), '完成核验')
+    }
     for (const n of notes) {
       for (const taskId of n.taskIds) {
         if (seen.has(taskId)) continue
         seen.add(taskId)
+        settle()
         const d = dispatchOf(log, taskId, n.toolUseId)
         if (!d) {
           // M4n（docs/49，全量审查第 24 条）：当前这一趟没记它、别的一趟记着——它是那一趟派出去的（指针切走之前派的）。原来这里不出声；现在告诉
@@ -3122,6 +3145,7 @@ function main() {
         }
         // 记录里的角色与段来自磁盘：只认花名册里的角色、阶段链上的段（之后原样拼进文字，是插件自己的名字）。
         if (!isPlainObject(roster) || !Object.hasOwn(roster, d.role) || !isKnownStage(ctx.stages, d.stage)) continue
+        pending = { agentId: d.agent_id, role: d.role, stage: d.stage, start: contexts.length }
         if (closedAt(ctx.state) !== null) {
           if (recipientIsPm) {
             contexts.push(
@@ -3187,6 +3211,7 @@ function main() {
         }
       }
     }
+    settle()
     if (!contexts.length) process.exit(0)
     emitHookJson(spec.event, { contexts })
   }

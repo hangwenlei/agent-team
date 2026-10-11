@@ -34,7 +34,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （门禁留痕的判读表、Claude Code 的下限），判据对着代码与 README 核。两份都是活的，直接改。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
 - `CHANGELOG.md` — 每一版一行，最新的在最上面。
-- `docs/13`…`docs/81` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/82` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，它 §5 排的六轮到 `docs/48` 做完；之后从 `docs/00-开放边界.md` 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -128,7 +128,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   产者全裁掉、谁都没叫过的段整段不核。先推进再原地重来写在一次里，往前那一截照推进核。不选只告警：告警到时已经推进了，也拦不住跳段。理由在 `docs/38`。
 - **交付物核验在子代理真正完成的那一刻做**：H5a 读 `tool_response.status`，后台启动那一刻不判产物；门禁专属的派发记录 `runs/<id>/dispatches.jsonl`
   （H5a 记派发，H5b 记每一回停下的结果；H3 对任何人的 Edit/Write 都拒）；完成通知到主会话时，UserPromptSubmit 上的 `completion` 按 `agent_id`
-  对回角色与段、核产物，成因按最后一回停下的结果判（`completion.mjs` 的 `missingCause`）。UserPromptSubmit 上只有标了 `speaks` 的检查项说话、
+  对回角色与段、核产物，成因按最后一回停下的结果判（`completion.mjs` 的 `missingCause`）；同一个 `agent_id` 再来一条、回传的指纹与派发记录里的 `told` 行相同时只说一句（`docs/82`）。UserPromptSubmit 上只有标了 `speaks` 的检查项说话、
   永不 exit 2。协调者返回时报它派出去的人各自的进度，不许诺之后的通知会到 PM。理由在 `docs/38`。
 - **持 Bash 的执行角色的敏感操作红线只在正文里，每一份逐字同一句，清单与 `/agent-team:at` 第 4 节 `sensitive` 那一行逐项相同**：碰到就以
   「冒泡：」停下，协调者原样冒泡给 PM，PM 照 `sensitive` 问用户；用户批准过的，执行角色只认契约「修订记录」里写明批准了的那一步（派发
