@@ -319,17 +319,27 @@ export function coordinatorProgress({ role, stageId, rows, recipientIsPm, selfDo
     }
     lines.push(`  - ${row.role}（${row.mode === 'background' ? '后台派发' : '前台派发'}）：${facts}${tail}`)
   }
+  // docs/80 §8：协调者自己那几份没交齐（selfMissing）时收尾按情形说——收件人不是 PM 的，要不要再派它、先等谁归收件人定（不说「不用处理」）；派出去的那一头
+  // 没有要等的（交了的交了、裁掉的免了），叫照交付物核验那一段处理它自己那份；还有在跑的，再派它之前先等、写明派过谁（不然它多半把同一件事再派一遍）；
+  // 停下了却没交齐的，「推进那一次照出路写 trimmed」后面注明它自己那几份交齐之前推进不出这一段。
   let close
   if (!recipientIsPm) {
-    close = '这一条你不用处理：交没交，PM 推进出这一段时门禁会核。'
+    close = selfMissing
+      ? `要不要再派 ${role}、先等谁，照上面交付物核验那一段定；推进出这一段时门禁会核每一份。`
+      : '这一条你不用处理：交没交，PM 推进出这一段时门禁会核。'
   } else if (!running && !stoppedShort && selfMissing) {
-    close = '它派出去的都交了；它自己那几份照上面交付物核验那一段处理。推进出这一段时门禁会核每一份。这一条不是在催你推进。'
+    close = '它派出去的那一头没有要等的了（交了的交了、裁掉的免了）；它自己那几份照上面交付物核验那一段处理。推进出这一段时门禁会核每一份。这一条不是在催你推进。'
   } else if (!running && !stoppedShort) {
     close = `名单上的都交了：照 /agent-team:at 第 3 节核实${impl ? '（实现记录的「被写路径隔离拒绝」一节要读）' : ''}再推进。`
   } else {
     close =
       (running ? '还在跑的，等它停下再核——它的完成通知不一定到你这里（交互模式下送回派它的协调者）；' : '') +
-      (stoppedShort ? '停下了却没交齐、或者交了却冒泡的，照 /agent-team:at 第 3 节「核实」定：同一段里经协调者重派、照第 4 节问用户，或者推进那一次照出路写 trimmed；' : '') +
+      (running && selfMissing ? `再派 ${role} 之前先等它们停下；再派时在提示里写明哪些人已经派过、交了什么，别让它把同一件事再派一遍；` : '') +
+      (stoppedShort
+        ? '停下了却没交齐、或者交了却冒泡的，照 /agent-team:at 第 3 节「核实」定：同一段里经协调者重派、照第 4 节问用户，或者推进那一次照出路写 trimmed' +
+          (selfMissing ? `（${role} 自己那几份交齐之前推进不出这一段）` : '') +
+          '；'
+        : '') +
       '推进出这一段时门禁会核每一份。这一条不是在催你推进。'
   }
   return (

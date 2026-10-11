@@ -51,6 +51,9 @@ test('完成核验（docs/80）：at-product 自己那份没交、冒泡停下�
   assert.match(c, /交付物核验（S2 进度）：刚返回的 at-product 是 S2 的协调者，它自己的那几份还没交齐；/)
   assert.match(c, /at-ui（后台派发）：02-ui-spec\.md 还没有，02-wireframe\.html 还没有——门禁还没见它停下：可能还在跑/)
   assert.ok(c.indexOf('01-prd.md 还没有') < c.indexOf('（S2 进度）'), c)
+  // 复核（docs/80 §8）：收尾按情形说——还在跑的，再派它之前先等、写明派过谁；PM 收件不说「不用处理」。
+  assert.ok(c.includes('再派 at-product 之前先等它们停下'), c)
+  assert.ok(!c.includes('那一头没有要等的了') && !c.includes('这一条你不用处理'), c)
 })
 
 test('H5a（docs/80）：前台派发的 at-product 跑完、自己那份没交，它派出去的 at-ui 还在跑——进度开头说它自己那几份还没交齐，不说「交了」', () => {
@@ -61,6 +64,38 @@ test('H5a（docs/80）：前台派发的 at-product 跑完、自己那份没交�
   assert.match(c, /交付物核验（S2 进度）：刚返回的 at-product 是 S2 的协调者，它自己的那几份还没交齐；/)
   assert.ok(!c.includes('它自己的那几份交了'), c)
   assert.match(c, /at-ui（后台派发）：02-ui-spec\.md 还没有/)
+  assert.ok(c.indexOf('01-prd.md 还没有') >= 0 && c.indexOf('01-prd.md 还没有') < c.indexOf('（S2 进度）'), c)
+  assert.ok(!c.includes('这一条你不用处理'), c)
+  assert.ok(c.includes('再派 at-product 之前先等它们停下'), c)
+})
+
+// 复核（docs/80 §8，中 1）：另两种情形的收尾——at-ui 交齐停下（正路）、at-ui 交了一半冒泡。
+function finished(uiFiles, uiBubble) {
+  return inS2((dirs) => {
+    const runDir = join(dirs.projectDir, '.agent-team', 'runs', 'r1')
+    run('deliverable', post(PRODUCT, launched('a00000000000000c5'), { toolUseId: 'toolu_01C5' }), GATE, dirs.projectDir)
+    run('deliverable', post(UI, launched('a00000000000000d5'), { caller: PRODUCT, callerId: 'a00000000000000c5', toolUseId: 'toolu_01D5' }), GATE, dirs.projectDir)
+    for (const name of uiFiles) writeFileSync(join(runDir, name), '# 界面\n')
+    if (uiBubble) {
+      run('stop-gate', stopped(UI, 'a00000000000000d5', false, '写不完。'), GATE, dirs.projectDir)
+      run('stop-gate', stopped(UI, 'a00000000000000d5', true, `${BUBBLE_MARK}缺设计稿。`), GATE, dirs.projectDir)
+    } else run('stop-gate', stopped(UI, 'a00000000000000d5', false, '写好了。'), GATE, dirs.projectDir)
+    run('stop-gate', stopped(PRODUCT, 'a00000000000000c5', false, '写不了。'), GATE, dirs.projectDir)
+    run('stop-gate', stopped(PRODUCT, 'a00000000000000c5', true, `${BUBBLE_MARK}缺用户确认。`), GATE, dirs.projectDir)
+    return ctxOf(run('completion', { hook_event_name: 'UserPromptSubmit', prompt: note('a00000000000000c5', 'toolu_01C5') }, GATE, dirs.projectDir))
+  })
+}
+
+test('完成核验（docs/80 §8）：at-ui 交齐停下、at-product 自己没交——收尾说那一头没有要等的、照交付物核验那一段处理它自己那份，不说「名单上的都交了、再推进」', () => {
+  const c = finished(['02-ui-spec.md', '02-wireframe.html'], false)
+  assert.ok(c.includes('它派出去的那一头没有要等的了'), c)
+  assert.ok(!c.includes('名单上的都交了') && !c.includes('再派 at-product 之前先等'), c)
+})
+
+test('完成核验（docs/80 §8）：at-ui 交了一半冒泡、at-product 自己没交——收尾给停下了却没交齐那一句，并注明 at-product 那几份交齐之前推进不出这一段', () => {
+  const c = finished(['02-ui-spec.md'], true)
+  assert.ok(c.includes('停下了却没交齐') && c.includes('at-product 自己那几份交齐之前推进不出这一段'), c)
+  assert.ok(!c.includes('那一头没有要等的了'), c)
 })
 
 test('完成核验（docs/80）：at-product 自己那份没交、也没派过别人——照旧只说它缺什么，不报进度', () => {
@@ -79,7 +114,10 @@ test('coordinatorProgress（docs/80）：协调者自己那几份没交齐、它
   const s = coordinatorProgress({ role: 'at-product', stageId: 'S2', rows, recipientIsPm: true, selfMissing: true, impl: false })
   assert.ok(s.includes('它自己的那几份还没交齐'), s)
   assert.ok(!s.includes('名单上的都交了'), s)
-  assert.ok(s.includes('它派出去的都交了；它自己那几份照上面交付物核验那一段处理'), s)
+  assert.ok(s.includes('它派出去的那一头没有要等的了（交了的交了、裁掉的免了）；它自己那几份照上面交付物核验那一段处理'), s)
+  // 复核（docs/80 §8，低 5）：收件人不是 PM（协调者派协调者，自造的链上才有）——要不要再派、先等谁归它定，不说「这一条你不用处理」。
+  const relay = coordinatorProgress({ role: 'at-product', stageId: 'S2', rows, recipientIsPm: false, selfMissing: true, impl: false })
+  assert.ok(relay.includes('要不要再派 at-product、先等谁，照上面交付物核验那一段定') && !relay.includes('这一条你不用处理'), relay)
   const done = coordinatorProgress({ role: 'at-product', stageId: 'S2', rows, recipientIsPm: true, selfDone: true, impl: false })
   assert.ok(done.includes('它自己的那几份交了') && done.includes('名单上的都交了'), done)
 })
