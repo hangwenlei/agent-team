@@ -130,6 +130,18 @@ test('M4k 评审 F6、F7：判不了的出路有 contract-hole；照现状交付
   assert.ok(unknown.includes('contract-hole') && unknown.includes('env-blocked') && unknown.includes('「照现状交付」'), unknown)
 })
 
+// docs/86 §8（第二次复核）：契约里用户说了那部分不要测试、验收照产出判不了的，正文里不回 S5 也不回 S6、问照现状交付；门禁的拒绝理由与【阶段】
+// （verdictFix、deliverRoute）同一个口径——判不了的出路里有这一种，它那一截不说「回到」；照现状交付的起因里有它、写明 kind。
+test('docs/86 复核：判不了的出路认「用户说了那部分不要测试、照产出判不了」——不回退、问照现状交付（kind 是 tradeoff）', () => {
+  const { before, after } = closing()
+  const unknown = decideAcceptance({ before, after, stages: STAGES, bytesOf: disk('结论：判不了' + NL), approvedShas: [] }).reason
+  const mine = unknown.split(/[；：。]/).filter((p) => p.includes('说了那部分不要测试'))
+  assert.ok(mine.length >= 2, unknown)
+  for (const p of mine) assert.ok(!p.includes('回到'), p)
+  assert.ok(mine.some((p) => p.includes('不回退')), unknown)
+  assert.ok(unknown.includes('用户说了不要测试那一种是 tradeoff'), unknown)
+})
+
 test('M4k 评审 F8、F9：首行读不出——还在验收那一段：只给同段重派，不附照现状交付；收口时：回退到验收那一段（写明代价）或者问用户照现状交付', () => {
   const s7 = { ...AT_S8, stage: 'S7', history: H(...CHAIN.slice(0, 7)) }
   const adv = decideAcceptance({ before: s7, after: { ...s7, stage: 'S8', history: [...s7.history, ...H('S8')] }, stages: STAGES, bytesOf: disk('# 验收报告' + NL), approvedShas: [] })

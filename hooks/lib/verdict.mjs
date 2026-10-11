@@ -102,8 +102,8 @@ export function deliverRoute({ act, verdict, here = false }) {
       ? '没过的那几条不修、要照现状交付的（返工预算耗尽，或者用户自己说不修），那是用户的决定——escalation 的 kind 照问的那一类记' +
         '（返工预算耗尽是 budget-exhausted，要用户在没过的条目与契约之间取舍的是 contract-conflict）：'
       : verdict === 'unknown'
-        ? '判不了的那几条补不上、要照现状交付的（环境跑不起来、返工预算耗尽，或者用户自己说不补），那是用户的决定——escalation 的 kind 照问的那一类记' +
-          '（环境跑不起来是 env-blocked，返工预算耗尽是 budget-exhausted）：'
+        ? '判不了的那几条补不上、要照现状交付的（环境跑不起来、返工预算耗尽、契约里用户说了那部分不要测试而照产出判不了，或者用户自己说不补），' +
+          '那是用户的决定——escalation 的 kind 照问的那一类记（环境跑不起来是 env-blocked，返工预算耗尽是 budget-exhausted，用户说了不要测试那一种是 tradeoff）：'
         : here
           ? null
           : '不想回退重验、要照现状交付的，那是用户的决定——读过验收结论之后，escalation 的 kind 照问的那一类记：'
@@ -119,7 +119,8 @@ export function deliverRoute({ act, verdict, here = false }) {
 const VERDICT_SAID = { fail: '「结论：不通过」', unknown: '「结论：判不了」' }
 
 /**
- * 验收没过时怎么办（不含照现状交付那一条）：按首行分。判不了的按原因分四条（评审 F6：契约或完成定义没写清楚的问用户，重测补不了它）；读不出的
+ * 验收没过时怎么办（不含照现状交付那一条）：按首行分。判不了的按原因分五条（评审 F6：契约或完成定义没写清楚的问用户，重测补不了它；docs/86 §8：
+ * 契约里用户说了那部分不要测试、照产出判不了的不回退，与 /agent-team:at「回退」那一段同一个口径）；读不出的
  * 按当前在不在验收那一段分同段重派与回退，回退写明哪几段各记一轮返工（评审 F8）。段 id、角色名来自阶段链，原样。
  */
 export function verdictFix({ stages, verdict, current }) {
@@ -133,7 +134,8 @@ export function verdictFix({ stages, verdict, current }) {
   if (verdict === 'unknown') {
     return (
       `判不了是因为要人补跑测试的，照第 3 节的「回退」回到 ${testStage ?? '测试那一段'}；因为新行为缺自动化测试的，回到 ${implStage ?? '实现那一段'}；` +
-      '因为环境跑不起来的，照第 4 节 env-blocked 问用户；因为契约或完成定义没写清楚的，照第 4 节 contract-hole 问用户'
+      '因为环境跑不起来的，照第 4 节 env-blocked 问用户；因为契约或完成定义没写清楚的，照第 4 节 contract-hole 问用户；' +
+      '契约里用户说了那部分不要测试、照读得到的产出判不了的，不是缺测试，不回退，照第 4 节问用户要不要照现状交付'
     )
   }
   if (current === acc.stageId) return `在 ${acc.stageId} 里同段重派 ${ACCEPTANCE_ROLE}，让它把第一行照格式写（同一段里重派不计返工）`
