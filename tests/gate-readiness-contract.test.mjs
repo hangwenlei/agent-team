@@ -5,10 +5,11 @@
 // 出路照用【契约】那一句（写 state.json、派发返回时同一句，hooks/lib/ledger.mjs 的 contractCheckNotice）；不报磁盘上算出来的值。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, decisionOf } from './helpers/gate-runner.mjs'
+import { failRead } from './helpers/fail-read.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 import { verifyStageOf } from '../hooks/lib/stages.mjs'
@@ -149,19 +150,15 @@ test('正文（docs/60）：/agent-team:at 与 at-acceptance 说派验证段之�
   assert.ok(acc.includes('派你之前门禁再对一遍，对不上不让派'), 'agents/at-acceptance.md')
 })
 
-// 契约在、这一次读不出（被别的程序占着）：不拦，留痕说没核。Windows 上造不出「在、却读不出」的文件，只在 POSIX 上用权限造。
-test('H2（docs/60）：契约在却读不出——不拦，stderr 说这一次没核契约的账', { skip: process.platform === 'win32' }, () => {
+// 契约在、这一次读不出（被别的程序占着）：不拦，留痕说没核。docs/84：原来只在 POSIX 上用权限位造；现在用预加载脚本让读它时抛 EBUSY，三个系统都跑。
+test('H2（docs/60）：契约在却读不出——不拦，stderr 说这一次没核契约的账', () => {
   withRun({ stage: 'S6', artifacts: S6_READY, contract: 'drift' }, (dirs) => {
-    const p = join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md')
-    chmodSync(p, 0o000)
-    try {
-      if (process.getuid && process.getuid() === 0) return // root 无视权限位
-      const { d, r } = decide(dirs, 'agent-team:at-qa')
-      assert.ok(d === null || !d.permissionDecisionReason.includes('处理完再派'), JSON.stringify(d))
-      assert.ok(r.stderr.includes('没核契约的账'), r.stderr)
-    } finally {
-      chmodSync(p, 0o644)
-    }
+    const { env, opts } = failRead('00-contract.md')
+    const r = run('readiness', dispatch('agent-team:at-qa'), dirs.gate, dirs.projectDir, env, opts)
+    const d = decisionOf(r.stdout)
+    // 复核（docs/84 §8）：标题说「不拦」，就要求放行——原来的断言放得过「读不出就拒派」。
+    assert.equal(d, null, JSON.stringify(d))
+    assert.ok(r.stderr.includes('没核契约的账'), r.stderr)
   })
 })
 

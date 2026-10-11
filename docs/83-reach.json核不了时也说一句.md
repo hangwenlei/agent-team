@@ -32,6 +32,7 @@
   `project.json` 不在（有 run、没有 run）四种都说「这一次没有核」与「没收到核对结果不等于对上了」；at-init 时 `project.json` 被占用（`tests/fixtures/fail-project-read.cjs`
   预加载、读它时抛 EBUSY）：失败一次重读读到了照常核，一直失败说这一刻读不出；对得上照旧不出声；不是项目经理写的叫它冒泡；正文那一句。原来钉着 at-init 那一句的判据
   （`tests/ledger-status-prose.test.mjs`）跟着改。
+  > **订正（2026-10-11，`docs/84` §8）**：`tests/fixtures/fail-project-read.cjs` 已删，那一条判据改用 `tests/helpers/fail-read.mjs`（包的是已有的 `tests/helpers/project-reads.cjs`）。
 - 变异（备份在仓库外，每一刀改完逐字节还原）：阻断时不说、插件问题不说、读不出不说、不在不说、没有 run 时不认不在、不分写者——每一刀都有判据红。复核之后又加了：
   不重读、重读读到了也不用、读不到也不说、插件问题照旧说法、不复用重读（坏文件停顿翻倍，原来那条「两次停顿」的判据红）、非项目经理不加后缀——每一刀都有判据红。
 
