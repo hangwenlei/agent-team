@@ -102,7 +102,8 @@ const bulletOf = (sec, head) => {
 test('M3x：/at-resume 第 2 节「齐了」那一支指回 /at 的同一次 Write，空集那一支说的是还没记账', () => {
   const done = bulletOf(RESUME_S2, '\\*\\*产物齐了\\*\\*')
   assert.match(done, /同一次 Write/)
-  assert.match(RESUME_S2, /空集只说明这一段还没记账/)
+  // docs/81：空集那一支分「还没记账」与「记了账、一个产者都没叫」两种，都不说明没人干过活。
+  assert.match(RESUME_S2, /空集要么是这一段还没记账/)
 })
 
 // 续跑时 PM 手上没有 /agent-team:at 的正文（主会话没有 Skill 工具），不给可读的路径就读不到那几条规矩——
