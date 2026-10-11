@@ -700,3 +700,68 @@ test('M4g 复核：非 PM 写坏 reach.json（没有 run 时 H3 对谁都放行�
     assert.ok(pm.includes('【触达表】刚写进') && !pm.includes('只有项目经理该改它'), pm)
   })
 })
+
+// docs/75（docs/74 §4「只看 state.json」）：project.json 里同一个对象写了不止一次的键（paths 写两遍、paths 里一个角色写两遍），JSON 只认最后一个——
+// 前一遍里的前缀悄悄丢掉，执行角色写那里会被写路径隔离拒。PM 写 project.json 时（有 run、没有 run、run 读不出三条路）与每趟开头写 current-run 时，
+// 并进【project.json】的「要改」那一档；写 state.json 时照旧只报阻断，不报它。复核（docs/75 §8）：句尾叫人把要留的并进最后那一个（state.json 那一路不这么说）。
+const DUP_PATHS = JSON.stringify(TEMPLATE).replace('"paths":{', '"paths":{"at-backend":["lib/"],')
+test('docs/75：PM 写的 project.json 里重复了键——「要改」里报它、句尾说并进最后那一个（没有 run、有 run 两条路）', () => {
+  withoutRun((p) => {
+    const raw = '{"paths":{"at-backend":["src/"]},' + JSON.stringify(TEMPLATE).slice(1)
+    writeFileSync(join(p, '.agent-team', 'project.json'), raw)
+    const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p))
+    const fix = sectionOf(ctx, '要改（') ?? ''
+    assert.ok(fix.includes('键 "paths" 写了不止一次') && fix.includes('并进最后那一个'), ctx)
+    assert.ok(!fix.includes('删掉前面几个不改变门禁读到的值'), ctx)
+  })
+  withRun(TEMPLATE, (p) => {
+    const file = join(p, '.agent-team', 'project.json')
+    writeFileSync(file, DUP_PATHS)
+    const ctx = ctxOf(run('ledger', posted(file), undefined, p))
+    assert.ok(sectionOf(ctx, '要改（')?.includes('键 "at-backend" 写了不止一次（在 "paths" 里）'), ctx)
+  })
+})
+
+test('docs/75 §8：每趟开头写 current-run 时也报（用户手改留下的在 S1 就露面）；写 state.json 时不报', () => {
+  withRun(TEMPLATE, (p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), DUP_PATHS)
+    const ptr = ctxOf(run('ledger', posted(join(p, '.agent-team', 'current-run')), undefined, p))
+    assert.ok(sectionOf(ptr, '要改（')?.includes('键 "at-backend" 写了不止一次（在 "paths" 里）'), ptr)
+    const st = ctxOf(run('ledger', posted(join(p, '.agent-team', 'runs', 'r1', 'state.json')), undefined, p))
+    assert.ok(!st.includes('写了不止一次'), st)
+  })
+})
+
+test('docs/75 §8：重复键与 validateProject 本来就报的「要改」同时在（并进，不替换）；两个重复键都列出来；run 在却读不出时写 project.json 也报', () => {
+  withoutRun((p) => {
+    // 给 at-pm 建了键（at-init 明令不许，validateProject 报「要改」）+ 两处重复。
+    const proj = { ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-pm': ['x/'] } }
+    const raw = '{"stack":{},"paths":{"at-backend":["src/"]},' + JSON.stringify(proj).slice(1)
+    writeFileSync(join(p, '.agent-team', 'project.json'), raw)
+    const fix = sectionOf(ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p)), '要改（') ?? ''
+    assert.ok(fix.includes('不要给 at-pm 建键') && fix.includes('键 "paths" 写了不止一次') && fix.includes('键 "stack" 写了不止一次'), fix)
+  })
+  withoutRun((p) => {
+    // current-run 指着一趟不在的 run：读不出运行上下文，写 project.json 走没有 run 那一支。
+    writeFileSync(join(p, '.agent-team', 'current-run'), 'ghost')
+    writeFileSync(join(p, '.agent-team', 'project.json'), DUP_PATHS)
+    const ctx = ctxOf(run('ledger', posted(join(p, '.agent-team', 'project.json')), undefined, p))
+    assert.ok(sectionOf(ctx, '要改（')?.includes('键 "at-backend" 写了不止一次'), ctx)
+  })
+})
+
+test('docs/75 §8：reach.json 抄重了键（后一遍对、前一遍错）也算对不上，给出正确的那一份', () => {
+  const right = computeReach({ roster: REAL_ROSTER, paths: TEMPLATE.paths })
+  withoutRun((p) => {
+    writeFileSync(join(p, '.agent-team', 'project.json'), JSON.stringify(TEMPLATE))
+    const reachFile = join(p, '.agent-team', 'reach.json')
+    writeFileSync(reachFile, '{"at-pm":{},' + safeJson(right).slice(1))
+    const ctx = ctxOf(run('ledger', posted(reachFile), undefined, p))
+    assert.ok(ctx.includes('【触达表】刚写进 .agent-team/reach.json 的里有写了不止一次的键') && ctx.includes(safeJson(right)), ctx)
+  })
+})
+
+test('docs/75 §8：at-init 第 2 节写明同一个键只写一次（「要改」那一档的定义罩得住重复键）', () => {
+  const init = readFileSync(new URL('../commands/at-init.md', import.meta.url), 'utf8').replace(/\s+/g, '')
+  assert.ok(init.includes('同一个键只写一次，同一个角色的前缀写进同一个数组——JSON只认最后一个，写两遍前一遍就丢了。'.replace(/\s+/g, '')))
+})

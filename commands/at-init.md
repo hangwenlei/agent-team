@@ -32,7 +32,7 @@ description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json
 
 - `stack`：语言、框架、包管理器。
 - `paths`：**每个角色能写哪些前缀（目录或单个文件）**。这是写路径隔离（H3）唯一的判据来源。
-  - 键只能是花名册里的角色名。
+  - 键只能是花名册里的角色名。同一个键只写一次，同一个角色的前缀写进同一个数组——JSON 只认最后一个，写两遍前一遍就丢了。
   - **不要给 `at-pm` 建键**：PM 不认领业务路径，它写的是控制文件与自己阶段的产物。
   - **也不要给 `at-qa` 与 `at-acceptance` 建键**：它们按设计不认领路径，不写实现代码，只写自己那份 run 产物。没有 `paths` 条目时，
     `${CLAUDE_PLUGIN_ROOT}/hooks/lib/writepath.mjs` 的 `decideWritePath` 在 run 目录之外拒它们的每一次写入——与下面「其余每个会被派到的角色都要有键」

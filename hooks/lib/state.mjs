@@ -142,14 +142,20 @@ export function duplicateKeys(text) {
   return scanDuplicates(text).found
 }
 
-/** 账本那一行：重复的键各报一条（键名与外层路径是磁盘上的值，quote 引；数组下标写成第几条）；超过上限的末尾一行说还有几个。 */
-export function duplicateKeyLines(text) {
+/**
+ * 账本那一行：重复的键各报一条（键名与外层路径是磁盘上的值，quote 引；数组下标写成第几条）；超过上限的末尾一行说还有几个。
+ * merge（docs/75 §8）：project.json 那一路前面那一遍往往正是想要的配置（前缀），句尾叫人把要留的并进最后那一个，不叫人删掉前面几个了事；
+ * state.json 那一路前面的值是作废的（改写入前的 history 条目 H6 还会拒），照旧说删掉前面几个。
+ */
+export function duplicateKeyLines(text, { merge = false } = {}) {
   const { found, total } = scanDuplicates(text)
   const where = (path) => path.map((k) => (typeof k === 'number' ? `第 ${k + 1} 条` : quote(k))).join(' → ')
   const lines = found.map(
     ({ path, key }) =>
       `键 ${quote(key)} 写了不止一次${path.length ? `（在 ${where(path)} 里）` : ''}：JSON 只认最后一个——门禁读到的是最后写的那个值，前面几个等于没写；` +
-      '删掉前面几个不改变门禁读到的值，要改值就改最后那一个',
+      (merge
+        ? '前面那几个里要留的（例如前一遍里的前缀）并进最后那一个，再删掉前面几个'
+        : '删掉前面几个不改变门禁读到的值，要改值就改最后那一个'),
   )
   if (total > found.length) lines.push(`还有 ${total - found.length} 个重复的键没列出来：照上面几条一并清掉`)
   return lines
