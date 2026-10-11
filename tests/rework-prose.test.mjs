@@ -334,7 +334,7 @@ test('M4a 复核二 建 run：替旧 run 收口照第 6 节第二、四步，回
   assert.match(S1, /照第 6 节第二、四步\s*替它收口/)
   assert.match(S1, /告诉用户替上一趟收了口/)
   assert.match(S1, /整段裁掉了验收[^。]*看交付文档/)
-  assert.match(S1, /验收没过或判不了、交付文档不在、收口被 H6 拒——都是收不了口/)
+  assert.match(S1, /验收没过或判不了、交付文档不在、契约里说了先别收口、收口被 H6 拒——都是收不了口/)
 })
 
 // PF-2、PF-3：第四步——补齐之后从第一步重走一遍；没有 stage_roles 的旧 run 只并进 roster；没叫过的才能补记 trimmed。
