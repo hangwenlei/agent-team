@@ -184,6 +184,17 @@ test('M4c S4：PM 写 state.json、契约被删 → 报【契约】', () => {
   })
 })
 
+// 复核（docs/84 §8）：项目经理写 state.json 时那一支「契约在、却读不出」原来没有判据——说读不出、没核，不说它不在。
+test('M4c S4b：PM 写 state.json、契约在却读不出 → 【契约】说这一次读不出、没核，不说它不在', () => {
+  withRun({ state: { contract_sha: H0 } }, ({ dirs, statePath }) => {
+    const { env, opts } = failRead('00-contract.md')
+    const ctx = ctxOf(run('ledger', posted(statePath), GATE, dirs.projectDir, env, opts).stdout)
+    assert.match(ctx, /【契约】/)
+    assert.ok(ctx.includes('读不出'), ctx)
+    assert.ok(!ctx.includes('磁盘上没有 00-contract.md'), ctx)
+  })
+})
+
 test('M4c S5：建 run 那一次（PENDING、契约还没写）写 state.json → 不报', () => {
   withRun({ stage: 'S1', roster: [], files: [], state: { contract_sha: 'PENDING' } }, ({ dirs, statePath }) => {
     assert.ok(!ctxOf(run('ledger', posted(statePath), GATE, dirs.projectDir).stdout).includes('【契约】'))

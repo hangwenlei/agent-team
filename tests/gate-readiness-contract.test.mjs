@@ -156,7 +156,8 @@ test('H2（docs/60）：契约在却读不出——不拦，stderr 说这一次�
     const { env, opts } = failRead('00-contract.md')
     const r = run('readiness', dispatch('agent-team:at-qa'), dirs.gate, dirs.projectDir, env, opts)
     const d = decisionOf(r.stdout)
-    assert.ok(d === null || !d.permissionDecisionReason.includes('处理完再派'), JSON.stringify(d))
+    // 复核（docs/84 §8）：标题说「不拦」，就要求放行——原来的断言放得过「读不出就拒派」。
+    assert.equal(d, null, JSON.stringify(d))
     assert.ok(r.stderr.includes('没核契约的账'), r.stderr)
   })
 })
