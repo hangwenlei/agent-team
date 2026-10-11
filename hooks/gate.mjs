@@ -344,6 +344,8 @@ const REACH_PROJECT_MISSING =
   '.agent-team/project.json 不在——触达表是照它算的。先跑 /agent-team:at-init 写好它，写它那一次的【触达表】给出正确的那一份，照它重写 reach.json；'
 const REACH_PROJECT_UNREADABLE =
   '.agent-team/project.json 这一刻读不出来（多半是被别的程序短暂占用）——触达表是照它算的。过一会儿原样再写一次 reach.json；'
+const REACH_PROJECT_BROKEN =
+  '.agent-team/project.json 解析不出（下一段说怎么改）——触达表是照它算的。改好之后，写它那一次的【触达表】给出正确的那一份，照它重写 reach.json；'
 function reachNoticeFor(filePath, project, writerIsPm = true) {
   if (project === null || project === undefined) return reachUnchecked(REACH_PROJECT_MISSING, writerIsPm)
   // 两个调用方只传对象或 null（readJson、ctx.project 都拒非对象），这一支是防御。
@@ -2491,6 +2493,18 @@ function main() {
           else unreadable = again.text === null
         }
         const writerIsPm = isContractWriter(input.agent_type)
+        // docs/87：读得到、却解析不出（或不是对象）——原来放过、落到下面「它在别处被弄坏」那一条缝，只说 project.json 的问题，没核被读成了对上。
+        // 现在这里一次说完：先说这一次没有核，再接那一段 project.json 的话（同一次回传，emitHookJson 写完就退出）。
+        const broken = projectReread !== null && projectReread.text !== null && !isPlainObject(projectReread.value)
+        if (broken) {
+          if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('ledger 回传', ctx))
+          emitHookJson(spec.event, {
+            contexts: [
+              reachUnchecked(REACH_PROJECT_BROKEN, writerIsPm),
+              brokenProjectNotice({ runInProgress: ctx.kind !== 'no-run', justWritten: false, utf16: looksUtf16(projectReread.text) }),
+            ],
+          })
+        }
         const reachNotice = unreadable
           ? reachUnchecked(REACH_PROJECT_UNREADABLE, writerIsPm)
           : project.ok || missing

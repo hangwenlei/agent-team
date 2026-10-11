@@ -22,7 +22,8 @@ const NOT_MATCHED = '没收到核对结果不等于对上了'
 // 写 reach.json（落盘之后的账本）。run：有没有一趟 run；project：project.json 的内容（null 是不在）；reach：reach.json 的原文（DIR 是建成目录）。
 const DIR = Symbol('dir')
 // failProjectReads：门禁子进程读 project.json 时失败几次（tests/helpers/fail-read.mjs；Infinity 是一直失败，null 是不加载）。
-function write({ run: withRun = true, project = TEMPLATE, reach = GOOD, writer = 'agent-team:at-pm', roster = null, failProjectReads = null } = {}) {
+// projectText：project.json 的原文（盖过 project；读得到、却解析不出的那一种用它造）。
+function write({ run: withRun = true, project = TEMPLATE, reach = GOOD, writer = 'agent-team:at-pm', roster = null, failProjectReads = null, projectText = null } = {}) {
   let projectDir, cleanup
   if (withRun) {
     const dirs = makeRun({ runId: 'r1', stage: 'S1', project: project ?? null })
@@ -37,6 +38,7 @@ function write({ run: withRun = true, project = TEMPLATE, reach = GOOD, writer =
     if (project) writeFileSync(join(projectDir, '.agent-team', 'project.json'), JSON.stringify(project))
     cleanup = () => rmSync(projectDir, { recursive: true, force: true })
   }
+  if (projectText !== null) writeFileSync(join(projectDir, '.agent-team', 'project.json'), projectText)
   const plugin = roster === null ? null : realpathSync(mkdtempSync(join(tmpdir(), 'agent-team-r41-plug-')))
   try {
     let gate = GATE
@@ -101,6 +103,24 @@ test('reach.json 核对（docs/83 §8）：at-init 时 project.json 被短暂占
   assert.ok(always.includes(UNCHECKED) && always.includes('project.json 这一刻读不出来') && always.includes(NOT_MATCHED), always)
   const other = write({ run: false, reach: '{}', failProjectReads: Infinity, writer: 'agent-team:at-backend' })
   assert.ok(other.includes('不要自己写 project.json 或 reach.json'), other)
+})
+
+// docs/87（docs/83 §4「project.json 读得到、却解析不出时……不提 reach.json 没核」）：原来写 reach.json 那一条缝放过它，落到「它在别处被弄坏」那一条缝，
+// 只说 project.json 的问题——没核被读成了对上。现在同一段回传里两样都说：先说这一次没有核，再说 project.json 的问题（UTF-16 的照旧点明）。
+test('reach.json 核对（docs/87）：project.json 读得到、却解析不出——有 run、没有 run 都说这一次没有核，同一段里照旧说 project.json 的问题', () => {
+  for (const withRun of [true, false]) {
+    const c = write({ run: withRun, projectText: '{ "paths": {}, }' })
+    assert.ok(c.includes(UNCHECKED) && c.includes(NOT_MATCHED) && c.includes('project.json 解析不出'), `${withRun}：${c}`)
+    assert.ok(c.includes('【project.json】') && c.indexOf(UNCHECKED) < c.indexOf('【project.json】'), `${withRun}：${c}`)
+    assert.equal(c.includes('run 进行中'), withRun, `${withRun}：${c}`)
+  }
+  // 不是项目经理写的：核不了的那一句后面叫它原样冒泡。
+  const other = write({ run: false, projectText: '[1, 2]', writer: 'agent-team:at-backend' })
+  assert.ok(other.includes(UNCHECKED) && other.includes('原样冒泡给派你的人'), other)
+  // UTF-16 的照旧点明编码（brokenProjectNotice 的 utf16 那一支）。
+  const utf16 =Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(JSON.stringify(TEMPLATE), 'utf16le')])
+  const u = write({ run: false, projectText: utf16 })
+  assert.ok(u.includes(UNCHECKED) && u.includes('UTF-16'), u)
 })
 
 test('正文（docs/83）：/agent-team:at-init 说清收到「这一次没有核」的不算对上', () => {
