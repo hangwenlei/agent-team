@@ -256,7 +256,7 @@ function runStateOf(dir) {
 
 // M4g（docs/42，审查第 28 条）：PM 写完 .agent-team/reach.json，按当前 project.json 与花名册重算一遍、与写进去的比（措辞在
 // hooks/lib/ledger.mjs 的 reachCheckNotice）。project.json 不在、有阻断或插件问题（花名册读不出）时不核：那时【触达表】本来就叫 PM
-// 先别写，「正确的那一份」也算不准。写进去的文件读不出来（被删、被占用）也不核。
+// 先别写，「正确的那一份」也算不准。这几种与写进去的文件读不出来（被删、被占用）时说「这一次没有核」（docs/83）。
 // M4h（docs/43，审查第 24-1 条）：PM 写 current-run 时，别的、没收口的 run 里「派出去了、门禁还没见它停下」的派发——指针一改，那一趟的产物
 // 没人核（M4h 时门禁还按新的这一趟判它们：停下行记进这一趟的派发记录、交付物核验按这一趟的段判；M4n 起按 agent_id 认回那一趟）。按派发记录认：最后一回停下是「拦」的也算没停
 // （拦了它会接着跑）；门禁没见它停下的，可能还在跑，也可能早就被中断了、平台没报——两种都照实说，不按时间猜。角色与段只在花名册、阶段链认得
@@ -380,7 +380,7 @@ function reachNoticeFor(filePath, project, writerIsPm = true) {
 }
 
 // docs/79：每趟开头写 current-run 时核磁盘上的 reach.json 是不是落后（措辞在 hooks/lib/ledger.mjs 的 reachStaleNotice）。project.json 不在、有阻断或
-// 插件问题时不核、也不说（同一次回传里【project.json】【插件】已经说了；写 reach.json 那一刻的 reachNoticeFor 在这几种时候说「这一次没有核」，docs/83）；reach.json 在、却读不出来（占用之类）也不核——只有不在（ENOENT）才说「不在」。复核（docs/79 §8）：写指针的人
+// 插件问题时不核、也不说（同一次回传里【project.json】【插件】已经说了；写 reach.json 那一刻的 reachNoticeFor 在这几种时候说「这一次没有核」，docs/83）；reach.json 在、却读不出来（占用、目录之类）说这一次没有核（docs/88），只有不在（ENOENT）才说「不在」。复核（docs/79 §8）：写指针的人
 // 不是项目经理时（没有 run 的那一刻 H3 对谁都放行），与 reachNoticeFor 同一个口径叫它原样冒泡。
 function staleReachFor(ctx, writerIsPm = true) {
   if (!isPlainObject(ctx.project)) return null

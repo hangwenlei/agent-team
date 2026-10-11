@@ -148,7 +148,7 @@ export function reachStaleNotice({ text, expected, unreadable = false }) {
   }[diff]
   return (
     `【触达表】.agent-team/reach.json ${why}——/agent-team:at-status 报各角色实际能写到哪里时读的就是它。` +
-    `把下面这份 JSON 原样重写进 .agent-team/reach.json${diff === 'unreadable' ? '（写不进去就告诉用户）' : ''}：\n${safeJson(expected)}`
+    `把下面这份 JSON 原样重写进 .agent-team/reach.json${diff === 'unreadable' ? '（写不进去就告诉用户，不要自己删它或改名）' : ''}：\n${safeJson(expected)}`
   )
 }
 

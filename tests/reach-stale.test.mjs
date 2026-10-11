@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, decisionOf } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
+import { failRead } from './helpers/fail-read.mjs'
 import { computeReach } from '../hooks/lib/reach.mjs'
 import { reachStaleNotice } from '../hooks/lib/ledger.mjs'
 
@@ -22,7 +23,8 @@ const WIDER = { ...TEMPLATE, paths: { ...TEMPLATE.paths, 'at-backend': [...(TEMP
 // 写 current-run（落盘之后的账本）；reach：磁盘上 reach.json 的原文（null 是不在，DIR 是建成一个目录）；writer：写指针的人；roster：花名册的原文（给了就拷一份插件、
 // 换掉花名册——门禁从它自己所在的插件根读花名册，tests/gate-acceptance.test.mjs 同一个做法）。
 const DIR = Symbol('dir')
-function pointer({ project = TEMPLATE, reach, file = 'current-run', writer = 'agent-team:at-pm', roster = null }) {
+// failReach：门禁子进程读 reach.json 时一直抛（tests/helpers/fail-read.mjs，三个系统都跑得到；错误不带 code，与被占用、权限拒绝同一支）。
+function pointer({ project = TEMPLATE, reach, file = 'current-run', writer = 'agent-team:at-pm', roster = null, failReach = false }) {
   const dirs = makeRun({ runId: 'r1', stage: 'S1', project })
   const plugin = roster === null ? null : realpathSync(mkdtempSync(join(tmpdir(), 'agent-team-r37-plug-')))
   try {
@@ -38,7 +40,9 @@ function pointer({ project = TEMPLATE, reach, file = 'current-run', writer = 'ag
     if (reach === DIR) mkdirSync(join(at, 'reach.json'))
     else if (reach !== null) writeFileSync(join(at, 'reach.json'), reach)
     const target = file === 'current-run' ? join(at, 'current-run') : join(at, 'runs', 'r1', file)
-    return ctxOf(run('ledger', posted(target, writer), gate, dirs.projectDir))
+    if (!failReach) return ctxOf(run('ledger', posted(target, writer), gate, dirs.projectDir))
+    const { env, opts } = failRead('reach.json')
+    return ctxOf(run('ledger', posted(target, writer), gate, dirs.projectDir, env, opts))
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })
@@ -82,8 +86,8 @@ test('写 current-run（docs/79）：project.json 有阻断时不核 reach.json�
   assert.ok(!ctx.includes('重写进 .agent-team/reach.json'), ctx)
 })
 
-// 复核（docs/79 §8）：花名册读不出（插件问题）时不核——照它算的触达表是空的，叫 PM 照着重写会用一份空表盖掉对的那一份；reach.json 在却读不出（这里是
-// 一个目录）不核；写指针的人不是项目经理时，叫它原样冒泡、不要自己重写（与写 reach.json 那一刻同一个口径）；「对不上」的成因里有插件更新。
+// 复核（docs/79 §8）：花名册读不出（插件问题）时不核——照它算的触达表是空的，叫 PM 照着重写会用一份空表盖掉对的那一份；写指针的人不是项目经理时，
+// 叫它原样冒泡、不要自己重写（与写 reach.json 那一刻同一个口径）；「对不上」的成因里有插件更新。reach.json 在却读不出的，docs/88 起说这一次没有核（下面那条）。
 test('写 current-run（docs/79 §8）：花名册读不出时只说【插件】、不给触达表；不是项目经理写的叫它冒泡；成因里有插件更新', () => {
   const broken = pointer({ project: TEMPLATE, reach: JSON.stringify(expectedOf(TEMPLATE)), roster: '{ 坏了' })
   assert.ok(broken.includes('【插件】'), broken)
@@ -95,12 +99,17 @@ test('写 current-run（docs/79 §8）：花名册读不出时只说【插件】
   assert.ok(reachStaleNotice({ text: JSON.stringify(expectedOf(WIDER)), expected: expectedOf(TEMPLATE) }).includes('插件更新'))
 })
 
-// docs/88（docs/79 §4「reach.json 在、却读不出来时不核」）：原来一声不吭——/agent-team:at-status 照它报时也读不出，项目经理却以为对上了。现在说这一次没有核、
+// docs/88（docs/79 §4「reach.json 在、却读不出来时不核」）：原来一声不吭——/agent-team:at-status 照它报时也读不出，项目经理什么都不知道。现在说这一次没有核、
 // 成因，给出按当前配置算出来的那一份（写不进去就告诉用户）；不是项目经理写的照旧叫它冒泡。只读一次：短暂占用时多说一次，照着重写一份正确的也无害。
 test('写 current-run（docs/88）：reach.json 在、却读不出来——说这一次没有核，给出按当前配置算出来的那一份；不是项目经理写的叫它冒泡', () => {
   const dir = pointer({ project: TEMPLATE, reach: DIR })
   assert.ok(dir.includes('【触达表】.agent-team/reach.json 在、却读不出来') && dir.includes('这一次没有核') && dir.includes('写不进去就告诉用户'), dir)
   assert.deepEqual(jsonAfter(dir), expectedOf(TEMPLATE))
+  // 复核（docs/88 §8，低 2）：被占用、权限拒绝（错误码不是 EISDIR）也走这一支——只钉目录时，把读不出收窄成 EISDIR 全绿，那几种会被说成「不在」。
+  const busy = pointer({ project: TEMPLATE, reach: JSON.stringify(expectedOf(TEMPLATE)), failReach: true })
+  assert.ok(busy.includes('在、却读不出来') && !busy.includes('reach.json 不在'), busy)
+  // 复核（低 4）：写不进去的告诉用户，不要自己删它或改名（它可能是个目录）。
+  assert.ok(dir.includes('不要自己删它或改名'), dir)
   const other = pointer({ project: TEMPLATE, reach: DIR, writer: 'agent-team:at-backend' })
   assert.ok(other.includes('在、却读不出来') && other.includes('原样冒泡'), other)
   // 读得出的照旧：对得上不吭声。
@@ -108,6 +117,10 @@ test('写 current-run（docs/88）：reach.json 在、却读不出来——说�
   // 纯函数：unreadable 盖过原文。
   assert.ok(reachStaleNotice({ text: null, expected: expectedOf(TEMPLATE), unreadable: true }).includes('在、却读不出来'))
   assert.ok(reachStaleNotice({ text: null, expected: expectedOf(TEMPLATE) }).includes('reach.json 不在'))
+  // 复核（低 3）：「写不进去」那半句只在读不出时有。
+  for (const text of [null, '{', JSON.stringify(expectedOf(WIDER))]) {
+    assert.ok(!reachStaleNotice({ text, expected: expectedOf(TEMPLATE) }).includes('写不进去'), String(text))
+  }
 })
 
 test('写 state.json（docs/79）：reach.json 落后也不在这里说——只在每趟开头写 current-run 时核', () => {
