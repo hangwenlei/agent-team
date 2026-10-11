@@ -42,12 +42,19 @@ test('isStageDone（docs/77）：这一段记了账时并上派发记录——�
 
 // 复核（docs/77 §8，中 1）：旧 run 的 roster 与 stage_roles 一样是推进那一次才累加的，段中途照样是没记账；项目经理在段中途先单独记下这一段、
 // 记的人里一个产者都没有（`[]`、只有协调者）也是。这两种并上派发记录，会在协调者只派出一部分人时提前判齐——不并，与改动前一样。
-test('isStageDone（docs/77 §8）：旧 run 不并派发记录；这一段的记录里一个产者都没有的也不并——协调者只派出一部分人时不提前判齐', () => {
+// 第二轮复核（docs/77 §8，低 3）：判「记了账」看的是传进来的参与者（stage_roles 那一段，旧 run 是整趟 roster）里有没有这一段的产者——旧 run 在 S2 用过 at-ui，
+// 它也是 S5 的产者，段中途参与者就不是空的，并上派发记录只会多要、不会提前判齐。参与者里一个产者都没有的不并（并了会把空名单变成非空、提前判齐）。
+test('isStageDone（docs/77 §8）：参与者里一个产者都没有的不并派发记录（旧 run 的 roster 没有这一段的产者、记成 [] 或只有协调者）——协调者只派出一部分人时不提前判齐；有产者的旧 run 照样并', () => {
   const only5 = only('05-impl/at-backend.md')
-  const legacy = { stage: 'S5', roster: ['at-architect', 'at-backend'] }
   const dispatched = { S5: ['at-backend', 'at-frontend'] }
-  const run5 = (state) => isStageDone({ stage: 'S5', stages: STAGES, artifactExists: only5, roster: participantsOf(state, 'S5'), state, dispatched })
-  assert.equal(run5(legacy), true)
+  const run5 = (state, exists = only5, d = dispatched) => isStageDone({ stage: 'S5', stages: STAGES, artifactExists: exists, roster: participantsOf(state, 'S5'), state, dispatched: d })
+  // 旧 run、roster 里没有 S5 的产者：不并（at-backend 交了也不说齐）。
+  assert.equal(run5({ stage: 'S5', roster: ['at-product', 'at-architect'] }, only5, { S5: ['at-backend'] }), false)
+  // 旧 run、roster 里有 S5 的产者：并——派了没记的 at-frontend 没交，不齐（与推进同一个口径）。
+  assert.equal(run5({ stage: 'S5', roster: ['at-architect', 'at-backend'] }), false)
+  // 旧 run 在 S2 用过 at-ui（它也是 S5 的产者）：S5 里 at-ui 交了、at-backend 还没交——不齐。
+  const withUi = { stage: 'S5', roster: ['at-product', 'at-ui', 'at-architect'] }
+  assert.equal(run5(withUi, only('05-impl/at-ui.md'), { S2: ['at-ui'], S5: ['at-ui', 'at-backend'] }), false)
   const legacyS2 = { stage: 'S2', roster: [] }
   assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: only('01-prd.md'), roster: participantsOf(legacyS2, 'S2'), state: legacyS2, dispatched: { S2: ['at-product'] } }), false)
   const early = (s5) => ({ ...BASE, stage_roles: { ...BASE.stage_roles, S5: s5 } })
@@ -261,6 +268,59 @@ test('进度（docs/77 §8）：空文件而且还是上一轮的不免；不随
   assert.match(fixed, /at-frontend（后台派发）：05-impl\/at-frontend\.md 没交，trimmed 里记着它在 S5 裁掉了，这一份免了，05-summary\.md 还没有/)
   const redo = progress({ frontendStops: true, earlierFrontend: true })
   assert.match(redo, /at-frontend（后台派发）：05-impl\/at-frontend\.md 没交，trimmed 里记着它在 S5 裁掉了，这一份免了\n/)
+})
+
+// 第二轮复核（docs/77 §8，低 1）：进度那一行按这个协调者自己那一次派发判免不免——它派的那一次还在跑，别的协调者派的同一个角色停下了（还在跑按角色最近的
+// 一次认，认的是那一次），这一行也不写免了、收尾不说都交了。
+test('进度（docs/77 §8）：这个协调者派的那一次还在跑（或者最后一回被拦），别的协调者派的同一个角色冒泡停下了——这一行不写免了', () => {
+  for (const f2Blocked of [false, true]) {
+    const dirs = makeRun({
+      runId: 'r1',
+      stage: 'S5',
+      artifacts: ['00-contract.md', '01-prd.md', '03-arch.md', '04-dispatch.md'],
+      roster: ['at-architect', 'at-backend', 'at-frontend'],
+      stage_roles: { S3: ['at-architect'], S5: ['at-architect', 'at-backend', 'at-frontend'] },
+      trimmed: { 'at-frontend': 'S5' },
+    })
+    try {
+      const ARCH = 'agent-team:at-architect'
+      run('deliverable', post(ARCH, 'a00000000000000a1', { toolUseId: 'toolu_01A1' }), GATE, dirs.projectDir)
+      run('deliverable', post(ARCH, 'a00000000000000a2', { toolUseId: 'toolu_01A2' }), GATE, dirs.projectDir)
+      run('deliverable', post('agent-team:at-frontend', 'a00000000000000f2', { caller: ARCH, callerId: 'a00000000000000a2', toolUseId: 'toolu_01F2' }), GATE, dirs.projectDir)
+      if (f2Blocked) run('stop-gate', stopped('agent-team:at-frontend', 'a00000000000000f2', false, '写不了。'), GATE, dirs.projectDir)
+      run('deliverable', post('agent-team:at-frontend', 'a00000000000000f1', { caller: ARCH, callerId: 'a00000000000000a1', toolUseId: 'toolu_01F1' }), GATE, dirs.projectDir)
+      run('stop-gate', stopped('agent-team:at-frontend', 'a00000000000000f1', false, '写不了。'), GATE, dirs.projectDir)
+      run('stop-gate', stopped('agent-team:at-frontend', 'a00000000000000f1', true, `${BUBBLE_MARK}缺组件库。`), GATE, dirs.projectDir)
+      const r = run('completion', { hook_event_name: 'UserPromptSubmit', prompt: note('a00000000000000a2', 'toolu_01A2') }, GATE, dirs.projectDir)
+      const c = r.stdout ? JSON.parse(r.stdout).hookSpecificOutput?.additionalContext ?? '' : ''
+      assert.match(c, f2Blocked ? /at-frontend（后台派发）：05-impl\/at-frontend\.md 还没有——门禁最后一回拦了它/ : /at-frontend（后台派发）：05-impl\/at-frontend\.md 还没有——门禁还没见它停下：可能还在跑/)
+      assert.ok(!c.includes('名单上的都交了'), c)
+    } finally {
+      rmSync(dirs.projectDir, { recursive: true, force: true })
+      rmSync(dirs.pluginDir, { recursive: true, force: true })
+    }
+  }
+})
+
+// 第二轮复核（docs/77 §8，低 5）：一行里有一份在磁盘上、另一份免了，它停下时又冒泡了——在磁盘上的那一份可能只写了它卡在哪，照旧叫 PM 读它再定。
+test('进度（docs/77 §8）：S2 里 at-ui 写了 02-ui-spec.md 又冒泡、裁掉之后 02-wireframe.html 免了——照旧说它停下时冒泡了、不说都交了', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['00-contract.md', '01-prd.md'], roster: ['at-product', 'at-ui'], stage_roles: {}, trimmed: { 'at-ui': 'S2' } })
+  try {
+    const runDir = join(dirs.projectDir, '.agent-team', 'runs', 'r1')
+    const PRODUCT = 'agent-team:at-product'
+    run('deliverable', post(PRODUCT, 'a00000000000000c2', { toolUseId: 'toolu_01C2' }), GATE, dirs.projectDir)
+    run('deliverable', post('agent-team:at-ui', 'a00000000000000d2', { caller: PRODUCT, callerId: 'a00000000000000c2', toolUseId: 'toolu_01D2' }), GATE, dirs.projectDir)
+    writeFileSync(join(runDir, '02-ui-spec.md'), '卡住了：没有设计稿。\n')
+    run('stop-gate', stopped('agent-team:at-ui', 'a00000000000000d2', false, '写不了。'), GATE, dirs.projectDir)
+    run('stop-gate', stopped('agent-team:at-ui', 'a00000000000000d2', true, `${BUBBLE_MARK}没有设计稿。`), GATE, dirs.projectDir)
+    const r = run('completion', { hook_event_name: 'UserPromptSubmit', prompt: note('a00000000000000c2', 'toolu_01C2') }, GATE, dirs.projectDir)
+    const c = r.stdout ? JSON.parse(r.stdout).hookSpecificOutput?.additionalContext ?? '' : ''
+    assert.match(c, /at-ui（后台派发）：02-ui-spec\.md 在磁盘上，02-wireframe\.html 没交，trimmed 里记着它在 S2 裁掉了，这一份免了——但它停下时冒泡了/)
+    assert.ok(!c.includes('名单上的都交了'), c)
+  } finally {
+    rmSync(dirs.projectDir, { recursive: true, force: true })
+    rmSync(dirs.pluginDir, { recursive: true, force: true })
+  }
 })
 
 // 复核（docs/77 §8，中 2）：交付物核验（前台派发的协调者跑完）与完成核验那两处调用的行为——S5 记了 [at-architect, at-backend]，架构师派出的 at-frontend

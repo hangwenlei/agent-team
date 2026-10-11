@@ -294,11 +294,12 @@ export function coordinatorProgress({ role, stageId, rows, recipientIsPm, selfDo
   let stoppedShort = false
   for (const row of rows) {
     const facts = row.items.map((it) => `${it.name} ${STATE[it.state] ?? '读不出来'}`).join('，')
-    // docs/77：免了的（waived）不算没交齐；它停下时冒泡了也不再叫 PM 去读那一份（它没交、已经裁掉）。
+    // docs/77：免了的（waived）不算没交齐。它停下时冒泡了：这一行有一份在磁盘上，照旧叫 PM 读它再定（那一份可能只写了它卡在哪）；
+    // 一份都没在磁盘上（全免了）的不叫读。
     const short = row.items.some((it) => it.state !== 'ok' && it.state !== 'waived')
-    const waived = row.items.some((it) => it.state === 'waived')
+    const present = row.items.some((it) => it.state === 'ok')
     let tail = ''
-    if (!short && row.stop === 'bubble' && !waived) {
+    if (!short && row.stop === 'bubble' && present) {
       // M4d 实测：产物在，它停下时却冒泡了——那一份可能只写了它卡在哪（M5 的前端），也可能交齐了、只是借标记转述别人的问题
       // （M5b 的后端）。门禁不读内容，不下结论，叫 PM 读。
       stoppedShort = true

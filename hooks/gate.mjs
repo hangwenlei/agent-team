@@ -1662,11 +1662,13 @@ function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, reci
   const running = runningRolesIn(ctx, stageId)
   const fixed = new Set(expandProduces(stage, []))
   const rows = [...byRole.values()].map((d) => {
-    const waivable = trimmedAt(ctx.state, d.role, stageId) && !running.has(d.role)
+    // 第二轮复核（docs/77 §8）：这一行自己那一次派发也要见过它停下（不是「拦」）——还在跑按角色最近的一次认，认的可能是别的协调者派的那一次。
+    const stop = lastStop(log, d.agent_id)
+    const waivable = trimmedAt(ctx.state, d.role, stageId) && !running.has(d.role) && stop !== null && stop !== 'block'
     return {
       role: d.role,
       mode: d.mode === 'foreground' ? 'foreground' : 'background',
-      stop: lastStop(log, d.agent_id),
+      stop,
       items: expandProduces(stage, [d.role]).map((name) => {
         const st = !ctx.artifactExists(name) ? 'missing' : fresh.isBlank(name) ? 'blank' : fresh.isStale(name) ? 'stale' : 'ok'
         const waive = waivable && (st === 'missing' || st === 'blank') && !fixed.has(name) && !fresh.isStale(name) && mayWaive(ctx.stages, stageId, name)
