@@ -24,7 +24,7 @@ import { PLUGIN_PREFIX, stripPluginPrefix } from './decide.mjs'
 // M3z（docs/34）：上限的单一真源挪到 budget.mjs（limitOf 要它，留在这里就成了环）；这里原样再导出，既有的 import 不用改。
 import { REWORK_LIMIT, limitOf } from './budget.mjs'
 import { closedAt, lastStageId } from './closing.mjs'
-import { mayWaive, trimmedAt } from './advance.mjs'
+import { mayWaive, trimmedAt, dispatchedIn } from './advance.mjs'
 
 // validateState 的问题文案会进受信回传【state.json】；state.json 是写得进它的任何人都能写的，
 // 键名与值一律过 quote（M3s，docs/27）——阶段名也一样：它在这里是 state.json 里写着的那个值，
@@ -326,7 +326,13 @@ export function rejectTo(kind) {
 // （advance.mjs 的 departureNeeds）同一个口径；不随参与者变的固定产物不免。不给 state 的照旧（等它们）。复核（docs/76 §8）：还是上一轮的不免
 // （artifactStale——推进那一次 H6 照样按还旧拒，免掉就成了【阶段】说齐、H6 拒）；还在跑的不免（running：派出去了、门禁还没见它停下——裁掉之后又派回来，
 // trimmed 不会自己清掉，免掉就成了它还在干活、门禁却催推进）。H6 那一侧不看还在跑（中断的子代理永远没有停下行，按它拦会一直拒），只这里不催。
-export function isStageDone({ stage, stages, artifactExists, roster, state = null, artifactStale = null, running = null }) {
+// docs/77：dispatched（{ 段: [角色] }，门禁派发记录，completion.mjs 的 dispatchedByStage）给了时，传进来的参与者（participantsOf：stage_roles 那一段，
+// 没有 stage_roles 的旧 run 是整趟 roster）里已经有这一段的产者，就并上派发记录里在这一段派出去过的人：推进判据的「叫到」（advance.mjs 的 calledIn）
+// 就是这样并的，派发记录里有、stage_roles 没记的人没交时，原来这里说齐了、H6 却拒。参与者里一个产者都没有的不并（还没记账、记成 [] 或只有协调者、
+// 旧 run 的 roster 里还没有这一段的人）：并了会把空名单变成非空，协调者只派出一部分人时提前判齐。有产者时并上只会多要、不会比原来更早判齐。
+// 复核（docs/77 §8）两轮：第一轮把旧 run 一律当没记账；第二轮改回按参与者认——旧 run 在 S2 用过 at-ui（它也是 S5 的产者）是常见配置，那一格不并就是
+// 【阶段】说齐、H6 拒。
+export function isStageDone({ stage, stages, artifactExists, roster, state = null, artifactStale = null, running = null, dispatched = null }) {
   // stage 来自 state.json：不是字符串、或者不是 stages 自己的键，就不算完成（M3s，docs/27 §3）。
   // 此前拿它直接做属性键，{"toString":1} 这样的对象会让 ToPropertyKey 抛异常——ledger 与
   // deliverable 整条崩掉，本该报出这个坏值的【state.json】也跟着消失。
@@ -336,7 +342,10 @@ export function isStageDone({ stage, stages, artifactExists, roster, state = nul
   // 「这一阶段在这一趟里的产出角色」走 stages.mjs 的 stageRolesInRun，不在这里自己
   // 再写一遍 roster 过滤——Task 3 评审发现 1：这段逻辑原本在这里和 expectedArtifacts
   // 各有一份逐字同构的实现，现已收敛成一处。
-  const participants = stageRolesInRun(current, roster)
+  const producers = stageRoles(current)
+  const recorded = isPlainObject(state) && Array.isArray(roster) && roster.some((r) => producers.includes(r))
+  const called = Array.isArray(roster) && recorded ? [...roster, ...dispatchedIn(stage, dispatched)] : roster
+  const participants = stageRolesInRun(current, called)
   const names = expandProduces(current, participants)
   if (names.length === 0) return false
   const fixed = new Set(expandProduces(current, []))
