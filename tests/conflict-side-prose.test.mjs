@@ -14,10 +14,15 @@ const ENV_ROW = '| `env-blocked` | 环境挡住了：缺工具、服务或权限
 const SIDE =
   '**`contract-conflict` 里哪些要问**（管设计分歧：`S2` 到 `S5` 里角色的产出跟契约不一致；验证段判没过的，照第 3 节 `S6`、`S7` 那一条与「回退」处理）：' +
   '- 跟契约第 1 节用户原话或第 4 节修订记录里用户说的相抵、照原话改得了的：照契约改——重派它的产者（那一段已经过了的，先照「回退」记），不用问；' +
-  '产者写明照原话做不到（附理由）的，照本节问。' +
-  '- 第 1 节读得出不止一种意思、产出读的那一种也说得通的，不算跟原话相抵：照本节问（`contract-hole`）。' +
-  '- 只跟契约第 2 节、第 3 节（你自己写的理解）不一致的，看方向：收窄到原话以内（不采纳超出原话的产出、照第 3 节不做）的，你自己定，写进 `04-dispatch.md`' +
-  '第 3 节与交付文档；扩出原话（采纳第 3 节排除的东西），或者改第 2、3 节去迁就产出的，照本节问（`tradeoff`）——第 2、3 节不是用户的话。'
+  '产者写明照原话做不到（附理由）的，照本节问（`contract-conflict`）。' +
+  // 第二次复核（docs/73 §8）：② 与 ③ 的先后——原话隐含、说得通的归 ②；③ 的收窄不含第 3 节里写了不算数的；扩出原话带上用户感受得到的门槛与 kind。
+  '- 第 1 节读得出不止一种意思、产出读的那一种也说得通、读错了可能白做的，不算跟原话相抵：照本节问（`contract-hole`）。产出认为原话隐含了某件事、' +
+  '这种读法说得通的，也归这一条，不算超出原话。' +
+  '- 只跟契约第 2 节、第 3 节（你自己写的理解）不一致的，看方向：收窄到原话以内（不采纳原话怎么读都不含的东西、照第 3 节不做；第 3 节里写了也不算数的' +
+  '——例如不写测试——不在此列）的，你自己定，写进 `04-dispatch.md` 第 3 节与交付文档；扩出原话（采纳原话怎么读都不含、用户感受得到的东西），或者改第 2、3 节' +
+  '去迁就产出（产出比第 2 节少做了的，照第 2 节重派；要改第 2 节就问）的，照本节问（第 3 节排除的是 `contract-conflict`，别的是 `tradeoff`）——第 2、3 节' +
+  '不是用户的话。' +
+  '架构师在未决问题里标的「要 PM 定」只是它的建议，照这三种情形分。'
 const NEXT = '**问之前先记**'
 const START = '**`contract-conflict` 里哪些要问**'
 
@@ -52,19 +57,36 @@ test('docs/73：README 两半「契约冲突」那一行、04-dispatch 模板的
   )
 })
 
-test('docs/73 §8：「第 2、3 节」与「不用问／自己定／自决」同一句出现的，只许是第 4 节钉住的那一段（commands、agents、templates）', () => {
-  const sec23 = /第2节、第3节|第2、3节|第2节与第3节|第2节和第3节/
-  const decide = /不用问|不必问|自己定|自决/
+test('docs/73 §8：「第 2、3 节」与「不用问／自己定／自决」同一句出现的，只许是第 4 节钉住的那一段（commands、agents、templates、skills）', () => {
+  // 第二次复核（docs/73 §8，中 2）：节号放宽（中文数字、「第 2、第 3 节」、带「契约」的单独一节）、认节名、词表加「你来定／由你定／不问」，扫描加上 skills。
+  const sec23 = /第[23二三](?:节)?[、与和]第?[23二三]节|契约第[23二三]节|PM的理解|明确不做的事/
+  const decide = /不用问|不必问|不问|自己定|你来定|由你定|自决/
   const allowed = flat(SIDE)
   const files = [
     ...readdirSync(new URL('../commands/', import.meta.url)).map((n) => `commands/${n}`),
     ...readdirSync(new URL('../agents/', import.meta.url)).map((n) => `agents/${n}`),
     ...readdirSync(new URL('../templates/', import.meta.url)).map((n) => `templates/${n}`),
+    ...readdirSync(new URL('../skills/', import.meta.url)).map((n) => `skills/${n}/SKILL.md`),
   ].filter((p) => p.endsWith('.md'))
   assert.ok(files.length > 10, '前置：扫得到正文')
   for (const p of files) {
-    for (const s of flat(read(p)).split('。')) {
+    // 「/agent-team:at-init 第 2、3 节」这类说的是那条命令自己的节，不是契约的——先剥掉。
+    for (const s of flat(read(p)).replace(/\/agent-team:[a-z-]+`?第[0-9、]+节/g, '').split('。')) {
       if (sec23.test(s) && decide.test(s)) assert.ok(allowed.includes(s), `${p}：「第 2、3 节」与自决同一句——${s.slice(0, 80)}`)
     }
   }
+})
+
+test('docs/73 §8（第二次复核）：S3 那一条、第 2 节可以改、被写路径隔离那一句、收尾两张清单、at-architect、模板与契约格式都跟上', () => {
+  const at = flat(read('commands/at.md'))
+  for (const s of [
+    '契约原话要求测试的，照第 4 节表格下那一段第一条：让架构师补上测试，写明做不到（附理由）的问用户（`contract-conflict`）。',
+    '你的理解写第 2 节，那一节可以改（推进出 `S1` 之后为迁就角色的产出改它，照第 4 节表格下那一段先问用户）。',
+    '用户原话（契约第 1 节、第 4 节修订记录）要的事不能由你定不做，照第 4 节问用户（`contract-conflict`；只是第 2 节写的，照第 4 节表格下那一段第三条）',
+    '`S5` 里被拒之后不做或改写到别处的（照 `04-dispatch.md` 第 3 节）、契约冲突里收窄到原话以内、你自己定的（同一节）。',
+    '`S5` 里被拒之后不做或改写到别处的、契约冲突里收窄到原话以内、你自己定的。',
+  ]) assert.ok(at.includes(flat(s)), s)
+  assert.ok(flat(read('agents/at-architect.md')).includes(flat('你定得了的就定（照原话做不到、原话读得出几种意思的不归你定）')), 'at-architect')
+  assert.ok(flat(read('templates/00-contract.md')).includes(flat('这一节可以改（推进出 S1 之后为迁就角色的产出改它，要先问用户）')), '契约模板')
+  assert.ok(flat(read('skills/at-contract-format/SKILL.md')).includes(flat('**可改**（推进出 S1 之后为迁就角色的产出改它，要先问用户）')), '契约格式')
 })
