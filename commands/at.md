@@ -49,9 +49,9 @@ $ARGUMENTS
 - 建目录 `.agent-team/runs/<run_id>/`。
 - 照 `${CLAUDE_PLUGIN_ROOT}/templates/state.json` 写 `.agent-team/runs/<run_id>/state.json`。
   模板的顶层键**照着写，一个都不要省**：除 `trimmed`、`stage_roles`、`rework_base` 与 `closed_at` 以外，少任何一个都会被账本回传报成
-  状态不合法；这四个少了**不会**报——校验对它们是向后兼容的（都是后加的字段，更早落盘的
-  run 里没有它们），但那是给旧 run 留的口子，不是让新 run 省掉它们的理由：新 run 少了 `stage_roles`，
-  门禁就按旧 run 的整趟口径判，一声不吭。逐个填法如下：
+  状态不合法；这四个少了账本**不会**报——校验对它们是向后兼容的（都是后加的字段，更早落盘的
+  run 里没有它们），但那是给旧 run 留的口子，不是让新 run 省掉它们的理由。`stage_roles` 另有一道：建 run 那一次少了 `stage_roles`（或者值不是对象），门禁拒这次写入
+  （少了它，门禁会按旧 run 的整趟口径判这一趟）；之后每次写 `state.json` 都带着它、值是对象，去掉它或者改成别的写入同样被拒。逐个填法如下：
   `run_id` 填你上面生成的那个 run id（**必须与目录名逐字相同**），`stage` 填 `S1`，
   `history` 填一条 `{ "stage": "S1", "at": "<ISO 时间>" }`，`contract_sha` 保持
   `PENDING`，`roster` 与 `never_invoked` 先留空数组，`artifacts`、`rework`、`stage_roles`、`trimmed` 与 `rework_base`
@@ -157,7 +157,7 @@ $ARGUMENTS
    合起来它就是 `roster`：一个角色在 `roster` 里却哪一段都没记、或者记在某一段里却不在 `roster` 里，
    账本回传都会报。门禁按它判「这一段齐了没」「这一段谁没交代」——`at-ui` 在 S2 叫过，不等于在 S5 也叫过。
    返工轮回到某一段、再走出来时，把这一轮叫到的人并进 `stage_roles` 那一段原有的名单，不删上一轮的——与 `roster` 只累加同一个道理。
-   `state.json` 里没有 `stage_roles` 这个键（更早落盘的 run）就不要加：照旧只累加 `roster`，门禁对没有它的 run 按 `roster` 判；半路加上它，之前走过、没补键的那几段会被当成没记账报出来。
+   `state.json` 里没有 `stage_roles` 这个键（更早落盘的 run）就不要加：照旧只累加 `roster`，门禁对没有它的 run 按 `roster` 判；半路加上它，之前走过、没补键的那几段会被当成没记账报出来；已经加上了的别再删（门禁拒去掉它的写入），照报出来的那几段逐段补记。
 
    **`never_invoked` 不要在这里逐段累加**
    ——S2 时 `at-architect` 还没轮到，逐段累加会先把它记成「没被叫过」，等 S3 真正

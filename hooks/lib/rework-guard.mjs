@@ -255,6 +255,24 @@ function decideChainInvariant({ before, after, stages }) {
   return { ok: true }
 }
 
+// docs/78（docs/32 §4「新 run 漏写 stage_roles 时静默退回整趟口径」）：按段判的门禁（【阶段】、推进、产者交代……）认 state.json 的 stage_roles——
+// 不是对象（没有这个键、null、数组……）就当更早落盘的 run、按整趟 roster 判（stages.mjs 的 participantsOf），validateState 对缺失不报（旧 run 本来就没有）。
+// 拿 closed_at、rework_base 在不在认新旧不准：旧 run 在新插件下续跑，回退会写进 rework_base、收口会写进 closed_at。门禁看得准的是两个时刻：建 run 的
+// 那一次（creating，认法在 gate.mjs 的 H6 那一处），这一次照现行模板写，stage_roles 不是对象就拒；写入之前它是对象、这次写入不是了（去掉、改成别的），拒。
+// 复核（docs/78 §8）：认值不只认键——值写坏了消费方同样退回整趟口径；写入之前的值本来就坏了的不拦（消费方早已把它当旧 run，【state.json】叫改成对象）。
+export const STAGE_ROLES_CREATE =
+  'agent-team H6 返工预算：这次写入建的是一趟新 run，state.json 里要有 stage_roles、值是对象（先写成 {}，推进出一段时把那一段叫到的人记进去）。' +
+  '少了它或者值不是对象，按段判齐、判交没交齐的门禁会把这一趟当成更早的 run、按整趟 roster 判，不再提醒。照 /agent-team:at 第 1 节的模板把顶层键写全，再写一次。'
+export const STAGE_ROLES_DROP =
+  'agent-team H6 返工预算：写入之前的 state.json 里 stage_roles 是对象，这次写入把它去掉了、或者改成了别的。它按段记这一趟叫到了谁，不是对象之后按段判的门禁会' +
+  '退回整趟 roster。把写入之前的 stage_roles 原样带上（这一次要记的人并进对应的那一段），再写一次。'
+export function decideStageRolesKey({ before, after, creating = false }) {
+  if (!isPlainObject(after) || isPlainObject(after.stage_roles)) return { ok: true }
+  if (creating) return { ok: false, reason: STAGE_ROLES_CREATE }
+  if (isPlainObject(before) && isPlainObject(before.stage_roles)) return { ok: false, reason: STAGE_ROLES_DROP }
+  return { ok: true }
+}
+
 /**
  * 重放一次 Edit，得出平台写入之后 state.json 的文本（M3r，docs/26，全量审查第 6 条）。
  *

@@ -46,7 +46,8 @@ const pendingPath = (projectDir) => join(projectDir, '.agent-team', USER_WORDS_F
 const pendingOf = (projectDir) => JSON.parse(readFileSync(pendingPath(projectDir), 'utf8'))
 const boundOf = (runDir) => JSON.parse(readFileSync(join(runDir, USER_WORDS_FILE), 'utf8'))
 const point = (projectDir, id) => writeFileSync(join(projectDir, '.agent-team', 'current-run'), id)
-const stateOf = (id, stage = 'S1', history = H('S1')) => ({ run_id: id, stage, contract_sha: 'PENDING', roster: [], artifacts: {}, rework: {}, never_invoked: [], escalations: [], history })
+// docs/78：建 run 的那一次要带着 stage_roles（照模板写成 {}），不带的 H6 拒。
+const stateOf = (id, stage = 'S1', history = H('S1')) => ({ run_id: id, stage, contract_sha: 'PENDING', roster: [], stage_roles: {}, artifacts: {}, rework: {}, never_invoked: [], escalations: [], history })
 const stateWrite = (runDir, state, sid = 's-1') => ({
   hook_event_name: 'PreToolUse',
   tool_name: 'Write',
