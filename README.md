@@ -122,7 +122,7 @@ flowchart TB
 
 另外，上一趟还没走完你又起了一趟新的，它会先问你接着跑哪一趟；项目在 git 仓库里时，初始化还会问一次要不要把 `.agent-team/` 加进 `.gitignore`。
 
-验收没过时，只有选项「照现状交付」会被门禁记成照现状交付的批准，在对话里单独发一条只写这一句的消息也算；批准只对那一刻的验收结论有效。
+测试或验收没过时，只有选项「照现状交付」会被门禁记成照现状交付的批准，在对话里单独发一条只写这一句的消息也算；批准只对那一刻的测试报告或验收结论有效。
 
 返工用尽时，只有选项「再返工一轮：回到 <段>」会被门禁记成再来一轮的批准；在对话里单独发一条只写这一句的消息也算——会话问不了你时（后台会话、不带权限提示的 `-p`），这是唯一的路。
 
@@ -333,7 +333,7 @@ Each question quotes the contract and offers two to four concrete options with t
 
 Also, if you start a new run while the previous one is unfinished, it first asks which one to continue; in a git repository, setup also asks once whether to add `.agent-team/` to `.gitignore`.
 
-When acceptance did not pass, only the option 「照现状交付」 is recorded by the gates as approval to deliver as is, and a message containing just that line counts too; the approval only covers the acceptance conclusion as it was at that moment.
+When tests or acceptance did not pass, only the option 「照现状交付」 is recorded by the gates as approval to deliver as is, and a message containing just that line counts too; the approval only covers the test report or acceptance conclusion as it was at that moment.
 
 When rework runs out, only the option 「再返工一轮：回到 <stage>」 is recorded by the gates as approval for another round; a message containing just that line counts too — in a session that cannot ask you (a background session, `-p` without a permission prompt), it is the only way.
 

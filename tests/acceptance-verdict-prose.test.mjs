@@ -28,14 +28,16 @@ const AT_S7 =
   `- **S7 验收结论的第一行**：门禁推进出 \`S7\` 时读 \`07-acceptance.md\` 的第一行（${VERDICT_LINES.map((l) => `「${l}」`).join('')}之一）：` +
   `不是「结论：通过」、又没有用户经「${DELIVER_LABEL}」批准过的（第 4 节），推进被拒；第一行读不出来的，在 \`S7\` 里同段重派 \`at-acceptance\`` +
   '照格式重写（同一段里重派不计返工）。'
+// docs/66 §8：照现状交付也盖测试报告——停在 S6 时绑在测试报告上。
 const AT_DELIVER =
-  '**照现状交付是用户的决定，经规范标签批**：验收结论没过（判不通过、判不了）而这一趟要照现状交付的——环境跑不起来（`env-blocked`）、' +
-  '返工预算耗尽（`budget-exhausted`，验收结论已经写成的，那一问可以加它当第三个选项）、或者用户自己这么说——问的时候，交付那一项的标签逐字写' +
-  `「${DELIVER_LABEL}」（推荐写在问题正文或选项说明里，不写进标签）。用户选了它、或者在对话里单独发了这一句，门禁记下这条批准；它只对那一刻的` +
-  '`07-acceptance.md` 有效（验收结论再改一个字就不算了），所以在验收结论写成、你读过之后再问——`S6` 里 `env-blocked` 那一问发生在验收结论写成之前，' +
-  '门禁记不下，那一问照常问（往下走还是停），照现状交付到验收结论写成之后再问。答复照上面写进修订块（kind 照问的那一类）：门禁记着这条批准，' +
-  '它之后的第一次改契约算记这条答复，不算改需求、验证段的结论不用重出（一份验收结论只批一次、只盖一次修订；之后再往这一块里补写不算修订，' +
-  '改别处、加新块照常算）。交付文档里写明哪些没过、哪些没验证。'
+  '**照现状交付是用户的决定，经规范标签批**：测试报告判不通过、或者验收结论没过（判不通过、判不了）而这一趟要照现状交付的——项目里本来就挂着的用例、' +
+  '不稳定的用例、环境跑不起来（`env-blocked`）、返工预算耗尽（`budget-exhausted`，结论已经写成的，那一问可以加它当第三个选项）、或者用户自己这么说——' +
+  `问的时候，交付那一项的标签逐字写「${DELIVER_LABEL}」（推荐写在问题正文或选项说明里，不写进标签）。用户选了它、或者在对话里单独发了这一句，门禁记下这条` +
+  '批准：停在 `S6` 时它绑在那一刻的 `06-test.md` 上，别的时候绑在那一刻的 `07-acceptance.md` 上（那份结论再改一个字就不算了），所以在那份结论写成、' +
+  '你读过之后再问。`06-test.md` 写「结论：跑不起来」的推进出 `S6` 不用批准：`S6` 里 `env-blocked` 那一问照常问（往下走还是停），照现状交付到验收结论' +
+  '写成之后再问。答复照上面写进修订块（kind 照问的那一类）：门禁记着这条批准，它之后的第一次改契约算记这条答复（测试报告那一条只在停在 `S6` 时算），' +
+  '不算改需求、验证段的结论不用重出（一份结论只批一次、只盖一次修订；之后再往这一块里补写不算修订，改别处、加新块照常算）。交付文档里写明哪些没过、' +
+  '哪些没验证。'
 const AT_CLOSE =
   '门禁收口时读 `07-acceptance.md` 的第一行：不是「结论：通过」的，只有用户经' + `规范标签「${DELIVER_LABEL}」批准过、门禁记下了（第 4 节），收口才放行` +
   '（`S6` 那一问里答过照现状交付的，验收结论写成之后照第 4 节再问一次）。'
@@ -69,14 +71,14 @@ test('M4k：契约模板与契约格式 skill——门禁记下照现状交付�
   for (const f of ['templates/00-contract.md', 'skills/at-contract-format/SKILL.md']) assert.ok(!read(f).includes('· 照现状交付'), f)
 })
 
-test('M4k：README 两半——验收没过时只有「照现状交付」被记成批准，单独发这一句也算，只对那一刻的验收结论有效', () => {
+test('M4k：README 两半——测试或验收没过时只有「照现状交付」被记成批准，单独发这一句也算，只对那一刻的测试报告或验收结论有效（docs/66）', () => {
   const r = read('README.md')
   const half = r.indexOf('<a id="english"></a>')
-  assert.ok(has(r.slice(0, half), `验收没过时，只有选项「${DELIVER_LABEL}」会被门禁记成照现状交付的批准，在对话里单独发一条只写这一句的消息也算；批准只对那一刻的验收结论有效。`))
+  assert.ok(has(r.slice(0, half), `测试或验收没过时，只有选项「${DELIVER_LABEL}」会被门禁记成照现状交付的批准，在对话里单独发一条只写这一句的消息也算；批准只对那一刻的测试报告或验收结论有效。`))
   assert.ok(
     has(
       r.slice(half),
-      `When acceptance did not pass, only the option 「${DELIVER_LABEL}」 is recorded by the gates as approval to deliver as is, and a message containing just that line counts too; the approval only covers the acceptance conclusion as it was at that moment.`,
+      `When tests or acceptance did not pass, only the option 「${DELIVER_LABEL}」 is recorded by the gates as approval to deliver as is, and a message containing just that line counts too; the approval only covers the test report or acceptance conclusion as it was at that moment.`,
     ),
   )
 })
@@ -84,14 +86,14 @@ test('M4k：README 两半——验收没过时只有「照现状交付」被记�
 test('M4k：at-status——返工批准那一行列照现状交付的写法，并说清它绑在那一刻的验收结论上', () => {
   const s = read('commands/at-status.md')
   assert.ok(has(s, `照现状交付写「${DELIVER_LABEL}：<product>（<at>）」`))
-  assert.ok(has(s, '门禁记的是那一刻验收结论的 sha——验收结论之后改过，它就不算了，这里不判。'))
+  assert.ok(has(s, '门禁记的是那一刻那份结论的 sha（`product` 写着是测试报告还是验收结论）——那份结论之后改过，它就不算了，这里不判。'))
 })
 
 test('M4k 评审 F12：at-resume——门禁记下了照现状交付批准、验收结论之后没改过的，不用重问；README 两半目录树里批准记录的说明', () => {
   assert.ok(
     has(
       read('commands/at-resume.md'),
-      `照现状交付那一问同样：门禁记下了批准的不用重问，把「${DELIVER_LABEL}」补进 \`answer\`——批准绑着那一刻的验收结论，之后验收结论改过的，推进或收口时门禁会拒，照它的出路重问。`,
+      `照现状交付那一问同样：门禁记下了批准的不用重问，把「${DELIVER_LABEL}」补进 \`answer\`——批准绑着那一刻的那份结论（测试报告或验收结论），之后它改过的，推进或收口时门禁会拒，照它的出路重问。`,
     ),
   )
   const r = read('README.md')

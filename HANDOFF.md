@@ -34,7 +34,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （门禁留痕的判读表、Claude Code 的下限），判据对着代码与 README 核。两份都是活的，直接改。
 - `docs/11-M1b-遗留与已知边界.md` — 已知边界登记簿；`docs/16-M2b-裁定记录.md` — 裁定记录与 §3 方法论语料。
 - `CHANGELOG.md` — 每一版一行，最新的在最上面。
-- `docs/13`…`docs/65` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
+- `docs/13`…`docs/66` — 带日期的实测记录；`docs/24` §5 是 2026-09-28 那次全量审查的冻结表（之后的现状写在它前面那串「更新」里，原文在它的附录）；
   `docs/39` 是 2026-10-05 对照 v2.2.0 的逐条核验与排序，它 §5 排的六轮到 `docs/48` 做完；之后从 `docs/00-开放边界.md` 挑。
 - `tests/` — 全部判据；`.github/workflows/ci.yml` 在三个系统上跑它们，推 main / 向 main 提 PR 时再跑 `scripts/check-version-bump.mjs`；`.github/workflows/min-node.yml` 把门禁子进程换到 `MIN_NODE` 上跑全部判据，Linux 上再用真的 Node 12.17 / 12.22 确认 boot.mjs 大声拒绝。
 
@@ -193,7 +193,9 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **收口读验收结论，照现状交付由门禁记**：`07-acceptance.md` 的第一个非空行固定写「结论：通过」「结论：不通过」「结论：判不了」之一（`hooks/lib/verdict.mjs`
   的 `acceptanceVerdict`：不通过、判不了按前缀认，通过严格）；验收角色在验收那一段停下、首行读不出时 H5b 拦它（`gate.mjs` 的 `verdictStopReason`，只核格式、
   冒泡照旧，`docs/62`）；推进出验收那一段与收口时 H6 读它（`decideAcceptance`，排在 H6 最后），【阶段】在 S7 齐了时与
-  S8 的收口阻碍里用同一份 `acceptanceBlock`。没过的只有用户经规范标签「照现状交付」批准过才放行：两个记录器也认它（标签与返工批准的同在 `budget.mjs`），
+  S8 的收口阻碍里用同一份 `acceptanceBlock`。测试报告（`06-test.md`）同一个做法、窄一号：第一个非空行写「结论：通过」「结论：不通过」「结论：跑不起来」之一，
+  只在推进出测试那一段的那一次 H6 读（不通过、读不出拒，跑不起来放行），`at-qa` 停下时首行读不出 H5b 拦（`hooks/lib/test-verdict.mjs`，`docs/66`）；
+  不通过的出口也是「照现状交付」——停在测试那一段时两个记录器把批准绑在测试报告上，H6、【阶段】、契约基线的 `deliver_used` 都认它（`docs/66` §8）。没过的只有用户经规范标签「照现状交付」批准过才放行：两个记录器也认它（标签与返工批准的同在 `budget.mjs`），
   记进 `approvals.jsonl`（`kind: deliver-as-is`），按 sha 绑在那一刻的验收结论上，一份只记一次；它之后的第一次改契约不算改需求，之后只往那几块修订块里
   补写也不算（契约基线的 `deliver_used` 按 sha 记、`deliver_blocks` 记那几块的标题，一份验收结论只盖一次修订）——不靠修订块标题里的标记（漏写会绕圈、
   冒充只要一行字）。理由在 `docs/46`（§8 是设计评审与实现复核）。

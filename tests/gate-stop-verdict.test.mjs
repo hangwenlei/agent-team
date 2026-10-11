@@ -80,10 +80,10 @@ test('H5b（docs/62）：被拦过一回、最后一条回复第一行是「冒�
   })
 })
 
-test('H5b（docs/62）：只管验收角色在验收那一段——at-qa 的测试报告不核首行、at-qa 在 S7 停下不核；at-acceptance 不在验收那一段（S6、收了口停在 S8）停下不核', () => {
+test('H5b（docs/62）：验收结论那一条只管验收角色在验收那一段——at-qa 在 S6 停下不说验收结论（它自己的测试报告另有一条，docs/66）、at-qa 在 S7 停下不核；at-acceptance 不在验收那一段（S6、收了口停在 S8）停下不核', () => {
   inRun({ stage: 'S6', verdict: null, files: ['00-contract.md', '01-prd.md', '03-arch.md', '04-dispatch.md', '06-test.md'] }, (dirs) => {
     writeFileSync(join(dirs.runDir, '06-test.md'), '# 测试报告\n')
-    assert.equal(run('stop-gate', stop('agent-team:at-qa'), GATE, dirs.projectDir).status, 0)
+    assert.ok(!run('stop-gate', stop('agent-team:at-qa'), GATE, dirs.projectDir).stderr.includes('第一行读不出验收结论'))
   })
   inRun({ verdict: '# 验收报告\n' }, (dirs) => {
     const r = run('stop-gate', stop('agent-team:at-qa'), GATE, dirs.projectDir)
