@@ -162,6 +162,22 @@ test('正文（docs/66）：at-qa 写明第一行的三种写法；/agent-team:a
   assert.ok(at.includes('门禁推进出 `S6` 时读 `06-test.md` 的第一行'), 'commands/at.md')
 })
 
+// docs/67（真实会话 M16）：项目经理在派发提示里写了「那一条挂着的不算」，at-qa 照派发口径判了通过——它自己的正文写的是照样判不通过。
+// 裁定：只认用户自己的话（契约第 1 节原话、第 4 节修订记录）；派发提示、契约第 2、3 节、产品定义、架构方案都不算（与「不写测试」那一条同一个口径）。
+// at-qa 与 /agent-team:at 用同一句；at-qa 那一句紧跟在「照样判不通过」后面（挪走、改成别的口径都红）。
+const KNOWN_FAIL =
+  '只有契约第 1 节用户原话或第 4 节修订记录里用户说了不算的那几条挂着的用例，不因它们判不通过；派发提示里的判定口径、契约第 2 节与第 3 节、' +
+  '产品定义、架构方案说它们不算的，都不算数。'
+test('正文（docs/67）：挂着的用例只认用户自己的话说不算——at-qa 与 /agent-team:at 用同一句；派发提示的口径不算', () => {
+  const flat = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').split(String.fromCharCode(13)).join('').split(String.fromCharCode(10)).join('').split(' ').join('')
+  const sq = KNOWN_FAIL.split(' ').join('')
+  const qa = flat('agents/at-qa.md')
+  assert.ok(qa.includes('这一趟之前就挂着的用例照样判不通过，逐条注明是这一趟之前就挂着的——要不要带着它们往下走，由项目经理问用户。' + sq), 'agents/at-qa.md')
+  assert.ok(qa.includes(sq + '不因它们判不通过的，照样逐条注明它们挂着、用户在哪一节说的。'), 'agents/at-qa.md')
+  const at = flat('commands/at.md')
+  assert.ok(at.includes('跑不起来的放行，照第4节`env-blocked`问用户。派`at-qa`时不替用户定哪些挂着的用例不算——' + sq + '用户没说的，`at-qa`判不通过，照上面问用户照现状交付。'), 'commands/at.md')
+})
+
 // ——— 复核（docs/66 §8）：测试没过时用户的出口——照现状交付，门禁记下、按 sha 绑在测试报告上 ———
 
 const NL = '\n'
