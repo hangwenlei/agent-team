@@ -207,6 +207,17 @@ export function isVerifyStage(stage) {
   return isPlainObject(stage) && stage.verifies === true
 }
 
+// docs/72 §8：测试角色的名字（test-verdict.mjs 从这里取）与「整段裁掉测试那一段要用户的话」那半句——门禁给出「写进 trimmed」出路的几处
+// （推进出一段、一次只推一段、收口）在那一段是测试那一段时补上它。
+export const TEST_ROLE = 'at-qa'
+export const TRIM_TEST_ASK =
+  `整段裁掉测试那一段（项目没配 ${TEST_ROLE} 的也算）要用户的话：只动了文档、或者契约里用户说过这一趟不要测试之外，照 /agent-team:at 第 4 节` +
+  `先问用户（kind 写 tradeoff），问不了就照常派 ${TEST_ROLE}`
+/** 这一段是不是测试那一段（阶段链上第一个产者里有测试角色的验证段）。 */
+export function isTestStage(stages, sid) {
+  return typeof sid === 'string' && verifyStageOf(stages, TEST_ROLE) === sid
+}
+
 /** M4y（docs/60）：这个角色是哪一个验证段的产者（阶段链上第一个），不是回 null。H2 派它之前核契约的账。 */
 export function verifyStageOf(stages, role) {
   if (!isStageChain(stages)) return null

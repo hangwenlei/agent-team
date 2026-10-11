@@ -118,7 +118,7 @@ flowchart TB
 | 返工用尽 | 返工次数用完了还不通过 |
 | 环境阻塞 | 缺工具、服务或权限，构建或测试跑不起来，交不出来或验证不了 |
 
-每次提问都会引用契约原文，给出 2–4 个具体选项、各自的后果和它的推荐；你的回答会作为修订写进契约。技术选型、裁掉哪些角色、代码风格这类事，它自己决定；只是要把测试整个裁掉（验收也就跟着没了）的，除非这一次没有新行为、或者你说过不要测试，它会先问你。
+每次提问都会引用契约原文，给出 2–4 个具体选项、各自的后果和它的推荐；你的回答会作为修订写进契约。技术选型、裁掉哪些角色、代码风格这类事，它自己决定；只是要把测试整个裁掉（验收也就跟着没了）的，除非这一次只动了文档、或者你说过这一趟不要测试，它会先问你。
 
 另外，上一趟还没走完你又起了一趟新的，它会先问你接着跑哪一趟；项目在 git 仓库里时，初始化还会问一次要不要把 `.agent-team/` 加进 `.gitignore`。
 
@@ -329,7 +329,7 @@ The project manager is the only role that talks to you, and it stops to ask only
 | Rework | Rework still fails after its budget is used up |
 | Blocked | A missing tool, service or permission stops the build or tests, so the work can't be delivered or verified |
 
-Each question quotes the contract and offers two to four concrete options with their consequences and a recommendation; your answer is added to the contract as a revision. Technology choices, which roles to leave out and code style are decided without asking you — except dropping testing altogether (which drops acceptance with it): unless the run adds no new behavior or you said you do not want tests, it asks you first.
+Each question quotes the contract and offers two to four concrete options with their consequences and a recommendation; your answer is added to the contract as a revision. Technology choices, which roles to leave out and code style are decided without asking you — except dropping testing altogether (which drops acceptance with it): unless the run only touches documentation or you said this run needs no testing, it asks you first.
 
 Also, if you start a new run while the previous one is unfinished, it first asks which one to continue; in a git repository, setup also asks once whether to add `.agent-team/` to `.gitignore`.
 

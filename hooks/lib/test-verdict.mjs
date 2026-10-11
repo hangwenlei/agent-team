@@ -9,7 +9,7 @@
 //   - 只在推进出测试那一段的那一次读，不在之后的推进、收口读：之后由验收结论管，已经走过测试那一段的旧 run 不受牵连。
 //   - docs/71：验收那一段整段裁掉的，收口那一次再读一遍——不是「结论：通过」的（跑不起来也算：这一趟没有一样验证过），只有用户经「照现状交付」批准过
 //     这一份才放行（trimmedCloseBlock）。
-import { isPlainObject, isRolePatternStage, isStageChain, isVerifyStage, productsOfStage, stageRoles } from './stages.mjs'
+import { isPlainObject, isRolePatternStage, isStageChain, isVerifyStage, productsOfStage, stageRoles, TEST_ROLE } from './stages.mjs'
 import { wholeStageTrimmed } from './advance.mjs'
 import { sha256OfContract } from './contract-hash.mjs'
 import { DELIVER_LABEL } from './budget.mjs'
@@ -17,7 +17,7 @@ import { acceptanceOf } from './verdict.mjs'
 import { closedAt } from './closing.mjs'
 import { isBlankText } from './text-norm.mjs'
 
-export const TEST_ROLE = 'at-qa'
+export { TEST_ROLE }
 const TEST_WORDS = { pass: '通过', fail: '不通过', env: '跑不起来' }
 export const TEST_VERDICT_LINES = Object.values(TEST_WORDS).map((w) => `结论：${w}`)
 const LINES = TEST_VERDICT_LINES.map((l) => `「${l}」`).join('')
