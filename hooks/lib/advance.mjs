@@ -19,7 +19,7 @@
 //     一段时，这一段的 stage_roles 正是这一次写入才记上的，PM 少记、漏记一个人，写入前后取并集也接不住它。读不出来就退回只看 stage_roles。
 //   - 随参与者展开的段，stage_roles 里这一段的值不是数组，同样算没记账（原来按「一个都没叫」放行）。
 //   - 拒绝理由按参与者从哪来分开说：stage_roles 记着的、旧 run 按整趟 roster 算的、只在派发记录里有的。
-import { isPlainObject, isStageChain, stageRoles, expandProduces, productsOfStage, participantsOf, isVerifyStage } from './stages.mjs'
+import { isPlainObject, isStageChain, stageRoles, expandProduces, productsOfStage, participantsOf, isVerifyStage, isTestStage, TRIM_TEST_ASK } from './stages.mjs'
 import { isContractWriter } from './contract-guard.mjs'
 import { quote } from './trusted.mjs'
 
@@ -63,7 +63,7 @@ export function dispatchedIn(sid, dispatched) {
 
 const trimmedAt = (state, role, sid) => isPlainObject(state?.trimmed) && Object.hasOwn(state.trimmed, role) && state.trimmed[role] === sid
 
-// 整段裁掉：这一段的产者都在 trimmed 里、记的就是这一段（PM 照「班底裁剪自决」裁掉了它们），这一趟在这一段一个都没叫过（calledIn，
+// 整段裁掉：这一段的产者都在 trimmed 里、记的就是这一段（PM 裁掉了它们——测试那一段要用户的话，/agent-team:at 第 4 节），这一趟在这一段一个都没叫过（calledIn，
 // 写入前后取并集），而且没有一个是 PM——PM 不裁自己的段。推进（departureNeeds）与收口（closing.mjs 的 trimmedAway）共用这一份：
 // 「整段裁掉」此前在两处各写一份，收口那一份没有「PM 不裁自己」这一条（收口的前置不是 PM 的产物，所以两份当时行为相同）。
 export function wholeStageTrimmed(stages, sid, state, prior, dispatched = null) {
@@ -133,7 +133,8 @@ export function decideSingleStep({ before, after, stages }) {
       `一次只推进一段：这次写入从 ${quote(before.stage)} 推进到 ${quote(after.stage)}，跨过了 ${skipped.join('、')}。先只推进到 ` +
       `${ids[from + 1]}（离开 ${ids[from]} 的账同一次记掉），之后每一段推进各一次 Write（/agent-team:at 第 3 节）——每一次推进，` +
       '门禁都核离开的那一段交齐了没有。跨过去的段要是确实不做，走到它、推进出它的那一次把它的产者写进 trimmed——后面要它的产物当前置的段' +
-      '（例：S7 的验收要 S6 的测试报告），跟着也派不出人，只能一起整段裁掉，交付文档里写明少了哪几段。',
+      '（例：S7 的验收要 S6 的测试报告），跟着也派不出人，只能一起整段裁掉，交付文档里写明少了哪几段。' +
+      (skipped.some((sid) => isTestStage(stages, sid)) ? `${TRIM_TEST_ASK}。` : ''),
   }
 }
 
@@ -191,7 +192,8 @@ export function departureLines(stages, blockers, unrecorded) {
       const later = [...new Set(g.items.flatMap((b) => requiredBy(stages, b.name)))]
       lines.push(
         `  - ${items}：${g.sid} 这一趟还没叫过 ${g.role}——派它；这一趟不叫它（项目不用它，或者你裁掉了它）：同一次 Write 把 ` +
-          `{"${g.role}": "${g.sid}"} 写进 trimmed，整段裁掉${later.length ? `（${later.join('、')} 要它当前置：整段裁掉它，那几段要派的人就派不出去，只能跟着整段裁掉，交付文档里写明少了哪几段）` : ''}。`,
+          `{"${g.role}": "${g.sid}"} 写进 trimmed，整段裁掉${later.length ? `（${later.join('、')} 要它当前置：整段裁掉它，那几段要派的人就派不出去，只能跟着整段裁掉，交付文档里写明少了哪几段）` : ''}` +
+          `${isTestStage(stages, g.sid) ? `；${TRIM_TEST_ASK}` : ''}。`,
       )
     }
   }

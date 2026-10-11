@@ -18,7 +18,7 @@
 //
 // ⚠️ 收口是一道单向门：判不了（阶段链读不出来、产物在却读不出来）就不放。冻结之后要改，只有另起一趟——或者 Bash（登记为边界）。
 // ⚠️ 「还旧」与 decideAdvance（rework-guard.mjs）同一个口径：写入后 rework_base 里那一条是 sha、磁盘内容的 sha 与它相同。
-import { isPlainObject, isStageChain, expandProduces, stageRoles, stageRolesInRun, participantsOf, productsOfStage, mayAcceptProduct } from './stages.mjs'
+import { isPlainObject, isStageChain, expandProduces, stageRoles, stageRolesInRun, participantsOf, productsOfStage, mayAcceptProduct, isTestStage, TRIM_TEST_ASK } from './stages.mjs'
 import { SHA_RE } from './contract-hash.mjs'
 import { isValidRoster } from './decide.mjs'
 import { inline, quote } from './trusted.mjs'
@@ -55,7 +55,7 @@ function stageIdOf(stages, name) {
 // 「这一趟在 sid 那一段叫到过的产者」（calledIn）在 advance.mjs：participantsOf（有 stage_roles 看那一段，旧 run 看整趟 roster），复核二（G2）：
 // prior（写入前那一份）读得出时取并集——收口那一次挪走 stage_roles 里的人、或者旧 run 新加 stage_roles，都翻不成「没叫过」。
 
-// 前置由整段裁掉的段产出：那一段的产者都在 trimmed 里、记的就是那一段（PM 照「班底裁剪自决」裁掉了 S6、S7 的人），而且这一趟在那一段
+// 前置由整段裁掉的段产出：那一段的产者都在 trimmed 里、记的就是那一段（PM 裁掉了 S6、S7 的人——测试那一段要用户的话，/agent-team:at 第 4 节），而且这一趟在那一段
 // 一个都没叫过。复核（A-2）：原来只看 trimmed——叫过却没交的 at-qa，收口那一次补写 trimmed 就把一份没交的测试报告豁免了。
 // M4d：判定本身挪进 advance.mjs 的 wholeStageTrimmed（推进判据共用）。
 // M4d 复核：dispatched（门禁派发记录里每一段派出去过的角色）一并算进「叫过」——派出去过的人所在的段，补写 trimmed 也不算整段裁掉。
@@ -105,7 +105,8 @@ export function blockerLine(stages, b, state, prior, dispatched = null) {
     }
     const trim = b.require && sid
       ? `；这一趟本来就不叫 ${who}（项目不用它，或者你裁掉了它）：把这个决定补记进 trimmed` +
-        `（${roles.map((r) => `"${r}": "${sid}"`).join('、')}），这条前置就不要求`
+        `（${roles.map((r) => `"${r}": "${sid}"`).join('、')}），这条前置就不要求` +
+        (isTestStage(stages, sid) ? `（${TRIM_TEST_ASK}）` : '')
       : ''
     // 复核二（PF-3）：没有 stage_roles 的旧 run 只并进 roster（/at 第 3 节：旧 run 不要加 stage_roles）。
     const book = isPlainObject(state?.stage_roles) ? `并进 roster 与 stage_roles 的 ${sid}` : '并进 roster'
