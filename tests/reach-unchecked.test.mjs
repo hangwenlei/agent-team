@@ -6,8 +6,8 @@ import assert from 'node:assert/strict'
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { run, GATE, decisionOf, hermeticEnv } from './helpers/gate-runner.mjs'
+import { run, GATE, decisionOf } from './helpers/gate-runner.mjs'
+import { failRead } from './helpers/fail-read.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { computeReach } from '../hooks/lib/reach.mjs'
 
@@ -21,7 +21,7 @@ const NOT_MATCHED = '没收到核对结果不等于对上了'
 
 // 写 reach.json（落盘之后的账本）。run：有没有一趟 run；project：project.json 的内容（null 是不在）；reach：reach.json 的原文（DIR 是建成目录）。
 const DIR = Symbol('dir')
-// failProjectReads：门禁子进程读 project.json 时失败几次（预加载 tests/fixtures/fail-project-read.cjs；Infinity 是一直失败，null 是不加载）。
+// failProjectReads：门禁子进程读 project.json 时失败几次（tests/helpers/fail-read.mjs；Infinity 是一直失败，null 是不加载）。
 function write({ run: withRun = true, project = TEMPLATE, reach = GOOD, writer = 'agent-team:at-pm', roster = null, failProjectReads = null } = {}) {
   let projectDir, cleanup
   if (withRun) {
@@ -51,9 +51,8 @@ function write({ run: withRun = true, project = TEMPLATE, reach = GOOD, writer =
     if (reach === DIR) mkdirSync(target)
     else writeFileSync(target, reach)
     if (failProjectReads === null) return ctxOf(run('ledger', posted(target, writer), gate, projectDir))
-    const preload = new URL('./fixtures/fail-project-read.cjs', import.meta.url)
-    const env = { ...hermeticEnv(), ...(Number.isFinite(failProjectReads) ? { AGENT_TEAM_TEST_PROJECT_READ_FAILS: String(failProjectReads) } : {}) }
-    return ctxOf(run('ledger', posted(target, writer), gate, projectDir, env, { nodeArgs: ['-r', fileURLToPath(preload)] }))
+    const { env, opts } = failRead('project.json', failProjectReads)
+    return ctxOf(run('ledger', posted(target, writer), gate, projectDir, env, opts))
   } finally {
     cleanup()
     if (plugin) rmSync(plugin, { recursive: true, force: true })

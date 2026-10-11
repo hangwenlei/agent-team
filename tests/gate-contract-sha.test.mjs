@@ -11,9 +11,10 @@
 // 回传不报磁盘上算出来的 sha，也不说「把 artifacts 改成与磁盘一致」：照着磁盘去改账，就把一次漂移洗成了合法。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmodSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { run, GATE } from './helpers/gate-runner.mjs'
+import { failRead } from './helpers/fail-read.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 
@@ -229,20 +230,14 @@ test('M4c G12：contract_sha 不合法 → 【契约】说它不合法、给 PEN
 })
 
 // 复核（docs/37 §3）：契约在、只是这一次读不出（例：被别的程序占着）——说「这次读不出、没核」，不说「需求基线不在了、告诉用户」。
-// Windows 上造不出「在、却读不出」的文件（锁要另一个进程持着），只在 POSIX 上用权限造。
-test('M4c G13：契约在却读不出 → 【契约】说这一次读不出、没核，不说它不在', { skip: process.platform === 'win32' }, () => {
-  withRun({ state: { contract_sha: H0 } }, ({ dirs, runDir }) => {
-    const p = join(runDir, '00-contract.md')
-    chmodSync(p, 0o000)
-    try {
-      const ctx = ctxOf(h5a(dirs).stdout)
-      if (process.getuid && process.getuid() === 0) return // root 无视权限位
-      assert.match(ctx, /【契约】/)
-      assert.ok(ctx.includes('读不出'), ctx)
-      assert.ok(!ctx.includes('磁盘上没有 00-contract.md'), ctx)
-    } finally {
-      chmodSync(p, 0o644)
-    }
+// docs/84：原来只在 POSIX 上用权限位造（Windows 上造不出「在、却读不出」的文件）；现在用预加载脚本让读它时抛 EBUSY，三个系统都跑。
+test('M4c G13：契约在却读不出 → 【契约】说这一次读不出、没核，不说它不在', () => {
+  withRun({ state: { contract_sha: H0 } }, ({ dirs }) => {
+    const { env, opts } = failRead('00-contract.md')
+    const ctx = ctxOf(run('deliverable', returned('agent-team:at-product'), GATE, dirs.projectDir, env, opts).stdout)
+    assert.match(ctx, /【契约】/)
+    assert.ok(ctx.includes('读不出'), ctx)
+    assert.ok(!ctx.includes('磁盘上没有 00-contract.md'), ctx)
   })
 })
 
