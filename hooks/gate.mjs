@@ -67,7 +67,7 @@ import { ACCEPTANCE_ROLE, acceptanceBlock, acceptanceOf, acceptanceVerdict, deci
 import { deliveredSnapshot, readSnapshot, makeDelivered, decideRedispatch, decideRedoWrite } from './lib/redo.mjs'
 import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispatch } from './lib/closing.mjs'
 import { computeReach } from './lib/reach.mjs'
-import { validateState, isStageDone } from './lib/state.mjs'
+import { validateState, isStageDone, duplicateKeyLines } from './lib/state.mjs'
 import { CONTRACT_FILE, compareContractSha, sha256OfContract, shaOrNote } from './lib/contract-hash.mjs'
 import { buildLedgerNotices, brokenProjectNotice, contractCheckNotice, reachCheckNotice, IMPL_RECORD_NOTE } from './lib/ledger.mjs'
 import { validateProject } from './lib/project.mjs'
@@ -2513,7 +2513,17 @@ function main() {
     const approvalsBytes = ctx.artifactBytes(APPROVALS_FILE)
     const grants = readGrants(approvalsBytes ? approvalsBytes.toString('utf8') : null, ctx.stages)
     const validation = kind === 'state' ? validateState(ctx.state, { stages: ctx.stages, grants }) : null
-    const stateProblems = validation ? validation.problems : []
+    // docs/74：state.json 原文里重复的键（JSON.parse 只认最后一个）——并进【state.json】那几条，只报不拦。
+    const dupLines = (() => {
+      if (kind !== 'state') return []
+      try {
+        const raw = ctx.artifactBytes('state.json')
+        return raw ? duplicateKeyLines(raw.toString('utf8')) : []
+      } catch {
+        return []
+      }
+    })()
+    const stateProblems = validation ? [...validation.problems, ...dupLines] : []
 
     // M3z：交付快照。PM 写 state.json、而 stage 变了之后照磁盘拍：早于当前段的各段产物记 sha（hooks/lib/redo.mjs 的 deliveredSnapshot）。
     // H2、H3 拿它分辨「交过」——不依赖 PM 把 sha 记进 artifacts（那条回传只发给写者，第 28 条）。写不进、读不出都只是少拦，

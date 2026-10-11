@@ -61,6 +61,69 @@ function editDistance(a, b) {
   return prev[b.length]
 }
 
+// docs/74（docs/55 §4「JSON 里重复的键」）：原文里同一个对象写了不止一次的键，[{ path, key }]（path 是外层各级键名；同一个键只报一次）。JSON.parse 只认
+// 最后一个、解析之后分不出来，所以扫原文：跟踪字符串（含转义）、对象与数组的嵌套，对象里冒号之前的那个字符串是键。不是对象、读不完整的给已扫出的部分。
+export function duplicateKeys(text) {
+  if (typeof text !== 'string') return []
+  const out = []
+  const stack = []
+  let i = 0
+  const readString = () => {
+    let s = ''
+    i++
+    while (i < text.length) {
+      const c = text[i]
+      if (c === '\\') {
+        const n = text[i + 1]
+        s += n === 'n' ? '\n' : n === 't' ? '\t' : n === 'u' ? String.fromCharCode(parseInt(text.slice(i + 2, i + 6), 16) || 0) : n ?? ''
+        i += n === 'u' ? 6 : 2
+        continue
+      }
+      if (c === '"') {
+        i++
+        return s
+      }
+      s += c
+      i++
+    }
+    return s
+  }
+  while (i < text.length) {
+    const c = text[i]
+    const top = stack[stack.length - 1]
+    if (c === '"') {
+      const s = readString()
+      if (top && top.obj && top.expectKey) {
+        if (top.keys.has(s)) {
+          if (!top.reported.has(s)) {
+            top.reported.add(s)
+            out.push({ path: top.path, key: s })
+          }
+        } else top.keys.add(s)
+        top.lastKey = s
+        top.expectKey = false
+      }
+      continue
+    }
+    if (c === '{' || c === '[') {
+      const path = top ? (top.obj ? [...top.path, top.lastKey] : top.path) : []
+      stack.push({ obj: c === '{', expectKey: c === '{', keys: new Set(), reported: new Set(), path, lastKey: null })
+    } else if (c === '}' || c === ']') stack.pop()
+    else if (c === ',' && top && top.obj) top.expectKey = true
+    i++
+  }
+  return out
+}
+
+/** 账本那一行：重复的键各报一条（键名与外层路径都是磁盘上的值，quote 引）。 */
+export function duplicateKeyLines(text) {
+  return duplicateKeys(text).map(
+    ({ path, key }) =>
+      `键 ${quote(key)} 写了不止一次${path.length ? `（在 ${path.map((k) => quote(k)).join(' → ')} 里）` : ''}：JSON 只认最后一个，前面写的等于没写——` +
+      '留下要的那一个、删掉别的',
+  )
+}
+
 // 认不出的键像哪个已知键：去掉下划线、连字符与空白，折成小写之后相同或只差一两步的那一个（取最近的）；都不像回 null，不瞎猜。
 function lookalikeKey(key) {
   const squash = (s) => s.toLowerCase().replace(/[_\-\s]/g, '')
