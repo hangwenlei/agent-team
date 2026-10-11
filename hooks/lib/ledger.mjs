@@ -165,14 +165,16 @@ export function reachStaleNotice({ text, expected }) {
  *   一条回传上。兜底（删掉重建）按 project.json 的写入次数计：run 进行中时 PM 写 state.json 已经收到过一次同样的句子，
  *   只说「第二次写完仍收到」会被数成第二次，第一次写完就删文件（合并前复测 8 次里 1 次）。
  */
-export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 = false }) {
+// reach：写的是 reach.json（它前面接着【触达表】这一次没有核那一段）——有 run 时也给没有 run 那一句出路：改好 project.json 就会收到报告与【触达表】，
+// 照它重写；「原样重写一次刚才那个文件拿回传」「哈希回传不了」对 reach.json 都不对（docs/87 §8）。
+export function brokenProjectNotice({ runInProgress, justWritten = true, utf16 = false, reach = false }) {
   const why = utf16 ? '（文件是 UTF-16 编码，门禁只读 UTF-8）' : '（常见原因：注释、尾逗号、文件不是 UTF-8 编码）'
   const how = justWritten
     ? utf16 && runInProgress
       ? '只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json；收到触达表之后，这之前写过、没拿到回传的 ' +
         'state.json、契约或产物各原样重写一次，再继续；不是的话回报上级，不要自己写。'
       : '只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json，再继续；不是的话回报上级，不要自己写。'
-    : runInProgress
+    : runInProgress && !reach
       ? '契约与产物的哈希这时也回传不了。只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json，' +
         '再原样重写一次刚才那个文件拿回传；不是的话回报上级，不要自己写。'
       : '只有 PM 该改它：你是 PM 就用 Write 写回一份合法的完整 project.json——改好就会收到报告与【触达表】那一段，再继续；' +
