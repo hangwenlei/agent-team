@@ -16,6 +16,7 @@ import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { reworkFromHistory } from '../hooks/lib/state.mjs'
 import { USER_WORDS_FILE } from '../hooks/lib/user-words.mjs'
+import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 
 const NL = String.fromCharCode(10)
 const NBSP = String.fromCharCode(0xa0)
@@ -98,7 +99,10 @@ function advance(runDir, to, sid = 's-1') {
   const now = JSON.parse(readFileSync(join(runDir, 'state.json'), 'utf8'))
   const ids = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8']
   const next = H(...ids.slice(0, ids.indexOf(to) + 1))
-  return stateWrite(runDir, { ...now, stage: to, history: next, rework: reworkFromHistory(next) }, sid)
+  // docs/63：推进出第一段那一次 H6 要 contract_sha 与磁盘上的契约对得上——照项目经理的做法记上门禁按契约算的值。
+  const contract = join(runDir, '00-contract.md')
+  const contract_sha = existsSync(contract) ? sha256OfContract(readFileSync(contract)) : now.contract_sha
+  return stateWrite(runDir, { ...now, stage: to, history: next, rework: reworkFromHistory(next), contract_sha }, sid)
 }
 
 test('记录器：/agent-team:at 展开时把参数、会话 id、那一刻 runs/ 下已有的 run 记进 .agent-team/user-words.json；stdout 一个字都不写；再来一次就换成新的', () => {
