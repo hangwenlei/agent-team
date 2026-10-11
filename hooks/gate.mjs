@@ -44,7 +44,7 @@ import {
 } from './lib/completion.mjs'
 import { mayWaive, dispatchedIn, wholeStageTrimmed, trimmedAt } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
-import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
+import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
 import {
   CONTRACT_BASE_FILE,
   DRIFT_FIX,
@@ -2188,16 +2188,12 @@ function main() {
       if (!r.ok) denyAndExit(r.reason + (r.budget ? approvalDiagnostic(filePath) : ''), spec.event)
 
       // docs/78：新 run 的 stage_roles——建 run 的那一次要带着它（值是对象），写入之前是对象的不许去掉、改成别的（hooks/lib/rework-guard.mjs 的
-      // decideStageRolesKey）。复核（docs/78 §8）：认「建 run」比 settleWords 多一条——写之前读不到 state.json，而且这一趟的目录还不在、或者是空的：
-      // state.json 丢了、目录里还有别的文件时照着重建不是建 run（旧 run 不被逼着加键）；文件被别的进程锁住读不到时目录也不空。
-      const runDirFresh = (() => {
-        try {
-          return readdirSync(dirname(filePath)).length === 0
-        } catch (err) {
-          return err?.code === 'ENOENT'
-        }
-      })()
-      const sk = decideStageRolesKey({ before, after, creating: before === null && beforeText === null && runDirFresh })
+      // decideStageRolesKey）。复核（docs/78 §8）两轮：认「建 run」比 settleWords 多一条——写之前读不到 state.json，而且这一趟的目录里没有一份门禁在
+      // state.json 落盘之后才写的文件（GATE_FILES：派发记录、批准记录、契约基线、交付快照、原话记录）。跑过一阵的一趟丢了 state.json、照着重建不算建 run；
+      // 目录里只有契约（先写了契约再建 run——门禁的回传会把人引到这条路上）、系统杂文件、空子目录的照样算。看不清（existsSync 出错答 false）算建 run——
+      // 严的一侧。第一轮复核改成「目录不在或为空」，第二轮复核实测它漏了先写契约那条路，改成现在这样。
+      const runSeen = GATE_FILES.map((p) => p.split('/').pop()).some((n) => existsSync(join(dirname(filePath), n)))
+      const sk = decideStageRolesKey({ before, after, creating: before === null && beforeText === null && !runSeen })
       if (!sk.ok) denyAndExit(sk.reason, spec.event)
 
       // M3y（docs/33，全量审查第 15 条）：rework_base——回退那一次写入照磁盘记下各份产物的 sha，之后原样带着，推进离开一段时

@@ -1,7 +1,8 @@
-// docs/78（docs/32 §4「新 run 漏写 stage_roles 时静默退回整趟口径」）：按段判的门禁（【阶段】、推进、产者交代……）认 state.json 有没有 stage_roles 这个键——
-// 没有就当旧 run、按整趟 roster 判。新 run 漏写它，门禁一声不吭地退回旧口径（validateState 对缺失不报：旧 run 本来就没有）。拿 closed_at、rework_base
-// 在不在认新旧不准：旧 run 在新插件下续跑，回退会写进 rework_base、收口会写进 closed_at。门禁看得准的是两个时刻：建 run 的那一次（写之前 state.json
-// 不在，这一次是照现行模板写的）不带 stage_roles，H6 拒；写入之前有 stage_roles、这次写入把它去掉了，H6 也拒。旧 run 从来没有这个键，两条都碰不到它。
+// docs/78（docs/32 §4「新 run 漏写 stage_roles 时静默退回整趟口径」）：按段判的门禁（【阶段】、推进、产者交代……）认 state.json 的 stage_roles——不是对象
+// （没有这个键、null、数组……）就当旧 run、按整趟 roster 判。新 run 漏写它，门禁一声不吭地退回旧口径（validateState 对缺失不报：旧 run 本来就没有）。拿
+// closed_at、rework_base 在不在认新旧不准：旧 run 在新插件下续跑，回退会写进 rework_base、收口会写进 closed_at。门禁看得准的是两个时刻：建 run 的那一次
+// （写之前 state.json 读不到、这一趟的目录里还没有门禁在 state.json 落盘之后才写的文件）stage_roles 不是对象，H6 拒；写入之前它是对象、这次写入不是了，
+// H6 也拒。没有这个键的旧 run 两条都碰不到（半路加上的除外，docs/78 §4）。认值、认「建 run」的写法是两轮复核之后定的（docs/78 §8）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -10,6 +11,11 @@ import { decideStageRolesKey } from '../hooks/lib/rework-guard.mjs'
 import { run, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { USER_WORDS_FILE } from '../hooks/lib/user-words.mjs'
+import { dispatchLine } from '../hooks/lib/completion.mjs'
+import { GATE_FILES } from '../hooks/lib/control-files.mjs'
+import { runContextFix } from '../hooks/lib/fail-open.mjs'
+
+const FIX_STATE = runContextFix('state')
 
 const NEW = { run_id: '20261011-1500-demo', stage: 'S1', contract_sha: 'PENDING', roster: [], stage_roles: {}, trimmed: {}, artifacts: {}, rework: {}, rework_base: {}, never_invoked: [], escalations: [], closed_at: null, history: [{ stage: 'S1', at: '2026-10-11T15:00:00Z' }] }
 const without = (o, k) => Object.fromEntries(Object.entries(o).filter(([key]) => key !== k))
@@ -126,21 +132,57 @@ test('H6（docs/78 §8）：/agent-team:at 之后建 run 不带 stage_roles 被�
 })
 
 // 复核（docs/78 §8，低 4）：认「建 run」要这一趟的目录还不在、或者是空的——state.json 丢了、目录里还有别的文件时照着重建，不是建 run（旧 run 重建不被逼着加键）。
-test('H6（docs/78 §8）：run 目录里还有别的文件、state.json 丢了——不带 stage_roles 的重建照常放行', () => {
-  const dirs = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['00-contract.md'], roster: [] })
-  try {
-    const statePath = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
-    const now = JSON.parse(readFileSync(statePath, 'utf8'))
-    rmSync(statePath)
-    const d = decisionOf(run('rework', write(statePath, now), GATE, dirs.projectDir))
-    assert.notEqual(d.permissionDecision, 'deny', JSON.stringify(d))
-  } finally {
-    rmSync(dirs.projectDir, { recursive: true, force: true })
-    rmSync(dirs.pluginDir, { recursive: true, force: true })
+// 第二轮复核（docs/78 §8）：跑过一阵的一趟——目录里有一份门禁在 state.json 落盘之后才写的文件（逐份各试一次：派发记录、批准记录、契约基线、交付快照、
+// 原话记录）——state.json 丢了照着重建，不算建 run。
+test('H6（docs/78 §8）：跑过一阵的一趟（目录里有任何一份门禁专属文件）state.json 丢了——不带 stage_roles 的重建照常放行', () => {
+  for (const name of GATE_FILES.map((p) => p.split('/').pop())) {
+    const dirs = makeRun({ runId: 'r1', stage: 'S2', artifacts: ['00-contract.md'], roster: [] })
+    try {
+      const statePath = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+      writeFileSync(join(statePath, '..', name), name === 'dispatches.jsonl' ? dispatchLine({ at: '2026-10-11T10:00:00.000Z', agentId: 'a0000000000000b01', toolUseId: null, role: 'at-product', stage: 'S2', caller: '__main__', callerId: null, mode: 'background' }) + '\n' : '{}')
+      const now = JSON.parse(readFileSync(statePath, 'utf8'))
+      rmSync(statePath)
+      const d = decisionOf(run('rework', write(statePath, now), GATE, dirs.projectDir))
+      assert.notEqual(d.permissionDecision, 'deny', name + '：' + JSON.stringify(d))
+    } finally {
+      rmSync(dirs.projectDir, { recursive: true, force: true })
+      rmSync(dirs.pluginDir, { recursive: true, force: true })
+    }
   }
 })
 
-// 写入之前的 state.json 在、却读不出来（修复路，H6 对它放行任何合法对象）：不算建 run——认「建 run」要写之前文件不在。
+// 第二轮复核（docs/78 §8，中 1、中 2、低 2）：建 run 的几种走法都核——先建空目录再写（/agent-team:at 第 1 节的正路）、先写了契约再建 run（门禁的回传会把人
+// 引到这条路上）、目录里多了系统杂文件或空子目录、第二趟（runs/ 下已经有别的一趟）。
+test('H6（docs/78 §8）：先建空目录、先写了契约、目录里有系统杂文件或空子目录、第二趟——建 run 不带 stage_roles 都拒，带了放行', () => {
+  const cases = {
+    空目录: () => {},
+    先写了契约: (dir) => writeFileSync(join(dir, '00-contract.md'), '# 契约\n'),
+    系统杂文件: (dir) => {
+      writeFileSync(join(dir, '.DS_Store'), 'x')
+      writeFileSync(join(dir, 'desktop.ini'), 'x')
+      mkdirSync(join(dir, '05-impl'))
+    },
+  }
+  for (const [name, prep] of Object.entries(cases)) {
+    // 第二趟：runs/ 下留着 makeRun 建的 r1（一趟完整的 run），新的一趟另起一个目录。
+    const dirs = makeRun({ runId: 'r1', stage: 'S5', artifacts: ['00-contract.md'], roster: [] })
+    try {
+      const dir = join(dirs.projectDir, '.agent-team', 'runs', '20261011-1500-demo')
+      mkdirSync(dir)
+      prep(dir)
+      const statePath = join(dir, 'state.json')
+      const no = decisionOf(run('rework', write(statePath, without(NEW, 'stage_roles')), GATE, dirs.projectDir))
+      assert.equal(no.permissionDecision, 'deny', name + '：' + JSON.stringify(no))
+      const yes = decisionOf(run('rework', write(statePath, NEW), GATE, dirs.projectDir))
+      assert.notEqual(yes.permissionDecision, 'deny', name + '：' + JSON.stringify(yes))
+    } finally {
+      rmSync(dirs.projectDir, { recursive: true, force: true })
+      rmSync(dirs.pluginDir, { recursive: true, force: true })
+    }
+  }
+})
+
+// 写入之前的 state.json 在、却读不出来（修复路，H6 对它放行任何合法对象）：不算建 run——认「建 run」要写之前文件读不到。
 test('H6（docs/78）：写入之前的 state.json 在、却不是合法 JSON——不当成建 run，不带 stage_roles 的修复写入照常放行', () => {
   const dirs = makeRun({ runId: 'r1', stage: 'S2', roster: [], stage_roles: {} })
   try {
@@ -158,8 +200,10 @@ test('H6（docs/78）：写入之前的 state.json 在、却不是合法 JSON—
 test('正文（docs/78）：/agent-team:at 第 1 节说清建 run 那一次少了 stage_roles 会被拒，之后每次写都要带着它', () => {
   const at = readFileSync(new URL('../commands/at.md', import.meta.url), 'utf8')
   const s1 = at.slice(at.indexOf('## 1. 建 run'), at.indexOf('## 2. '))
-  assert.ok(s1.includes('建 run 那一次少了 `stage_roles`，门禁拒这次写入'), s1)
-  assert.ok(s1.includes('之后每次写 `state.json` 都带着它'), s1)
+  assert.ok(s1.includes('建 run 那一次少了 `stage_roles`（或者值不是对象），门禁拒这次写入'), s1)
+  assert.ok(s1.includes('之后每次写 `state.json` 都带着它、值是对象'), s1)
   // 例外名单那一句照旧（账本的校验对四个都向后兼容，tests/templates.test.mjs 钉着），stage_roles 的那一道写在它后面。
   assert.ok(s1.indexOf('建 run 那一次少了 `stage_roles`') > s1.indexOf('这四个少了账本**不会**报'), s1)
+  // 第二轮复核（docs/78 §8，低 3）：state.json 读不出来时门禁给的修法——原文里认得出的 stage_roles 照原样保留，原文里没有它的旧 run 不要加。
+  assert.ok(FIX_STATE.includes('stage_roles') && FIX_STATE.includes('原文里没有 stage_roles 的旧 run 不要加'), FIX_STATE)
 })

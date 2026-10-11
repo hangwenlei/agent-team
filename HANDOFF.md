@@ -81,7 +81,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   按段拆开、同一个「叫到」口径，PM 在推进出那一段的同一次 Write 里记；`isStageDone` 的每一处调用、产者交代、at-qa/at-status/at-resume
   经 `hooks/lib/stages.mjs` 的 `participantsOf` 取（有字段、没这一段的键 = 还没记账 = 空集；没有字段的旧 run 退回 `roster`）。
   `compareArtifacts` 与 `decideReadiness` 仍传整趟 `roster`：当前段记账之前按段取是空集，前者漏报漂移、后者提前放行。理由在 `docs/32`。
-  新的一趟漏写 `stage_roles` 会被当成旧 run：H6 在建 run 那一次（写之前 `state.json` 不在、目录不在或是空的）它不是对象、写入之前是对象这次却不是了时拒
+  新的一趟漏写 `stage_roles` 会被当成旧 run：H6 在建 run 那一次（写之前 `state.json` 读不到、目录里还没有门禁专属文件）它不是对象、写入之前是对象这次却不是了时拒
   （`rework-guard.mjs` 的 `decideStageRolesKey`，排在原话绑定之前，`docs/78`）；从 `state.json` 本身分不出新旧，所以 `validateState` 对缺失照旧不报。
   `state.json` 里认不出的键（拼错的 `stage_roles`、`trimmed` 之类门禁不读）由 `validateState` 报、点出像的那一个，只报不拦；已知键的单一真源是
   `hooks/lib/state.mjs` 的 `STATE_KEYS`，与模板逐项相同（`docs/55`）。
