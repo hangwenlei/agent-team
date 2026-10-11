@@ -162,6 +162,76 @@ test('正文（docs/66）：at-qa 写明第一行的三种写法；/agent-team:a
   assert.ok(at.includes('门禁推进出 `S6` 时读 `06-test.md` 的第一行'), 'commands/at.md')
 })
 
+// docs/67（真实会话 M16）：项目经理在派发提示里写了「那一条挂着的不算」，at-qa 照派发口径判了通过——它自己的正文写的是照样判不通过。
+// 裁定：只认用户自己的话（契约第 1 节原话、第 4 节修订块里用户的原话或裁决）；派发提示、契约第 2、3 节、产品定义、架构方案、「对契约的影响」、
+// 照现状交付的答复都不算（与「不写测试」那一条同一个口径）。at-qa 与 /agent-team:at 用同一句。
+// 复核（docs/67 §8）：只钉「包含」时，在承重句后面另起一句放宽、改同一段里的同义说法（「新增的用例都跑了」）全套不红——at-qa 那一段、
+// /agent-team:at 的 S6 那一条改成整段相等（空白不计）；再加反向判据：「判定口径」只许出现在那一段（那一条）里，「挂着」只许出现在那一段、
+// S6 那一条与第 4 节照现状交付那一段里（在别处补一句「派发提示里说哪些挂着的不算就照它判」也红）。契约的模板与格式写明不写进第 2、3 节。
+const KNOWN_FAIL =
+  '只有契约第 1 节用户原话或第 4 节修订记录里用户说了不算的那几条挂着的用例，不因它们判不通过；派发提示里的判定口径、契约第 2 节与第 3 节、' +
+  '产品定义、架构方案说它们不算的，都不算数。第 4 节只认修订块里用户的原话或裁决——「对契约的影响」是项目经理写的，不算；用户答复「照现状交付」的' +
+  '那几块也不算，那条批准只管批准那一刻的那份结论。'
+const QA_VERDICT_PARA =
+  '**`06-test.md` 的第一行写总的结论，逐字是这三句之一：「结论：通过」「结论：不通过」「结论：跑不起来」。** 有用例没过、新行为缺测试的就是不通过' +
+  '（缺测试写「结论：不通过：缺测试」）；实现自己编译不过、缺依赖、一起就崩的也是不通过；只有环境的原因（缺工具、服务或权限）跑不起来的才是跑不起来；' +
+  '都跑了、都过了才是通过。这一趟之前就挂着的用例照样判不通过，逐条注明是这一趟之前就挂着的——要不要带着它们往下走，由项目经理问用户。' +
+  KNOWN_FAIL +
+  '不因它们判不通过的，照样逐条注明它们挂着、引用户那一句；除了它们都跑了、都过了，第一行写「结论：通过」。' +
+  '第一行之前不写标题；不通过、跑不起来后面可以接冒号写原因，' +
+  '通过这一行不夹别的话。门禁推进出 `S6` 时读这一行：不通过的、读不出来的，推进会被拒；读不出来的，你停下时门禁就拦回来，叫你把这一行改好再停。'
+const AT_S6_BULLET =
+  '- **S6 测试报告的第一行**：门禁推进出 `S6` 时读 `06-test.md` 的第一行（「结论：通过」「结论：不通过」「结论：跑不起来」之一）：不通过的推进被拒，' +
+  '照下面「回退」回到 S5（根因在更早一段的回到那一段）；没过的那几条不修、要带着它们往下走的（项目里本来就挂着的用例、不稳定的用例、返工预算耗尽），' +
+  '那是用户的决定——照第 4 节问用户，标签逐字写「照现状交付」，门禁记下这条批准（只对那一刻的测试报告有效）之后放行；第一行读不出来的，在 `S6` 里同段重派 ' +
+  '`at-qa` 照格式重写（同一段里重派不计返工）；跑不起来的放行，照第 4 节 `env-blocked` 问用户。' +
+  '派 `at-qa` 时不替用户定哪些挂着的用例不算——' +
+  KNOWN_FAIL +
+  '用户没说的，`at-qa` 判不通过，照上面问用户照现状交付。'
+const KNOWN_CONTRACT = '「哪些挂着的用例不算」不写在第 2、3 节：由用户定（第 1 节原话或第 4 节修订记录），写在这里也不算数'
+const textOf = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').split(String.fromCharCode(13)).join('')
+const noWs = (s) => s.replace(/\s+/g, '')
+// 从 start 开始到 end 判定的边界为止的那一截（含 start）；start 必须恰好出现一次。
+function sliceFrom(text, start, endRe) {
+  assert.equal(text.split(start).length - 1, 1, `「${start}」应当恰好出现一次`)
+  const i = text.indexOf(start)
+  const rest = text.slice(i + start.length)
+  const m = endRe.exec(rest)
+  return { from: i, to: i + start.length + (m ? m.index : rest.length), text: start + (m ? rest.slice(0, m.index) : rest) }
+}
+const countOf = (text, s) => text.split(s).length - 1
+const indicesOf = (text, s) => {
+  const out = []
+  for (let i = text.indexOf(s); i >= 0; i = text.indexOf(s, i + 1)) out.push(i)
+  return out
+}
+
+test('正文（docs/67）：at-qa 第一行那一段整段相等——挂着的用例只认用户自己的话说不算，派发提示的口径不算', () => {
+  const qa = textOf('agents/at-qa.md')
+  const para = sliceFrom(qa, '**`06-test.md` 的第一行写总的结论', /\n\s*\n/)
+  assert.equal(noWs(para.text), noWs(QA_VERDICT_PARA), 'agents/at-qa.md 第一行那一段变了')
+  // 反向：「判定口径」只在这一段里出现一次；「挂着」只出现在这一段里。
+  assert.equal(countOf(qa, '判定口径'), 1, 'agents/at-qa.md 别处又提了判定口径')
+  for (const i of indicesOf(qa, '挂着')) assert.ok(i >= para.from && i < para.to, `agents/at-qa.md 在第一行那一段之外提了挂着的用例：${qa.slice(i - 30, i + 30)}`)
+})
+
+test('正文（docs/67）：/agent-team:at 的 S6 那一条整条相等——派 at-qa 时不替用户定；「判定口径」「挂着」不出现在别处（第 4 节照现状交付那一段除外）', () => {
+  const at = textOf('commands/at.md')
+  const bullet = sliceFrom(at, '- **S6 测试报告的第一行**', /\n(?=- |\s*\n)/)
+  assert.equal(noWs(bullet.text), noWs(AT_S6_BULLET), 'commands/at.md 的 S6 那一条变了')
+  const deliver = sliceFrom(at, '**照现状交付是用户的决定，经规范标签批**', /\n\s*\n/)
+  assert.equal(countOf(at, '判定口径'), 1, 'commands/at.md 别处又提了判定口径')
+  for (const i of indicesOf(at, '挂着')) {
+    const inside = (i >= bullet.from && i < bullet.to) || (i >= deliver.from && i < deliver.to)
+    assert.ok(inside, `commands/at.md 在 S6 那一条与照现状交付那一段之外提了挂着的用例：${at.slice(i - 30, i + 30)}`)
+  }
+})
+
+test('正文（docs/67）：契约的模板与格式都写明「哪些挂着的用例不算」不写进第 2、3 节', () => {
+  assert.ok(noWs(textOf('templates/00-contract.md')).includes(noWs(KNOWN_CONTRACT)), 'templates/00-contract.md')
+  assert.ok(noWs(textOf('skills/at-contract-format/SKILL.md')).includes(noWs(KNOWN_CONTRACT)), 'skills/at-contract-format/SKILL.md')
+})
+
 // ——— 复核（docs/66 §8）：测试没过时用户的出口——照现状交付，门禁记下、按 sha 绑在测试报告上 ———
 
 const NL = '\n'
