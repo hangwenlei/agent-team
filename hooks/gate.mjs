@@ -62,7 +62,7 @@ import {
 } from './lib/contract-base.mjs'
 import { readGrants } from './lib/budget.mjs'
 import { askAnswers, promptAnswer, promptDeliver, planApprovals, approvalLine, approvalNotices } from './lib/approvals.mjs'
-import { TEST_ROLE, decideTestVerdict, testBlock, testStageNote, testStageOf, testVerdict } from './lib/test-verdict.mjs'
+import { TEST_ROLE, decideTestVerdict, decideTrimmedClose, testBlock, testStageNote, testStageOf, testVerdict, trimmedCloseBlock, trimmedCloseText } from './lib/test-verdict.mjs'
 import { ACCEPTANCE_ROLE, acceptanceBlock, acceptanceOf, acceptanceVerdict, decideAcceptance, deliverLine, readDeliverApprovalEntries, readDeliverApprovals, verdictBlockerText, verdictStageNote } from './lib/verdict.mjs'
 import { deliveredSnapshot, readSnapshot, makeDelivered, decideRedispatch, decideRedoWrite } from './lib/redo.mjs'
 import { closedAt, lastStageId, closeBlockers, decideClosing, decideClosedDispatch } from './lib/closing.mjs'
@@ -1061,13 +1061,22 @@ function unusedDeliverApproval(ctx, base) {
   const text = ab.toString('utf8')
   const testDef = testStageOf(ctx.stages)
   // 复核（docs/66 §8 第二次）：测试报告的批准只在停在测试那一段时盖那次修订——没用掉就推进了的，不让它一直挂到 S7、吞掉之后真的改需求。
-  for (const def of [acceptanceOf(ctx.stages), testDef && ctx.state?.stage === testDef.stageId ? testDef : null]) {
+  // docs/71：验收那一段整段裁掉、走过测试那一段的，收口读测试报告——那里批的照现状交付同样盖记它的那一次修订。复核（docs/71 §8，中 1）：只认走过测试那一段
+  // 之后才记的（批准行的 stage 不是测试那一段）——停在测试那一段时批了、没用掉就推进的，不让它一直挂到收口、吞掉之后真的改需求（与 docs/66 §8 同一个口径）。
+  const atTest = Boolean(testDef) && ctx.state?.stage === testDef.stageId
+  const trimmedPast = Boolean(testDef) && !atTest && acceptanceTrimmedPastTest(ctx)
+  const defs = [
+    { def: acceptanceOf(ctx.stages), counts: () => true },
+    { def: atTest ? testDef : null, counts: () => true },
+    { def: trimmedPast ? testDef : null, counts: (e) => typeof e.stage === 'string' && e.stage !== testDef.stageId },
+  ]
+  for (const { def, counts } of defs) {
     if (!def) continue
     const bytes = ctx.artifactExists(def.name) ? ctx.artifactBytes(def.name) : null
     if (!bytes) continue
     const now = sha256OfContract(bytes)
     if (Array.isArray(base.deliver_used) && base.deliver_used.includes(now)) continue
-    if (readDeliverApprovalEntries(text, def.name).some((e) => e.sha === now)) return now
+    if (readDeliverApprovalEntries(text, def.name).some((e) => e.sha === now && counts(e))) return now
   }
   return null
 }
@@ -1311,7 +1320,7 @@ function runWords(runDir) {
 // 对不对着上一版契约（与 H6 的契约判据同一份 outdatedProducts）——复核（低 4）：验证段里不是项目经理自己写的那几份（测试报告、验收结论）有一份对着
 // 上一版就算（测试报告对着上一版，收口要回退重测，验收结论跟着重出，批准白记）；契约基线读不出来就当不对着（少拦）。复核（中 2）：这份验收结论已经
 // 记过的照现状交付批准（approved）。复核（docs/66 §8）：停在测试那一段时记录器读的是测试报告（kind 'test'，首行按 test-verdict.mjs 认），label 是回传里的说法。
-function acceptanceOnDisk(ctx, name, kind = 'acceptance') {
+function acceptanceOnDisk(ctx, name, kind = 'acceptance', envNeedsApproval = false) {
   const bytes = ctx.artifactExists(name) ? ctx.artifactBytes(name) : null
   let outdated = false
   try {
@@ -1339,7 +1348,30 @@ function acceptanceOnDisk(ctx, name, kind = 'acceptance') {
     outdated,
     approved: readDeliverApprovals(ab ? ab.toString('utf8') : null, name),
     label: kind === 'test' ? '测试报告' : '验收结论',
+    envNeedsApproval,
   }
+}
+
+// docs/71：验收那一段整段裁掉（「叫过」并上派发记录）——收口读测试报告，照现状交付的批准绑在它上面（跑不起来也要批准）。出意外当不是。
+function acceptanceTrimmedNow(ctx) {
+  try {
+    const acc = acceptanceOf(ctx.stages)
+    if (!acc || !testStageOf(ctx.stages) || !isStageChain(ctx.stages)) return false
+    const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
+    const dispatched = logBytes ? dispatchedByStage(readDispatchLog(logBytes.toString('utf8'))) : null
+    return wholeStageTrimmed(ctx.stages, acc.stageId, ctx.state, null, dispatched)
+  } catch {
+    return false
+  }
+}
+
+// 而且已经走过测试那一段。
+function acceptanceTrimmedPastTest(ctx) {
+  const ts = testStageOf(ctx.stages)
+  if (!ts || !isStageChain(ctx.stages)) return false
+  const ids = Object.keys(ctx.stages)
+  if (ids.indexOf(ctx.state?.stage) <= ids.indexOf(ts.stageId)) return false
+  return acceptanceTrimmedNow(ctx)
 }
 
 function gateFileReason(checked, exotic) {
@@ -2206,6 +2238,24 @@ function main() {
       })
       if (!tv.ok) denyAndExit(tv.reason + approvalDiagnostic(filePath), spec.event)
 
+      // docs/71：验收那一段整段裁掉时，收口那一次读测试报告的第一行——不是「结论：通过」、又没有门禁记下的照现状交付批准的，拒（跑不起来也算：
+      // 这一趟没有一样验证过）。验收那一段没裁的，由下面的验收结论判据管。
+      const tc = decideTrimmedClose({
+        before,
+        after,
+        stages: stagesForRework,
+        approvedShas: testDef ? readDeliverApprovals(approvalsText, testDef.name) : [],
+        bytesOf: (name) => {
+          try {
+            return readFileSync(join(runDir, name))
+          } catch {
+            return null
+          }
+        },
+        dispatched,
+      })
+      if (!tc.ok) denyAndExit(tc.reason + approvalDiagnostic(filePath), spec.event)
+
       // M4k（docs/46，docs/35 §5「收口不读验收结论」）：验收结论首行——推进出验收那一段与收口时，不是「结论：通过」、又没有门禁记下的
       // 照现状交付批准（approvals.jsonl 里 sha 等于它现在的 sha），拒（hooks/lib/verdict.mjs）。排在最后：对着上一版契约的结论先重出，
       // 读它的首行才有意义。批准读同一个目录下的 approvals.jsonl（上面读过；读不出来当一条都没有——更严的一侧）。
@@ -2638,6 +2688,25 @@ function main() {
       if (verdictNow && !list.some((b) => b.name === verdictNow.name)) {
         list.push({ name: verdictNow.name, why: 'verdict', require: true, fix: verdictBlockerText({ stages: ctx.stages, verdict: verdictNow.verdict, current: ctx.state?.stage }) })
       }
+      // docs/71：验收那一段整段裁掉时，测试报告首行不是通过、又没批准——与 H6 同一份 trimmedCloseBlock、同一句出路。
+      const trimmedNow = (() => {
+        try {
+          const ts = testStageOf(ctx.stages)
+          if (!ts) return null
+          const ab = ctx.artifactBytes(APPROVALS_FILE)
+          return trimmedCloseBlock({
+            stages: ctx.stages,
+            state: ctx.state,
+            prior: undefined,
+            bytesOf: (n) => (ctx.artifactExists(n) ? ctx.artifactBytes(n) : null),
+            dispatched: dispatchedNow,
+            approvedShas: readDeliverApprovals(ab ? ab.toString('utf8') : null, ts.name),
+          })
+        } catch {
+          return null
+        }
+      })()
+      if (trimmedNow && !list.some((b) => b.name === trimmedNow.name)) list.push({ name: trimmedNow.name, why: 'verdict', require: true, fix: trimmedCloseText(trimmedNow) })
       return list
     })()
 
@@ -2853,14 +2922,19 @@ function main() {
           const testDefNow = testStageOf(ctx.stages)
           const acceptance =
             testDefNow && ctx.state?.stage === testDefNow.stageId
-              ? acceptanceOnDisk(ctx, testDefNow.name, 'test')
-              : acceptanceDef
+              ? acceptanceOnDisk(ctx, testDefNow.name, 'test', acceptanceTrimmedNow(ctx))
+              : testDefNow && acceptanceTrimmedPastTest(ctx)
+                ? acceptanceOnDisk(ctx, testDefNow.name, 'test', true)
+                : acceptanceDef
                 ? acceptanceOnDisk(ctx, acceptanceDef.name)
                 : null
           for (const p of planApprovals({ items: found.items, state: ctx.state, stages: ctx.stages, grants, acceptance })) {
             if (p.deliver && typeof p.sha === 'string') {
               try {
-                appendFileSync(file, sep + deliverLine({ at: new Date().toISOString(), source: ask ? 'ask' : 'prompt', product: p.name, sha: p.sha }) + '\n')
+                appendFileSync(
+                  file,
+                  sep + deliverLine({ at: new Date().toISOString(), source: ask ? 'ask' : 'prompt', product: p.name, sha: p.sha, stage: typeof ctx.state?.stage === 'string' ? ctx.state.stage : undefined }) + '\n',
+                )
                 sep = ''
                 out.push(p)
               } catch {

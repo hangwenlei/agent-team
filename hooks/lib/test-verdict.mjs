@@ -7,10 +7,15 @@
 //     项目里本来就挂着的用例、不稳定的用例、返工预算耗尽，那是用户的决定；复核 docs/66 §8）；读不出的拒（同段重派 at-qa 照格式写）；跑不起来的放行——
 //     那是正文里 env-blocked 那一问，用户定；
 //   - 只在推进出测试那一段的那一次读，不在之后的推进、收口读：之后由验收结论管，已经走过测试那一段的旧 run 不受牵连。
+//   - docs/71：验收那一段整段裁掉的，收口那一次再读一遍——不是「结论：通过」的（跑不起来也算：这一趟没有一样验证过），只有用户经「照现状交付」批准过
+//     这一份才放行（trimmedCloseBlock）。
 import { isPlainObject, isRolePatternStage, isStageChain, isVerifyStage, productsOfStage, stageRoles } from './stages.mjs'
 import { wholeStageTrimmed } from './advance.mjs'
 import { sha256OfContract } from './contract-hash.mjs'
 import { DELIVER_LABEL } from './budget.mjs'
+import { acceptanceOf } from './verdict.mjs'
+import { closedAt } from './closing.mjs'
+import { isBlankText } from './text-norm.mjs'
 
 export const TEST_ROLE = 'at-qa'
 const TEST_WORDS = { pass: '通过', fail: '不通过', env: '跑不起来' }
@@ -100,6 +105,72 @@ export function decideTestVerdict({ before, after, stages, bytesOf, dispatched =
   const block = testBlock({ stages, state: after, prior: before, bytesOf, dispatched, approvedShas })
   if (!block) return { ok: true }
   return { ok: false, reason: `agent-team H6 返工预算：${testBlockText(block)}。` }
+}
+
+/**
+ * docs/71：验收那一段整段裁掉时，收口读测试报告的第一行（H6、【阶段】的收口阻碍共用一份）。验收那一段没裁、测试那一段也整段裁掉、报告不在或空的，
+ * 不拦（交给别的判据）；首行「通过」、或者门禁记下的照现状交付批准的 sha 等于它现在的 sha，不拦；别的——不通过、跑不起来、读不出——拦，
+ * 给 { name, stageId, accStageId, verdict }（verdict 是 'fail'、'env' 或 null）。
+ */
+export function trimmedCloseBlock({ stages, state, prior, bytesOf, dispatched = null, approvedShas = [] }) {
+  const acc = acceptanceOf(stages)
+  const ts = testStageOf(stages)
+  if (!acc || !ts) return null
+  if (!wholeStageTrimmed(stages, acc.stageId, state, prior, dispatched)) return null
+  if (wholeStageTrimmed(stages, ts.stageId, state, prior, dispatched)) return null
+  let bytes = null
+  try {
+    bytes = bytesOf(ts.name)
+  } catch {
+    bytes = null
+  }
+  if (!bytes || isBlankText(bytes)) return null
+  // 还是上一轮的不用在这里判：测试报告是最后一段的前置，H6 的收口判据先拒，【阶段】也先把它列成还是上一轮的（变异验证：这一行走不到，删了）。
+  const digest = sha256OfContract(bytes)
+  const verdict = testVerdict(bytes)
+  if (verdict === 'pass') return null
+  if (Array.isArray(approvedShas) && approvedShas.includes(digest)) return null
+  return { name: ts.name, stageId: ts.stageId, implStage: ts.implStage, accStageId: acc.stageId, verdict }
+}
+
+/** trimmedCloseBlock 那一句：首行怎么了、两条路（回退去验证、问用户照现状交付）。段 id、产物名来自阶段链，原样。 */
+export function trimmedCloseText(block) {
+  const said =
+    block.verdict === 'env'
+      ? '「结论：跑不起来」——测试没跑成、验收又裁掉了，这一趟没有一样验证过'
+      : block.verdict === 'fail'
+        ? '「结论：不通过」——测试没过、验收又裁掉了'
+        : `不是${LINES}之一，门禁读不出测试结论`
+  return (
+    `验收那一段（${block.accStageId}）整段裁掉了，收口读测试报告 ${block.name} 的第一行：${said}。要验证的，照 /agent-team:at 第 3 节的「回退」` +
+    (block.verdict === 'fail'
+      ? `记回到 ${block.implStage ?? '实现那一段'} 修好、重测`
+      : block.verdict === 'env'
+        ? `记回到 ${block.stageId} 重测（环境好了之后）`
+        : `记回到 ${block.stageId}，让 ${TEST_ROLE} 照格式重写第一行`) +
+    `，或者回到 ${block.accStageId} 把验收派出去；要带着它交付的，那是用户的决定：照 /agent-team:at 第 4 节` +
+    '先往 escalations 记一条（answer 写空串），再用 AskUserQuestion 问——一道单选题（multiSelect 设 false），那一项的标签逐字写' +
+    `「${DELIVER_LABEL}」；用户选了它，门禁记下这条批准（只对现在这份 ${block.name} 有效），再收口。问不了用户的（工具面里没有 AskUserQuestion），` +
+    `请用户在对话里单独发一条只写「${DELIVER_LABEL}」的消息`
+  )
+}
+
+/**
+ * H6 的这一条（docs/71）：只管收口那一次（closed_at 新写上、写入前没收口）。
+ * @returns {{ ok: true } | { ok: false, reason: string }}
+ */
+export function decideTrimmedClose({ before, after, stages, bytesOf, dispatched = null, approvedShas = [] }) {
+  if (!isPlainObject(after) || !isStageChain(stages)) return { ok: true }
+  const prior = isPlainObject(before) ? before : null
+  if (closedAt(after) === null || closedAt(prior) !== null) return { ok: true }
+  const block = trimmedCloseBlock({ stages, state: after, prior: prior ?? undefined, bytesOf, dispatched, approvedShas })
+  if (!block) return { ok: true }
+  // 复核（docs/71 §8，低 3）：这一次写入才把验收那一段记成整段裁掉的——记录器按磁盘上的 state.json 认，照理由去问，批准会绑到验收结论上、记不下。
+  const already = prior !== null && wholeStageTrimmed(stages, block.accStageId, prior, undefined, dispatched)
+  const first = already
+    ? ''
+    : `这一次写入才把 ${block.accStageId} 记成整段裁掉：先单独一次 Write 把 trimmed 记上（不写 closed_at），再问用户——门禁按磁盘上的 state.json 认批准绑在哪一份。`
+  return { ok: false, reason: `agent-team H6 收口：${trimmedCloseText(block)}。${first}` }
 }
 
 /**

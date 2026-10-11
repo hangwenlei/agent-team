@@ -154,9 +154,14 @@ test('M4k 评审 F1、F2：readDeliverApprovalEntries——带 at 的照现状�
   const b = JSON.stringify({ at: 7, kind: DELIVER_KIND, product: '07-acceptance.md', sha: S })
   const other = deliverLine({ at: 't', source: 'ask', product: 'x.md', sha: S })
   assert.deepEqual(readDeliverApprovalEntries([a, b, other, '{bad'].join(NL), '07-acceptance.md'), [
-    { at: '2026-10-06T12:00:00.000Z', sha: S },
-    { at: null, sha: S },
+    { at: '2026-10-06T12:00:00.000Z', sha: S, stage: null },
+    { at: null, sha: S, stage: null },
   ])
+  // docs/71 §8：批准行记下当时停在哪一段（stage），读的时候带出来；不是字符串的给 null。
+  const c = deliverLine({ at: 't', source: 'ask', product: '06-test.md', sha: S, stage: 'S8' })
+  assert.equal(JSON.parse(c).stage, 'S8')
+  assert.deepEqual(readDeliverApprovalEntries(c, '06-test.md'), [{ at: 't', sha: S, stage: 'S8' }])
+  assert.equal(Object.hasOwn(JSON.parse(deliverLine({ at: 't', source: 'ask', product: '06-test.md', sha: S })), 'stage'), false)
   assert.deepEqual(readDeliverApprovalEntries(null, '07-acceptance.md'), [])
 })
 

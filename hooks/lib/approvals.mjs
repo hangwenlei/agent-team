@@ -137,7 +137,8 @@ function planDeliver(state, acceptance, approved = []) {
   // 评审 F3：对着上一版契约的验收结论（契约基线记着），H6 的契约判据会先拒——批准了也推进不了、收不了口，重出之后 sha 一变批准就作废。排在「通过」之前。
   if (a.outdated === true) return no('outdated-acceptance')
   if (a.verdict === 'pass') return no('deliver-not-needed')
-  if (a.verdict === 'env') return no('deliver-not-needed-env')
+  // docs/71：验收整段裁掉、收口读测试报告时，跑不起来也要批准（envNeedsApproval）；停在测试那一段时不要。
+  if (a.verdict === 'env' && a.envNeedsApproval !== true) return no('deliver-not-needed-env')
   if (approved.includes(a.sha)) return no('deliver-duplicate')
   return { deliver: true, name: a.name, sha: a.sha, ...tag }
 }
