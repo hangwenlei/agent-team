@@ -345,8 +345,9 @@ function reachNoticeFor(filePath, project, writerIsPm = true) {
 }
 
 // docs/79：每趟开头写 current-run 时核磁盘上的 reach.json 是不是落后（措辞在 hooks/lib/ledger.mjs 的 reachStaleNotice）。project.json 不在、有阻断或
-// 插件问题时不核（同 reachNoticeFor）；reach.json 在、却读不出来（占用之类）也不核——只有不在（ENOENT）才说「不在」。
-function staleReachFor(ctx) {
+// 插件问题时不核（同 reachNoticeFor）；reach.json 在、却读不出来（占用之类）也不核——只有不在（ENOENT）才说「不在」。复核（docs/79 §8）：写指针的人
+// 不是项目经理时（没有 run 的那一刻 H3 对谁都放行），与 reachNoticeFor 同一个口径叫它原样冒泡。
+function staleReachFor(ctx, writerIsPm = true) {
   if (!isPlainObject(ctx.project)) return null
   const roster = loadRoster()
   const report = validateProject(ctx.project, { roster })
@@ -358,7 +359,8 @@ function staleReachFor(ctx) {
     if (err?.code !== 'ENOENT') return null
     text = null
   }
-  return reachStaleNotice({ text, expected: computeReach({ roster, paths: ctx.project.paths }) })
+  const notice = reachStaleNotice({ text, expected: computeReach({ roster, paths: ctx.project.paths }) })
+  return notice && !writerIsPm ? `${notice}\nreach.json 是编排层的控制文件，只有项目经理该改它：把这一段原样冒泡给派你的人，不要自己重写。` : notice
 }
 
 // ledger 那两处「project.json 是不是写坏了」要读它的原文（M3u）。最多读 3 次，两次之间停 25ms：Windows 上杀毒软件、
@@ -2854,7 +2856,7 @@ function main() {
       const inflight = inflightNotice(inflightElsewhere(ctx))
       if (inflight) notices.push(inflight)
       // docs/79：每趟开头核 reach.json 是不是落后（staleReachFor 上方）。
-      const stale = staleReachFor(ctx)
+      const stale = staleReachFor(ctx, isContractWriter(input.agent_type))
       if (stale) notices.push(stale)
     }
 

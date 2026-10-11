@@ -142,7 +142,7 @@ export function reachStaleNotice({ text, expected }) {
     missing: '不在',
     invalid: '不是一份合法的 JSON（写坏了，或者被截断了）',
     dup: '里有写了不止一次的键（JSON 只认最后一个，照原文读的人可能读到前一遍）',
-    differ: '与门禁按当前 project.json 与花名册算出来的不一样（project.json 在它写成之后改过，或者当初手抄出错）',
+    differ: '与门禁按当前 project.json 与花名册算出来的不一样（project.json 在它写成之后改过、插件更新之后算法或花名册变了，或者当初手抄出错）',
   }[diff]
   return (
     `【触达表】.agent-team/reach.json ${why}——/agent-team:at-status 报各角色实际能写到哪里时读的就是它。` +
