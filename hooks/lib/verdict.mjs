@@ -161,7 +161,7 @@ export function verdictStageNote({ stages, block, writer }) {
   if (writer === ACCEPTANCE_ROLE && block.verdict === null) {
     return (
       `你写的 ${block.name} 第一行读不出验收结论：把第一行改成${VERDICT_LINES.map((l) => `「${l}」`).join('')}之一（第一行之前不写标题，` +
-      `这一行也不夹别的话），改完再停下——不改，推进出 ${acc.stageId} 会被拒，项目经理要再派你一次。`
+      `这一行也不夹别的话），改完再停下——不改，你停下时门禁会拦回来，推进出 ${acc.stageId} 也会被拒。`
     )
   }
   const act = `推进出 ${acc.stageId}`
