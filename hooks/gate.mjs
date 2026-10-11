@@ -2551,6 +2551,12 @@ function main() {
     // M4j 复核（docs/45 §8，F6）：对着上一版契约的验证段结论也是收口阻碍——与 H6 的契约判据同一份 outdatedProducts，【阶段】不说「该收口了」，
     // 出路与 H6 同一份 outdatedFix（看当前段）。
     const outdatedNow = outdatedSetOf(ctx)
+    // docs/68 §8（复核中 2）：当前段（不是最后一段）有对着上一版契约的产物时，【阶段】不说「齐了、推进」——照着推进 H6 会拒；改说哪几份对着上一版，
+    // 出路与【契约】、H6 同一份 outdatedFix。最后一段照旧走收口阻碍那一路（那里列了对着上一版的）。
+    const outdatedHere =
+      stageDone && closedAt(ctx.state) === null && ctx.state?.stage !== lastStageId(ctx.stages)
+        ? [...outdatedNow].filter((n) => producerOfName(ctx.stages, n)?.stageId === ctx.state?.stage)
+        : []
     const blockers0 =
       stageDone && closedAt(ctx.state) === null && ctx.state?.stage === lastStageId(ctx.stages)
         ? closeBlockers({
@@ -2641,7 +2647,7 @@ function main() {
       state: ctx.state,
       reach,
       stages: ctx.stages,
-      stageDone,
+      stageDone: stageDone && !outdatedHere.length,
       stateProblems,
       produceName,
       produceSha: produceBytes ? sha256OfContract(produceBytes) : null,
@@ -2670,6 +2676,14 @@ function main() {
       if (reachNotice) notices.push(reachNotice)
     }
     for (const line of contractBaseLines) notices.push(line)
+    if (outdatedHere.length) {
+      const sid = ctx.state.stage
+      notices.push(
+        `【阶段】${sid} 的产物都写了，但 ${outdatedHere.join('、')} 对着上一版契约（契约在它写成之后改过）：${outdatedFix(ctx.stages, outdatedHere, sid).text}` +
+          `——重出之前，H6 不放行推进出 ${sid}。` +
+          (isContractWriter(input.agent_type) ? '' : '这件事归项目经理：回报上级，不要自己去写 state.json。'),
+      )
+    }
     if (wordsMismatch && kind === 'contract') notices.push(`【契约】${wordsMismatchText(wordsMismatch)}。${WORDS_FIX}——改好之前推进不出 ${firstStageId}。`)
     // M4h（docs/43，审查第 24-1 条）：写 current-run 时，别的、没收口的 run 里门禁还没见它停下的派发（inflightElsewhere 上方）。
     if (isPointer) {
