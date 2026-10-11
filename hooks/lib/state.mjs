@@ -61,6 +61,100 @@ function editDistance(a, b) {
   return prev[b.length]
 }
 
+// docs/74（docs/55 §4「JSON 里重复的键」）：原文里同一个对象写了不止一次的键，[{ path, key }]（path 是外层各级键名；同一个键只报一次）。JSON.parse 只认
+// 最后一个、解析之后分不出来，所以扫原文：跟踪字符串（含转义）、对象与数组的嵌套，对象里冒号之前的那个字符串是键。不是对象、读不完整的给已扫出的部分。
+// 安全审查（docs/74 §8）：门禁每次写 state.json 都扫原文——原文太长不扫，嵌套超过 depth 层的那几层只数括号、不认键，报的条数封顶（末尾一行说还有几个）。
+export const DUP_LIMITS = Object.freeze({ chars: 1000000, depth: 32, report: 20 })
+
+// 复核（docs/74 §8）：JSON 的单字符转义照 JSON.parse 解（原来只认 n、t，\r \b \f 解成了字母，会误报、把键名报错）。
+const JSON_ESC = { b: '\b', f: '\f', n: '\n', r: '\r', t: '\t', '"': '"', '/': '/', '\\': '\\' }
+
+function scanDuplicates(text) {
+  const found = []
+  let total = 0
+  if (typeof text !== 'string' || text.length > DUP_LIMITS.chars) return { found, total }
+  const stack = []
+  let skipped = 0
+  let i = 0
+  const readString = () => {
+    let s = ''
+    i++
+    while (i < text.length) {
+      const c = text[i]
+      if (c === '\\') {
+        const n = text[i + 1]
+        if (n === 'u') {
+          s += String.fromCharCode(parseInt(text.slice(i + 2, i + 6), 16) || 0)
+          i += 6
+        } else {
+          s += n === undefined ? '' : Object.prototype.hasOwnProperty.call(JSON_ESC, n) ? JSON_ESC[n] : n
+          i += 2
+        }
+        continue
+      }
+      if (c === '"') {
+        i++
+        return s
+      }
+      s += c
+      i++
+    }
+    return s
+  }
+  while (i < text.length) {
+    const c = text[i]
+    const top = skipped ? null : stack[stack.length - 1]
+    if (c === '"') {
+      const s = readString()
+      if (top && top.obj && top.expectKey) {
+        if (top.keys.has(s)) {
+          if (!top.reported.has(s)) {
+            top.reported.add(s)
+            total++
+            if (found.length < DUP_LIMITS.report) found.push({ path: top.path, key: s })
+          }
+        } else top.keys.add(s)
+        top.lastKey = s
+        top.expectKey = false
+      }
+      continue
+    }
+    if (c === '{' || c === '[') {
+      if (skipped || stack.length >= DUP_LIMITS.depth) skipped++
+      else {
+        // 复核（docs/74 §8）：数组里的对象，路径带上它是第几条（数字）。
+        const path = top ? [...top.path, top.obj ? top.lastKey : top.index] : []
+        stack.push({ obj: c === '{', expectKey: c === '{', keys: new Set(), reported: new Set(), path, lastKey: null, index: 0 })
+      }
+    } else if (c === '}' || c === ']') {
+      if (skipped) skipped--
+      else stack.pop()
+    } else if (c === ',' && top) {
+      if (top.obj) top.expectKey = true
+      else top.index++
+    }
+    i++
+  }
+  return { found, total }
+}
+
+export function duplicateKeys(text) {
+  return scanDuplicates(text).found
+}
+
+/** 账本那一行：重复的键各报一条（键名与外层路径是磁盘上的值，quote 引；数组下标写成第几条）；超过上限的末尾一行说还有几个。 */
+export function duplicateKeyLines(text) {
+  const { found, total } = scanDuplicates(text)
+  const where = (path) => path.map((k) => (typeof k === 'number' ? `第 ${k + 1} 条` : quote(k))).join(' → ')
+  const lines = found.map(
+    ({ path, key }) =>
+      `键 ${quote(key)} 写了不止一次${path.length ? `（在 ${where(path)} 里）` : ''}：JSON 只认最后一个——门禁读到的是最后写的那个值，前面几个等于没写；` +
+      '删掉前面几个不改变门禁读到的值，要改值就改最后那一个',
+  )
+  if (total > found.length) lines.push(`还有 ${total - found.length} 个重复的键没列出来：照上面几条一并清掉`)
+  return lines
+}
+
 // 认不出的键像哪个已知键：去掉下划线、连字符与空白，折成小写之后相同或只差一两步的那一个（取最近的）；都不像回 null，不瞎猜。
 function lookalikeKey(key) {
   const squash = (s) => s.toLowerCase().replace(/[_\-\s]/g, '')

@@ -324,6 +324,20 @@ const SCENARIOS = [
     anchor: (all) => all.includes('这一趟收口了') && all.includes('一条认不出角色或段的派发'),
   },
   {
+    // docs/74：state.json 原文里重复的键与外层路径进【state.json】那一块，两样都是磁盘上的值。
+    name: 'state.json 原文里重复的键与外层路径（docs/74）',
+    disk: true,
+    raw: {
+      'state.json': (P) => {
+        const s = JSON.stringify(baseState())
+        const k = JSON.stringify(P)
+        return s.slice(0, -1) + ',' + k + ':{' + k + ':1,' + k + ':2}}'
+      },
+    },
+    calls: ({ run }) => [['ledger', posted('at-pm', join(run, 'state.json'))]],
+    anchor: (all) => all.includes('写了不止一次'),
+  },
+  {
     // M4t（docs/55）：state.json 里认不出的键原样进【state.json】那一块。
     name: 'validateState：state.json 里认不出的键是载荷',
     disk: true,
