@@ -108,3 +108,32 @@ test('M4k 复核：boot.mjs 给记录器的那两句跟上照现状交付', () =
   assert.equal(boot.split('（批准记录器不拦任何东西）').length - 1, 2)
   assert.equal(boot.split('用户若是在批准再返工一轮或照现状交付').length - 1, 2)
 })
+
+// docs/68：验收那一侧也只认用户自己的话（docs/67 §4「验收那一侧没收」）。真实会话 M16 里项目经理把「挂着的不算」写进契约第 2 节、叫产品经理写进产品定义，
+// 验收照着认；M16b 的验收逐条写了「部分过」。逐条的结论只有三种；挂着的用例与 at-qa 用同一句（整段钉）；「挂着」「部分过」只许出现在钉住的那几处。
+const KNOWN_FAIL =
+  '只有契约第 1 节用户原话或第 4 节修订记录里用户说了不算的那几条挂着的用例，不因它们判不通过；派发提示里的判定口径、契约第 2 节与第 3 节、' +
+  '产品定义、架构方案说它们不算的，都不算数。第 4 节只认修订块里用户的原话或裁决——「对契约的影响」是项目经理写的，不算；用户答复「照现状交付」的' +
+  '那几块也不算，那条批准只管批准那一刻的那份结论。'
+const ACC_KNOWN =
+  '**这一趟之前就挂着的用例，也只认用户自己的话。** 完成定义要求测试都过、而有这一趟之前就挂着的用例没过的：' +
+  KNOWN_FAIL +
+  '用户没说的，那一条照没过判，要不要带着它们交付由项目经理问用户；不因它们判不通过的，逐条注明它们挂着、引用户那一句。'
+const ACC_THREE = '逐条给结论：过、没过、判不了，每一条都指出依据的是契约的哪一句。没有第四种：一条里有一部分没过就是没过，不写「部分过」。'
+test('docs/68：验收角色——逐条只有三种结论（不写「部分过」）；挂着的用例只认用户自己的话，与 at-qa 同一句，整段钉', () => {
+  const raw = readFileSync(new URL('../agents/at-acceptance.md', import.meta.url), 'utf8').split(String.fromCharCode(13)).join('')
+  const body = bodyOf('at-acceptance')
+  const s = body.slice(body.indexOf('## 你判什么'), body.indexOf('## 你没有 `Bash`'))
+  assert.ok(has(s, ACC_THREE), '「你判什么」那一节：逐条只有三种')
+  const start = '**这一趟之前就挂着的用例，也只认用户自己的话。**'
+  assert.equal(raw.split(start).length - 1, 1, start)
+  const from = raw.indexOf(start)
+  const m = /\n\s*\n/.exec(raw.slice(from))
+  const to = from + (m ? m.index : raw.length - from)
+  assert.equal(stripWs(raw.slice(from, to)), stripWs(ACC_KNOWN), 'agents/at-acceptance.md 挂着的用例那一段变了')
+  assert.ok(s.includes(start), '那一段写在「你判什么」那一节里')
+  // 反向：「挂着」只在那一段里；「部分过」只出现在「不写『部分过』」那一句里；「判定口径」只出现一次。
+  for (let i = raw.indexOf('挂着'); i >= 0; i = raw.indexOf('挂着', i + 1)) assert.ok(i >= from && i < to, `在那一段之外提了挂着的用例：${raw.slice(i - 30, i + 30)}`)
+  assert.equal(raw.split('部分过').length - 1, 1, '「部分过」只许出现在不写它的那一句里')
+  assert.equal(raw.split('判定口径').length - 1, 1, '「判定口径」只许出现在那一段里')
+})
