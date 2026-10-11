@@ -81,7 +81,7 @@ S5 是第一种（一个模式配 N 个角色），S2 是第二种（`at-product
 |---|---|
 | H3 写路径（`writepath.mjs` 的 `stageOwnerOfRunPath`） | 写入者自己 |
 | `ledger` 的 `produce` 回传 | 写入者自己——与上一行共用同一个 `stageOwnerOfRunPath` |
-| `isStageDone`（`gate.mjs` 里的每一处调用，清单以 `tests/stage-done-call-site.test.mjs` 为准） | 当前段叫到的人 `∩ producers`（`participantsOf`：`stage_roles`，旧 run 退回 `roster`）；叫到之后又裁掉、`mayWaive` 许的那几份免掉，还旧的、还在跑的不免（`docs/76`） |
+| `isStageDone`（`gate.mjs` 里的每一处调用，清单以 `tests/stage-done-call-site.test.mjs` 为准） | 当前段叫到的人 `∩ producers`（`participantsOf`：`stage_roles`，旧 run 退回 `roster`）；这一段记了账时并上门禁派发记录里在这一段派出去过的人（与推进的「叫到」同一个口径，`docs/77`）；叫到之后又裁掉、`mayWaive` 许的那几份免掉，还旧的、还在跑的不免（`docs/76`） |
 | H6 推进判据 `departureNeeds`（`advance.mjs`，M4d） | 离开的那一段叫到的人（写入前后 `participantsOf` 的并集，再并上派发记录里在这一段派出去过的）`∩ producers`；`trimmed` 记着这一段、不在任何前置里的免掉 |
 | 完成核验与协调者进度（`completion.mjs`，M4d） | 派发记录里那一次派发的角色（按 `agent_id`），进度是协调者这一次运行派出去的 |
 | 产者交代 `decideCoverage`（走过的每一段） | 那一段叫到的人（`participantsOf`）∪ `trimmed` 的键，对 `producers ∩ available_roles` |

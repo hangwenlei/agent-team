@@ -288,15 +288,17 @@ const STOP_TAIL = {
 // M4h（docs/43，审查第 14 条）：selfDone——协调者自己也是这一段的产者、它那几份交了（S2 的 at-product）；impl——这一段是执行段（产物是实现记录）。
 export function coordinatorProgress({ role, stageId, rows, recipientIsPm, selfDone = false, impl = true }) {
   if (!Array.isArray(rows) || !rows.length) return null
-  const STATE = { ok: '在磁盘上', missing: '还没有', blank: '是空文件', stale: '还是上一轮的' }
+  const STATE = { ok: '在磁盘上', missing: '还没有', blank: '是空文件', stale: '还是上一轮的', waived: `没交，trimmed 里记着它在 ${stageId} 裁掉了，这一份免了` }
   const lines = []
   let running = false
   let stoppedShort = false
   for (const row of rows) {
     const facts = row.items.map((it) => `${it.name} ${STATE[it.state] ?? '读不出来'}`).join('，')
-    const short = row.items.some((it) => it.state !== 'ok')
+    // docs/77：免了的（waived）不算没交齐；它停下时冒泡了也不再叫 PM 去读那一份（它没交、已经裁掉）。
+    const short = row.items.some((it) => it.state !== 'ok' && it.state !== 'waived')
+    const waived = row.items.some((it) => it.state === 'waived')
     let tail = ''
-    if (!short && row.stop === 'bubble') {
+    if (!short && row.stop === 'bubble' && !waived) {
       // M4d 实测：产物在，它停下时却冒泡了——那一份可能只写了它卡在哪（M5 的前端），也可能交齐了、只是借标记转述别人的问题
       // （M5b 的后端）。门禁不读内容，不下结论，叫 PM 读。
       stoppedShort = true

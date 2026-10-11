@@ -382,7 +382,7 @@ export function buildLedgerNotices({
       Array.isArray(closeBlockers) && closeBlockers.length
         ? pmOnlyNotice('改 state.json', '"最后一段还收不了口、缺哪几份"这件事')
         : implStage && !writerIsPm
-          ? pmOnlyNotice('改 state.json', '"这一段的产物都在磁盘上了（门禁不读实现记录写了什么）"这件事')
+          ? pmOnlyNotice('改 state.json', '"这一段要交的产物都在磁盘上了（门禁不读实现记录写了什么）"这件事')
           : pmOnlyNotice('改 state.json', '"这一段的产物已经齐了"这件事')
     // M3y（docs/33）：返工轮里下一段在 history 里已经出现过（回到 S5 之后再进 S6），rework 那一段也要照派生量加 1——少了 H6
     // 会拒。这条提示原来只列 stage、history、roster、stage_roles、trimmed，照写会被 H6 拒一次（docs/15 那一趟真撞上过）。

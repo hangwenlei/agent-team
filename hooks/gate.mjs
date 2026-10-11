@@ -42,7 +42,7 @@ import {
   reportTexts,
   stopLine,
 } from './lib/completion.mjs'
-import { mayWaive, dispatchedIn, wholeStageTrimmed } from './lib/advance.mjs'
+import { mayWaive, dispatchedIn, wholeStageTrimmed, trimmedAt } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
 import {
@@ -1636,6 +1636,16 @@ function runningRolesIn(ctx, stageId) {
   return out
 }
 
+// docs/77：门禁派发记录按段拆开（{ 段: [角色] }）——isStageDone 的「叫到」并上它，与推进判据同一个口径。读不出给 null（退回只看 stage_roles）。
+function dispatchedByStageOf(ctx) {
+  try {
+    const bytes = ctx.artifactBytes(DISPATCHES_FILE)
+    return bytes ? dispatchedByStage(readDispatchLog(bytes.toString('utf8'))) : null
+  } catch {
+    return null
+  }
+}
+
 function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, recipientIsPm, selfDone = false }) {
   const stage = ctx.stages?.[stageId]
   if (!isPlainObject(stage) || !coordinatorId) return null
@@ -1645,15 +1655,21 @@ function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, reci
     if (d.stage !== stageId || !producers.includes(d.role) || d.caller_id !== coordinatorId) continue
     byRole.set(d.role, d)
   }
-  const rows = [...byRole.values()].map((d) => ({
-    role: d.role,
-    mode: d.mode === 'foreground' ? 'foreground' : 'background',
-    stop: lastStop(log, d.agent_id),
-    items: expandProduces(stage, [d.role]).map((name) => ({
-      name,
-      state: !ctx.artifactExists(name) ? 'missing' : fresh.isBlank(name) ? 'blank' : fresh.isStale(name) ? 'stale' : 'ok',
-    })),
-  }))
+  // docs/77：叫到之后又裁掉（trimmed 记着这一段）、已经停下的人，没交的那几份里 mayWaive 许的写成免了（waived）——与 isStageDone、推进同一个口径；
+  // 还旧的、还在跑的不免。
+  const running = runningRolesIn(ctx, stageId)
+  const rows = [...byRole.values()].map((d) => {
+    const waivable = trimmedAt(ctx.state, d.role, stageId) && !running.has(d.role)
+    return {
+      role: d.role,
+      mode: d.mode === 'foreground' ? 'foreground' : 'background',
+      stop: lastStop(log, d.agent_id),
+      items: expandProduces(stage, [d.role]).map((name) => {
+        const st = !ctx.artifactExists(name) ? 'missing' : fresh.isBlank(name) ? 'blank' : fresh.isStale(name) ? 'stale' : 'ok'
+        return { name, state: waivable && (st === 'missing' || st === 'blank') && mayWaive(ctx.stages, stageId, name) ? 'waived' : st }
+      }),
+    }
+  })
   return coordinatorProgress({ role: coordinator, stageId, rows, recipientIsPm, selfDone, impl: isRolePatternStage(stage) })
 }
 
@@ -2635,6 +2651,7 @@ function main() {
       state: ctx.state,
       artifactStale: fresh.isStale,
       running: runningRolesIn(ctx, ctx.state?.stage),
+      dispatched: dispatchedByStageOf(ctx),
     })
     // 【返工】：写 state.json 时，当前段与更早段还是上一轮的产物（hooks/lib/ledger.mjs 那一段）。
     const reworkStale = kind === 'state' ? staleByStage({ stages: ctx.stages, stageId: ctx.state?.stage, isStale: fresh.isStale }) : null
@@ -3100,6 +3117,7 @@ function main() {
               state: ctx.state,
               artifactStale: fresh.isStale,
               running: runningRolesIn(ctx, ctx.state?.stage),
+              dispatched: dispatchedByStageOf(ctx),
             })
             if (!done) {
               const p = progressOf({ ctx, fresh, log, coordinator: d.role, coordinatorId: taskId, stageId: d.stage, recipientIsPm, selfDone: r.skipped === undefined })
@@ -3471,6 +3489,7 @@ function main() {
         state: ctx.state,
         artifactStale: fresh.isStale,
         running: runningRolesIn(ctx, ctx.state?.stage),
+        dispatched: dispatchedByStageOf(ctx),
       })
       // 'unknown-stage'：state.stage 缺失、不是字符串，或不在阶段链里——交付物核验这一次没做，在它改对之前每一次都不做。
       // M3v（docs/30）订正：上一版这里写的是「ledger 那条路径会给出细节」「SubagentStop 上没有 additionalContext 这条
