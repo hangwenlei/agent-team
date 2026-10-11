@@ -111,9 +111,10 @@ test('M4k H6：推进出 S7——判不了拒（出路按原因分、附照现�
   })
 })
 
-test('M4k H6：验收那一段整段裁掉、谁都没叫过——没有验收结论，收口不读', () => {
+// docs/71：验收整段裁掉时收口改读测试报告的第一行（tests/gate-trimmed-close.test.mjs）——这里的测试报告写成通过。
+test('M4k H6：验收那一段整段裁掉、谁都没叫过——没有验收结论，收口不读验收结论（测试报告通过的照常收口）', () => {
   const trimmedRun = { stage: 'S8', history: upTo('S8'), roster: ['at-qa'], stage_roles: { S6: ['at-qa'], S7: [] }, trimmed: { 'at-acceptance': 'S7' } }
-  withRun(trimmedRun, { '06-test.md': 'test' + NL, '08-delivery.md': 'delivery' + NL }, ({ projectDir, runDir }) => {
+  withRun(trimmedRun, { '06-test.md': '结论：通过' + NL, '08-delivery.md': 'delivery' + NL }, ({ projectDir, runDir }) => {
     assert.equal(decisionOf(run('rework', closeWrite(runDir), GATE, projectDir).stdout), null)
   })
 })
