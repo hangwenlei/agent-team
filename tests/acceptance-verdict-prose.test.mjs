@@ -69,14 +69,14 @@ test('M4k：契约模板与契约格式 skill——门禁记下照现状交付�
   for (const f of ['templates/00-contract.md', 'skills/at-contract-format/SKILL.md']) assert.ok(!read(f).includes('· 照现状交付'), f)
 })
 
-test('M4k：README 两半——验收没过时只有「照现状交付」被记成批准，单独发这一句也算，只对那一刻的验收结论有效', () => {
+test('M4k：README 两半——测试或验收没过时只有「照现状交付」被记成批准，单独发这一句也算，只对那一刻的测试报告或验收结论有效（docs/66）', () => {
   const r = read('README.md')
   const half = r.indexOf('<a id="english"></a>')
-  assert.ok(has(r.slice(0, half), `验收没过时，只有选项「${DELIVER_LABEL}」会被门禁记成照现状交付的批准，在对话里单独发一条只写这一句的消息也算；批准只对那一刻的验收结论有效。`))
+  assert.ok(has(r.slice(0, half), `测试或验收没过时，只有选项「${DELIVER_LABEL}」会被门禁记成照现状交付的批准，在对话里单独发一条只写这一句的消息也算；批准只对那一刻的测试报告或验收结论有效。`))
   assert.ok(
     has(
       r.slice(half),
-      `When acceptance did not pass, only the option 「${DELIVER_LABEL}」 is recorded by the gates as approval to deliver as is, and a message containing just that line counts too; the approval only covers the acceptance conclusion as it was at that moment.`,
+      `When tests or acceptance did not pass, only the option 「${DELIVER_LABEL}」 is recorded by the gates as approval to deliver as is, and a message containing just that line counts too; the approval only covers the test report or acceptance conclusion as it was at that moment.`,
     ),
   )
 })

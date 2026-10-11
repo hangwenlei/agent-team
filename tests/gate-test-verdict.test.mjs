@@ -13,6 +13,7 @@ import { makeRun } from './fixtures/make-run.mjs'
 import { reworkFromHistory } from '../hooks/lib/state.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 import { testVerdict, TEST_VERDICT_LINES } from '../hooks/lib/test-verdict.mjs'
+import { bodyShaOf } from '../hooks/lib/contract-base.mjs'
 
 const H = (...ids) => ids.map((stage) => ({ stage, at: '2026-10-10T12:00:00Z' }))
 const S6_FILES = ['00-contract.md', '01-prd.md', '03-arch.md', '04-dispatch.md', '05-impl/at-backend.md']
@@ -159,4 +160,124 @@ test('正文（docs/66）：at-qa 写明第一行的三种写法；/agent-team:a
   assert.ok(qa.includes('`06-test.md` 的第一行写总的结论，逐字是这三句之一：「结论：通过」「结论：不通过」「结论：跑不起来」'), 'agents/at-qa.md')
   const at = flat('commands/at.md')
   assert.ok(at.includes('门禁推进出 `S6` 时读 `06-test.md` 的第一行'), 'commands/at.md')
+})
+
+// ——— 复核（docs/66 §8）：测试没过时用户的出口——照现状交付，门禁记下、按 sha 绑在测试报告上 ———
+
+const NL = '\n'
+const FAIL = '结论：不通过' + NL + NL + '- `legacy.test.js` 第 3 条：这一趟之前就挂着' + NL
+const asked = (answer) => ({
+  hook_event_name: 'PostToolUse',
+  tool_name: 'AskUserQuestion',
+  agent_type: 'agent-team:at-pm',
+  tool_input: { questions: [{ question: '测试没过，怎么办？', header: '测试', multiSelect: false, options: [] }] },
+  tool_response: { questions: [{ question: '测试没过，怎么办？', header: '测试', multiSelect: false, options: [] }], answers: { '测试没过，怎么办？': answer } },
+})
+const approvalsOf = (runDir) => {
+  try {
+    return readFileSync(join(runDir, 'approvals.jsonl'), 'utf8').split(NL).filter(Boolean).map((l) => JSON.parse(l))
+  } catch {
+    return []
+  }
+}
+
+test('照现状交付（复核 docs/66 §8）：停在 S6、测试报告不通过——用户选「照现状交付」，门禁记下（绑在 06-test.md 上），推进出 S6 放行；报告再改一个字，批准不算了', () => {
+  inS6(FAIL, (fx) => {
+    const r = run('approval-ask', asked('照现状交付'), GATE, fx.projectDir)
+    const c = ctxOf(r)
+    assert.ok(c.includes('已记下照现状交付的批准') && c.includes('06-test.md'), c)
+    const rows = approvalsOf(fx.runDir)
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].product, '06-test.md')
+    assert.equal(rows[0].sha, sha256OfContract(Buffer.from(FAIL)))
+    assert.equal(advance(fx), null, '批准过的这一份放行')
+    const byPm = { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'agent-team:at-pm', tool_input: { file_path: fx.statePath } }
+    assert.ok(!ctxOf(run('ledger', byPm, GATE, fx.projectDir)).includes('推进出 S6 会被 H6 拒'), '【阶段】也认这条批准')
+    writeFileSync(join(fx.runDir, '06-test.md'), FAIL + '补一句' + NL)
+    assert.equal(advance(fx)?.permissionDecision, 'deny', '改过之后批准不算了')
+  })
+})
+
+test('照现状交付（复核 docs/66 §8）：拒绝理由里给这条出路；停在 S6 时写「跑不起来」的不需要批准、还没有测试报告的说还没有测试报告', () => {
+  inS6(FAIL, (fx) => {
+    const why = advance(fx).permissionDecisionReason
+    assert.ok(why.includes('「照现状交付」') && why.includes('只对现在这份 06-test.md 有效'), why)
+    assert.ok(why.includes('根因在更早一段的，回到那一段'), why)
+  })
+  inS6('结论：跑不起来：缺 Docker\n', (fx) => {
+    const c = ctxOf(run('approval-ask', asked('照现状交付'), GATE, fx.projectDir))
+    assert.ok(c.includes('测试报告第一行是「结论：跑不起来」') && c.includes('不需要批准'), c)
+    assert.equal(approvalsOf(fx.runDir).length, 0)
+  })
+  inS6(null, (fx) => {
+    const c = ctxOf(run('approval-ask', asked('照现状交付'), GATE, fx.projectDir))
+    assert.ok(c.includes('还没有测试报告'), c)
+  })
+})
+
+test('照现状交付（复核 docs/66 §8）：测试报告的批准之后，项目经理把用户的答复写成修订——那一次不算改需求（记进 deliver_used、测试报告不算对着上一版），推进出 S6 放行', () => {
+  inS6(FAIL, (fx) => {
+    const contract = ['# 00 契约', '', '## 1. 用户原话', '', '> 做一个计数工具。', '', '## 2. PM 的理解（可改）', '', '- 命令行。', '', '## 4. 修订记录', ''].join(NL)
+    writeFileSync(join(fx.runDir, '00-contract.md'), contract)
+    // 推进出第一段时门禁记下的基线（第 1 节与修订指纹）。
+    writeFileSync(join(fx.runDir, 'contract-base.json'), JSON.stringify({ section1: '> 做一个计数工具。', body_sha: bodyShaOf(contract), revisions: [], verify_base: {}, revised_at: null }))
+    run('approval-ask', asked('照现状交付'), GATE, fx.projectDir)
+    writeFileSync(join(fx.runDir, '00-contract.md'), contract + '### 2026-10-10 · 升级 #1（kind: contract-conflict）' + NL + '**用户裁决**：照现状交付，老用例不修。' + NL)
+    const posted = { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'agent-team:at-pm', tool_input: { file_path: join(fx.runDir, '00-contract.md') } }
+    const c = ctxOf(run('ledger', posted, GATE, fx.projectDir))
+    assert.ok(!c.includes('契约改了'), c)
+    const base = JSON.parse(readFileSync(join(fx.runDir, 'contract-base.json'), 'utf8'))
+    assert.deepEqual(base.deliver_used, [sha256OfContract(Buffer.from(FAIL))])
+    assert.deepEqual(base.verify_base, {})
+    assert.equal(advance(fx), null)
+  })
+})
+
+// ——— 复核（docs/66 §8）：几种写法与先后 ———
+
+test('H6（复核 docs/66 §8）：推进那一次才把 at-qa 裁掉——派发记录里有它在 S6 的派发、或者写入前记着它，照样读测试报告首行', () => {
+  // S6 的 stage_roles 真实顺序里要到推进那一次才记：写入前没有 S6 这一项，派发记录里有 at-qa 在 S6 的派发。
+  inS6('结论：不通过\n', (fx) => {
+    const { S6: _s6, ...rolesBefore } = fx.state.stage_roles
+    const before = { ...fx.state, stage_roles: rolesBefore, roster: fx.state.roster.filter((r) => r !== 'at-qa') }
+    writeFileSync(fx.statePath, JSON.stringify(before))
+    writeFileSync(join(fx.runDir, 'dispatches.jsonl'), JSON.stringify({ kind: 'dispatch', agent_id: 'a0000000000000082', role: 'at-qa', stage: 'S6', caller: 'at-pm', at: '2026-10-10T12:00:00Z' }) + '\n')
+    const trimmedWrite = { ...before, trimmed: { ...before.trimmed, 'at-qa': 'S6' }, stage_roles: { ...rolesBefore, S6: [] } }
+    const d = decisionOf(run('rework', toS7({ ...fx, state: trimmedWrite }), GATE, fx.projectDir).stdout)
+    assert.equal(d?.permissionDecision, 'deny', JSON.stringify(d))
+  })
+  // 没有派发记录、写入前记着 at-qa：推进那一次删名字再裁掉。
+  inS6('结论：不通过\n', (fx) => {
+    const trimmedWrite = { ...fx.state, roster: fx.state.roster.filter((r) => r !== 'at-qa'), trimmed: { ...fx.state.trimmed, 'at-qa': 'S6' }, stage_roles: { ...fx.state.stage_roles, S6: [] } }
+    const d = decisionOf(run('rework', toS7({ ...fx, state: trimmedWrite }), GATE, fx.projectDir).stdout)
+    assert.equal(d?.permissionDecision, 'deny', JSON.stringify(d))
+  })
+})
+
+test('H6、【阶段】（复核 docs/66 §8）：测试报告对着上一版契约、首行又是不通过——先说契约那一句（同段重派重出），不说「记回到 S5」；【阶段】也不补测试那一句', () => {
+  inS6('结论：不通过\n', (fx) => {
+    const sha6 = sha256OfContract(readFileSync(join(fx.runDir, '06-test.md')))
+    writeFileSync(join(fx.runDir, 'contract-base.json'), JSON.stringify({ revisions: ['### 2026-10-10 · 用户主动提出'], verify_base: { '06-test.md': sha6 }, revised_at: '2026-10-10T12:30:00Z' }))
+    const why = advance(fx).permissionDecisionReason
+    assert.ok(why.includes('在 S6 里同段重派') && !why.includes('「回退」记回到 S5'), why)
+    const byPm = { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'agent-team:at-pm', tool_input: { file_path: fx.statePath } }
+    const c = ctxOf(run('ledger', byPm, GATE, fx.projectDir))
+    assert.ok(!c.includes('推进出 S6 会被 H6 拒'), c)
+  })
+})
+
+test('【阶段】（复核 docs/66 §8）：at-qa 写的是不通过——给它自己的那一句（回报时照实说），不给项目经理那一句；已经走过 S6、停在 S7 的不说推进出 S6', () => {
+  inS6('结论：不通过：缺测试\n', (fx) => {
+    const byQa = { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'agent-team:at-qa', tool_input: { file_path: join(fx.runDir, '06-test.md') } }
+    const c = ctxOf(run('ledger', byQa, GATE, fx.projectDir))
+    assert.ok(c.includes('测试结论是「结论：不通过」') && c.includes('回报时照实说') && !c.includes('会被 H6 拒'), c)
+  })
+  inS6('# 旧格式的测试报告\n', (fx) => {
+    writeFileSync(join(fx.runDir, '07-acceptance.md'), '结论：通过\n')
+    const hist = H('S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7')
+    writeFileSync(fx.statePath, JSON.stringify({ ...fx.state, stage: 'S7', stage_roles: { ...fx.state.stage_roles, S7: ['at-acceptance'] }, history: hist, rework: reworkFromHistory(hist) }))
+    const byPm = { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'agent-team:at-pm', tool_input: { file_path: fx.statePath } }
+    const c = ctxOf(run('ledger', byPm, GATE, fx.projectDir))
+    assert.ok(!c.includes('推进出 S6'), c)
+  })
 })

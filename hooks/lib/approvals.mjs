@@ -123,17 +123,23 @@ export function planApprovals({ items, state, stages, grants, acceptance = null 
   return out
 }
 
+// 复核（docs/66 §8）：acceptance 也可以是测试报告（停在测试那一段时，label 是「测试报告」）；回传按 label 换词。测试报告写「跑不起来」的不需要批准（H6 放行）。
 function planDeliver(state, acceptance, approved = []) {
   if (closedAt(state) !== null) return { deliver: true, why: 'closed' }
   const a = isPlainObject(acceptance) ? acceptance : null
-  if (!a || !a.exists || a.blank || typeof a.sha !== 'string') return { deliver: true, why: 'no-acceptance' }
+  const label = a && typeof a.label === 'string' ? a.label : '验收结论'
+  // 验收结论（默认）那一路不带 label，输出与原来一样。
+  const tag = label === '验收结论' ? {} : { label }
+  const no = (why) => ({ deliver: true, why, ...tag })
+  if (!a || !a.exists || a.blank || typeof a.sha !== 'string') return no('no-acceptance')
   const rb = isPlainObject(state?.rework_base) ? state.rework_base : {}
-  if (rb[a.name] === a.sha) return { deliver: true, why: 'stale-acceptance' }
+  if (rb[a.name] === a.sha) return no('stale-acceptance')
   // 评审 F3：对着上一版契约的验收结论（契约基线记着），H6 的契约判据会先拒——批准了也推进不了、收不了口，重出之后 sha 一变批准就作废。排在「通过」之前。
-  if (a.outdated === true) return { deliver: true, why: 'outdated-acceptance' }
-  if (a.verdict === 'pass') return { deliver: true, why: 'deliver-not-needed' }
-  if (approved.includes(a.sha)) return { deliver: true, why: 'deliver-duplicate' }
-  return { deliver: true, name: a.name, sha: a.sha }
+  if (a.outdated === true) return no('outdated-acceptance')
+  if (a.verdict === 'pass') return no('deliver-not-needed')
+  if (a.verdict === 'env') return no('deliver-not-needed-env')
+  if (approved.includes(a.sha)) return no('deliver-duplicate')
+  return { deliver: true, name: a.name, sha: a.sha, ...tag }
 }
 
 /** approvals.jsonl 的一行（不带换行）。 */
@@ -149,26 +155,28 @@ const ASK_AGAIN =
 const ASK_DELIVER =
   `要照现状交付就重新问一次：一道单选题（multiSelect 设 false），交付那一项的标签逐字写「${DELIVER_LABEL}」，推荐写在问题正文或选项说明里，不写进标签。`
 
-function deliverWhyText(why, cause) {
+function deliverWhyText(why, cause, label = '验收结论') {
   switch (why) {
     case 'closed':
       return '这一趟已经收口，批准记不进去，也用不上。交付之后的新改动或修复另起一趟（/agent-team:at）。'
     case 'no-acceptance':
       return (
-        '还没有验收结论（验收结论不在，或者是空的）：照现状交付的批准要对着一份写成的验收结论记（按它那一刻的样子绑定）。' +
-        `等验收结论写成、你读过之后再问。${ASK_DELIVER}`
+        `还没有${label}（${label}不在，或者是空的）：照现状交付的批准要对着一份写成的${label}记（按它那一刻的样子绑定）。` +
+        `等${label}写成、你读过之后再问。${ASK_DELIVER}`
       )
     case 'stale-acceptance':
-      return `验收结论还是上一轮的（与回退那一刻 rework_base 记的一样）：等这一轮的写成、你读过之后再问。${ASK_DELIVER}`
+      return `${label}还是上一轮的（与回退那一刻 rework_base 记的一样）：等这一轮的写成、你读过之后再问。${ASK_DELIVER}`
     case 'outdated-acceptance':
       return (
-        '验收结论对着上一版契约（契约在它写成之后改过，门禁记着）：照写契约那一次的【契约】、或者 H6 拒绝理由给的出路先让它对着这一版重出，' +
+        `${label}对着上一版契约（契约在它写成之后改过，门禁记着）：照写契约那一次的【契约】、或者 H6 拒绝理由给的出路先让它对着这一版重出，` +
         `读过之后再问。${ASK_DELIVER}`
       )
     case 'deliver-duplicate':
-      return '这一份验收结论的照现状交付已经记过了（一份结论只批一次、只盖一次修订），不用再问：照常推进或收口。'
+      return `这一份${label}的照现状交付已经记过了（一份结论只批一次、只盖一次修订），不用再问：照常推进或收口。`
     case 'deliver-not-needed':
-      return '验收结论第一行是「结论：通过」，不需要批准：照常推进或收口。'
+      return `${label}第一行是「结论：通过」，不需要批准：照常推进或收口。`
+    case 'deliver-not-needed-env':
+      return `${label}第一行是「结论：跑不起来」，推进出这一段不需要批准：照常推进；之后验收结论写成、没过的，再问照现状交付。`
     default:
       return whyText(why, '', cause, ASK_DELIVER, DELIVER_LABEL)
   }
@@ -227,7 +235,7 @@ export function approvalNotices({ results, total, cause, stages } = {}) {
           ? `【门禁】已记下照现状交付的批准：只对现在这份 ${r.name} 有效——它再改一个字，这条批准就不算了。照 /agent-team:at 第 4 节：` +
               'escalation 那一条的 answer 补上用户的原话；答复写进修订块（标题照模板写，kind 照问的那一类）——门禁记着这条批准，它之后的第一次' +
               '改契约算记这条答复，不算改需求、验证段的结论不用重出（一条批准只盖一次修订）；交付文档里写明哪些没过、哪些没验证；再推进或收口。'
-          : `【门禁】这次的回答没有记成照现状交付的批准：${deliverWhyText(r.why, cause)}`,
+          : `【门禁】这次的回答没有记成照现状交付的批准：${deliverWhyText(r.why, cause, r.label)}`,
       )
       continue
     }

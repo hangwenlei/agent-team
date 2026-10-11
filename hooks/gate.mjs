@@ -1053,16 +1053,21 @@ function ensureContractBase(ctx) {
 }
 
 // M4k（docs/46，评审 F1、F2）：验收结论现在这份的 sha——approvals.jsonl 里有它的照现状交付批准、契约基线还没把它记成用过（复核中 2：按 sha 记，
-// 同一份结论批两次也只盖一次修订）；没有给 null。
+// 同一份结论批两次也只盖一次修订）；没有给 null。复核（docs/66 §8）：测试报告也认——停在测试那一段时批准绑在测试报告上，记那条答复的修订同样不算改需求
+// （不然那一次修订把测试报告记成对着上一版契约，H6 叫它重出，绕回原地）。
 function unusedDeliverApproval(ctx, base) {
-  const acc = acceptanceOf(ctx.stages)
-  if (!acc) return null
-  const accBytes = ctx.artifactExists(acc.name) ? ctx.artifactBytes(acc.name) : null
   const ab = ctx.artifactBytes(APPROVALS_FILE)
-  if (!accBytes || !ab) return null
-  const now = sha256OfContract(accBytes)
-  if (Array.isArray(base.deliver_used) && base.deliver_used.includes(now)) return null
-  return readDeliverApprovalEntries(ab.toString('utf8'), acc.name).some((e) => e.sha === now) ? now : null
+  if (!ab) return null
+  const text = ab.toString('utf8')
+  for (const def of [acceptanceOf(ctx.stages), testStageOf(ctx.stages)]) {
+    if (!def) continue
+    const bytes = ctx.artifactExists(def.name) ? ctx.artifactBytes(def.name) : null
+    if (!bytes) continue
+    const now = sha256OfContract(bytes)
+    if (Array.isArray(base.deliver_used) && base.deliver_used.includes(now)) continue
+    if (readDeliverApprovalEntries(text, def.name).some((e) => e.sha === now)) return now
+  }
+  return null
 }
 
 // 修订那一刻还在跑的验证段角色（复核 F4）：这一趟派发记录里，验证段的派发、门禁没见它停下（最后一回是「拦」也算没停）的。角色与段只认
@@ -1303,8 +1308,8 @@ function runWords(runDir) {
 // M4k（docs/46）：记录器判「照现状交付要不要记」时读的验收结论——在不在、空不空、sha、首行（approvals.mjs 的 planApprovals 那一支）；评审 F3：
 // 对不对着上一版契约（与 H6 的契约判据同一份 outdatedProducts）——复核（低 4）：验证段里不是项目经理自己写的那几份（测试报告、验收结论）有一份对着
 // 上一版就算（测试报告对着上一版，收口要回退重测，验收结论跟着重出，批准白记）；契约基线读不出来就当不对着（少拦）。复核（中 2）：这份验收结论已经
-// 记过的照现状交付批准（approved）。
-function acceptanceOnDisk(ctx, name) {
+// 记过的照现状交付批准（approved）。复核（docs/66 §8）：停在测试那一段时记录器读的是测试报告（kind 'test'，首行按 test-verdict.mjs 认），label 是回传里的说法。
+function acceptanceOnDisk(ctx, name, kind = 'acceptance') {
   const bytes = ctx.artifactExists(name) ? ctx.artifactBytes(name) : null
   let outdated = false
   try {
@@ -1327,9 +1332,10 @@ function acceptanceOnDisk(ctx, name) {
     exists: Boolean(bytes),
     blank: bytes ? isBlankText(bytes) : false,
     sha: bytes ? sha256OfContract(bytes) : null,
-    verdict: bytes ? acceptanceVerdict(bytes) : null,
+    verdict: bytes ? (kind === 'test' ? testVerdict(bytes) : acceptanceVerdict(bytes)) : null,
     outdated,
     approved: readDeliverApprovals(ab ? ab.toString('utf8') : null, name),
+    label: kind === 'test' ? '测试报告' : '验收结论',
   }
 }
 
@@ -2170,7 +2176,8 @@ function main() {
         }
       }
       // M4o 复核（docs/50 §9）：放行之前处理项目一级那份原话记录——这个会话建出这一趟 state.json 的那一次（写之前它不在）绑，续跑命令之前就有的那一趟
-      // 作废（settleWords）。排在所有拒绝之后：被拒的写入不绑。
+      // 作废（settleWords）。排在推进、契约、原话那几条拒绝之后：被拒的写入不绑。测试报告与验收结论那两条排在它后面（复核 docs/66 §8）——建 run 的那一次
+      // 走不到它们（绑只在那一次），被它们拒掉的续跑写入照样会作废原话记录：作废说的是「续跑了它」，那一次写入被拒，续跑这件事已经发生。
       // 复核（docs/58 §8）：只认项目经理的写入——别的角色写 state.json 被 H3 拒，几道门禁并行，H6 这边不能先替它记下 binding。
       if (isContractWriter(input.agent_type)) {
         settleWords({ runDir, agentTeamDir, sessionId: input.session_id, state: after, stages: stagesForRework, creating: before === null && beforeText === null })
@@ -2178,10 +2185,13 @@ function main() {
 
       // docs/66（docs/46 §4「测试报告的结论不读」）：推进出测试那一段的那一次读测试报告首行——不通过的拒（回退到实现那一段）、读不出的拒（同段重派
       // at-qa 照格式写）；跑不起来的放行（正文里 env-blocked 那一问）。只在那一次读：之后由验收结论管，已经走过测试那一段的旧 run 不受牵连。
+      const testDef = testStageOf(stagesForRework)
       const tv = decideTestVerdict({
         before,
         after,
         stages: stagesForRework,
+        // 复核（docs/66 §8）：用户经「照现状交付」批准过这一份测试报告的（门禁记下、按 sha 绑），不通过也放行。
+        approvedShas: testDef ? readDeliverApprovals(approvalsText, testDef.name) : [],
         bytesOf: (name) => {
           try {
             return readFileSync(join(runDir, name))
@@ -2597,12 +2607,14 @@ function main() {
       try {
         const ts = testStageOf(ctx.stages)
         if (!ts || !stageDone || ctx.state?.stage !== ts.stageId || closedAt(ctx.state) !== null || outdatedNow.has(ts.name)) return null
+        const tab = ctx.artifactBytes(APPROVALS_FILE)
         const block = testBlock({
           stages: ctx.stages,
           state: ctx.state,
           prior: undefined,
           bytesOf: (n) => (ctx.artifactExists(n) ? ctx.artifactBytes(n) : null),
           dispatched: dispatchedNow,
+          approvedShas: readDeliverApprovals(tab ? tab.toString('utf8') : null, ts.name),
         })
         return block ? testStageNote({ block, writer: callerOf(input) }) || null : null
       } catch {
@@ -2820,7 +2832,14 @@ function main() {
           let sep = bytes && bytes.length && bytes[bytes.length - 1] !== 0x0a ? '\n' : ''
           const out = []
           const acceptanceDef = acceptanceOf(ctx.stages)
-          const acceptance = acceptanceDef ? acceptanceOnDisk(ctx, acceptanceDef.name) : null
+          // 复核（docs/66 §8）：停在测试那一段时，照现状交付绑在测试报告上（测试没过、用户要带着它往下走）；别的时候照旧绑在验收结论上。
+          const testDefNow = testStageOf(ctx.stages)
+          const acceptance =
+            testDefNow && ctx.state?.stage === testDefNow.stageId
+              ? acceptanceOnDisk(ctx, testDefNow.name, 'test')
+              : acceptanceDef
+                ? acceptanceOnDisk(ctx, acceptanceDef.name)
+                : null
           for (const p of planApprovals({ items: found.items, state: ctx.state, stages: ctx.stages, grants, acceptance })) {
             if (p.deliver && typeof p.sha === 'string') {
               try {
