@@ -1488,7 +1488,8 @@ function withApprovalsLock(runDir, body) {
 
 // M4d（docs/38，全量审查第 19 条）：往当前 run 的派发记录（runs/<id>/dispatches.jsonl，门禁专属）追加一行。只追加、一次写一整行（O_APPEND）：
 // 并发的几个门禁进程各写各的，不读后判、不加锁。末字节不是换行（手改过、被截断）时先补一个。写不进只留痕——完成核验这一次少核。
-function appendDispatchLog(runDir, line, label) {
+// consequence：写不成的后果（复核 docs/82 §8：told 行写不成时，这一次核全了、是下一条通知会照常整段报）。
+function appendDispatchLog(runDir, line, label, consequence = '完成核验这一次少核') {
   try {
     const file = join(runDir, DISPATCHES_FILE)
     let sep = ''
@@ -1508,7 +1509,7 @@ function appendDispatchLog(runDir, line, label) {
     } catch {}
     appendFileSync(file, `${sep}${line}\n`)
   } catch (err) {
-    process.stderr.write(`agent-team ${label}：派发记录没有写成（${quote(err?.message ?? err, { max: 120 })}），完成核验这一次少核。\n`)
+    process.stderr.write(`agent-team ${label}：派发记录没有写成（${quote(err?.message ?? err, { max: 120 })}），${consequence}。\n`)
   }
 }
 
@@ -3118,11 +3119,11 @@ function main() {
         contexts.splice(
           start,
           piece.length,
-          `交付物核验：${role}（${stage}）这条完成通知门禁之前已经核过一次、结论没变——照那一次的回传处理（同一个子代理的完成通知平台会送不止一条；那一次的回传已经不在上下文里的，跑 /agent-team:at-status 核一遍）。`,
+          `交付物核验：${role}（${stage}）这条完成通知门禁之前已经核过一次、结论没变——照那一次的回传处理（同一个子代理的完成通知平台会送不止一条；那一次的回传已经不在上下文里的，读它的回报、照 /agent-team:at 第 3 节「核实」去 run 目录核实）。`,
         )
         return
       }
-      appendDispatchLog(ctx.runDir, toldLine({ at: new Date().toISOString(), agentId, role, stage, sha }), '完成核验')
+      appendDispatchLog(ctx.runDir, toldLine({ at: new Date().toISOString(), agentId, role, stage, sha }), '完成核验', '下一条同一个子代理的完成通知会照常整段报')
     }
     for (const n of notes) {
       for (const taskId of n.taskIds) {
@@ -3145,7 +3146,6 @@ function main() {
         }
         // 记录里的角色与段来自磁盘：只认花名册里的角色、阶段链上的段（之后原样拼进文字，是插件自己的名字）。
         if (!isPlainObject(roster) || !Object.hasOwn(roster, d.role) || !isKnownStage(ctx.stages, d.stage)) continue
-        pending = { agentId: d.agent_id, role: d.role, stage: d.stage, start: contexts.length }
         if (closedAt(ctx.state) !== null) {
           if (recipientIsPm) {
             contexts.push(
@@ -3155,6 +3155,8 @@ function main() {
           }
           continue
         }
+        // docs/82 §8：从这里起的回传按指纹去重——收口之后的那一句（上面）照旧每次说，也不往已收口的 run 写（H5a、H5b 对收了口的那一趟都不记）。
+        pending = { agentId: d.agent_id, role: d.role, stage: d.stage, start: contexts.length }
         const r = decideDeliverable({
           role: d.role,
           stageId: d.stage,

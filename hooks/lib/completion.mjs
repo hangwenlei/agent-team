@@ -15,7 +15,7 @@
 //   - 嵌套派发的通知路由按模式分：-p 下协调者还在跑，孙代理的通知送给协调者、不触发任何 hook；交互模式下协调者停车、被孙代理的通知
 //     唤醒。所以协调者返回时，它派出去的人的完成通知不一定会到 PM 那里——进度那一段不许诺「之后门禁会单独核它」。
 //
-// 门禁专属文件 runs/<id>/dispatches.jsonl（control-files.mjs 的 GATE_FILES）：门禁自己追加，任何人的 Edit/Write 都拒。两种行：
+// 门禁专属文件 runs/<id>/dispatches.jsonl（control-files.mjs 的 GATE_FILES）：门禁自己追加，任何人的 Edit/Write 都拒。三种行（told 那一种在 toldLine 上方）：
 //   - { kind: "dispatch", at, agent_id, tool_use_id, role, stage, caller, caller_id, mode }：H5a 在团队角色的每一次派发返回时记（mode 是
 //     "background"（启动那一刻）或 "foreground"（跑完那一刻））。stage 是那一刻的 state.stage——完成时按派它时的那一段核，不按完成时的。
 //   - { kind: "stop", at, agent_id, role, stage, outcome }：H5b 每一回停下记一行，outcome 是 pass（放它停下）、bubble（认冒泡、放它停下）、
