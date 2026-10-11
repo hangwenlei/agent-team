@@ -1667,7 +1667,7 @@ function dispatchedByStageOf(ctx) {
   }
 }
 
-function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, recipientIsPm, selfDone = false }) {
+function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, recipientIsPm, selfDone = false, selfMissing = false }) {
   const stage = ctx.stages?.[stageId]
   if (!isPlainObject(stage) || !coordinatorId) return null
   const producers = stageRoles(stage)
@@ -1695,7 +1695,7 @@ function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, reci
       }),
     }
   })
-  return coordinatorProgress({ role: coordinator, stageId, rows, recipientIsPm, selfDone, impl: isRolePatternStage(stage) })
+  return coordinatorProgress({ role: coordinator, stageId, rows, recipientIsPm, selfDone, selfMissing, impl: isRolePatternStage(stage) })
 }
 
 function main() {
@@ -3179,6 +3179,12 @@ function main() {
             : `经派得到 ${d.role} 的那一层再派它一次（你派不到它）`
         const trimHint = trimHintFor(ctx.stages, d.stage, d.role, [...r.missing, ...(Array.isArray(r.blank) ? r.blank : [])])
         contexts.push(missingNotice({ ctx, r, role: d.role, recipientCanWriteState: recipientIsPm, why, redispatch, trimHint }))
+        // docs/80（docs/43 §4「S2 的进度只在 at-product 自己那份交了时报」）：自己也是这一段产者的协调者（S2 的 at-product）自己那份没交齐、它又派过别人——
+        // 在上面那一段之后报它派出去的人的进度（selfMissing），PM 照「再派它」做之前看得到另一头。只在那一段还是当前段、没收口时报（与交了的那一支同一个条件）。
+        if (d.stage === ctx.state?.stage && closedAt(ctx.state) === null && dispatchesOtherProducers(ctx, d.role, d.stage)) {
+          const p = progressOf({ ctx, fresh, log, coordinator: d.role, coordinatorId: taskId, stageId: d.stage, recipientIsPm, selfMissing: true })
+          if (p) contexts.push(p)
+        }
       }
     }
     if (!contexts.length) process.exit(0)
@@ -3678,6 +3684,26 @@ function main() {
           trimHint = trimHintFor(ctx.stages, r.stageId, role, [...r.missing, ...(Array.isArray(r.blank) ? r.blank : [])])
         }
         notices.push(missingNotice({ ctx, r, role, recipientCanWriteState, why, trimHint }))
+        // docs/80：同上（完成核验那一处），前台派发跑完的那一刻。
+        if (
+          CHECK === 'deliverable' &&
+          r.stageId === ctx.state?.stage &&
+          closedAt(ctx.state) === null &&
+          dispatchesOtherProducers(ctx, role)
+        ) {
+          const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
+          const p = progressOf({
+            ctx,
+            fresh,
+            log: readDispatchLog(logBytes ? logBytes.toString('utf8') : null),
+            coordinator: role,
+            coordinatorId: typeof launchedId === 'string' && AGENT_ID_RE.test(launchedId) ? launchedId : null,
+            stageId: ctx.state?.stage,
+            recipientIsPm: recipientCanWriteState,
+            selfMissing: true,
+          })
+          if (p) notices.push(p)
+        }
       }
       // 交付物本身还缺产物时，账本比对一样并进同一条——它审计的是全部阶段的
       // produces，不只是刚被判定缺失的这一段（比如更早的阶段被 Bash 绕过写过）。
