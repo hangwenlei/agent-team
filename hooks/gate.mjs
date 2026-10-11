@@ -2513,17 +2513,7 @@ function main() {
     const approvalsBytes = ctx.artifactBytes(APPROVALS_FILE)
     const grants = readGrants(approvalsBytes ? approvalsBytes.toString('utf8') : null, ctx.stages)
     const validation = kind === 'state' ? validateState(ctx.state, { stages: ctx.stages, grants }) : null
-    // docs/74：state.json 原文里重复的键（JSON.parse 只认最后一个）——并进【state.json】那几条，只报不拦。
-    const dupLines = (() => {
-      if (kind !== 'state') return []
-      try {
-        const raw = ctx.artifactBytes('state.json')
-        return raw ? duplicateKeyLines(raw.toString('utf8')) : []
-      } catch {
-        return []
-      }
-    })()
-    const stateProblems = validation ? [...validation.problems, ...dupLines] : []
+    const stateProblems = validation ? [...validation.problems] : []
 
     // M3z：交付快照。PM 写 state.json、而 stage 变了之后照磁盘拍：早于当前段的各段产物记 sha（hooks/lib/redo.mjs 的 deliveredSnapshot）。
     // H2、H3 拿它分辨「交过」——不依赖 PM 把 sha 记进 artifacts（那条回传只发给写者，第 28 条）。写不进、读不出都只是少拦，
@@ -2531,6 +2521,14 @@ function main() {
     if (kind === 'state') writeDeliveredSnapshot(ctx)
     // M4j（docs/45）：契约基线——推进出第一段之后第一次见到 state.json 时记下（contract-base.mjs）；写契约之后按它说【契约】。
     const contractBaseLines = kind === 'state' ? ensureContractBase(ctx) : kind === 'contract' ? contractBaseNotices(ctx) : []
+    // docs/74：state.json 原文里重复的键（JSON.parse 只认最后一个）——并进【state.json】那几条，只报不拦。复核（docs/74 §8）：排在交付快照、契约基线
+    // 两次写盘之后——扫描万一出事，那两份门禁专属文件照样写了。
+    if (kind === 'state' && validation) {
+      try {
+        const raw = ctx.artifactBytes('state.json')
+        if (raw) stateProblems.push(...duplicateKeyLines(raw.toString('utf8')))
+      } catch {}
+    }
     // M4o（docs/50，审查第 20 条修法 A）：原话记录——项目经理在这一趟写 state.json 或契约时作废（settleWords；绑只在 H6 建 run 的那一次）；还在第一段、契约在时
     // 拿第 1 节对它（第一段之后第 1 节的变化归契约基线管）。写契约那一次对不上说【契约】；写 state.json 时第一段的产物齐了，【阶段】那一句补上。
     const firstStageId = isStageChain(ctx.stages) ? Object.keys(ctx.stages)[0] : null
