@@ -5,9 +5,10 @@
 // 记上——之后 PENDING 而契约不在的那一格就走不到了（除非 Bash 改 state.json）。出路照用【契约】那一句。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { run, decisionOf } from './helpers/gate-runner.mjs'
+import { fileURLToPath } from 'node:url'
+import { run, decisionOf, hermeticEnv } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 import { reworkFromHistory } from '../hooks/lib/state.mjs'
@@ -60,7 +61,11 @@ test('H6（docs/63）：推进出 S1 时 contract_sha 记的是别的合法值�
   inS1({}, (fx) => {
     const drift = decide(fx, OTHER).d
     assert.equal(drift?.permissionDecision, 'deny')
-    assert.ok(drift.permissionDecisionReason.includes('对不上') && !drift.permissionDecisionReason.includes(fx.disk), drift.permissionDecisionReason)
+    const dw = drift.permissionDecisionReason
+    // 说的是这次写入里的值；不报磁盘上算出来的值。复核（docs/63 §8）：第一段里契约由项目经理写、可以改——出路是记最近一次写契约的回传，
+    // 不说「契约被人改过、恢复原样」（照原话改第 1 节本身就不是第 4 节的修订，恢复原样会绕回原话那一条）。
+    assert.ok(dw.includes('对不上') && dw.includes(OTHER) && !dw.includes(fx.disk), dw)
+    assert.ok(dw.includes('还在 S1') && dw.includes('最近一次写契约') && !dw.includes('恢复原样'), dw)
     const invalid = decide(fx, 'not-a-sha').d
     assert.equal(invalid?.permissionDecision, 'deny')
     assert.ok(invalid.permissionDecisionReason.includes('不是合法的 sha256'), invalid.permissionDecisionReason)
@@ -75,19 +80,40 @@ test('H6（docs/63）：不是推进出 S1 的写入（S1 里原地重写、记 
   })
 })
 
-// 契约在、这一次读不出（被占着）：不拦，留痕。Windows 上造不出，只在 POSIX 上用权限造。
-test('H6（docs/63）：推进出 S1 时契约在却读不出——不按这一条拦，stderr 留痕', { skip: process.platform === 'win32' }, () => {
+// 契约在、这一次读不出（被占着）：不拦，留痕。复核（docs/63 §8）：用预加载让读契约抛异常（tests/helpers/inject-throw.cjs 的 read:），三个系统上都跑；
+// 断言认这一条自己那一行——推进判据自己也会留一行「读不出」。
+const INJECT = fileURLToPath(new URL('./helpers/inject-throw.cjs', import.meta.url))
+test('H6（docs/63）：推进出 S1 时契约在却读不出——不按这一条拦，stderr 留痕', () => {
   inS1({}, (fx) => {
-    const p = join(fx.runDir, '00-contract.md')
-    chmodSync(p, 0o000)
-    try {
-      if (process.getuid && process.getuid() === 0) return
-      const { d, r } = decide(fx, 'PENDING')
-      assert.ok(d === null || !d.permissionDecisionReason.includes('推进出 S1 之前'), JSON.stringify(d))
-      assert.ok(r.stderr.includes('读不出') , r.stderr)
-    } finally {
-      chmodSync(p, 0o644)
-    }
+    const r = run('rework', advance(fx, 'PENDING'), undefined, fx.projectDir, { ...hermeticEnv(), AGENT_TEAM_TEST_THROW: 'read:00-contract.md' }, { nodeArgs: ['-r', INJECT] })
+    const d = decisionOf(r.stdout)
+    assert.ok(d === null || !d.permissionDecisionReason.includes('推进出 S1 之前'), JSON.stringify(d))
+    assert.ok(r.stderr.includes('推进出 S1 之前没核契约的账'), r.stderr)
+  })
+})
+
+test('H6（复核 docs/63 §8）：一次写入里先回到 S1、再推进出来——同样核（分两次写要核的，写在一次里照样核）', () => {
+  inS1({}, (fx) => {
+    // 先停在 S2（记着契约的 sha），再一次写入：history 追加 S1、S2，rework_base 里契约标 accepted，contract_sha 写成 PENDING。
+    const atS2 = { ...fx.state, stage: 'S2', contract_sha: fx.disk, history: H('S1', 'S2'), rework: reworkFromHistory(H('S1', 'S2')) }
+    writeFileSync(fx.statePath, JSON.stringify(atS2))
+    const hist = H('S1', 'S2', 'S1', 'S2')
+    const both = { ...atS2, contract_sha: 'PENDING', history: hist, rework: reworkFromHistory(hist), rework_base: { '00-contract.md': 'accepted' } }
+    const input = { hook_event_name: 'PreToolUse', tool_name: 'Write', agent_type: 'agent-team:at-pm', tool_input: { file_path: fx.statePath, content: JSON.stringify(both, null, 2) } }
+    const d = decisionOf(run('rework', input, undefined, fx.projectDir).stdout)
+    assert.equal(d?.permissionDecision, 'deny', JSON.stringify(d))
+    assert.ok(d.permissionDecisionReason.includes('推进出 S1 之前'), d.permissionDecisionReason)
+  })
+})
+
+test('H6（复核 docs/63 §8）：第 1 节对不上原话、契约的账也没记——先说原话那一句（改好第 1 节契约的哈希就变了），出路里一并说记上回传的 sha', () => {
+  inS1({}, (fx) => {
+    writeFileSync(join(fx.runDir, 'user-words.json'), JSON.stringify({ args: '做一个待办应用', session_id: 's-1', runs_before: [], bound: 'r1', dropped: null, binding: null }))
+    const d = decide(fx, 'PENDING').d
+    assert.equal(d?.permissionDecision, 'deny')
+    const why = d.permissionDecisionReason
+    assert.ok(why.includes('对不上用户在 /agent-team:at 后面写的原话') && !why.includes('推进出 S1 之前'), why)
+    assert.ok(why.includes('改好之后把那一次写契约收到的【契约】回传给的 sha 记进 contract_sha'), why)
   })
 })
 

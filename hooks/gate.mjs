@@ -2116,12 +2116,25 @@ function main() {
       // 记录），拒。没有记录的（更早建的 run、别的会话建的、不经门禁建的、命令没带参数、收口之后照用户的消息另起的）不核。
       // 排在契约判据之后、验收判据之前：两样都是契约那一族，第一段推进时契约基线还没有，不会两样一起说。
       const chain = isStageChain(stagesForRework) ? Object.keys(stagesForRework) : []
-      if (chain.length && isPlainObject(before) && isPlainObject(after) && before.stage === chain[0] && chain.indexOf(after.stage) > 0) {
+      // 复核（docs/63 §8）：「推进出第一段」也认一次写入里先回到第一段、再推进出来的（追加的 history 里有第一段、写入后不停在第一段）——分两次写
+      // 要核的，写在一次里照样核。
+      const appendedHistory =
+        isPlainObject(before) && isPlainObject(after) && Array.isArray(before.history) && Array.isArray(after.history) && after.history.length > before.history.length
+          ? after.history.slice(before.history.length)
+          : []
+      const leavesFirst =
+        chain.length > 0 &&
+        isPlainObject(before) &&
+        isPlainObject(after) &&
+        chain.indexOf(after.stage) > 0 &&
+        (before.stage === chain[0] || appendedHistory.some((h) => isPlainObject(h) && h.stage === chain[0]))
+      if (leavesFirst) {
         const words = runWords(runDir)
         const m = words && contractBytes ? section1Mismatch(contractBytes.toString('utf8'), words.args) : null
-        if (m) denyAndExit(`${wordsMismatchText(m)}。${WORDS_FIX}——再推进。`, spec.event)
+        // 复核（docs/63 §8）：改好第 1 节会让契约的哈希变，下面那一条接着就要它记上——出路里一并说，省一轮被拒。
+        if (m) denyAndExit(`${wordsMismatchText(m)}。${WORDS_FIX}——改好之后把那一次写契约收到的【契约】回传给的 sha 记进 contract_sha，再推进。`, spec.event)
         // docs/63（docs/37 §5「PENDING 而契约不在，一律当还没写」）：推进出第一段那一次，这次写入的 contract_sha 要与磁盘上的契约对得上——之后
-        // PENDING 而契约不在的那一格就走不到了（除非 Bash 改 state.json）。出路照用【契约】那一句；契约这一次读不出（被占着）不拦、留痕。
+        // 「过了第一段还是 PENDING」那一格只剩不经这一次的写法（见 docs/63 §4）。出路照用【契约】那一句；契约这一次读不出（被占着）不拦、留痕。
         const s1cmp =
           contractBytes === null && existsSync(join(runDir, CONTRACT_FILE))
             ? { ok: false, kind: 'unreadable' }
@@ -2129,7 +2142,14 @@ function main() {
         if (s1cmp.kind === 'unreadable') {
           process.stderr.write(`agent-team H6 返工预算：这一次读不出 ${CONTRACT_FILE}，推进出 ${chain[0]} 之前没核契约的账。\n`)
         } else {
-          const s1notice = contractCheckNotice(s1cmp, after.contract_sha)
+          // 复核（docs/63 §8）：漂了的那一支在第一段里单写——契约还由项目经理写、可以改（改第 1 节照原话、改第 2 节的理解），通用那一句的「契约被人改过、
+          // 不是第 4 节的修订——恢复原样」在这里会导向绕圈。值仍然只从写契约那一次的回传来、不照磁盘改账。
+          const s1notice =
+            s1cmp.kind === 'drift'
+              ? `【契约】这次写入的 contract_sha（${shaOrNote(after.contract_sha)}）与磁盘上的 ${CONTRACT_FILE} 对不上。还在 ${chain[0]}，契约由你写、可以改：` +
+                `把最近一次写契约收到的【契约】回传给的 sha 记进 contract_sha；手上没有那个值，就原样重写一次 ${CONTRACT_FILE}，从这一次的回传里拿——` +
+                '不要自己算（门禁先统一行尾再算，自己算的对不上）。'
+              : contractCheckNotice(s1cmp, after.contract_sha)
           if (s1notice) denyAndExit(`agent-team H6 返工预算：推进出 ${chain[0]} 之前，这次写入的 contract_sha 要与磁盘上的契约对得上。${s1notice}`, spec.event)
         }
       }

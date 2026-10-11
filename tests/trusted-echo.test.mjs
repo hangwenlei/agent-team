@@ -373,6 +373,15 @@ const SCENARIOS = [
     calls: ({ run }, P) => [['rework', stateWrite(run, { ...withForgedHistory(baseState(), P), rework: {} })]],
   },
   {
+    // docs/63（复核 §8）：推进出第一段那一次写入的 contract_sha 进 H6 的拒绝理由——值是调用方自己这次给的，经 shaOrNote，不合法的不回显。
+    name: '推进出第一段那一次写入的 contract_sha（H6）',
+    state: (s) => ({ ...s, stage: 'S1', history: [{ stage: 'S1', at: '2026-09-17T14:30:00Z' }], rework: {} }),
+    calls: ({ run }, P) => [
+      ['rework', stateWrite(run, { ...baseState(), stage: 'S2', contract_sha: P, history: [{ stage: 'S1', at: 't' }, { stage: 'S2', at: 't' }], rework: {} })],
+    ],
+    anchor: (all) => all.includes('推进出 S1 之前'),
+  },
+  {
     name: 'rework 的键与值（H6：不是 0 到上限之间的整数）',
     disk: true,
     calls: ({ run }, P) => [

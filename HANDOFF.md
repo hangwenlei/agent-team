@@ -119,7 +119,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   `contract_sha` 比磁盘，对不上出【契约】——不报磁盘上算出来的值、不说「改成与磁盘一致」（照着磁盘改账就把漂移洗成了合法），合法修订的新值
   只从写契约那一次的回传来。H2 派验证段的产者（`stages.mjs` 的 `verifyStageOf`，按 `verifies` 派生，只核花名册里派得到的）之前也比一遍，排在 H2 最后，对不上就拒、出路是同一句【契约】
   （`gate.mjs` 的 `contractCmp`，派发返回的【契约】与它共用；读不出契约不拦、留痕，`docs/60`）；推进出第一段那一次 H6 要这次写入的 `contract_sha` 与磁盘上的
-  契约对得上（`docs/63`），之后「PENDING 而契约不在」只剩旧 run 与 Bash。升级类别从 `ESCALATION_KINDS` 派生、正文不报总数。理由在 `docs/37`。
+  契约对得上（一次写入里回到第一段再推进出来的也算，第一段里漂了的出路单写，`docs/63`）；不经那一次的写法见 `docs/63` §4。升级类别从 `ESCALATION_KINDS` 派生、正文不报总数。理由在 `docs/37`。
 - **推进由 H6 在推进那一次核：一次只推一段、离开的那一段要交齐**（`hooks/lib/advance.mjs`，在 `rework-guard.mjs` 的 `decideReworkBase` 里接上）：
   叫到的产者各自那几份、固定产物都在，空白算没交，`"accepted"` 算交了；「叫到」= 写入前后的 `participantsOf` 并上门禁的派发记录（PM 少记一个人、
   先单独删名字都翻不成没叫过）；`trimmed` 里记着、值是这一段的免掉，只限按叫到的人展开产物的段里、不被任何段当前置的那几份（`mayWaive`）；
