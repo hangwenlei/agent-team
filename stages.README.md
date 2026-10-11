@@ -90,7 +90,7 @@ S5 是第一种（一个模式配 N 个角色），S2 是第二种（`at-product
 | H2 `decideReadiness` 的 `done` | (`roster` ∪ 目标) `∩ producers`（有意整趟） |
 | `validateState` 的 artifacts 键校验 | 全部 `producers` |
 | `/at-resume` 的「产物齐没齐」核盘（`commands/at-resume.md`） | 这一段叫到的人 `∩ producers`（`participantsOf`） |
-| `/at-status` 的产物那一栏（`commands/at-status.md`） | 这一段叫到的人 `∩ producers`（`participantsOf`） |
+| `/at-status` 的产物那一栏（`commands/at-status.md`） | 这一段叫到的人 `∩ producers`（`participantsOf`）；展开是空集、推进出去了又没整段裁掉的，后面某一段要当前置的那几份照磁盘报（`docs/81`） |
 | `at-qa` 开工前的自查（`agents/at-qa.md`） | `stage_roles` 在 S5 记着的人 `∩ producers`（旧 run 看 `roster`） |
 
 ⚠️ **按段与整趟分两组（M3x，`docs/32`）。** `roster` 不分段：`at-ui` 在 S2 进过 `roster`，S5 就把它当成 S5 的产者
