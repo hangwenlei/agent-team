@@ -2120,6 +2120,18 @@ function main() {
         const words = runWords(runDir)
         const m = words && contractBytes ? section1Mismatch(contractBytes.toString('utf8'), words.args) : null
         if (m) denyAndExit(`${wordsMismatchText(m)}。${WORDS_FIX}——再推进。`, spec.event)
+        // docs/63（docs/37 §5「PENDING 而契约不在，一律当还没写」）：推进出第一段那一次，这次写入的 contract_sha 要与磁盘上的契约对得上——之后
+        // PENDING 而契约不在的那一格就走不到了（除非 Bash 改 state.json）。出路照用【契约】那一句；契约这一次读不出（被占着）不拦、留痕。
+        const s1cmp =
+          contractBytes === null && existsSync(join(runDir, CONTRACT_FILE))
+            ? { ok: false, kind: 'unreadable' }
+            : compareContractSha({ recorded: after.contract_sha, actual: contractBytes ? sha256OfContract(contractBytes) : null })
+        if (s1cmp.kind === 'unreadable') {
+          process.stderr.write(`agent-team H6 返工预算：这一次读不出 ${CONTRACT_FILE}，推进出 ${chain[0]} 之前没核契约的账。\n`)
+        } else {
+          const s1notice = contractCheckNotice(s1cmp, after.contract_sha)
+          if (s1notice) denyAndExit(`agent-team H6 返工预算：推进出 ${chain[0]} 之前，这次写入的 contract_sha 要与磁盘上的契约对得上。${s1notice}`, spec.event)
+        }
       }
       // M4o 复核（docs/50 §9）：放行之前处理项目一级那份原话记录——这个会话建出这一趟 state.json 的那一次（写之前它不在）绑，续跑命令之前就有的那一趟
       // 作废（settleWords）。排在所有拒绝之后：被拒的写入不绑。
