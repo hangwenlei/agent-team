@@ -114,6 +114,18 @@ export function departureNeeds({ stages, sid, state, prior, dispatched = null })
   for (const r of called) {
     for (const n of expandProduces(stage, [r])) (trimmedAt(state, r, sid) && mayWaive(stages, sid, n) ? excuse : need)(n, r)
   }
+  // docs/89：没叫过、也没在这一段裁掉的产者，它的产物是后面某段的前置的（S2 的 01-prd.md），照样要——原来只要叫到的人那几份，S2 记成 []、谁都没裁时
+  // 放行推进，到下一段派人时 H2 才按前置拒。不是前置的（02-*、05-impl/*，mayWaive）照旧不要：没叫它就是这一趟不用它那几份。
+  // 复核（docs/89 §8）：带上 prereq 与 othersCalled——拒绝理由按它给出路：只把这一个产者写进 trimmed，下一段派人时 H2 照前置拒（这一段不算整段裁掉），
+  // 所以叫过别的产者的只有「派它」，一个都没叫的是「派它、或者整段裁掉这一段」。
+  for (const r of roles) {
+    if (called.includes(r) || trimmedAt(state, r, sid)) continue
+    for (const n of expandProduces(stage, [r])) {
+      if (mayWaive(stages, sid, n) || seen.has(n)) continue
+      seen.add(n)
+      out.needs.push({ name: n, role: r, called: false, via: null, prereq: true, othersCalled: called.length > 0 })
+    }
+  }
   return out
 }
 
@@ -189,11 +201,27 @@ export function departureLines(stages, blockers, unrecorded) {
       )
       if (g.items.every((b) => mayWaive(stages, g.sid, b.name))) waivable.push(g)
       else fixed.push(g)
+    } else if (g.items.some((b) => b.prereq)) {
+      // docs/89 §8：没叫过、也没裁掉的产者被后面当前置的那几份。括号里只列要派人的段（产者全是项目经理的段不列）。
+      const later = [...new Set(g.items.flatMap((b) => requiredBy(stages, b.name)))].filter((id) => !stageRoles(stages[id]).every((r) => isContractWriter(r)))
+      const pending = later.join('、')
+      if (g.items.some((b) => b.othersCalled)) {
+        lines.push(`  - ${items}：${g.sid} 这一趟还没叫过 ${g.role}——派它（${pending} 要它当前置；${g.sid} 已经叫过别的产者，只裁掉 ${g.role} 走不下去）。`)
+      } else {
+        const all = stageRoles(stages[g.sid]).filter((r) => !isContractWriter(r))
+        lines.push(
+          `  - ${items}：${g.sid} 这一趟还没叫过 ${g.role}——派它；这一趟整段不做 ${g.sid}：同一次 Write 把 ` +
+            `{${all.map((r) => `"${r}": "${g.sid}"`).join(', ')}} 写进 trimmed，整段裁掉（${pending} 要它当前置：那几段要派的人就派不出去，只能跟着整段裁掉，` +
+            '交付文档里写明少了哪几段）。',
+        )
+      }
     } else {
       const later = [...new Set(g.items.flatMap((b) => requiredBy(stages, b.name)))]
+      // 随参与者展开的段（S2）裁掉的是这一个产者，不是整段（docs/89）。
+      const cut = dependsOnParticipants(stages[g.sid]) ? '裁掉它' : '整段裁掉'
       lines.push(
         `  - ${items}：${g.sid} 这一趟还没叫过 ${g.role}——派它；这一趟不叫它（项目不用它，或者你裁掉了它）：同一次 Write 把 ` +
-          `{"${g.role}": "${g.sid}"} 写进 trimmed，整段裁掉${later.length ? `（${later.join('、')} 要它当前置：整段裁掉它，那几段要派的人就派不出去，只能跟着整段裁掉，交付文档里写明少了哪几段）` : ''}` +
+          `{"${g.role}": "${g.sid}"} 写进 trimmed，${cut}${later.length ? `（${later.join('、')} 要它当前置：${cut === '整段裁掉' ? '整段裁掉它' : '裁掉它'}，那几段要派的人就派不出去，只能跟着整段裁掉，交付文档里写明少了哪几段）` : ''}` +
           `${isTestStage(stages, g.sid) ? `；${TRIM_TEST_ASK}` : ''}。`,
       )
     }

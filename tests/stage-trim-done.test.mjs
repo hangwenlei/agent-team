@@ -147,3 +147,23 @@ test('isStageDone（docs/76）：免哪几份与推进同一个口径——被�
   assert.equal(isStageDone({ stage: 'S1', stages: custom, artifactExists: only('x/b.md'), roster: participantsOf(st, 'S1'), state: st }), false)
   assert.equal(isStageDone({ stage: 'S1', stages: custom, artifactExists: only('x/b.md', 'notes.md'), roster: participantsOf(st, 'S1'), state: st }), true)
 })
+
+// docs/89：推进那一侧对没叫过、也没裁掉的产者要它被后面当前置的产物（S2 只叫了 at-ui，01-prd.md 是 S3 的前置）——isStageDone 同一个口径，
+// 不然【阶段】说 S2 齐了、推进却被拒。不是前置的（02-*）没叫就不要；在这一段裁掉了的不要。
+test('isStageDone（docs/89）：S2 只叫了 at-ui——01-prd.md 不在不算齐；在了、或者 at-product 在 S2 裁掉了，算齐', () => {
+  const state = { stage: 'S2', roster: ['at-ui'], stage_roles: { S2: ['at-ui'] } }
+  const roster = participantsOf(state, 'S2')
+  const ui = new Set(['02-ui-spec.md', '02-wireframe.html'])
+  assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: (n) => ui.has(n), roster, state }), false)
+  assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: (n) => ui.has(n) || n === '01-prd.md', roster, state }), true)
+  const cut = { ...state, trimmed: { 'at-product': 'S2' } }
+  assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: (n) => ui.has(n), roster, state: cut }), true)
+  // 复核（docs/89 §8，低 5）：记在别的段的 trimmed 不算这一段裁掉；没有 stage_roles 的旧 run 同样要；不传 state 的不加这一条（调用方都传）。
+  assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: (n) => ui.has(n), roster, state: { ...state, trimmed: { 'at-product': 'S5' } } }), false)
+  const legacy = { stage: 'S2', roster: ['at-ui'] }
+  assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: (n) => ui.has(n), roster: participantsOf(legacy, 'S2'), state: legacy }), false)
+  assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: (n) => ui.has(n), roster }), true)
+  // 只叫了 at-product：02-* 不是前置，没叫 at-ui 就不要。
+  const prd = { stage: 'S2', roster: ['at-product'], stage_roles: { S2: ['at-product'] } }
+  assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: (n) => n === '01-prd.md', roster: participantsOf(prd, 'S2'), state: prd }), true)
+})

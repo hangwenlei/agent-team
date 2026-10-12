@@ -348,6 +348,14 @@ export function isStageDone({ stage, stages, artifactExists, roster, state = nul
   const participants = stageRolesInRun(current, called)
   const names = expandProduces(current, participants)
   if (names.length === 0) return false
+  // docs/89：没叫过、也没在这一段裁掉的产者，它被后面某段当前置的产物（S2 的 01-prd.md）照样要——与推进（advance.mjs 的 departureNeeds）同一个口径，
+  // 不然【阶段】说齐了、推进却被拒。只在传了 state 时（调用方都传）。
+  if (isPlainObject(state)) {
+    for (const r of producers) {
+      if (participants.includes(r) || trimmedAt(state, r, stage)) continue
+      for (const n of expandProduces(current, [r])) if (!mayWaive(stages, stage, n) && !names.includes(n)) names.push(n)
+    }
+  }
   const fixed = new Set(expandProduces(current, []))
   const excused = new Set()
   if (isPlainObject(state)) {
