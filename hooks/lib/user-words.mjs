@@ -195,6 +195,26 @@ export function section1Mismatch(contractText, args) {
 }
 
 /**
+ * 原话在契约第 1 节里匹配到的那一段，认不上回 null。门禁记契约基线时用它当第 1 节（contract-base.mjs 的 initialBase）：照原话认，不靠按标题猜第 1 节
+ * 在哪结束（docs/90 第二次复核）。取的是原话核对放行的整段——标题之后到原话之后的下一个编号节标题（或末尾），契约里的原样行，去掉首尾的空行：
+ * 原话之后放行的「>」行、只有看不见的字的行都在里面（第三次复核，低 4：不然记下的那一段与契约里的切不上，锚认不上）。
+ */
+export function matchedSection1(contractText, args) {
+  if (typeof contractText !== 'string' || section1Mismatch(contractText, args) !== null) return null
+  const lines = contractLines(contractText)
+  const start = lines.findIndex((l) => numberedHeading(l) === 1)
+  let i = start + 1
+  while (i < lines.length && canon(lines[i]) === '') i++
+  const want = wordLines(typeof args === 'string' ? args : '')
+  let end = lines.findIndex((l, j) => j >= i + want.length && numberedHeading(l) !== null)
+  if (end < 0) end = lines.length
+  const body = lines.slice(start + 1, end)
+  while (body.length && body[0] === '') body.shift()
+  while (body.length && body[body.length - 1] === '') body.pop()
+  return body.join('\n')
+}
+
+/**
  * 对不上的那一句（H6 的拒绝理由、写契约时的【契约】、【阶段】的补句共用）。原话与契约里的行都是磁盘上的值，过 quote。
  * 引之前去掉比对时本来就不计的那些看不见的字（复核 docs/59 §8）：quote 会把它们写成码点转义，照抄进第 1 节就成了几个可见的字，反倒对不上。
  */

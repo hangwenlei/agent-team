@@ -59,6 +59,8 @@ import {
   readContractBase,
   revisedBase,
   section1Drift,
+  isLegacyBase,
+  anchorOf,
   verifyShasOf,
 } from './lib/contract-base.mjs'
 import { readGrants } from './lib/budget.mjs'
@@ -78,7 +80,7 @@ import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
 import { isPlainObject, isStageChain, isVerifyStage, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName, verifyStageOf } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
-import { USER_WORDS_FILE, WORDS_FIX, bindDecision, blankAtSession, finishBinding, pendingRecord, readWords, section1Mismatch, wordsMismatchText, wordsOf } from './lib/user-words.mjs'
+import { USER_WORDS_FILE, WORDS_FIX, bindDecision, blankAtSession, finishBinding, matchedSection1, pendingRecord, readWords, section1Mismatch, wordsMismatchText, wordsOf } from './lib/user-words.mjs'
 import { GATE_CHECK_PATH, gateCheckReason, isGateCheck, selfCheckIdentity } from './lib/gate-check.mjs'
 import {
   SECOND_WRITE_NOTE,
@@ -1095,11 +1097,14 @@ function ensureContractBase(ctx) {
       }
       return []
     }
-    const base = initialBase(ctx.artifactBytes(CONTRACT_FILE))
+    // docs/90 第二次复核：有原话记录的，照原话在契约里匹配到的那一段记第 1 节（不靠按标题猜）。
+    const contractBytes = ctx.artifactBytes(CONTRACT_FILE)
+    const words = contractBytes ? runWords(ctx.runDir) : null
+    const base = initialBase(contractBytes, words ? matchedSection1(contractBytes.toString('utf8'), words.args) : null)
     if (!base) return []
     writeFileSync(join(ctx.runDir, CONTRACT_BASE_FILE), `${JSON.stringify(base, null, 2)}\n`)
     return base.section1 === null
-      ? ['【契约】契约里切不出第 1 节（「## 1. 用户原话」那一节，到下一个「## 2.」这样的编号节标题为止）：门禁这一趟不锁第 1 节，改了它也不会拦。' +
+      ? ['【契约】契约里切不出第 1 节（「## 1. 用户原话」那一节，到契约自己的第 2 节「## 2. PM 的理解」为止）：门禁这一趟不锁第 1 节，改了它也不会拦。' +
           '契约的格式见 at-contract-format：第 1 节逐字照抄用户原话。']
       : []
   } catch (e) {
@@ -1171,7 +1176,7 @@ function contractBaseNotices(ctx) {
     const bytes = ctx.artifactBytes(CONTRACT_FILE)
     if (!base || !bytes) return out
     if (closedAt(ctx.state) !== null) {
-      if (section1Drift(base, bytes) || bodyShaOf(bytes.toString('utf8'), base.deliver_blocks) !== base.body_sha) {
+      if (section1Drift(base, bytes) || bodyShaOf(bytes.toString('utf8'), base.deliver_blocks, isLegacyBase(base), anchorOf(base)) !== base.body_sha) {
         out.push('【契约】这一趟已经收口：收口之后改契约，验证段的结论不再重出、门禁也不再核——交付之后的新改动另起一趟（/agent-team:at）。')
       }
       return out
