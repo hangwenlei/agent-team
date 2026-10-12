@@ -658,7 +658,7 @@ function decideAdvance({ before, after, stages, diskSha, dispatched = null }) {
   }
   const lines = [
     `从 ${quote(before.stage)} 推进到 ${quote(after.stage)}，离开的 ${sids.join('、')} 还没交齐——推进要离开的那一段这一趟叫到的产者各自那几份、` +
-      '这一段固定的产物都在、不是空文件（裁掉的不算，标了 "accepted" 的算交了）：',
+      '这一段固定的产物、没叫过、也没裁掉的产者被后面某段当前置的那几份都在、不是空文件（裁掉的不算，标了 "accepted" 的算交了）：',
     ...departureLines(stages, dep.blockers, dep.unrecorded),
   ]
   if (staleText) lines.push(staleText)

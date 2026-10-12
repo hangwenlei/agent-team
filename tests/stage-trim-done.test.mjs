@@ -158,6 +158,11 @@ test('isStageDone（docs/89）：S2 只叫了 at-ui——01-prd.md 不在不算�
   assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: (n) => ui.has(n) || n === '01-prd.md', roster, state }), true)
   const cut = { ...state, trimmed: { 'at-product': 'S2' } }
   assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: (n) => ui.has(n), roster, state: cut }), true)
+  // 复核（docs/89 §8，低 5）：记在别的段的 trimmed 不算这一段裁掉；没有 stage_roles 的旧 run 同样要；不传 state 的不加这一条（调用方都传）。
+  assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: (n) => ui.has(n), roster, state: { ...state, trimmed: { 'at-product': 'S5' } } }), false)
+  const legacy = { stage: 'S2', roster: ['at-ui'] }
+  assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: (n) => ui.has(n), roster: participantsOf(legacy, 'S2'), state: legacy }), false)
+  assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: (n) => ui.has(n), roster }), true)
   // 只叫了 at-product：02-* 不是前置，没叫 at-ui 就不要。
   const prd = { stage: 'S2', roster: ['at-product'], stage_roles: { S2: ['at-product'] } }
   assert.equal(isStageDone({ stage: 'S2', stages: STAGES, artifactExists: (n) => n === '01-prd.md', roster: participantsOf(prd, 'S2'), state: prd }), true)
