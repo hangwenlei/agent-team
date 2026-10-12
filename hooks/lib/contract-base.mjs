@@ -6,6 +6,7 @@
 //
 // 门禁记下（hooks/gate.mjs 的 ledger，PM 写 state.json 与契约之后）：
 //   - section1：推进出第一段之后门禁第一次见到 state.json 时，契约第 1 节的正文（之后不再变）；切不出来记 null，第 1 节就不核。
+//     section1_next：那一刻第 1 节之后紧跟的那一行标题（第 1 节一直到末尾的不记）——第 1 节被改、认不上 section1 时切在它那里（docs/90 第三次复核）。
 //   - body_sha：契约去掉第 1 节、不计行尾空白之后的指纹——一次修订是它变了（复核 F2：改第 1 节、照提示改回去都不算修订，第 1 节的变化
 //     只归第 1 节那条判据管）。revisions：第 4 节里修订块的标题。
 //   - verify_base、revised_at：一次改需求的修订那一刻，磁盘上验证段（stages.json 里 verifies: true 的段）各份产物的 sha，与那一刻（门禁的钟）。
@@ -56,7 +57,8 @@ export function numberedHeading(line) {
 // docs/90：契约自己的节。用户常贴一份带编号节标题的需求（「## 1. 背景」「## 4. 验收标准」），项目经理照抄进第 1 节——只按编号认，第 1 节会在原话里
 // 第一个编号节标题处切断，第 4 节会认成原话里的那一节（真的修订块一条都读不到）。第二次复核（高 1）：靠标题猜结构总有反例（项目经理在可改的第 2 节里
 // 加「## 2.1 …的理解」子节，第 1 节就吞进第 2 节）——所以第 1 节先认已知的那一段（known：基线记下的第 1 节，或者记基线时原话匹配到的那一段）：
-// 「## 1.」之后跳过空行、逐行就是它、之后到下一个编号节标题之间只有空行，就是它；认不上（第 1 节被改过）或者没有已知的，才按结构猜。第 4 节是第 1 节
+// 「## 1.」之后跳过空行、逐行就是它、之后到下一个编号节标题之间只有空行，就是它；认不上（第 1 节被改过）时切在记基线时第 1 节之后的那一行标题（第三次
+// 复核，中 1：重新猜的切点可能与记基线时不一样，改了第 1 节又改回去会被算成两次修订）；都没有，才按结构猜。第 4 节是第 1 节
 // 之后第一个标题带「修订」的顶层「## 4.」（没有带的取第一个顶层「## 4.」），一直到末尾（契约没有第 5 节，修订块里贴进来的编号节标题不切断它）。
 const SECTION_KEY = { 2: /理解/, 3: /不做/, 4: /修订/ }
 // 顶层编号节标题：「## 2.」算，「## 2.1」不算（第二次复核，高 1）。
@@ -118,12 +120,21 @@ function anchoredSection1End(lines, s1, known) {
  * legacy：这一版之前的切法（第一个「## n.」、到下一个编号节标题）——没有 slicing 标记的旧基线照它算，升级之后同一份契约算出来的值不变，进行中的 run
  * 不会被判成第 1 节变了、契约改了（旧切法记下的第 1 节可能是空串，「照它改回去」改不回去）。
  */
+// known：已知的第 1 节——字符串，或者 anchorOf 给的 { section1, next }（next 是记基线时第 1 节之后的那一行标题）。
 function sectionRange(lines, n, legacy = false, known = null) {
   if (!legacy && (n === 1 || n === 4)) {
     const s1 = lines.findIndex((l) => numberedHeading(l) === 1)
-    if (s1 < 0) return null
-    const anchored = anchoredSection1End(lines, s1, known)
-    const e1 = anchored >= 0 ? anchored : guessSection1End(lines, s1)
+    if (s1 < 0) {
+      // 切不出第 1 节：第 4 节照样从头找（第三次复核，中 2：不让环境阻塞的答复被当成改需求）。
+      if (n === 1) return null
+      const keyed = lines.findIndex((l) => topHeading(l) === 4 && SECTION_KEY[4].test(l))
+      const s4 = keyed >= 0 ? keyed : lines.findIndex((l) => topHeading(l) === 4)
+      return s4 < 0 ? null : [s4, lines.length]
+    }
+    const k = isPlainObject(known) ? known : { section1: known, next: null }
+    let e1 = anchoredSection1End(lines, s1, k.section1)
+    if (e1 < 0 && typeof k.next === 'string') e1 = lines.findIndex((l, i) => i > s1 && l === k.next)
+    if (e1 < 0) e1 = guessSection1End(lines, s1)
     if (n === 1) return [s1, e1]
     const keyed = lines.findIndex((l, i) => i >= e1 && topHeading(l) === 4 && SECTION_KEY[4].test(l))
     const s4 = keyed >= 0 ? keyed : lines.findIndex((l, i) => i >= e1 && topHeading(l) === 4)
@@ -221,12 +232,18 @@ export function readContractBase(bytes) {
     deliver_blocks: Array.isArray(v.deliver_blocks) ? v.deliver_blocks.filter((h) => typeof h === 'string') : [],
     // docs/90：按新切法记下的基线带 slicing: 2；没有的是这一版之前记的，照旧切法算（isLegacyBase）。
     ...(v.slicing === 2 ? { slicing: 2 } : {}),
+    ...(typeof v.section1_next === 'string' ? { section1_next: v.section1_next } : {}),
   }
 }
 
 /** 这一版之前记下的基线（没有 slicing: 2）：第 1 节、修订指纹、修订块标题照旧切法算（docs/90）。 */
 export function isLegacyBase(base) {
   return !base || base.slicing !== 2
+}
+
+/** 按基线切契约时认的第 1 节：旧基线回 null（照旧切法），新基线回 { section1, next }。 */
+export function anchorOf(base) {
+  return isLegacyBase(base) ? null : { section1: base.section1, next: typeof base.section1_next === 'string' ? base.section1_next : null }
 }
 
 /** 验证段（verifies: true）的产物，按阶段链的书写顺序。 */
@@ -259,7 +276,10 @@ export function initialBase(contractBytes, known = null) {
   if (!contractBytes) return null
   const text = contractBytes.toString('utf8')
   const section1 = section1Of(text, false, known)
-  return { section1, body_sha: bodyShaOf(text, [], false, section1), revisions: revisionHeadingsOf(text, false, section1), verify_base: {}, revised_at: null, deliver_used: [], deliver_blocks: [], slicing: 2 }
+  const lines = linesOf(text)
+  const r = sectionRange(lines, 1, false, known)
+  const next = r && r[1] < lines.length ? { section1_next: lines[r[1]] } : {}
+  return { section1, body_sha: bodyShaOf(text, [], false, section1), revisions: revisionHeadingsOf(text, false, section1), verify_base: {}, revised_at: null, deliver_used: [], deliver_blocks: [], slicing: 2, ...next }
 }
 
 /**
@@ -277,7 +297,7 @@ export function revisedBase(base, contractBytes, verifyShas, now, deliverSha = n
   const text = contractBytes.toString('utf8')
   const blocks = Array.isArray(base.deliver_blocks) ? base.deliver_blocks : []
   const legacy = isLegacyBase(base)
-  const anchor = legacy ? null : base.section1
+  const anchor = anchorOf(base)
   const body = bodyShaOf(text, blocks, legacy, anchor)
   if (body === base.body_sha) return null
   const headings = revisionHeadingsOf(text, legacy, anchor)
@@ -305,7 +325,7 @@ export function revisedBase(base, contractBytes, verifyShas, now, deliverSha = n
 export function section1Drift(base, contractBytes) {
   if (!base || typeof base.section1 !== 'string' || !contractBytes) return false
   const legacy = isLegacyBase(base)
-  return section1Of(contractBytes.toString('utf8'), legacy, legacy ? null : base.section1) !== base.section1
+  return section1Of(contractBytes.toString('utf8'), legacy, anchorOf(base)) !== base.section1
 }
 
 /** 派发记录（completion.mjs 的 readDispatchLog）→ 产物名 → 它的产者在它那一段最后一次被派出去的时刻（门禁的钟）；没派过回 null。 */

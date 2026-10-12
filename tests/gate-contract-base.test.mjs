@@ -11,7 +11,7 @@ import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { reworkFromHistory } from '../hooks/lib/state.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
-import { bodyShaOf } from '../hooks/lib/contract-base.mjs'
+import { bodyShaOf, initialBase } from '../hooks/lib/contract-base.mjs'
 import { dispatchLine } from '../hooks/lib/completion.mjs'
 
 const NL = String.fromCharCode(10)
@@ -56,7 +56,7 @@ test('M4j 账本：推进出第一段之后第一次见到 state.json 记基线�
     assert.ok(!existsSync(join(runDir, 'contract-base.json')), '复核（K03）：契约还不在——不记，下一次再记')
     writeFileSync(join(runDir, '00-contract.md'), V1)
     run('ledger', posted(join(runDir, 'state.json')), GATE, projectDir)
-    assert.deepEqual(baseOf(runDir), { section1: '> 做一个待办清单。', body_sha: bodyShaOf(V1), revisions: [], verify_base: {}, revised_at: null, deliver_used: [], deliver_blocks: [], slicing: 2 })
+    assert.deepEqual(baseOf(runDir), { section1: '> 做一个待办清单。', body_sha: bodyShaOf(V1), revisions: [], verify_base: {}, revised_at: null, deliver_used: [], deliver_blocks: [], slicing: 2, section1_next: '## 2. PM 的理解（可改）' })
     writeFileSync(join(runDir, '00-contract.md'), DRIFTED)
     run('ledger', posted(join(runDir, 'state.json')), GATE, projectDir)
     assert.equal(baseOf(runDir).section1, '> 做一个待办清单。', '记下之后，再写 state.json 不改基线')
@@ -215,6 +215,25 @@ test('docs/90 复核 H6：升级中途的旧基线——推进出 S6 照常放�
     writeFileSync(join(runDir, 'contract-base.json'), JSON.stringify(legacy))
     const c = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
     assert.ok(!c.includes('收口之后改契约'), c)
+  })
+})
+
+// docs/90 第三次复核（中 1）：第 2 节补过带「理解」的「## 2.」之后，项目经理误改第 1 节、照【契约】改回去——两次都不算修订，测试报告不被判成对着上一版
+// 契约，推进出 S6 放行（原来锚认不上就重新猜，猜的切点吞进了第 2 节，两次都算改需求）。
+test('docs/90 第三次复核 H6：第 1 节改了又改回去——不重拍验证段的快照，推进出 S6 放行', () => {
+  withRun(s6Run, ({ projectDir, runDir }) => {
+    writeFileSync(join(runDir, 'contract-base.json'), JSON.stringify(initialBase(Buffer.from(V1, 'utf8'))))
+    const C1 = V1.replace('- 命令行。', '- 命令行。' + NL + NL + '## 2. 补充理解（修订后）' + NL + '- 一行一条')
+    writeFileSync(join(runDir, '00-contract.md'), C1)
+    run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir)
+    writeFileSync(join(runDir, '06-test.md'), '结论：通过' + NL + 'test v1' + NL)
+    writeFileSync(join(runDir, '00-contract.md'), C1.replace('做一个待办清单。', '做一个待办清单，还要能删。'))
+    const c = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
+    assert.ok(c.includes('契约第 1 节是用户原话') && !c.includes('契约改了'), c)
+    writeFileSync(join(runDir, '00-contract.md'), C1)
+    run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir)
+    assert.deepEqual(baseOf(runDir).verify_base, {}, '改第 1 节、改回去都不重拍')
+    assert.equal(decisionOf(run('rework', advanceS6(runDir), GATE, projectDir).stdout), null)
   })
 })
 

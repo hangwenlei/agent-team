@@ -60,6 +60,7 @@ import {
   revisedBase,
   section1Drift,
   isLegacyBase,
+  anchorOf,
   verifyShasOf,
 } from './lib/contract-base.mjs'
 import { readGrants } from './lib/budget.mjs'
@@ -1175,7 +1176,7 @@ function contractBaseNotices(ctx) {
     const bytes = ctx.artifactBytes(CONTRACT_FILE)
     if (!base || !bytes) return out
     if (closedAt(ctx.state) !== null) {
-      if (section1Drift(base, bytes) || bodyShaOf(bytes.toString('utf8'), base.deliver_blocks, isLegacyBase(base), isLegacyBase(base) ? null : base.section1) !== base.body_sha) {
+      if (section1Drift(base, bytes) || bodyShaOf(bytes.toString('utf8'), base.deliver_blocks, isLegacyBase(base), anchorOf(base)) !== base.body_sha) {
         out.push('【契约】这一趟已经收口：收口之后改契约，验证段的结论不再重出、门禁也不再核——交付之后的新改动另起一趟（/agent-team:at）。')
       }
       return out

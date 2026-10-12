@@ -119,6 +119,13 @@ test('matchedSection1：原话在契约第 1 节里匹配到的那一段（原�
   assert.equal(matchedSection1(contract(['第一行', '', '第三行']), '第一行' + NL + NL + '第三行'), '第一行' + NL + NL + '第三行')
   assert.equal(matchedSection1(contract(['> 第一行', '>', '> 第三行']), '第一行' + NL + NL + '第三行'), '> 第一行' + NL + '>' + NL + '> 第三行')
   assert.equal(matchedSection1(contract(['改过的']), '原话'), null)
+  // 第三次复核（低 4）：原话核对在原话之后放行的「>」行、只有看不见的字的行，也算在这一段里（锚才认得上）。
+  assert.equal(matchedSection1(contract(['> 第一行', '>']), '第一行'), '> 第一行' + NL + '>')
+  const ZW = String.fromCharCode(0x200b)
+  assert.equal(matchedSection1(contract(['第一行', ZW]), '第一行'), '第一行' + NL + ZW)
+  // 原话自带编号节标题：结束从原话之后找，不在原话里的「## 1.」「## 4.」处切断。
+  const W = ['## 1. 背景', '做一个待办清单。', '## 4. 验收标准', '- 能看到']
+  assert.equal(matchedSection1(contract(W), W.join(NL)), W.join(NL))
   assert.equal(matchedSection1(null, '原话'), null)
 })
 
