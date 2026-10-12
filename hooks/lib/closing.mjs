@@ -32,6 +32,12 @@ const isSha = (v) => typeof v === 'string' && SHA_RE.test(v)
 export const EMPTY_SHA = 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 // 复核（A-3）：只认 ISO 形状的时间。原来「非空字符串」就算收口——"null"（at.md 提醒不带引号的那个笔误）、"false"、一句话都被当成
 // 一次收口。Date.parse 单独用太宽（"0"、"1" 都解析得出），先过形状。
+// 门禁的钟（docs/93）：到秒的 UTC 时间、以 Z 结尾——自检的回复与【阶段】带着它，项目经理照它写 history 的 at 与 closed_at（它没有钟，估的会越写越偏）。
+// 门禁不拿这两个时间判任何事。
+export function gateClock(now = new Date()) {
+  return now.toISOString().slice(0, 19) + 'Z'
+}
+
 const ISO_TIME_RE = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?$/
 
 export function closedAt(state) {
