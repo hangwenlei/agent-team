@@ -11,6 +11,7 @@ import {
   finishBinding,
   pendingRecord,
   readWords,
+  matchedSection1,
   section1Mismatch,
   wordsMismatchText,
   wordsOf,
@@ -97,7 +98,7 @@ test('bindDecision：这个会话记下的、还没绑也没作废的——这�
 const contract = (section1, rest = ['## 2. PM 的理解（可改）', '', '- 命令行。', '']) =>
   ['# 00 契约 —— 这趟 run 的需求基线', '', '## 1. 用户原话', '', ...section1, '', ...rest].join(NL)
 
-test('section1Mismatch：标题之后逐行就是原话（行尾空白、BOM、CRLF 不计），之后到第 1 节结束之间没有别的', () => {
+test('section1Mismatch：标题之后逐行就是原话（行尾空白、BOM、CRLF 不计），之后到下一个编号节标题之间没有别的', () => {
   assert.equal(section1Mismatch(contract(['做一个待办应用']), '做一个待办应用'), null)
   assert.equal(section1Mismatch(contract(['第一行  ', '  缩进的第二行', '', '第四行']), '第一行' + NL + '  缩进的第二行' + NL + NL + '第四行'), null)
   assert.equal(section1Mismatch(BOM + contract(['做一个待办应用']).split(NL).join(CRLF), '做一个待办应用'), null)
@@ -106,11 +107,19 @@ test('section1Mismatch：标题之后逐行就是原话（行尾空白、BOM、C
   const own = ['背景', '## 安装', 'npm i', '## 2. 第二部分', '再做一件事']
   assert.equal(section1Mismatch(contract(own), own.join(NL)), null)
   assert.equal(section1Mismatch(contract(['做一个待办应用'], []), '做一个待办应用'), null, '契约到原话就结束了')
-  // 复核（docs/90 §8，低 8）：原话之后到契约自己的下一节（第 2 节「PM 的理解」）之前只能有空行——项目经理把「## 3. 明确不做的事」写在第 2 节前面，
-  // 契约基线的第 1 节会把它算进去锁住，这里同样不放行（原来认任何编号节标题都算第 1 节结束）。
+  // docs/90 第二次复核（高 1）：原话之后到下一个编号节标题之间只能有空行（原来的口径）——第 2 节里有子节（「## 2.1 …的理解」）、第 3 节写在第 2 节
+  // 前面，都照常放行；契约基线有原话记录时照原话记第 1 节，第 3 节不会被锁进去（tests/contract-base.test.mjs）。
   const misordered = ['# 00 契约', '', '## 1. 用户原话', '', '做一个待办应用', '', '## 3. 明确不做的事', '- 无', '', '## 2. PM 的理解（可改）', '- x', ''].join(NL)
-  assert.equal(section1Mismatch(misordered, '做一个待办应用')?.kind, 'extra')
-  assert.ok(wordsMismatchText(section1Mismatch(misordered, '做一个待办应用')).includes('第 1 节结束之前'))
+  assert.equal(section1Mismatch(misordered, '做一个待办应用'), null)
+  assert.equal(section1Mismatch(contract(['做一个待办应用'], ['## 2. PM 的理解（可改）', '- x', '', '## 2.1 对「删」的理解', '- y', '']), '做一个待办应用'), null)
+})
+
+// docs/90 第二次复核：记契约基线时照原话在契约里匹配到的那一段记第 1 节——返回契约里的原样行（直接写的、引用块的都行），认不上回 null。
+test('matchedSection1：原话在契约第 1 节里匹配到的那一段（原样行）；认不上回 null', () => {
+  assert.equal(matchedSection1(contract(['第一行', '', '第三行']), '第一行' + NL + NL + '第三行'), '第一行' + NL + NL + '第三行')
+  assert.equal(matchedSection1(contract(['> 第一行', '>', '> 第三行']), '第一行' + NL + NL + '第三行'), '> 第一行' + NL + '>' + NL + '> 第三行')
+  assert.equal(matchedSection1(contract(['改过的']), '原话'), null)
+  assert.equal(matchedSection1(null, '原话'), null)
 })
 
 test('section1Mismatch：引用块的写法也认（每行前面一个「>」或「> 」，空行写「>」或空着）', () => {
