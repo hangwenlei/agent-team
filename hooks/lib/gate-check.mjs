@@ -14,6 +14,7 @@ import { resolve, sep } from 'node:path'
 import { norm } from './path-norm.mjs'
 import { inline, quote } from './trusted.mjs'
 import { PLUGIN_PREFIX, exemptFromPaths, malformedCaller } from './decide.mjs'
+import { gateClock } from './closing.mjs'
 
 export const GATE_CHECK_PATH = '.agent-team/gate-check'
 export const GATE_CHECK_ONLINE = 'agent-team 门禁自检：在线'
@@ -42,12 +43,14 @@ function endsWithGateCheck(parts) {
 /**
  * 自检写入的拒绝理由：固定串打头，给人看的一句，门禁用的 node（门禁自己取，过 inline），再是这个结果的
  * 有效期——复核实测，续会话之后没有提醒时，PM 会拿上一个进程的「在线」对用户说自检通过（0/4）；
- * 理由里写明只管这一轮之后 4/4 重新自检（docs/28 §3）。
+ * 理由里写明只管这一轮之后 4/4 重新自检（docs/28 §3）。门禁此刻的时间（docs/93）：项目经理每一轮第一次写 .agent-team 之前都自检，
+ * 写 state.json 的 history 与 closed_at 时照它写。
  */
-export function gateCheckReason({ version = process.version, execPath = process.execPath } = {}) {
+export function gateCheckReason({ version = process.version, execPath = process.execPath, now = new Date() } = {}) {
   return (
     `${GATE_CHECK_ONLINE}——这条被拦下的写入是自检的预期结果，不是故障。` +
     `门禁用的 node 是 ${inline(version)}（${inline(execPath)}）。` +
+    `门禁此刻的时间是 ${gateClock(now)}（UTC）：state.json 里的时间（history、escalations 的 at，closed_at）照最近一次门禁回传给的时间写，不要估。` +
     '这个结果只管到这一轮用户消息结束：之后的每一轮——包括用户说「继续」、续会话之后——在第一次派发或写 ' +
     '.agent-team 之前都要重新自检，不能引用这一条。接着往下做。'
   )

@@ -23,7 +23,7 @@ import { quote } from './trusted.mjs'
 import { PLUGIN_PREFIX, stripPluginPrefix } from './decide.mjs'
 // M3z（docs/34）：上限的单一真源挪到 budget.mjs（limitOf 要它，留在这里就成了环）；这里原样再导出，既有的 import 不用改。
 import { REWORK_LIMIT, limitOf } from './budget.mjs'
-import { closedAt, lastStageId } from './closing.mjs'
+import { closedAt, lastStageId, gateClock } from './closing.mjs'
 import { mayWaive, trimmedAt, dispatchedIn } from './advance.mjs'
 
 // validateState 的问题文案会进受信回传【state.json】；state.json 是写得进它的任何人都能写的，
@@ -402,7 +402,7 @@ export function validateState(state, { stages, grants } = {}) {
     const last = lastStageId(stages)
     if (closedAt(state) === null) {
       const got = typeof state.closed_at === 'string' ? `是 ${quote(state.closed_at)}` : '是别的类型'
-      p(`closed_at ${got}：它要么是 null（还没收口），要么是收口那一刻的 ISO 时间（例："2026-10-01T15:00:00Z"）——收口照 /agent-team:at 第 6 节`)
+      p(`closed_at ${got}：它要么是 null（还没收口），要么是收口那一刻的 ISO 时间（照门禁给的写，门禁此刻是 "${gateClock()}"）——收口照 /agent-team:at 第 6 节`)
     } else if (last && state.stage !== last) {
       p(`closed_at 在，但 stage 不是阶段链最后一段（${last}）——收口只在最后一段`)
     }
