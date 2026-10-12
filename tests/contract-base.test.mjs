@@ -60,7 +60,7 @@ test('M4j：基线文件名；不改需求的答复类别都是升级类别', ()
   for (const k of ADMIN_KINDS) assert.ok(ESCALATION_KINDS.includes(k), k)
 })
 
-test('M4j：section1Of——「## 1.」到下一个编号节标题之间；剥 BOM、折 CRLF、去行尾空白与首尾空行；原话里的「## 」行与 ### 小标题都留着', () => {
+test('M4j：section1Of——「## 1.」到契约自己的下一节之间；剥 BOM、折 CRLF、去行尾空白与首尾空行；原话里的「## 」行与 ### 小标题都留着', () => {
   assert.equal(section1Of(CONTRACT), SECTION1)
   assert.equal(section1Of(BOM + CONTRACT.split(NL).join(CRLF)), SECTION1)
   assert.equal(section1Of(BOM + '## 1. 用户原话' + NL + NL + '> 原话'), '> 原话')
@@ -94,8 +94,64 @@ test('docs/90：原话里自带编号节标题——第 1 节到契约自己的�
   assert.equal(bodyShaOf(more.replace('要能导入。', '要能导入导出。'), ['### 2026-10-13 · 用户主动提出']), bodyShaOf(more, ['### 2026-10-13 · 用户主动提出']))
   // 契约自己的第 2 节标题不带「理解」的，退回第一个「## 2.」（与原来一样）。
   assert.equal(section1Of(['## 1. 用户原话', '', '原话', '', '## 2. 其他', 'x', '', '## 4. 修订记录', ''].join(NL)), '原话')
-  // 第 4 节之后另起编号更大的节，第 4 节在那里结束。
-  assert.deepEqual(revisionHeadingsOf(text + '## 5. 附录' + NL + '### 不是修订' + NL), ['### 2026-10-12 · 用户主动提出'])
+  // 复核（docs/90 §8，低 7）：契约没有第 5 节——第 4 节一直到末尾，修订块里贴进来的「## 5. 导出」不切断它、后面的修订块照样认。
+  const five = text + '### 2026-10-13 · 用户主动提出' + NL + '**用户原话**：' + NL + '## 5. 导出' + NL + NL + '### 2026-10-14 · 升级 #1（kind: env-blocked）' + NL + '**用户裁决**：x' + NL
+  assert.deepEqual(revisionHeadingsOf(five), ['### 2026-10-12 · 用户主动提出', '### 2026-10-13 · 用户主动提出', '### 2026-10-14 · 升级 #1（kind: env-blocked）'])
+  // 升级兼容（docs/90）：新记的基线带 slicing: 2、按新切法算；这一版之前记下的（没有 slicing）照旧切法算——同一份契约不判第 1 节变了、不判修订，
+  // 进行中的 run 升级之后不会被「照它改回去」卡住（旧切法记下的第 1 节是空串，改不回去）。
+  const fresh = initialBase(buf(text))
+  assert.equal(fresh.slicing, 2)
+  assert.equal(fresh.section1, PASTED.join(NL))
+  const legacy = { section1: section1Of(text, true), body_sha: bodyShaOf(text, [], true), revisions: revisionHeadingsOf(text, true), verify_base: {}, revised_at: null, deliver_used: [], deliver_blocks: [] }
+  assert.equal(legacy.section1, '', '旧切法：第 1 节切成空串（这一版之前的样子）')
+  assert.equal(section1Drift(legacy, buf(text)), false)
+  assert.equal(revisedBase(legacy, buf(text), {}, NOW), null)
+  assert.equal(section1Drift(fresh, buf(text)), false)
+  assert.equal(revisedBase(fresh, buf(text), {}, NOW), null)
+  // 新基线改了原话照样认出来；旧基线照旧切法（认不出，与这一版之前一样）。
+  assert.equal(section1Drift(fresh, buf(edited)), true)
+  // readContractBase 留着 slicing: 2，别的值丢掉。
+  assert.equal(readContractBase(buf(JSON.stringify({ ...fresh }))).slicing, 2)
+  assert.equal('slicing' in readContractBase(buf(JSON.stringify({ ...fresh, slicing: 'x' }))), false)
+})
+
+// 复核（docs/90 §8，中 2、低 6）：几种原话与修订块的组合——
+//   ① 实测清单场景 A 那段需求原样照抄（原话里的「## 3. 不做的」带着第 3 节的关键词）：第 1 节是整段（后一节从前一节往下找）；
+//   ② 修订块里贴「## 4. 修订后的验收」：前面的修订块照样认（取第一个带关键词的，不取最后一个）；
+//   ③ 契约缺第 2 节、原话里有「## 3. 范围」「## 4. 验收」：第 3、4 节认带关键词的那一个；
+//   ④ 契约缺第 3 节、修订块里贴「## 3. 不做的」：第 4 节照样认出来（第 2、3 节只在第 4 节之前找）；
+//   ⑤ 契约第 2 节标题不带「理解」、修订块里贴「## 2. 对需求的理解」：第 1 节不把后面几节吞进去。
+test('docs/90 复核：原话与修订块里的几种编号节标题组合——第 1 节是整段原话、第 4 节的修订块一条不丢', () => {
+  const tail = (s2 = '## 2. PM 的理解（可改）', s3 = '## 3. 明确不做的事') =>
+    [...(s2 ? [s2, '- 理解', ''] : []), ...(s3 ? [s3, '- 无', ''] : []), '## 4. 修订记录', '', '### 2026-10-12 · 用户主动提出', '**改动**：x', '']
+  const doc = (words, ...rest) => ['# 契约', '', '## 1. 用户原话', '', ...words, '', ...tail(...rest)].join(NL)
+  const A = ['## 1. 背景', '我想要一个命令行记账小工具，用 Node.js 写，不引入第三方依赖。', '', '## 2. 功能', '- add <金额> <备注>：记一笔支出', '- list：列出全部记录，带序号与日期',
+    '- total：输出总金额', '- 数据存在当前目录的 ledger.json', '', '## 3. 不做的', '- 不做图形界面，不做多用户', '', '## 4. 验收标准', '- 新记的一笔 list 能看到',
+    '- 金额不是数字时报错，退出码不是 0', '- 有自动化测试，node --test 能跑通']
+  assert.equal(section1Of(doc(A)), A.join(NL), '①')
+  assert.deepEqual(revisionHeadingsOf(doc(A)), ['### 2026-10-12 · 用户主动提出'], '①')
+  const two = doc(['做一个待办清单。']) + '### 2026-10-13 · 用户主动提出' + NL + '## 4. 修订后的验收' + NL + '- 能导出' + NL
+  assert.deepEqual(revisionHeadingsOf(two), ['### 2026-10-12 · 用户主动提出', '### 2026-10-13 · 用户主动提出'], '②')
+  const W3 = ['## 3. 范围', '只做命令行', '## 4. 验收', '- 能用']
+  assert.equal(section1Of(doc(W3, null)), W3.join(NL), '③')
+  assert.deepEqual(revisionHeadingsOf(doc(W3, null)), ['### 2026-10-12 · 用户主动提出'], '③')
+  const four = doc(['做一个待办清单。'], '## 2. PM 的理解（可改）', null) + '### 2026-10-13 · 用户主动提出' + NL + '## 3. 不做的' + NL + '- 不做多用户' + NL + NL +
+    '### 2026-10-14 · 升级 #1（kind: env-blocked）' + NL + '**用户裁决**：x' + NL
+  assert.deepEqual(revisionHeadingsOf(four), ['### 2026-10-12 · 用户主动提出', '### 2026-10-13 · 用户主动提出', '### 2026-10-14 · 升级 #1（kind: env-blocked）'], '④')
+  const five = doc(['做一个待办清单。'], '## 2. 其他') + '### 2026-10-13 · 用户主动提出' + NL + '## 2. 对需求的理解' + NL + '- 变了' + NL
+  assert.equal(section1Of(five), '做一个待办清单。', '⑤')
+  assert.deepEqual(revisionHeadingsOf(five), ['### 2026-10-12 · 用户主动提出', '### 2026-10-13 · 用户主动提出'], '⑤')
+  // ⑥ 原话里有标题带「理解」「不做」的「## 2.」「## 3.」：契约自己的第 2、3 节在原话之后、第 4 节之前，取最后一个带关键词的——第 1 节照样是整段。
+  const W6 = ['## 2. 对需求的理解', '要简单', '## 3. 不做的', '- 不做图形界面']
+  assert.equal(section1Of(doc(W6)), W6.join(NL), '⑥')
+  // ⑦ 契约缺第 3 节、原话里有「## 3. 不做的」：第 3 节只在第 2 节之后找，原话里的那一个不算。
+  const W7 = ['做一个待办清单。', '## 3. 不做的', '- 不做多用户']
+  assert.equal(section1Of(doc(W7, '## 2. PM 的理解（可改）', null)), W7.join(NL), '⑦')
+  // ⑧ 第 4 节标题不带「修订」：退回从前一节往下找、带关键词的优先——原话里的「## 2. 需求」「## 4. 验收」不切断第 1 节，第 4 节认契约自己的那一节。
+  const W8 = ['## 2. 需求', '能加', '## 4. 验收', '- 能看到']
+  const d8 = ['## 1. 用户原话', '', ...W8, '', '## 2. PM 的理解（可改）', '- x', '', '## 3. 明确不做的事', '- 无', '', '## 4. 变更记录', '', '### 2026-10-12 · 用户主动提出', ''].join(NL)
+  assert.equal(section1Of(d8), W8.join(NL), '⑧')
+  assert.deepEqual(revisionHeadingsOf(d8), ['### 2026-10-12 · 用户主动提出'], '⑧')
 })
 
 test('M4j：bodyShaOf——修订指纹去掉第 1 节、不计行尾空白与换行写法；第 4 节加修订块、改第 2 节都算', () => {
@@ -141,20 +197,20 @@ test('M4j：verificationProducts 与 verifyShasOf——验证段的固定产物�
 
 test('M4j：initialBase 与 revisedBase——只改第 1 节、只改空白不算修订；新加的修订块全是不改需求的答复：只换指纹；别的修订：重拍快照、记下时刻', () => {
   const base = initialBase(buf(CONTRACT))
-  assert.deepEqual(base, { section1: SECTION1, body_sha: bodyShaOf(CONTRACT), revisions: [], verify_base: {}, revised_at: null, deliver_used: [], deliver_blocks: [] })
+  assert.deepEqual(base, { section1: SECTION1, body_sha: bodyShaOf(CONTRACT), revisions: [], verify_base: {}, revised_at: null, deliver_used: [], deliver_blocks: [], slicing: 2 })
   assert.equal(initialBase(null), null)
   const shas = { '06-test.md': sha('t'), '07-acceptance.md': sha('a') }
   assert.equal(revisedBase(base, buf(CONTRACT), shas, NOW), null, '契约没变')
   assert.equal(revisedBase(base, buf(CONTRACT.replace('能加一条', '能加一条、删一条')), shas, NOW), null, '复核（F2）：只改第 1 节不算修订')
   const admin = withBlock(CONTRACT, '### 2026-10-06 · 升级 #1（kind: env-blocked）', '**用户裁决**：照现状交付。')
   assert.deepEqual(revisedBase(base, buf(admin), shas, NOW), {
-    base: { section1: SECTION1, body_sha: bodyShaOf(admin), revisions: ['### 2026-10-06 · 升级 #1（kind: env-blocked）'], verify_base: {}, revised_at: null, deliver_used: [], deliver_blocks: [] },
+    base: { section1: SECTION1, body_sha: bodyShaOf(admin), revisions: ['### 2026-10-06 · 升级 #1（kind: env-blocked）'], verify_base: {}, revised_at: null, deliver_used: [], deliver_blocks: [], slicing: 2 },
     requirement: false,
   })
   const user = withBlock(admin, '### 2026-10-07 · 用户主动提出')
   const afterAdmin = revisedBase(base, buf(admin), shas, NOW).base
   assert.deepEqual(revisedBase(afterAdmin, buf(user), shas, NOW), {
-    base: { section1: SECTION1, body_sha: bodyShaOf(user), revisions: ['### 2026-10-06 · 升级 #1（kind: env-blocked）', '### 2026-10-07 · 用户主动提出'], verify_base: shas, revised_at: NOW, deliver_used: [], deliver_blocks: [] },
+    base: { section1: SECTION1, body_sha: bodyShaOf(user), revisions: ['### 2026-10-06 · 升级 #1（kind: env-blocked）', '### 2026-10-07 · 用户主动提出'], verify_base: shas, revised_at: NOW, deliver_used: [], deliver_blocks: [], slicing: 2 },
     requirement: true,
   })
   // 没有新的修订块、改了第 2 节：算改需求。认不出类别的新块：算改需求。

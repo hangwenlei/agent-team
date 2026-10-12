@@ -46,7 +46,7 @@ Node 找不到、旧到门禁起不来，或者 hooks 被关掉时，平台不�
 
 Node 起得来但太旧时，门禁会拒绝每一次派发与写入，并写明要装哪个版本。自检不核 Claude Code 的版本：版本不够时，门禁可能照常在跑、自检也通过，分层派发却走不通——所以要自己确认，终端里用 `claude --version`，桌面端保持应用为最新。
 
-**更新**——版本号变了才会拉到新版，已经开着的会话要重开才生效。每一版改了什么写在 [CHANGELOG.md](CHANGELOG.md)，每一版都打了对应的 tag（`v` 加版本号）。
+**更新**——版本号变了才会拉到新版，已经开着的会话要重开才生效。每一版改了什么写在 [CHANGELOG.md](CHANGELOG.md)，每一版都打了对应的 tag（`v` 加版本号）。更新最好放在两趟之间；进行中的那一趟更新之后可以接着跑，万一被门禁拦得没有出路，另起一趟（`/agent-team:at`）。
 
 ```sh
 claude plugin update agent-team@agent-team-marketplace --scope local
@@ -257,7 +257,7 @@ If Node is missing or too old for the gates to start, or hooks are disabled, the
 
 If Node starts but is too old, the gates refuse every dispatch and write and say which version to install. The self-check does not check the Claude Code version: on an older Claude Code the gates may run and the self-check pass while layered dispatch still fails — so check it yourself with `claude --version` in a terminal, and keep the desktop app up to date.
 
-**Update** — a new release arrives only when its version number changes, and sessions already open need a restart. What changed in each version is in [CHANGELOG.md](CHANGELOG.md), and every version has a matching tag (`v` plus the version number).
+**Update** — a new release arrives only when its version number changes, and sessions already open need a restart. What changed in each version is in [CHANGELOG.md](CHANGELOG.md), and every version has a matching tag (`v` plus the version number). Updating between runs is best; a run in progress can carry on after an update, and if the gates ever block it with no way forward, start a new run (`/agent-team:at`).
 
 ```sh
 claude plugin update agent-team@agent-team-marketplace --scope local

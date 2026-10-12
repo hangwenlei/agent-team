@@ -54,7 +54,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   版本检查都过了之后，`ci.yml` 的 `tag` 作业跑 `scripts/tag-release.mjs`：每一版打在 main 的 first-parent 历史上 `plugin.json` 第一次是它的提交（`v` 加版本号），
   缺的都补上，已有的不挪；同一个作业接着给 3.3.1 起缺 GitHub Release 的各版建一条（`scripts/github-release.mjs`，与打 tag 同一份认法：tag 不在远端或指向
   别处的不建、已有就不动、正文是 `CHANGELOG.md` 那一行，打 tag 那一步红了也跑；之前的各版不补，`docs/52`）。GITHUB_TOKEN 推不了指向「带着与 `main` 现在不同的工作流文件」的提交的 tag（推它等于创建或更新工作流）：那样的旧版作业
-  补不上、会红，要有 `workflow` 权限的人在本地跑 `node scripts/tag-release.mjs --push`（不带 `--push` 只列不打）。M4l 起工作流的 push 只认分支，推 tag
+  补不上、会红，要有 `workflow` 权限的人在本地跑 `node scripts/tag-release.mjs --push`（不带 `--push` 只列不打）。新版不许让进行中的 run 新增失败：门禁专属文件
+  的算法或格式变了的，新记的带版本标记、旧的照旧口径算（例：契约基线的 `slicing`，`docs/90`），并配一条「上一版状态的夹具」判据。M4l 起工作流的 push 只认分支，推 tag
   不触发 CI；M4l 之前的提交里的工作流不认这一条，一次推三个以内会起 CI。理由在 `docs/47` 与它的订正。
 - **`docs/11` §1–§4 原文一字不改，只追加 §5.x；带日期的实测记录正文不改，订正与收口写在旁边 —— 而且写在原话的标题底下**，只在新一节里指称它的收口，扫标题的人读不到。
 - **活的事实不写进带日期的记录**：判据要对着代码核的说明与数写在 `docs/00-现行参考.md`，还开着什么写在 `docs/00-开放边界.md`（docs/15 起每一份记录的「仍然开着的边界」

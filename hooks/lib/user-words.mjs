@@ -16,12 +16,12 @@
 // 别的会话推进出第一段之后回退到第一段时晚绑，与契约基线互相卡死（第 1 节照哪一份都过不去）。
 // 绑分两步（docs/58 §8）：bindDecision 说绑时 H6 只记 binding（这一刻 run 目录还不在、这次写入还可能被用户拒掉）；同一次 Write 落盘之后账本问
 // finishBinding，才标 bound、写 run 一级那份。
-// 核（section1Mismatch）：第 1 节标题之后（跳过空行）逐行就是原话，之后到下一个编号节标题之间只有空行。行尾空白、BOM、CRLF 不计；整段写成
+// 核（section1Mismatch）：第 1 节标题之后（跳过空行）逐行就是原话，之后到第 1 节结束（契约自己的下一节，docs/90）只有空行。行尾空白、BOM、CRLF 不计；整段写成
 // 引用块（每行一个「>」或「> 」）也认——真实会话里两种写法都有（docs/50 §1）。按原话的行数往下认，原话里自带的「## 2. …」不会把它切断。
 // 复核（docs/50 §9）：比之前两边都把空白变体（不换行空格、全角空格、制表符这类）折成一个普通空格、连续空白算一个，去掉零宽与格式字符——
 // 实测 sonnet 照抄时把不换行空格换成了普通空格，拒绝理由里两段肉眼一样、改不出来，这一趟就推进不出第一段。
 import { PLUGIN_PREFIX } from './decide.mjs'
-import { contractLines, numberedHeading } from './contract-base.mjs'
+import { contractLines, numberedHeading, section1EndOf } from './contract-base.mjs'
 import { isPlainObject } from './stages.mjs'
 import { USER_WORDS_FILE } from './control-files.mjs'
 import { quote } from './trusted.mjs'
@@ -162,7 +162,9 @@ function matchFrom(lines, i, want, quoted) {
   }
   let j = i + want.length
   while (j < lines.length && (canon(lines[j]) === '' || (quoted && canon(lines[j]) === '>'))) j++
-  if (j < lines.length && numberedHeading(lines[j]) === null) return { kind: 'extra', line: j - i + 1, want: null, got: lines[j], at: want.length, diff: null }
+  // 复核（docs/90 §8，低 8）：原话之后到第 1 节结束（契约自己的下一节，与契约基线同一个口径）之前只能有空行；切不出结束的，退回下一个编号节标题。
+  const end = section1EndOf(lines)
+  if (j < lines.length && (end !== null ? j < end : numberedHeading(lines[j]) === null)) return { kind: 'extra', line: j - i + 1, want: null, got: lines[j], at: want.length, diff: null }
   return null
 }
 
@@ -205,7 +207,7 @@ export function wordsMismatchText(m) {
     `${USER_WORDS_FILE} 里，args 那一项）：`
   if (!m || m.kind === 'no-section') return head + '契约里切不出第 1 节（「## 1. 用户原话」那一行）'
   if (m.kind === 'short') return head + `第 1 节到第 ${m.line} 行就没了，原话从这一行起还有 ${shown(m.want)} 等`
-  if (m.kind === 'extra') return head + `原话之后、下一个编号节标题之前还多出一行 ${shown(m.got)}`
+  if (m.kind === 'extra') return head + `原话之后、第 1 节结束之前（契约自己的第 2 节「PM 的理解」之前）还多出一行 ${shown(m.got)}`
   const where = typeof m.col === 'number' ? `（从第 ${m.col} 个字起不一样：原话是 ${m.wantCode}，这里是 ${m.gotCode}）` : ''
   return head + `第 1 节第 ${m.line} 行应是 ${shown(m.want)}，现在是 ${shown(m.got)}${where}`
 }
