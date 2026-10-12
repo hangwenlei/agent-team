@@ -69,6 +69,32 @@ test('叫到之后又裁掉：不在任何前置里的、非验证段的才免�
   assert.equal(mayWaive(STAGES, 'S5', '05-impl/at-ui.md'), true)
 })
 
+// docs/89（docs/77 §4、docs/81 §4「stage_roles 记成 []、推进照旧放行」）：随参与者展开的段，原来只要叫到的人那几份——S2 记成 []、谁都没裁，01-prd.md 不在也
+// 放行推进，到 S3 派人时 H2 才按前置拒。现在没叫过、也没裁掉的产者，它的产物是后面某段的前置的，照样要（出路是派它、或者把它写进 trimmed）；不是前置的
+// （02-*、05-impl/*）照旧不要。
+test('docs/89：随参与者展开的段，没叫过也没裁掉的产者——它的产物是后面某段的前置时照样要；不是前置的不要；裁掉了的不要', () => {
+  const empty = departureNeeds({ stages: STAGES, sid: 'S2', state: st('S3', { stage_roles: { S2: [] } }) })
+  assert.deepEqual(empty.needs.map((n) => [n.name, n.role, n.called]), [['01-prd.md', 'at-product', false]])
+  const uiOnly = departureNeeds({ stages: STAGES, sid: 'S2', state: st('S3', { stage_roles: { S2: ['at-ui'] } }) })
+  assert.deepEqual(names(uiOnly).sort(), ['01-prd.md', '02-ui-spec.md', '02-wireframe.html'])
+  const cut = departureNeeds({ stages: STAGES, sid: 'S2', state: st('S3', { stage_roles: { S2: [] }, trimmed: { 'at-product': 'S2' } }) })
+  assert.deepEqual(names(cut), [])
+  // 记在别的段的 trimmed 不算这一段裁掉。
+  const elsewhere = departureNeeds({ stages: STAGES, sid: 'S2', state: st('S3', { stage_roles: { S2: [] }, trimmed: { 'at-product': 'S5' } }) })
+  assert.deepEqual(names(elsewhere), ['01-prd.md'])
+  // 05-impl/* 不是前置：S5 记成 [] 照旧不要。
+  assert.deepEqual(names(departureNeeds({ stages: STAGES, sid: 'S5', state: st('S6', { stage_roles: { S5: [] } }) })), [])
+  // H6 接线：S2 记成 []、01-prd.md 不在 → 拒，出路是派 at-product 或者把它写进 trimmed（随参与者展开的段说「裁掉它」，不说整段裁掉）；在了 → 放行。
+  const at2 = { stage: 'S2', history: H('S1', 'S2'), rework: {}, roster: [], stage_roles: { S2: [] } }
+  const to3 = { ...at2, stage: 'S3', history: [...at2.history, ...H('S3')] }
+  const r = decideReworkBase({ before: at2, after: to3, stages: STAGES, diskSha: disk({ '00-contract.md': 'c' }) })
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /01-prd\.md 缺：S2 这一趟还没叫过 at-product——派它/)
+  assert.match(r.reason, /\{"at-product": "S2"\} 写进 trimmed，裁掉它/)
+  assert.ok(!/写进 trimmed，整段裁掉/.test(r.reason), r.reason)
+  assert.equal(decideReworkBase({ before: at2, after: to3, stages: STAGES, diskSha: disk({ '00-contract.md': 'c', '01-prd.md': 'p' }) }).ok, true)
+})
+
 test('有 stage_roles 却没有离开的那一段（随参与者展开的段）→ keyMissing；产物固定的段不管', () => {
   assert.equal(departureNeeds({ stages: STAGES, sid: 'S5', state: st('S6', { stage_roles: { S2: ['at-product'] } }) }).keyMissing, true)
   assert.equal(departureNeeds({ stages: STAGES, sid: 'S5', state: st('S6', { stage_roles: { S5: [] } }) }).keyMissing, false)

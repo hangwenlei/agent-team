@@ -38,6 +38,8 @@ test('rework：正常推进的 Write（history 追加一条）→ 放行，stdou
   const dirs = makeRun({ runId: 'r1', stage: 'S2' })
   try {
     const p = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    // docs/89：离开 S2 要它的前置产物（01-prd.md 是 S3 的前置）——夹具照真实顺序先有它。
+    writeFileSync(join(dirs.projectDir, '.agent-team', 'runs', 'r1', '01-prd.md'), 'prd')
     const before = JSON.parse(readFileSync(p, 'utf8'))
     const after = {
       ...before,
