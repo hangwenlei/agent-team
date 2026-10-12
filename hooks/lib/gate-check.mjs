@@ -50,7 +50,7 @@ export function gateCheckReason({ version = process.version, execPath = process.
   return (
     `${GATE_CHECK_ONLINE}——这条被拦下的写入是自检的预期结果，不是故障。` +
     `门禁用的 node 是 ${inline(version)}（${inline(execPath)}）。` +
-    `门禁此刻的时间是 ${gateClock(now)}（UTC）：state.json 的 history 里的 at、closed_at 照门禁回传给的这种时间写，不要估。` +
+    `门禁此刻的时间是 ${gateClock(now)}（UTC）：state.json 里的时间（history、escalations 的 at，closed_at）照最近一次门禁回传给的时间写，不要估。` +
     '这个结果只管到这一轮用户消息结束：之后的每一轮——包括用户说「继续」、续会话之后——在第一次派发或写 ' +
     '.agent-team 之前都要重新自检，不能引用这一条。接着往下做。'
   )

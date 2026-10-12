@@ -42,7 +42,7 @@ import { quote, safeJson } from './trusted.mjs'
 import { SHA_RE } from './contract-hash.mjs'
 // 第 17 条（推进判据）：离开一段时核缺的、空文件、没记账；一次只推进一段。
 import { decideSingleStep, departureBlockers, departureLines } from './advance.mjs'
-import { EMPTY_SHA } from './closing.mjs'
+import { EMPTY_SHA, gateClock } from './closing.mjs'
 
 function counts(history) {
   const c = {}
@@ -238,7 +238,7 @@ function decideChainInvariant({ before, after, stages }) {
     return {
       ok: false,
       reason:
-        `history 新追加的第 ${j + 1} 条${what}不是 { "stage": 阶段链上的段, "at": "<ISO 时间>" } 的形状。` +
+        `history 新追加的第 ${j + 1} 条${what}不是 { "stage": 阶段链上的段, "at": 时间 } 的形状（时间照门禁给的写，门禁此刻是 "${gateClock()}"）。` +
         `history 只记进入过阶段链上的哪一段。${tail}`,
     }
   }

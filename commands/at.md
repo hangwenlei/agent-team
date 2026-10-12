@@ -57,7 +57,7 @@ $ARGUMENTS
   `PENDING`，`roster` 与 `never_invoked` 先留空数组，`artifacts`、`rework`、`stage_roles`、`trimmed` 与 `rework_base`
   先留空对象——`artifacts` 会在每段产物写完之后按回传逐条补上，`rework_base` 只在回退时生成（见第 3 节的「回退」），
   `escalations` 先留空数组；`closed_at` 先写成 null（JSON 的空值，不带引号）——它是收口标记，收口时（第 6 节）才写成时间。
-  `history` 里的 at 与 `closed_at` 写真实的时间：照这一轮门禁自检或【阶段】回传里给的门禁时间写，不要估——你没有钟，估出来的会越写越偏。
+  `state.json` 里的时间（`history` 与 `escalations` 每一条的 at、`closed_at`）和契约的冻结时间写真实的时间：用这次写入之前最后拿到的门禁时间（自检的回复与【阶段】都带着），不要估——你没有钟，估出来的会越写越偏；拿到之后又等过用户或角色的，先照你的角色说明里「门禁自检」那一节再做一次、取一次时间（门禁照样拒那次写入，回复里带着此刻的时间，不弹权限窗）。
 - 写 `.agent-team/current-run`，内容就是 run id 本身，**不带换行以外的任何东西，
   不含路径分隔符**。写完之后要是收到【project.json】，里面的阻断与要改先照 `/agent-team:at-init`
   第 2、3 节改完，再进 S2——阻断会让执行角色在 run 目录之外的写入被拒；要改的是 at-init 明令不许、

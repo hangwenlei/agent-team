@@ -166,7 +166,7 @@ export function decideClosing({ before, after, stages, diskSha, atPath, dispatch
       ok: false,
       reason:
         `closed_at 是收口标记，这次${got}。还没收口就写 JSON 的 null（不带引号）；收口时写成收口那一刻的 ISO 时间` +
-        '（例："2026-10-01T15:00:00Z"，照 /agent-team:at 第 6 节）。',
+        `（照门禁给的写，门禁此刻是 "${gateClock()}"；照 /agent-team:at 第 6 节）。`,
     }
   }
 
