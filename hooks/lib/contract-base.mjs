@@ -53,8 +53,48 @@ export function numberedHeading(line) {
   return m ? Number(m[1]) : null
 }
 
-/** 第 n 节在 lines 里的 [标题行, 下一个编号节标题)；没有这一节回 null。 */
+// docs/90：契约自己的四个编号节按结构认。用户常贴一份带编号节标题的需求（「## 1. 背景」「## 4. 验收标准」），项目经理照抄进第 1 节——只按编号认，
+// 第 1 节会在原话里第一个编号节标题处切断，第 4 节会认成原话里的那一节（真的修订块一条都读不到）。第 2 节认第 1 节之后标题带「理解」的那一个
+// （模板写的是「## 2. PM 的理解（可改）」），之后各节从它往下找、带「不做」「修订」的优先；找不到带关键词的，退回第一个同编号的标题（与原来一样）。
+const SECTION_KEY = { 2: /理解/, 3: /不做/, 4: /修订/ }
+function sectionStarts(lines) {
+  const starts = { 1: lines.findIndex((l) => numberedHeading(l) === 1) }
+  if (starts[1] < 0) return null
+  let from = starts[1]
+  for (const n of [2, 3, 4]) {
+    let first = -1
+    let keyed = -1
+    for (let i = from + 1; i < lines.length; i++) {
+      if (numberedHeading(lines[i]) !== n) continue
+      if (first < 0) first = i
+      if (SECTION_KEY[n].test(lines[i])) {
+        keyed = i
+        break
+      }
+    }
+    starts[n] = keyed >= 0 ? keyed : first
+    if (starts[n] >= 0) from = starts[n]
+  }
+  return starts
+}
+
+/**
+ * 第 n 节在 lines 里的 [标题行, 结束)；没有这一节回 null。第 1 到 4 节按 sectionStarts 认，结束在契约自己的下一节；第 4 节一直到下一个编号大于 4 的
+ * 标题或末尾（修订块里贴进来的编号节标题不切断它，docs/90）；找不到契约自己的下一节时，与原来一样在下一个编号节标题处结束。
+ */
 function sectionRange(lines, n) {
+  const starts = n >= 1 && n <= 4 ? sectionStarts(lines) : null
+  if (starts) {
+    const start = starts[n]
+    if (start < 0) return null
+    const later = [2, 3, 4].filter((k) => k > n && starts[k] > start).map((k) => starts[k])
+    if (later.length) return [start, Math.min(...later)]
+    const end =
+      n === 4
+        ? lines.findIndex((l, i) => i > start && (numberedHeading(l) ?? 0) > 4)
+        : lines.findIndex((l, i) => i > start && SECTION_RE.test(l))
+    return [start, end < 0 ? lines.length : end]
+  }
   const start = lines.findIndex((l) => {
     const m = SECTION_RE.exec(l)
     return m !== null && Number(m[1]) === n

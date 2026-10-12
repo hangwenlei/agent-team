@@ -132,6 +132,29 @@ test('M4j 账本：第 1 节变了说【契约】；只改第 1 节不算修订�
   })
 })
 
+// docs/90：原话里自带编号节标题（用户贴了一份带「## 1. 背景」「## 4. 验收标准」的需求）——基线记下的是整段原话（原来是空串），改原话说第 1 节变了；
+// 第 4 节加改需求的修订块照样认出来（原来认成原话里的「## 4.」那一节，真的修订块读不到）。
+test('docs/90 账本：原话里自带编号节标题——基线记整段原话；改原话说第 1 节变了；第 4 节加改需求的修订块照样认出来', () => {
+  const NUMBERED = ['# 00 契约', '', '## 1. 用户原话', '', '## 1. 背景', '做一个待办清单。', '', '## 4. 验收标准', '- 能看到', '', '## 2. PM 的理解（可改）', '', '- 命令行。', '', '## 4. 修订记录', ''].join(NL)
+  withRun({ stage: 'S2', history: upTo('S2') }, ({ projectDir, runDir }) => {
+    writeFileSync(join(runDir, '00-contract.md'), NUMBERED)
+    run('ledger', posted(join(runDir, 'state.json')), GATE, projectDir)
+    assert.equal(baseOf(runDir).section1, ['## 1. 背景', '做一个待办清单。', '', '## 4. 验收标准', '- 能看到'].join(NL))
+    writeFileSync(join(runDir, '00-contract.md'), NUMBERED.replace('做一个待办清单。', '做一个待办清单，还要能删。'))
+    const c = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
+    assert.ok(c.includes('【契约】契约第 1 节是用户原话') && !c.includes('契约改了'), c)
+  })
+  withRun({ stage: 'S8', history: upTo('S8') }, ({ projectDir, runDir }) => {
+    writeFileSync(join(runDir, '00-contract.md'), NUMBERED)
+    run('ledger', posted(join(runDir, 'state.json')), GATE, projectDir)
+    writeFileSync(join(runDir, '06-test.md'), '结论：通过' + NL + 'test v1' + NL)
+    writeFileSync(join(runDir, '00-contract.md'), NUMBERED + '### 2026-10-12 · 用户主动提出' + NL + '**改动**：加一条：能删。' + NL)
+    const c = ctxOf(run('ledger', posted(join(runDir, '00-contract.md')), GATE, projectDir).stdout)
+    assert.ok(c.includes('契约改了'), c)
+    assert.deepEqual(baseOf(runDir).revisions, ['### 2026-10-12 · 用户主动提出'])
+  })
+})
+
 test('M4j 账本（复核 F11）：已经收口的 run 上改契约——只说另起一趟，不给回退', () => {
   withRun({ stage: 'S8', history: upTo('S8') }, ({ projectDir, runDir }) => {
     const statePath = join(runDir, 'state.json')

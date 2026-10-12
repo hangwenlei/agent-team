@@ -72,6 +72,32 @@ test('M4j：section1Of——「## 1.」到下一个编号节标题之间；剥 B
   assert.equal(section1Of(null), null)
 })
 
+// docs/90：用户常贴一份带编号节标题的需求（「## 1. 背景」「## 2. 需求」「## 4. 验收标准」），项目经理照抄进第 1 节。只按编号认节时，第 1 节在原话里第一个编号节
+// 标题处切断（成了空串：推进出 S1 之后改原话门禁认不出），第 4 节认成原话里的那一节（真的修订块一条都读不到，改需求的判据整条失效）。现在按结构认契约
+// 自己的节：第 2 节是第 1 节之后标题带「理解」的那一个，之后各节从它往下找（带「不做」「修订」的优先），找不到带关键词的退回第一个同编号的；第 4 节
+// 一直到下一个编号大于 4 的标题或末尾（修订块里贴进来的编号节标题不切断它）。
+test('docs/90：原话里自带编号节标题——第 1 节到契约自己的第 2 节为止，第 4 节认契约自己的那一节、贴进修订块的编号节标题不切断它', () => {
+  const PASTED = ['## 1. 背景', '做一个待办应用。', '', '## 2. 需求', '能加、能删。', '', '## 4. 验收标准', '- 加了能看到', '### 4.1 细节']
+  const text = ['# 契约', '', '## 1. 用户原话', '', ...PASTED, '', '## 2. PM 的理解（可改）', '- 理解', '', '## 3. 明确不做的事', '- 无', '', '## 4. 修订记录', '',
+    '### 2026-10-12 · 用户主动提出', '**改动**：加一条：能导出。', ''].join(NL)
+  assert.equal(section1Of(text), PASTED.join(NL))
+  assert.deepEqual(revisionHeadingsOf(text), ['### 2026-10-12 · 用户主动提出'])
+  // 改原话是第 1 节变了，不进修订指纹；改第 2 节照旧进。
+  const edited = text.replace('能加、能删。', '能加、能删、能改。')
+  assert.notEqual(section1Of(edited), section1Of(text))
+  assert.equal(bodyShaOf(edited), bodyShaOf(text))
+  assert.notEqual(bodyShaOf(text.replace('- 理解', '- 理解变了')), bodyShaOf(text))
+  // 修订块里贴进来的编号节标题（用户原话那一栏）不切断第 4 节：后面的修订块照样认；用掉批准的那几块照样能整块去掉。
+  const more = text + '### 2026-10-13 · 用户主动提出' + NL + '**用户原话**：' + NL + '## 1. 新背景' + NL + '要能导入。' + NL + NL +
+    '### 2026-10-14 · 升级 #1（kind: tradeoff）' + NL + '**用户裁决**：x' + NL
+  assert.deepEqual(revisionHeadingsOf(more), ['### 2026-10-12 · 用户主动提出', '### 2026-10-13 · 用户主动提出', '### 2026-10-14 · 升级 #1（kind: tradeoff）'])
+  assert.equal(bodyShaOf(more.replace('要能导入。', '要能导入导出。'), ['### 2026-10-13 · 用户主动提出']), bodyShaOf(more, ['### 2026-10-13 · 用户主动提出']))
+  // 契约自己的第 2 节标题不带「理解」的，退回第一个「## 2.」（与原来一样）。
+  assert.equal(section1Of(['## 1. 用户原话', '', '原话', '', '## 2. 其他', 'x', '', '## 4. 修订记录', ''].join(NL)), '原话')
+  // 第 4 节之后另起编号更大的节，第 4 节在那里结束。
+  assert.deepEqual(revisionHeadingsOf(text + '## 5. 附录' + NL + '### 不是修订' + NL), ['### 2026-10-12 · 用户主动提出'])
+})
+
 test('M4j：bodyShaOf——修订指纹去掉第 1 节、不计行尾空白与换行写法；第 4 节加修订块、改第 2 节都算', () => {
   const base = bodyShaOf(CONTRACT)
   assert.equal(bodyShaOf(CONTRACT.replace('能加一条', '能加一条、删一条')), base, '只改第 1 节不算修订')
