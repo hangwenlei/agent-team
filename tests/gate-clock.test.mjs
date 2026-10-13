@@ -2,6 +2,8 @@
 // 收口时间写到了会话结束之后。门禁在项目经理写 state.json 之前总会说话的两处带上门禁此刻的时间：自检的回复（每一轮第一次写
 // .agent-team 之前；桌面端每个角色交回来都会触发一轮）与【阶段】（推进、收口）；命令正文叫它照抄、不要估。门禁不核这两个时间
 // （不用它们判任何事），这里只钉「给了」与「格式过得了收口标记的形状」。
+// docs/94：两场真实会话里项目经理收口那一次都把 history 里挨着的 S8 那一条已有的时间换成了收口时间、再自己改回去（整份重写 state.json 时把手头这件事
+// 的时间带进了挨着的那一条）。几处说法都写明只有这次新写的那个时间照最新的写，已经写下的原样带着；门禁不核这些时间（它们不进任何判据，只是记录）。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, rmSync } from 'node:fs'
@@ -34,7 +36,7 @@ test('gateClock：到秒的 UTC 时间、以 Z 结尾，过得了收口标记的
 
 test('自检的回复带门禁此刻的时间，说 state.json 里的时间照最近一次门禁给的写、不要估', () => {
   const r = gateCheckReason({ version: 'v24.1.0', execPath: '/n', now: NOW })
-  assert.ok(r.includes(`门禁此刻的时间是 ${T}（UTC）：state.json 里的时间（history、escalations 的 at，closed_at）照最近一次门禁回传给的时间写，不要估。`), r)
+  assert.ok(r.includes(`门禁此刻的时间是 ${T}（UTC）：state.json 里这次新写的时间（history 新追加的那一条、escalations 新记的那一条的 at，closed_at）照最近一次门禁回传给的时间写，不要估；已经写下的时间原样带着。`), r)
 })
 
 // 复核（低 5）：钟是 UTC，不跟着机器的时区走——CI 的 runner 默认就是 UTC，换一个时区才打得红用本地时间的写法。Node 运行中改 TZ 当场生效。
@@ -54,13 +56,13 @@ test('gateClock：换了时区照样是 UTC', () => {
 
 test('【阶段】推进：history 那一条带门禁此刻的时间，不再是占位', () => {
   const s = buildLedgerNotices({ ...base, now: NOW }).join('\n')
-  assert.ok(s.includes(`往 history 追加一条 { "stage": "S2", "at": "${T}" }（at 是门禁此刻的时间，照抄，不要估）`), s)
+  assert.ok(s.includes(`往 history 追加一条 { "stage": "S2", "at": "${T}" }（at 是门禁此刻的时间，照抄，不要估；已有的 history 与 escalations 条目原样带着）`), s)
   assert.ok(!s.includes('<ISO 时间>'), s)
 })
 
 test('【阶段】收口：closed_at 写门禁此刻的时间', () => {
   const s = buildLedgerNotices({ ...base, state: { stage: 'S2', contract_sha: 'PENDING' }, now: NOW }).join('\n')
-  assert.ok(s.includes(`记 never_invoked 与 closed_at（closed_at 写门禁此刻的时间 ${T}，不要估；`), s)
+  assert.ok(s.includes(`记 never_invoked 与 closed_at（closed_at 写门禁此刻的时间 ${T}，不要估；history 原样带着，连时间也不改；`), s)
 })
 
 const inWindow = (text, t0, t1) => {
@@ -97,8 +99,9 @@ test('命令正文：state.json 里的时间与冻结时间照最近一次门禁
   const at = readFileSync(new URL('../commands/at.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
   assert.ok(
     at.includes(
-      '`state.json` 里的时间（`history` 与 `escalations` 每一条的 at、`closed_at`）和契约的冻结时间写真实的时间：用这次写入之前最后拿到的门禁时间' +
-        '（自检的回复与【阶段】都带着），不要估——你没有钟，估出来的会越写越偏；拿到之后又等过用户或角色的，先照你的角色说明里「门禁自检」那一节再做一次、取一次时间' +
+      '`state.json` 里这次新写的时间（`history` 新追加的那一条、`escalations` 新记的那一条的 at、`closed_at`）和契约的冻结时间写真实的时间：用这次写入之前' +
+        '最后拿到的门禁时间（自检的回复与【阶段】都带着），不要估——你没有钟，估出来的会越写越偏；已经写下的时间原样带着，不跟着换。拿到之后又等过用户或角色的，' +
+        '先照你的角色说明里「门禁自检」那一节再做一次、取一次时间' +
         '（门禁照样拒那次写入，回复里带着此刻的时间，不弹权限窗）。',
     ),
     '缺那一句',
@@ -106,6 +109,8 @@ test('命令正文：state.json 里的时间与冻结时间照最近一次门禁
   // 复核（低 5）：建 run、推进、回退三处 history 那一条都写「门禁给的时间」，收口那一步照门禁给的写——逐处核，不只认一个字面的占位。
   assert.equal(at.split('"at": "<门禁给的时间>" }').length - 1, 3, '三处 history 那一条')
   assert.ok(at.includes('（收口那一刻的时间，照门禁给的写，例：'), '收口那一步')
+  assert.ok(at.includes('这一次不往 `history` 追加（推进进最后一段是之前单独那一次写入），已有的条目连时间也不改，'), '收口那一步不改已有的时间')
+  assert.ok(at.includes('照它说的原因重问。重写那次被拒的写入时，它要追加的那一条照这次写入之前最后拿到的门禁时间写（那次写入没落盘）。'), '重写被拒的写入时，新追加的那一条照最新的门禁时间')
   assert.ok(!at.includes('ISO 时间'), '还有只写 ISO 时间的地方')
   const tpl = readFileSync(new URL('../templates/00-contract.md', import.meta.url), 'utf8')
   assert.ok(tpl.includes('冻结时间：<门禁给的时间>'), '契约模板的冻结时间')
@@ -125,4 +130,29 @@ test('拒绝理由与报错：history 条目形状不对、closed_at 不是时�
   const r = decideRework({ before, after: { ...before, history: [...before.history, { at: T }] }, stages: STAGES })
   assert.equal(r.ok, false, JSON.stringify(r))
   inWindow(r.reason.slice(r.reason.indexOf('门禁此刻是')), t0, Date.now())
+})
+
+// docs/94 复核（低 4）：改旧条目段名的拒绝理由原来说「at 可以订正」，与正文「已经写下的时间原样带着」相抵。
+test('改 history 旧条目段名的拒绝理由：段名、时间都不改，不再说可以订正', () => {
+  const before = { run_id: 'r1', stage: 'S2', contract_sha: 'PENDING', history: [{ stage: 'S1', at: T }, { stage: 'S2', at: T }] }
+  const r = decideRework({ before, after: { ...before, history: [{ stage: 'S2', at: T }, { stage: 'S2', at: T }] }, stages: STAGES })
+  assert.equal(r.ok, false)
+  assert.ok(r.reason.includes('已有的条目原样带着，段名、时间都不改，也不许删') && !r.reason.includes('订正'), r.reason)
+})
+
+// docs/94：桌面端默认权限模式下实测——插件装在项目之外，项目经理与各角色读插件自带的说明都要你确认；权限确认里拒掉任何一次，这一轮就停下等你。
+test('README 两半：默认权限模式下会频繁弹窗、拒掉一次就停下，说「继续」接着做', () => {
+  const text = readFileSync(new URL('../README.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  const [zh, en] = text.split('<a id="english"></a>')
+  assert.ok(
+    zh.includes('> **默认权限模式下会频繁弹窗。** 每次写文件、跑命令都要你确认；插件装在项目文件夹之外，项目经理和部分角色读插件自带的说明也要确认。' +
+      '在权限确认里拒掉项目经理的一次请求，这一轮就停下等你——说一句「继续」它会接着做。嫌弹窗多可以用 auto 模式。\n'),
+    '中文那一半',
+  )
+  assert.ok(
+    en.includes('> **Expect frequent prompts in the default permission mode.** Every file write and command asks for your confirmation, and since the plugin ' +
+      'lives outside your project folder, the project manager and some roles also ask before reading the plugin\'s own instructions. Deny one of the project ' +
+      'manager\'s requests and that turn stops and waits for you — say “continue” and it picks up where it stopped. Auto mode cuts the prompts down.\n'),
+    '英文那一半',
+  )
 })

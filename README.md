@@ -176,6 +176,9 @@ flowchart TB
 > **不要用 `claude plugin disable` 或 `claude plugin enable` 开关插件。** 一个会话的工具面在它的生命周期内是固定的，disable 不会把它还回来；enable 会接管已经在跑的会话。用完就结束会话，不再需要就卸载。
 
 > [!NOTE]
+> **默认权限模式下会频繁弹窗。** 每次写文件、跑命令都要你确认；插件装在项目文件夹之外，项目经理和部分角色读插件自带的说明也要确认。在权限确认里拒掉项目经理的一次请求，这一轮就停下等你——说一句「继续」它会接着做。嫌弹窗多可以用 auto 模式。
+
+> [!NOTE]
 > **在 git 仓库里用后台会话**（`claude --bg`、agent view）跑团队，先在项目的 `.claude/settings.local.json` 里设 `"worktree": {"bgIsolation": "none"}`（只对你自己生效；写进 `.claude/settings.json` 会改到所有协作者）。不设的话，平台会拦下后台会话对项目目录的写入，项目经理第一步自检就停下来告诉你。前台会话与桌面端不受影响；团队不进 worktree。
 
 > [!NOTE]
@@ -385,6 +388,9 @@ You can watch a role but not talk to it: roles report their questions to the pro
 
 > [!CAUTION]
 > **Don't toggle the plugin with `claude plugin disable` or `claude plugin enable`.** A session's tool surface is fixed for its lifetime, and disabling does not hand it back; enabling takes over sessions that are already running. End the session when you are done, and uninstall when you no longer need it.
+
+> [!NOTE]
+> **Expect frequent prompts in the default permission mode.** Every file write and command asks for your confirmation, and since the plugin lives outside your project folder, the project manager and some roles also ask before reading the plugin's own instructions. Deny one of the project manager's requests and that turn stops and waits for you — say “continue” and it picks up where it stopped. Auto mode cuts the prompts down.
 
 > [!NOTE]
 > **Background sessions in a git repository** (`claude --bg`, agent view): set `"worktree": {"bgIsolation": "none"}` in the project's `.claude/settings.local.json` first (it applies to you only; putting it in `.claude/settings.json` changes it for every collaborator). Otherwise the platform blocks the background session's writes to the project directory, and the project manager stops at its first self-check and tells you. Foreground sessions and the desktop app are unaffected; the team does not work in worktrees.

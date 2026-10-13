@@ -437,7 +437,7 @@ export function buildLedgerNotices({
     out.push(
       nxt
         ? `【阶段】${st.stage} 的产物已经齐了。这一段如果确实结束了，需要把 state.stage 推进到 ` +
-          `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "${gateClock(now)}" }（at 是门禁此刻的时间，照抄，不要估）${again}——用同一次 Write 把这一段的账一起记掉：` +
+          `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "${gateClock(now)}" }（at 是门禁此刻的时间，照抄，不要估；已有的 history 与 escalations 条目原样带着）${again}——用同一次 Write 把这一段的账一起记掉：` +
           `叫到的人累加进 roster（state.json 里有 stage_roles 的，同一批人并进它的这一段），决定不叫的产出角色写进 trimmed。` +
           `分两次写，推进那一次产者交代会把刚走完那一段的产者点名报出来（门禁记过派发的报成漏记，没记过的报成漏派）。` +
           (implStage ? implRecordNote({ stage: stages?.[st.stage], writerIsPm, writer }) : '') +
@@ -451,7 +451,7 @@ export function buildLedgerNotices({
             closeBlockers.map((b) => `  - ${blockerLine(stages, b, st, undefined, dispatched)}`).join('\n') +
             `\n补齐之后照 /agent-team:at 第 6 节从第一步重走一遍再收口（补交的验收结论要读，交付文档要照它改）。${who}${tail}`
           : `【阶段】${st.stage} 的产物已经齐了，而它是阶段链的最后一段——该收口了：照 /agent-team:at 第 6 节，用同一次 Write ` +
-            `记 never_invoked 与 closed_at（closed_at 写门禁此刻的时间 ${gateClock(now)}，不要估；收口那一次 H6 核最后一段的前置与产物；没被拒就是收好了，收口成功不另发回传），再向用户汇报。` +
+            `记 never_invoked 与 closed_at（closed_at 写门禁此刻的时间 ${gateClock(now)}，不要估；history 原样带着，连时间也不改；收口那一次 H6 核最后一段的前置与产物；没被拒就是收好了，收口成功不另发回传），再向用户汇报。` +
             `收口之后，交付之后的新改动另起一趟。${who}${tail}`,
     )
   }
