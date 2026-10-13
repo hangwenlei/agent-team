@@ -96,7 +96,8 @@ function decideCounts({ before, after, stages, grants }) {
 
   // 复核（docs/34 §3，budget-1，高）：「只许追加」此前只核条数与各段出现次数——把一条更早的 S5 改成还有额度的段、同时照常追加一条 S5，
   // 各段次数都不降，S5 的派生值却不涨，第 4、5、6 轮都不经批准做成；对调两条旧条目的段名还能把回退藏起来。写入前已有的条目，段名
-  // 一个字都不许改（at 可以订正）。写入前就坏了的条目（不是 { stage 字符串 }）不管：计数本来就不数它。
+  // 一个字都不许改。写入前就坏了的条目（不是 { stage 字符串 }）不管：计数本来就不数它。at 门禁不核（不进任何判据，只是记录；docs/94），
+  // 拒绝理由照正文说原样带着。
   for (let i = 0; i < hb.length; i++) {
     const old = hb[i]
     if (!isPlainObject(old) || typeof old.stage !== 'string') continue
@@ -106,7 +107,7 @@ function decideCounts({ before, after, stages, grants }) {
       ok: false,
       reason:
         `history[${i}] 是写入前就有的条目，段名是 ${quote(old.stage)}，这次写入把它改了——history 只许追加：已有的条目不许改段名、` +
-        '不许删（at 可以订正）。返工计数是它的派生量，改旧条目的段名等于改计数。',
+        '已有的条目原样带着，段名、时间都不改，也不许删。返工计数是它的派生量，改旧条目的段名等于改计数。',
     }
   }
 

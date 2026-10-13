@@ -437,7 +437,7 @@ export function buildLedgerNotices({
     out.push(
       nxt
         ? `【阶段】${st.stage} 的产物已经齐了。这一段如果确实结束了，需要把 state.stage 推进到 ` +
-          `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "${gateClock(now)}" }（at 是门禁此刻的时间，照抄，不要估；已有的条目原样带着）${again}——用同一次 Write 把这一段的账一起记掉：` +
+          `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "${gateClock(now)}" }（at 是门禁此刻的时间，照抄，不要估；已有的 history 与 escalations 条目原样带着）${again}——用同一次 Write 把这一段的账一起记掉：` +
           `叫到的人累加进 roster（state.json 里有 stage_roles 的，同一批人并进它的这一段），决定不叫的产出角色写进 trimmed。` +
           `分两次写，推进那一次产者交代会把刚走完那一段的产者点名报出来（门禁记过派发的报成漏记，没记过的报成漏派）。` +
           (implStage ? implRecordNote({ stage: stages?.[st.stage], writerIsPm, writer }) : '') +
