@@ -49,7 +49,7 @@ test('wordsOf：只认 /agent-team:at 这条命令展开、参数不是空白、
 
 test('readWords：读得出的记录；剥 BOM；形状不对回 null；runs_before 只留字符串，bound、dropped 不是字符串当 null', () => {
   const rec = pendingRecord({ at: '2026-10-07T00:00:00.000Z', sessionId: 's-1', args: '做一个待办应用', runsBefore: ['r0'] })
-  assert.deepEqual(rec, { at: '2026-10-07T00:00:00.000Z', session_id: 's-1', args: '做一个待办应用', runs_before: ['r0'], binding: null, bound: null, dropped: null })
+  assert.deepEqual(rec, { at: '2026-10-07T00:00:00.000Z', session_id: 's-1', args: '做一个待办应用', source: 'command', runs_before: ['r0'], binding: null, bound: null, dropped: null })
   assert.deepEqual(readWords(Buffer.from(JSON.stringify(rec))), rec)
   assert.deepEqual(readWords(Buffer.from(BOM + JSON.stringify(rec))), rec)
   assert.deepEqual(readWords(JSON.stringify({ ...rec, runs_before: ['r0', 3, null, 'r1'], binding: 7, bound: 5, dropped: [] })), { ...rec, runs_before: ['r0', 'r1'] })

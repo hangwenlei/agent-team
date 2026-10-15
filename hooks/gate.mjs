@@ -80,7 +80,7 @@ import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
 import { isPlainObject, isStageChain, isVerifyStage, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName, verifyStageOf } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
-import { USER_WORDS_FILE, WORDS_FIX, bindDecision, blankAtSession, finishBinding, matchedSection1, pendingRecord, readWords, section1Mismatch, wordsMismatchText, wordsOf } from './lib/user-words.mjs'
+import { USER_WORDS_FILE, WORDS_FIX, bindDecision, blankAtSession, briefAnswer, briefNotice, finishBinding, matchedSection1, pendingRecord, readWords, section1Mismatch, wordsMismatchText, wordsOf } from './lib/user-words.mjs'
 import { GATE_CHECK_PATH, gateCheckReason, isGateCheck, selfCheckIdentity } from './lib/gate-check.mjs'
 import {
   SECOND_WRITE_NOTE,
@@ -1324,7 +1324,7 @@ function settleWords({ runDir, agentTeamDir, sessionId, state, stages, creating 
   try {
     if (decision === 'drop') {
       writeFileSync(pendingPath, `${JSON.stringify({ ...pending, dropped: runId }, null, 2)}\n`)
-      process.stderr.write(`agent-team user-words：${quote(runId)} 是那条命令之前就有的一趟、这次被续跑了，那条命令的原话记录作废。\n`)
+      process.stderr.write(`agent-team user-words：${quote(runId)} 是记下原话之前就有的一趟、这次被续跑了，那份原话记录（命令带的参数或批准的需求稿）作废。\n`)
       return
     }
     // 实测（docs/58，§8 是复核）：这里是 PreToolUse——run 目录还不在（项目经理直接 Write runs/<id>/state.json，落盘时才建），这次写入也还可能被
@@ -1361,6 +1361,52 @@ function finishWordsBinding(input, filePath) {
   } catch (e) {
     process.stderr.write(`agent-team user-words：原话记录写不进（${quote(e?.message ?? e, { max: 120 })}），这一趟可能不核契约第 1 节。\n`)
   }
+}
+
+// docs/95：需求稿的批准。用户在 AskUserQuestion 里选了「照这份需求开始」，把那道题的题面当作这一次的原话，整份重写项目一级的原话记录（source: 'ask'）——
+// 与 /agent-team:at 带参数展开时同一个文件、同一个形状，之后的绑定（H6 建 run 那一次）与核对一样走。不靠运行上下文：这一刻这一趟的 run 还没建。
+// .agent-team 不在不建；记不下时回传叫项目经理请用户把需求稿贴在命令后面重发（照现在这样往下建，命令那一次记下的旧原话会被绑上、第 1 节对不上）。
+// 回 null（回答里没有像批准需求稿的）或 { kind（给用户那一行）、notice（给项目经理那一段） }。
+function recordBrief(input) {
+  const b = briefAnswer(input?.tool_response)
+  if (!b) return null
+  const skip = (why) => {
+    process.stderr.write(`agent-team approval-ask：没有记成需求稿的批准（${why}）。\n`)
+    return { kind: 'brief-skipped', notice: briefNotice(why) }
+  }
+  if (b.why) return skip(b.why)
+  const sid = input.session_id
+  if (typeof sid !== 'string' || sid === '') return skip('no-session')
+  const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+  let isDir = false
+  try {
+    isDir = statSync(agentTeamDir).isDirectory()
+  } catch {}
+  if (!isDir) return skip('no-agent-team')
+  let runsBefore = []
+  try {
+    runsBefore = readdirSync(join(agentTeamDir, 'runs'))
+  } catch {}
+  try {
+    const rec = pendingRecord({ at: new Date().toISOString(), sessionId: sid, args: b.draft, runsBefore, source: 'ask' })
+    writeFileSync(join(agentTeamDir, USER_WORDS_FILE), `${JSON.stringify(rec, null, 2)}\n`)
+  } catch (e) {
+    process.stderr.write(`agent-team approval-ask：需求稿记不下（${quote(e?.message ?? e, { max: 120 })}）。\n`)
+    return skip('write-failed')
+  }
+  process.stderr.write('agent-team approval-ask：已记下用户批准的需求稿。\n')
+  // 复核：current-run 指着的那一趟是批准之前就建好的、还没收口（项目经理先建了 run 再问）——需求稿不会绑给它（项目经理再写它的 state.json 时这份记录作废），
+  // 回传点明出路。只读指针与那一趟的 state.json，不引任何磁盘上的值。
+  let staleRun = false
+  try {
+    const runsDir = join(agentTeamDir, 'runs')
+    const id = readFileSync(join(agentTeamDir, 'current-run'), 'utf8').trim()
+    if (id !== '' && runsBefore.some((n) => norm(join(runsDir, n)) === norm(join(runsDir, id)))) {
+      const st = JSON.parse(readFileSync(join(runsDir, id, 'state.json'), 'utf8'))
+      staleRun = isPlainObject(st) && closedAt(st) === null
+    }
+  } catch {}
+  return { kind: 'brief-recorded', notice: briefNotice(null, { staleRun }) }
 }
 
 // M4o：这一趟 run 目录里的原话记录；没有回 null，在却读不出：留痕、当没有（少拦）。
@@ -2294,7 +2340,7 @@ function main() {
       })
       if (!cb.ok) denyAndExit(cb.reason, spec.event)
 
-      // M4o（docs/50，审查第 20 条修法 A）：推进出第一段时，契约第 1 节对不上用户在 /agent-team:at 后面写的原话（这一趟建起来那一次绑进 run 目录的
+      // M4o（docs/50，审查第 20 条修法 A）：推进出第一段时，契约第 1 节对不上用户在 /agent-team:at 后面写的原话或批准的需求稿（docs/95）（这一趟建起来那一次绑进 run 目录的
       // 记录），拒。没有记录的（更早建的 run、别的会话建的、不经门禁建的、命令没带参数、收口之后照用户的消息另起的）不核。
       // 排在契约判据之后、验收判据之前：两样都是契约那一族，第一段推进时契约基线还没有，不会两样一起说。
       const chain = isStageChain(stagesForRework) ? Object.keys(stagesForRework) : []
@@ -2314,7 +2360,7 @@ function main() {
         const words = runWords(runDir)
         const m = words && contractBytes ? section1Mismatch(contractBytes.toString('utf8'), words.args) : null
         // 复核（docs/63 §8）：改好第 1 节会让契约的哈希变，下面那一条接着就要它记上——出路里一并说，省一轮被拒。
-        if (m) denyAndExit(`${wordsMismatchText(m)}。${WORDS_FIX}——改好之后把那一次写契约收到的【契约】回传给的 sha 记进 contract_sha，再推进。`, spec.event)
+        if (m) denyAndExit(`${wordsMismatchText(m, words.source)}。${WORDS_FIX}——改好之后把那一次写契约收到的【契约】回传给的 sha 记进 contract_sha，再推进。`, spec.event)
         // docs/63（docs/37 §5「PENDING 而契约不在，一律当还没写」）：推进出第一段那一次，这次写入的 contract_sha 要与磁盘上的契约对得上——之后
         // 「过了第一段还是 PENDING」那一格只剩不经这一次的写法（见 docs/63 §4）。出路照用【契约】那一句；契约这一次读不出（被占着）不拦、留痕。
         const s1cmp =
@@ -2896,7 +2942,7 @@ function main() {
       closeBlockers: blockers,
       // 测试那一段与验收那一段不会同时是当前段：两句共用一个位置。
       acceptanceNote: acceptanceNote ?? testNote,
-      wordsNote: wordsMismatch && kind !== 'contract' ? `${wordsMismatchText(wordsMismatch)}。推进出 ${firstStageId} 会被拒：${WORDS_FIX}。` : null,
+      wordsNote: wordsMismatch && kind !== 'contract' ? `${wordsMismatchText(wordsMismatch, words.source)}。推进出 ${firstStageId} 会被拒：${WORDS_FIX}。` : null,
       budget: validation ? validation.budget : [],
       grants,
       // M4b 第二轮复核：执行段「齐了」那句按写者分（谓词与 H3 同一个 isContractWriter）。
@@ -2924,7 +2970,7 @@ function main() {
           (isContractWriter(input.agent_type) ? '' : '这件事归项目经理：回报上级，不要自己去写 state.json。'),
       )
     }
-    if (wordsMismatch && kind === 'contract') notices.push(`【契约】${wordsMismatchText(wordsMismatch)}。${WORDS_FIX}——改好之前推进不出 ${firstStageId}。`)
+    if (wordsMismatch && kind === 'contract') notices.push(`【契约】${wordsMismatchText(wordsMismatch, words.source)}。${WORDS_FIX}——改好之前推进不出 ${firstStageId}。`)
     // M4h（docs/43，审查第 24-1 条）：写 current-run 时，别的、没收口的 run 里门禁还没见它停下的派发（inflightElsewhere 上方）。
     if (isPointer) {
       const inflight = inflightNotice(inflightElsewhere(ctx))
@@ -3062,11 +3108,16 @@ function main() {
     // approval-ask 在 PostToolUse 上：记下了、没记下（像批准却不记）都回一段【门禁】，给用户一行；一个像批准的回答都没有时不出声。
     // approval-prompt 在 UserPromptSubmit 上：stdout 会进模型上下文，一个字都不写（hookOutput 对这个事件恒给空），只往 stderr 留痕。
     const ask = CHECK === 'approval-ask'
+    // docs/95：需求稿的批准只在 AskUserQuestion 上认（门禁得看得见批的是哪一份）；与返工、照现状交付的批准互不相干，先记它。
+    const brief = ask ? recordBrief(input) : null
     // M4k（docs/46）：两个记录器也认「照现状交付」（候选 { deliver: true }，按 sha 绑在那一刻的验收结论上）。
     const found = ask
       ? askAnswers(input.tool_response)
       : { excluded: null, items: promptAnswer(input.prompt) ? [{ stage: promptAnswer(input.prompt) }] : promptDeliver(input.prompt) ? [{ deliver: true }] : [] }
-    if (!found.excluded && !found.items.length) process.exit(0)
+    if (!found.excluded && !found.items.length) {
+      if (brief) emitHookJson(spec.event, { contexts: [brief.notice], systemMessage: systemMessage(brief.kind) })
+      process.exit(0)
+    }
     let results
     let total = 0
     let cause = null
@@ -3145,11 +3196,18 @@ function main() {
       )
     }
     if (!ask) process.exit(0)
+    // 同一次问里既有像批准需求稿的、又有返工或照现状交付的回答（项目经理不该这么问，需求稿那一道按「不是单独问的」不记）：两段都回给项目经理，
+    // 给用户那一行两句都说（都是固定文字，并成一行）。
     emitHookJson(spec.event, {
-      contexts: approvalNotices({ results, total, cause, stages }),
-      systemMessage: systemMessage(
-        results.some((r) => r.covers) ? 'approval-recorded' : results.some((r) => r.deliver && r.sha) ? 'deliver-recorded' : results.some((r) => r.deliver) ? 'deliver-skipped' : 'approval-skipped',
-      ),
+      contexts: [...(brief ? [brief.notice] : []), ...approvalNotices({ results, total, cause, stages })],
+      systemMessage: [
+        brief ? systemMessage(brief.kind) : null,
+        systemMessage(
+          results.some((r) => r.covers) ? 'approval-recorded' : results.some((r) => r.deliver && r.sha) ? 'deliver-recorded' : results.some((r) => r.deliver) ? 'deliver-skipped' : 'approval-skipped',
+        ),
+      ]
+        .filter(Boolean)
+        .join(' '),
     })
   }
 

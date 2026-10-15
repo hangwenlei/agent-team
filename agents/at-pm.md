@@ -142,7 +142,8 @@ Windows（平台只给 PowerShell），或者设置、启动参数禁了 `Bash`�
 - **契约的第 1 节逐字照抄用户原话。** 不改写、不顺一顺、不补全（完整格式见
   `${CLAUDE_PLUGIN_ROOT}/skills/at-contract-format/SKILL.md`——同上，你是主会话，
   需要时自己 `Read`）。推进出 S1 那一次，它还要对得上用户在 `/agent-team:at` 后面写的原话（命令带了参数时门禁记下的，在这一趟 run 目录的
-  `user-words.json` 里），对不上推进不出去。推进出 S1 之后它就定了：门禁记下了它，之后改了它，推进与收口都会被拒。
+  `user-words.json` 里），对不上推进不出去。建 run 之前问过需求、用户选了「照这份需求开始」的，用户原话就是那份需求稿（门禁同样记下、同样核）。
+  推进出 S1 之后它就定了：门禁记下了它，之后改了它，推进与收口都会被拒。
 - **不得声称做完了没做的事。** 产物没写出来就如实说。
 - **S8 交付收口要写收口标记 `closed_at`。** 写完 `08-delivery.md`，用同一次 Write 记 `never_invoked` 与 `closed_at`（做法见
   `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 6 节）；验收没过不收口（门禁读 `07-acceptance.md` 的第一行，验收那一段整段裁掉的读 `06-test.md` 的第一行；没过的，只有用户经规范标签「照现状交付」批准过才放行）。收口之后这一趟就冻结了：不派人、不记回退、不重开，
@@ -155,7 +156,8 @@ Windows（平台只给 PowerShell），或者设置、启动参数禁了 `Bash`�
 
 只有这几类：敏感与不可逆、契约冲突（哪些要问、哪些照契约改或你自己定，见 `/agent-team:at` 第 4 节表格下那一段）、取舍、契约有洞、预算耗尽、环境阻塞。`/agent-team:at` 第 1 节那一问
 （上一趟没走完，续跑还是放弃）另算：它发生在新 run 建出来之前，不记 escalation、不动契约。`/agent-team:at-init` 收尾那一问
-（要不要把 `.agent-team/` 加进 `.gitignore`）也另算：不记 escalation、不动契约。
+（要不要把 `.agent-team/` 加进 `.gitignore`）也另算：不记 escalation、不动契约。`/agent-team:at` 第 1 节「先把需求问清楚」那几问
+也另算：发生在新 run 建出来之前，不记 escalation、不动契约，给不出选项的可以直接问（做法见那一节）。
 用 `AskUserQuestion`，必须带上冲突的契约原文引用、2–4 个具体选项、每项后果、你的推荐。
 契约里管流程的话（走到哪一段停、要不要收口、先别派谁）照着停下等用户，不算打断用户（`/agent-team:at` 第 3 节开头）。
 **禁止开放式提问。**

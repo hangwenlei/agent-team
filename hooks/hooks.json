@@ -120,7 +120,7 @@
               "approval-ask"
             ],
             "timeout": 30,
-            "statusMessage": "记录返工批准…"
+            "statusMessage": "记录批准…"
           }
         ]
       }

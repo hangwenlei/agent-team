@@ -82,6 +82,8 @@ claude --plugin-dir /path/to/agent-team
 | `/agent-team:at-status` | **看进度。** 只读：当前阶段、产物、返工与待你回答的问题 |
 | `/agent-team:at-resume` | **接着跑。** 上下文压缩后或换了会话时，从磁盘恢复这一趟 |
 
+需求还没想清楚也可以直接发。`/agent-team:at` 不带需求，或者话里还有几处没说清时，项目经理先问你几个问题（一次一个），整理成一份需求稿给你过目；你选「照这份需求开始」，就照它起这一趟，契约里记的是这份需求稿。话已经说清楚的，直接开始。
+
 ### 一趟 run 怎么走
 
 <!-- 阶段与角色的真源是 stages.json；这张图的箭头数由 tests/readme-sync.test.mjs 钉成与阶段数相等 -->
@@ -133,7 +135,7 @@ flowchart TB
 ├── project.json         勘察结果：各角色能写的目录、可用角色、构建与测试命令
 ├── reach.json           算上派发之后，各角色实际能写到的地方
 ├── current-run          当前这一趟的 run id
-├── user-words.json      你最近一次在 /agent-team:at 后面写的原话（门禁自己记）
+├── user-words.json      你最近一次在 /agent-team:at 后面写的原话，或者批准的需求稿（门禁自己记）
 └── runs/<run_id>/
     ├── 00-contract.md   契约：你的原话与修订记录
     ├── …                各阶段的产物（实现阶段每个执行角色各一份）
@@ -296,6 +298,8 @@ Loaded this way, pass the flag again every time you resume a session — see [Kn
 | `/agent-team:at-status` | **Check progress.** Stage, deliverables, rework, open questions |
 | `/agent-team:at-resume` | **Resume a run.** After compaction or in a new session |
 
+You can start before the request is worked out. When `/agent-team:at` comes without a request, or the request leaves things open, the project manager first asks you a few questions (one at a time) and writes up the request for you to review; pick 「照这份需求开始」 (start with this request) and the run starts from it, with that write-up recorded in the contract. A request that is already clear starts right away.
+
 ### How a run flows
 
 <!-- stages.json is the source of truth for stages and roles; tests/readme-sync.test.mjs pins this diagram's arrow count to the number of stages -->
@@ -347,7 +351,7 @@ When rework runs out, only the option 「再返工一轮：回到 <stage>」 is 
 ├── project.json         the survey: writable directories per role, available roles, build and test commands
 ├── reach.json           where each role can actually write once dispatch is taken into account
 ├── current-run          the id of the current run
-├── user-words.json      the words you last wrote after /agent-team:at (recorded by the gates)
+├── user-words.json      the words you last wrote after /agent-team:at, or the request write-up you approved (recorded by the gates)
 └── runs/<run_id>/
     ├── 00-contract.md   the contract: your words and its revisions
     ├── …                each stage's deliverables (one per implementation role in the implementation stage)
