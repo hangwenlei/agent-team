@@ -7,7 +7,6 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BRIEF_LABEL } from '../hooks/lib/user-words.mjs'
-import { numberedHeading } from '../hooks/lib/contract-base.mjs'
 import { crashContext } from '../hooks/lib/fail-open.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -25,38 +24,40 @@ test('/agent-team:at 第 1 节：「先把需求问清楚」在上一趟那一�
   const block = s1.slice(i, s1.indexOf('- run id：'))
   for (const k of [
     '**先把需求问清楚**（建 run 之前做；上面那一问里用户选了续跑的，不做）',
-    '命令没带参数的，先问用户这次要做什么，再照这一段问清',
-    '先用 `AskUserQuestion` 单选问一次「先把需求问清楚」还是「照原话直接开始」，题面列出没说清的那几处',
-    '话已经够清楚的、用户选了照原话直接开始的，不做这一段，契约第 1 节照抄原话',
-    '问不了用户（工具面里没有 `AskUserQuestion`）也不做：命令带了参数的照抄原话；没带的，停下，请用户把需求写在 `/agent-team:at` 后面重发',
+    '命令没带参数的，先问用户这次要做什么，再照这一段问清；话里说了要先把需求想清楚的，照这一段问清',
+    '话里有几处怎么猜都可能白做的，先用 `AskUserQuestion` 单选问一次「先把需求问清楚」还是「照原话直接开始」，题面列出没说清的那几处',
+    '别的、以及用户选了照原话直接开始的，不做这一段，契约第 1 节照抄原话',
+    '「话」是 `$ARGUMENTS`；收口之后照第 6 节自己另起一趟时，是用户提出这次改动的那几条消息',
+    '问不了用户（工具面里没有 `AskUserQuestion`）也不做：有话的照抄原话；命令没带参数的，停下，请用户把需求写在 `/agent-team:at` 后面重发',
     '代码里答得出的不问。这时还没有 run，不往 `.agent-team/` 下写任何东西',
     '这几问发生在建 run 之前：不记 escalation、不动契约，也不受第 4 节「禁止开放式提问」的限制',
     '架构、模块怎么拆、文件怎么放、技术选型，用户没有要求的不问——那是后面各段的事',
-    '需求稿里只写用户说过或认可过的：你自己的推断，要么问过用户，要么不写；「不要自动化测试」「本来就没过的测试不算」这类话，只有用户自己这么说过才写',
-    '题面就是整份需求稿，逐字，不夹别的话；这一次只问这一道题',
-    `两个选项，标签逐字写「${BRIEF_LABEL}」与「再改改」（推荐不写进标签）`,
+    '要不要自动化测试、项目里本来就没过的测试算不算，不主动问：用户自己提了才写进需求稿',
+    '纯文本，每行顶格、不缩进，不用 `##` 标题（契约按编号节标题认自己的节），也不夹 HTML、注释、链接定义与看不见的字符（门禁不记这样的题面）',
+    '依次写「要做什么、为什么：」「给谁用：」「做完的样子：」（下面一行一条，`1.`、`2.` 编号）「不做：」「约束：」各一行或几行',
+    '需求稿里只写用户说过或认可过的：你自己的推断，要么问过用户，要么不写',
+    '单独问这一道题，单选；题面就是整份需求稿，逐字，开头不加说明、末尾不加问句（第 1 节要逐字照抄题面，多一句就多抄一句）',
+    `两个选项，标签逐字写「${BRIEF_LABEL}」与「再改改」（推荐不写进标签，要说的话写在选项说明里）`,
     `用户选了「${BRIEF_LABEL}」，门禁记下这份需求稿、回传【需求稿】：照本节往下建 run，契约第 1 节逐字照抄这份需求稿（第 2 节）`,
+    '只点了「再改改」、没说改哪里的，先问改哪里',
     '回传说没有记成、没有记下的，照它说的办，不要往下建 run',
     `用户在对话里单独发「${BRIEF_LABEL}」不算——门禁不知道批的是哪一份——再用这道题问一次`,
   ]) assert.ok(has(block, k), `缺「${k}」`)
+  // 不主动去问测试豁免：问「要不要测试」「没过的算不算」不在要问的那一串里（用户自己提了才写）。
+  const ask = block.slice(block.indexOf('- 只问会改变做出来什么'), block.indexOf('架构、模块怎么拆'))
+  assert.ok(!ask.includes('测试'), ask)
+  // 需求稿的样子不放在缩进的代码块里（模型照抄会把缩进带进题面，第 1 节对不上）。
+  assert.ok(!block.includes('```'), '需求稿的样子不用代码块')
 })
 
-test('/agent-team:at 第 1 节：需求稿的样子里没有编号节标题（契约按它认自己的节），列着做完的样子', () => {
-  const s1 = section('**先把需求问清楚**', '- run id：')
-  const fence = s1.slice(s1.indexOf('```text') + 7, s1.indexOf('```', s1.indexOf('```text') + 7))
-  const lines = fence.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
-  assert.ok(lines.length >= 5, fence)
-  for (const l of lines) assert.equal(numberedHeading(l), null, l)
-  for (const k of ['要做什么、为什么：', '给谁用：', '做完的样子：', '不做：', '约束：']) assert.ok(lines.some((l) => l.startsWith(k)), k)
-})
-
-test('/agent-team:at 第 2 节与第 6 节：第 1 节照抄批准的需求稿、门禁在批准那一刻记下它、几种不核的情形里批准过的除外；另起一趟同样', () => {
+test('/agent-team:at 第 2 节与第 6 节：第 1 节照抄批准的需求稿（并进加粗那一句）、门禁在批准那一刻记下它、几种不核的情形里批准过的除外；另起一趟同样', () => {
   const s2 = section('## 2. S1 录入', '## 3.')
   for (const k of [
-    `照第 1 节问过需求、用户选了「${BRIEF_LABEL}」的，照抄那份需求稿（那道题的题面）：它就是这一趟的原话`,
+    `**第 1 节「用户原话」必须逐字照抄上面 \`$ARGUMENTS\` 的内容；照第 1 节问过需求、用户选了「${BRIEF_LABEL}」的，逐字照抄那份需求稿（那道题的题面）——它就是这一趟的原话。**`,
     `用户批准了需求稿的，门禁在用户选「${BRIEF_LABEL}」那一刻记下的是那份需求稿（同一份文件，换掉命令那一次记下的），之后一样核`,
     '门禁没有记下这一趟的原话，不核——这几种里问过需求、用户批准了需求稿的除外（门禁记下了那份需求稿）',
   ]) assert.ok(has(s2, k), `第 2 节缺「${k}」`)
+  assert.equal(s2.split('它就是这一趟的原话').length - 1, 1, '需求稿那一句只说一次')
   assert.ok(has(at.slice(at.indexOf('## 6. 收尾')), '（按时间顺序整条照抄，不删不改；照第 1 节问过需求、用户批准了需求稿的，照抄需求稿）'), '第 6 节')
 })
 

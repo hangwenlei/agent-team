@@ -83,11 +83,33 @@ export function pendingRecord({ at, sessionId, args, runsBefore, source = 'comma
   }
 }
 
+// 题面里界面上可能看不见、原文里却在的东西（复核：信任锚是「用户点的那张卡片上的字就是记下的字」，这几样会让两者不一样，夹进去的话就成了用户原话）：
+// 控制字符（换行、制表符除外）、格式字符与别的默认不可见的字（零宽、双向控制、标签字符、变体选择符……；表情用的零宽连接符与 U+FE0E、U+FE0F 除外）、
+// HTML 注释与标签、Markdown 的链接定义。
+const CTRL_RE = new RegExp('[' + BS + 'x00-' + BS + 'x08' + BS + 'x0b-' + BS + 'x1f' + BS + 'x7f-' + BS + 'x9f]')
+const INVISIBLE_RE = new RegExp('[' + BS + 'p{Cf}' + BS + 'p{Default_Ignorable_Code_Point}]', 'u')
+// 标签照 HTML 的写法认：字母开头的名字，后面紧跟空白、/ 或 >（「a<b，b>c」不算）。
+const HTML_RE = new RegExp('<!--|</?[A-Za-z][A-Za-z0-9-]*(?:' + BS + 's[^>]*)?/?>')
+const LINK_DEF_RE = new RegExp('^ {0,3}' + BS + '[[^' + BS + ']' + BS + 'n]+' + BS + ']:', 'm')
+const EMOJI_JOINERS = new Set([0x200d, 0xfe0e, 0xfe0f])
+
+/** 题面里有没有界面上可能看不见的内容。 */
+export function hiddenIn(text) {
+  if (typeof text !== 'string') return false
+  if (CTRL_RE.test(text) || HTML_RE.test(text) || LINK_DEF_RE.test(text)) return true
+  for (const ch of text) {
+    if (EMOJI_JOINERS.has(ch.codePointAt(0))) continue
+    if (INVISIBLE_RE.test(ch)) return true
+  }
+  return false
+}
+
 /**
  * PostToolUse:AskUserQuestion 的 tool_response 里有没有批准需求稿：一个像样的都没有回 null；认上了回 { draft }（题面原样）；像是批准、却不记回 { why }。
  * 不记的形状与返工批准同一套（approvals.mjs 的 askAnswers）：离开键盘自动提交（afk）、要追问（follow-up）、另写了一段话（response）、那道题带备注
- * （notes）、多选题（multi）、答案是数组（array）——那几种情况下模型收到的不是一句干净的批准，门禁不能比模型看到的更宽。标签夹了别的话（malformed）、
- * 题面是空的（blank）、一次问里不止一道题选了它（several，批的是哪一份说不清）也不记。
+ * （notes）、多选题（multi）、答案是数组（array）——那几种情况下模型收到的不是一句干净的批准，门禁不能比模型看到的更宽。标签后面夹了别的话（malformed）、
+ * 题面是空的（blank）、题面里有界面上可能看不见的内容（hidden）、这一次问里还有别的题（not-alone：那几题的答案进不了契约第 1 节）也不记。
+ * 「像批准」是答案以标签开头（推荐后缀与空白不计）：只是在话里提到这几个字的（「要，照这份需求开始做就行」）多半是别的题，不出声。
  */
 export function briefAnswer(toolResponse) {
   if (!isPlainObject(toolResponse) || !isPlainObject(toolResponse.answers)) return null
@@ -95,9 +117,9 @@ export function briefAnswer(toolResponse) {
   const questions = Array.isArray(tr.questions) ? tr.questions : []
   // 用到时才归一化：加载这个模块时不调任何会被注入异常的内建（门禁代码加载失败会按安全边界拒绝 PreToolUse 上的每一次调用）。
   const BRIEF_KEY = normalizeLabel(BRIEF_LABEL)
+  const like = (a) => typeof a === 'string' && normalizeLabel(a).startsWith(BRIEF_KEY)
   const hits = []
   for (const [text, answer] of Object.entries(tr.answers)) {
-    const like = (a) => typeof a === 'string' && normalizeLabel(a).includes(BRIEF_KEY)
     if (Array.isArray(answer)) {
       if (answer.some(like)) hits.push({ why: 'array' })
       continue
@@ -109,17 +131,19 @@ export function briefAnswer(toolResponse) {
     else if (isPlainObject(tr.annotations) && isPlainObject(tr.annotations[text]) && typeof tr.annotations[text].notes === 'string' && tr.annotations[text].notes.trim() !== '')
       hits.push({ why: 'notes' })
     else if (text.trim() === '') hits.push({ why: 'blank' })
+    else if (hiddenIn(text)) hits.push({ why: 'hidden' })
     else hits.push({ draft: text })
   }
   if (!hits.length) return null
   if (tr.afkTimeoutMs !== undefined) return { why: 'afk' }
   if (tr.followUp === true) return { why: 'follow-up' }
   if (typeof tr.response === 'string' && tr.response.trim() !== '') return { why: 'response' }
-  if (hits.length > 1) return { why: 'several' }
+  if (Math.max(questions.length, Object.keys(tr.answers).length) > 1) return { why: 'not-alone' }
   return hits[0]
 }
 
-// 需求稿没有记下的原因：前一组是用户这次的回答本身不是一句干净的批准（照用户的话改、再问），后一组是门禁这一侧记不下（请用户把需求稿贴在命令后面重发）。
+// 需求稿没有记下的原因，按出路分三组：用户这次的回答不是一句干净的批准（照用户的话改、再问）；这一问本身不合要求（照要求重问）；门禁这一侧记不下
+// （请用户把需求稿贴在命令后面重发——没有 .agent-team 的先跑 at-init）。
 const BRIEF_WHY = {
   afk: '用户离开了键盘，对话框自动提交了',
   'follow-up': '用户要先追问',
@@ -127,34 +151,43 @@ const BRIEF_WHY = {
   notes: '用户在选项旁写了备注',
   multi: '那道题是多选',
   array: '回答是好几项',
-  malformed: `标签夹了别的话（要逐字是「${BRIEF_LABEL}」）`,
-  blank: '题面是空的（题面要就是整份需求稿）',
-  several: '一次问里不止一道题选了它，分不清批的是哪一份',
+  malformed: `标签后面夹了别的话（要逐字是「${BRIEF_LABEL}」）`,
+  blank: '题面是空的',
+  hidden: '题面里有界面上可能看不见的内容（控制字符、零宽或双向控制这类不可见的字、HTML 注释或标签、Markdown 链接定义），用户看到的与门禁记下的会不一样',
+  'not-alone': '这一次问里还有别的题，那几题的答案进不了契约第 1 节',
   'no-session': '读不到这个会话的 id',
   'no-agent-team': '这个项目里还没有 .agent-team',
   'write-failed': '门禁写不进原话记录',
 }
+const FORM_SIDE = new Set(['blank', 'hidden', 'not-alone'])
 const GATE_SIDE = new Set(['no-session', 'no-agent-team', 'write-failed'])
+const REASK = `单独问这一道题，单选，题面就是整份纯文本的需求稿，标签逐字写「${BRIEF_LABEL}」`
 
-/** 需求稿批准之后给项目经理的那一段（批准记录器在 PostToolUse 上回传）。why 为空是记下了；否则是 briefAnswer 或记录器给的原因。 */
-export function briefNotice(why = null) {
+/**
+ * 需求稿批准之后给项目经理的那一段（批准记录器在 PostToolUse 上回传）。why 为空是记下了；否则是 briefAnswer 或记录器给的原因。
+ * staleRun：记下了，但 current-run 指着的那一趟是批准之前就建好的、还没收口——需求稿不会绑给它，点明出路。
+ */
+export function briefNotice(why = null, { staleRun = false } = {}) {
   if (!why) {
     return (
       `【需求稿】门禁记下了用户批准的这份需求稿（就是那道题的题面，记在 .agent-team/${USER_WORDS_FILE}，换掉了之前记下的原话）。` +
-      '照 /agent-team:at 第 1 节接着建这一趟新 run，契约第 1 节逐字照抄它；推进出第一段时门禁拿它核。批准之前就建好的 run 不认它。'
+      '照 /agent-team:at 第 1 节接着建这一趟新 run，契约第 1 节逐字照抄它；推进出第一段时门禁拿它核。' +
+      (staleRun
+        ? '另外，current-run 指着的那一趟是批准之前就建好的、还没收口：这份需求稿不会绑给它。照需求稿走，就换一个新的 run id 另建一趟（刚才那一趟原样留在磁盘上，' +
+          '它是这一轮你自己建的，不用问用户续不续跑）；接着用那一趟的话，它的第 1 节照它建起来时记下的原话核。'
+        : '批准之前就建好的 run 不认它。')
     )
   }
   const reason = BRIEF_WHY[why] ?? '回答的形状认不出'
   if (GATE_SIDE.has(why)) {
+    const first = why === 'no-agent-team' ? '先请用户跑 /agent-team:at-init，再' : '请用户'
     return (
-      `【需求稿】门禁没有记下用户批准的这份需求稿：${reason}。请用户把这份需求稿原样贴在 /agent-team:at 后面重发一次（门禁在命令展开时记下它）；` +
+      `【需求稿】门禁没有记下用户批准的这份需求稿：${reason}。${first}把这份需求稿原样贴在 /agent-team:at 后面重发一次（门禁在命令展开时记下它）；` +
       '不要照现在这样往下建 run——那样契约第 1 节要么不核，要么拿之前记下的那一份核、对不上。'
     )
   }
-  return (
-    `【需求稿】用户这次的回答没有记成批准：${reason}。照用户的话改好需求稿，再单独问一次（单选，题面就是整份需求稿，标签逐字写「${BRIEF_LABEL}」）；` +
-    '在那之前不要建 run。'
-  )
+  if (FORM_SIDE.has(why)) return `【需求稿】这一问没有记成批准：${reason}。照要求重问一次（${REASK}）；在那之前不要建 run。`
+  return `【需求稿】用户这次的回答没有记成批准：${reason}。照用户的话改好需求稿，再问一次（${REASK}）；在那之前不要建 run。`
 }
 
 /** 读一份记录（两级同一个形状，run 一级多一个 bound_at 也照读）；读不出、形状不对回 null。 */

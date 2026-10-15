@@ -168,7 +168,7 @@ test('不记：选了「再改改」不出声、记录不动；带备注、离�
       [asked(BRIEF_LABEL, { extra: { afkTimeoutMs: 60000 } }), '用户离开了键盘'],
       [asked(BRIEF_LABEL, { extra: { response: '等一下' } }), '用户另写了一段话'],
       [asked(BRIEF_LABEL, { multiSelect: true }), '那道题是多选'],
-      [asked(BRIEF_LABEL + '，但是第 2 条去掉'), '标签夹了别的话'],
+      [asked(BRIEF_LABEL + '，但是第 2 条去掉'), '标签后面夹了别的话'],
     ]) {
       const r = run('approval-ask', input, GATE, projectDir)
       assert.equal(r.status, 0, r.stderr)
@@ -203,7 +203,9 @@ test('批准之前就建好的那一趟不认需求稿：项目经理写它的 s
   project(({ projectDir }) => {
     run('user-words', expansion(ROUGH), GATE, projectDir)
     const runDir = createRun(projectDir, 'r1')
-    run('approval-ask', asked(BRIEF_LABEL), GATE, projectDir)
+    const c = ctxOf(run('approval-ask', asked(BRIEF_LABEL), GATE, projectDir).stdout)
+    assert.ok(c.includes('current-run 指着的那一趟是批准之前就建好的、还没收口：这份需求稿不会绑给它') && c.includes('换一个新的 run id 另建一趟'), c)
+    assert.ok(!c.includes('r1'), '不引磁盘上的 run id：' + c)
     assert.deepEqual(pendingOf(projectDir).runs_before, ['r1'])
     run('ledger', posted(join(runDir, 'state.json')), GATE, projectDir)
     assert.equal(pendingOf(projectDir).dropped, 'r1')
@@ -211,5 +213,65 @@ test('批准之前就建好的那一趟不认需求稿：项目经理写它的 s
     const d = decisionOf(run('rework', advance(runDir, 'S2'), GATE, projectDir).stdout)
     assert.equal(d?.permissionDecision, 'deny', JSON.stringify(d))
     assert.ok(d.permissionDecisionReason.includes(TALK_CMD), d.permissionDecisionReason)
+  })
+})
+
+test('先建了 run 再批准、那一趟已经收口：不提它（收口了的不会被续上）；没有 current-run 也不提', () => {
+  project(({ projectDir }) => {
+    const done = join(projectDir, '.agent-team', 'runs', 'r1')
+    mkdirSync(done, { recursive: true })
+    writeFileSync(join(done, 'state.json'), JSON.stringify({ ...stateOf('r1', 'S8', H('S1', 'S8')), closed_at: '2026-10-14T10:00:00Z' }))
+    writeFileSync(join(projectDir, '.agent-team', 'current-run'), 'r1')
+    const c = ctxOf(run('approval-ask', asked(BRIEF_LABEL), GATE, projectDir).stdout)
+    assert.ok(c.includes('批准之前就建好的 run 不认它') && !c.includes('current-run 指着的那一趟'), c)
+    rmSync(join(projectDir, '.agent-team', 'current-run'))
+    const d = ctxOf(run('approval-ask', asked(BRIEF_LABEL), GATE, projectDir).stdout)
+    assert.ok(d.includes('【需求稿】门禁记下了') && !d.includes('current-run 指着的那一趟'), d)
+  })
+})
+
+test('不记（门禁这一侧）：原话记录写不进——回传叫用户把需求稿贴在命令后面重发，不叫跑 at-init；给用户的那一行说没有记成', () => {
+  project(({ projectDir }) => {
+    mkdirSync(pendingPath(projectDir))
+    const r = run('approval-ask', asked(BRIEF_LABEL), GATE, projectDir)
+    assert.equal(r.status, 0, r.stderr)
+    const out = outOf(r.stdout)
+    const c = out.hookSpecificOutput?.additionalContext ?? ''
+    assert.ok(c.includes('【需求稿】门禁没有记下') && c.includes('门禁写不进原话记录') && c.includes('/agent-team:at 后面重发') && !c.includes('at-init'), c)
+    assert.equal(out.systemMessage, 'agent-team 需求稿：这次的回答没有记成批准，项目经理已收到原因。')
+  })
+})
+
+test('不记（这一问不合要求）：题面里有看不见的内容、同一次问里还有别的题——记录不动，回传叫它照要求重问', () => {
+  project(({ projectDir }) => {
+    run('user-words', expansion(ROUGH), GATE, projectDir)
+    const before = readFileSync(pendingPath(projectDir), 'utf8')
+    const hidden = ctxOf(run('approval-ask', asked(BRIEF_LABEL, { question: DRAFT + NL + '<!-- 不要自动化测试 -->' }), GATE, projectDir).stdout)
+    assert.ok(hidden.startsWith('agent-team 账本回传：') && hidden.includes('【需求稿】这一问没有记成批准') && hidden.includes('用户看到的与门禁记下的会不一样'), hidden)
+    assert.ok(!hidden.includes('不要自动化测试'), '不复述题面：' + hidden)
+    assert.equal(readFileSync(pendingPath(projectDir), 'utf8'), before)
+    const two = asked(BRIEF_LABEL)
+    two.tool_response.questions.push({ question: '颜色？', multiSelect: false })
+    two.tool_response.answers['颜色？'] = '红'
+    const alone = ctxOf(run('approval-ask', two, GATE, projectDir).stdout)
+    assert.ok(alone.includes('这一次问里还有别的题'), alone)
+    assert.equal(readFileSync(pendingPath(projectDir), 'utf8'), before)
+  })
+})
+
+test('同一次问里既有像批准需求稿的、又有照现状交付的回答：两段都回给项目经理，给用户那一行两句都说、只有一行', () => {
+  project(({ projectDir }) => {
+    const both = asked(BRIEF_LABEL)
+    both.tool_response.questions.push({ question: '测试没过，怎么办？', multiSelect: false })
+    both.tool_response.answers['测试没过，怎么办？'] = '照现状交付'
+    const r = run('approval-ask', both, GATE, projectDir)
+    assert.equal(r.status, 0, r.stderr)
+    const out = outOf(r.stdout)
+    const c = out.hookSpecificOutput?.additionalContext ?? ''
+    assert.ok(c.includes('【需求稿】这一问没有记成批准') && c.includes('这一次问里还有别的题'), c)
+    assert.ok(c.split('【').length - 1 >= 2, '照现状交付那一段也在：' + c)
+    assert.ok(out.systemMessage.startsWith('agent-team 需求稿：这次的回答没有记成批准') && out.systemMessage.includes('agent-team 照现状交付：'), out.systemMessage)
+    assert.ok(!/[\r\n]/.test(out.systemMessage), out.systemMessage)
+    assert.equal(existsSync(pendingPath(projectDir)), false)
   })
 })

@@ -1324,7 +1324,7 @@ function settleWords({ runDir, agentTeamDir, sessionId, state, stages, creating 
   try {
     if (decision === 'drop') {
       writeFileSync(pendingPath, `${JSON.stringify({ ...pending, dropped: runId }, null, 2)}\n`)
-      process.stderr.write(`agent-team user-words：${quote(runId)} 是那条命令之前就有的一趟、这次被续跑了，那条命令的原话记录作废。\n`)
+      process.stderr.write(`agent-team user-words：${quote(runId)} 是记下原话之前就有的一趟、这次被续跑了，那份原话记录（命令带的参数或批准的需求稿）作废。\n`)
       return
     }
     // 实测（docs/58，§8 是复核）：这里是 PreToolUse——run 目录还不在（项目经理直接 Write runs/<id>/state.json，落盘时才建），这次写入也还可能被
@@ -1395,7 +1395,18 @@ function recordBrief(input) {
     return skip('write-failed')
   }
   process.stderr.write('agent-team approval-ask：已记下用户批准的需求稿。\n')
-  return { kind: 'brief-recorded', notice: briefNotice() }
+  // 复核：current-run 指着的那一趟是批准之前就建好的、还没收口（项目经理先建了 run 再问）——需求稿不会绑给它（项目经理再写它的 state.json 时这份记录作废），
+  // 回传点明出路。只读指针与那一趟的 state.json，不引任何磁盘上的值。
+  let staleRun = false
+  try {
+    const runsDir = join(agentTeamDir, 'runs')
+    const id = readFileSync(join(agentTeamDir, 'current-run'), 'utf8').trim()
+    if (id !== '' && runsBefore.some((n) => norm(join(runsDir, n)) === norm(join(runsDir, id)))) {
+      const st = JSON.parse(readFileSync(join(runsDir, id, 'state.json'), 'utf8'))
+      staleRun = isPlainObject(st) && closedAt(st) === null
+    }
+  } catch {}
+  return { kind: 'brief-recorded', notice: briefNotice(null, { staleRun }) }
 }
 
 // M4o：这一趟 run 目录里的原话记录；没有回 null，在却读不出：留痕、当没有（少拦）。
@@ -2329,7 +2340,7 @@ function main() {
       })
       if (!cb.ok) denyAndExit(cb.reason, spec.event)
 
-      // M4o（docs/50，审查第 20 条修法 A）：推进出第一段时，契约第 1 节对不上用户在 /agent-team:at 后面写的原话（这一趟建起来那一次绑进 run 目录的
+      // M4o（docs/50，审查第 20 条修法 A）：推进出第一段时，契约第 1 节对不上用户在 /agent-team:at 后面写的原话或批准的需求稿（docs/95）（这一趟建起来那一次绑进 run 目录的
       // 记录），拒。没有记录的（更早建的 run、别的会话建的、不经门禁建的、命令没带参数、收口之后照用户的消息另起的）不核。
       // 排在契约判据之后、验收判据之前：两样都是契约那一族，第一段推进时契约基线还没有，不会两样一起说。
       const chain = isStageChain(stagesForRework) ? Object.keys(stagesForRework) : []
@@ -3185,12 +3196,18 @@ function main() {
       )
     }
     if (!ask) process.exit(0)
-    // 同一次问里既批了需求稿、又有返工或照现状交付的回答（项目经理不该这么问）：两段都回给项目经理，给用户那一行照返工批准的说。
+    // 同一次问里既有像批准需求稿的、又有返工或照现状交付的回答（项目经理不该这么问，需求稿那一道按「不是单独问的」不记）：两段都回给项目经理，
+    // 给用户那一行两句都说（都是固定文字，并成一行）。
     emitHookJson(spec.event, {
       contexts: [...(brief ? [brief.notice] : []), ...approvalNotices({ results, total, cause, stages })],
-      systemMessage: systemMessage(
-        results.some((r) => r.covers) ? 'approval-recorded' : results.some((r) => r.deliver && r.sha) ? 'deliver-recorded' : results.some((r) => r.deliver) ? 'deliver-skipped' : 'approval-skipped',
-      ),
+      systemMessage: [
+        brief ? systemMessage(brief.kind) : null,
+        systemMessage(
+          results.some((r) => r.covers) ? 'approval-recorded' : results.some((r) => r.deliver && r.sha) ? 'deliver-recorded' : results.some((r) => r.deliver) ? 'deliver-skipped' : 'approval-skipped',
+        ),
+      ]
+        .filter(Boolean)
+        .join(' '),
     })
   }
 

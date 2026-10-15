@@ -202,7 +202,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   `records` 说「原话没有记下」。理由在 `docs/50`（§9 是复核）。
 - **需求稿经用户批准才是原话，门禁记题面**：`/agent-team:at` 建 run 之前问清需求（第 1 节「先把需求问清楚」），用户在 `AskUserQuestion` 里选规范标签
   「照这份需求开始」（`hooks/lib/user-words.mjs` 的 `BRIEF_LABEL`），批准记录器（`approval-ask`）把那道题的题面原样记进项目一级的 `user-words.json`（`source: "ask"`），
-  之后的绑定与核对与命令带参数时同一条路；对话里打字批准不认（门禁看不到批的是哪一份）；不另加命令。理由在 `docs/95`。
+  之后的绑定与核对与命令带参数时同一条路；那道题要单独问、题面里不许有界面上可能看不见的内容（`hiddenIn`），不然不记；对话里打字批准不认（门禁看不到批的
+  是哪一份）；要不要测试、没过的测试算不算不主动问；不另加命令。理由在 `docs/95`。
 - **收口读验收结论，照现状交付由门禁记**：`07-acceptance.md` 的第一个非空行固定写「结论：通过」「结论：不通过」「结论：判不了」之一（`hooks/lib/verdict.mjs`
   的 `acceptanceVerdict`：不通过、判不了按前缀认，通过严格）；验收角色在验收那一段停下、首行读不出时 H5b 拦它（`gate.mjs` 的 `verdictStopReason`，只核格式、
   冒泡照旧，`docs/62`）；推进出验收那一段与收口时 H6 读它（`decideAcceptance`，排在 H6 最后），【阶段】在 S7 齐了时与

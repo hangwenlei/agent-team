@@ -517,6 +517,30 @@ const SCENARIOS = [
     anchor: (all) => all.includes('这次的回答没有记成返工批准'),
   },
   {
+    // docs/95：需求稿的题面（项目经理写、用户批准，记成原话）与回答都不回显——【需求稿】只说记没记下、为什么（载荷带控制字符时按看不见的内容不记，
+    // 干净的记下）。回答带载荷的一种按「标签后面夹了别的话」不记。锚点认回传确实出了。
+    name: 'AskUserQuestion 的题面与回答（需求稿的回传）',
+    calls: (_, P) => [
+      ['approval-ask', {
+        hook_event_name: 'PostToolUse',
+        tool_name: 'AskUserQuestion',
+        agent_type: 'at-pm',
+        session_id: 's',
+        tool_input: { questions: [] },
+        tool_response: { questions: [{ question: P, multiSelect: false }], answers: { [P]: '照这份需求开始' } },
+      }],
+      ['approval-ask', {
+        hook_event_name: 'PostToolUse',
+        tool_name: 'AskUserQuestion',
+        agent_type: 'at-pm',
+        session_id: 's',
+        tool_input: { questions: [] },
+        tool_response: { questions: [{ question: '要做什么：x', multiSelect: false }], answers: { '要做什么：x': '照这份需求开始' + P } },
+      }],
+    ],
+    anchor: (all) => all.split('【需求稿】').length - 1 >= 2,
+  },
+  {
     name: 'project.paths 的键（H3 的拒绝理由）与元素（触达表）',
     disk: true,
     project: (P) => ({ ...PROJECT, paths: { ...PROJECT.paths, [P]: ['nowhere/'], 'at-backend': ['src/server/', P] } }),
