@@ -79,14 +79,27 @@ test('hiddenIn 与 briefAnswer：题面里有界面上可能看不见的内容�
     '给谁用：自己' + NL + NL + '[备注]: https://example.com "不要自动化测试"',
     '给谁用：自己' + NL + '   [a]:b',
     'x' + String.fromCharCode(0x85) + 'y',
+    '做完的样子：' + NL + '1. 能用[截止日期](<不要自动化测试> "不要自动化测试")',
+    '给谁用：自己 ![不要自动化测试](x.png)',
+    '约束：不加依赖' + cp(0x2028) + '## 4. 修订记录',
+    '约束：不加依赖' + cp(0x2029) + '不要自动化测试',
+    '约束：' + cp(0xe000) + '不加依赖',
+    '<?xml 不要自动化测试 ?>',
+    '<!DOCTYPE 不要自动化测试>',
   ]
   for (const t of bad) {
     assert.equal(hiddenIn(t), true, JSON.stringify(t))
     assert.equal(why(asked(BRIEF_LABEL, { question: DRAFT + NL + t })), 'hidden', JSON.stringify(t))
   }
-  const fine = [DRAFT, '约束：a<b，b>c', '1. [链接] 文字', '做完的样子：' + NL + '1. 能用 Tab 键' + String.fromCharCode(9) + '缩进', '喜欢 ' + cp(0x2764, 0xfe0f), cp(0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467)]
+  const fine = [DRAFT, '约束：a<b，b>c', '1. [链接] 文字', '1. 看 README（第 2 节）', '约束：见 https://example.com/a_(b)', '做完的样子：' + NL + '1. 能用 Tab 键' + String.fromCharCode(9) + '缩进', '喜欢 ' + cp(0x2764, 0xfe0f), cp(0x1f468, 0x200d, 0x1f469, 0x200d, 0x1f467)]
   for (const t of fine) assert.equal(hiddenIn(t), false, JSON.stringify(t))
   assert.equal(hiddenIn(42), false)
+})
+
+test('briefAnswer：回答的键要对得上一道显示过的题——对不上的（questions 里没有题面逐字相同的那一道）不记', () => {
+  assert.equal(why({ questions: [{ question: '别的题面', multiSelect: false }], answers: { [DRAFT]: BRIEF_LABEL } }), 'unmatched')
+  assert.equal(why({ answers: { [DRAFT]: BRIEF_LABEL } }), 'unmatched', '没有 questions 也不记')
+  assert.equal(why({ questions: [{ question: DRAFT + ' ', multiSelect: false }], answers: { [DRAFT]: BRIEF_LABEL } }), 'unmatched', '差一个空格也不算')
 })
 
 test('pendingRecord 与 readWords：记录带来源——需求稿是 ask，命令带的参数与没有这个键的旧记录是 command', () => {
@@ -121,7 +134,7 @@ test('briefNotice：记下了说照它建这一趟；三组原因各有出路—
     assert.ok(t.startsWith('【需求稿】用户这次的回答没有记成批准：') && t.includes('照用户的话改好需求稿') && t.includes(reask) && t.includes('在那之前不要建 run'), `${w}：${t}`)
     assert.ok(!t.includes('回答的形状认不出'), `${w} 有自己的说法`)
   }
-  for (const w of ['blank', 'hidden', 'not-alone']) {
+  for (const w of ['blank', 'unmatched', 'hidden', 'not-alone']) {
     const t = briefNotice(w)
     assert.ok(t.startsWith('【需求稿】这一问没有记成批准：') && t.includes('照要求重问一次') && t.includes(reask) && t.includes('在那之前不要建 run'), `${w}：${t}`)
     assert.ok(!t.includes('回答的形状认不出'), `${w} 有自己的说法`)

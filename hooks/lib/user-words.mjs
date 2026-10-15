@@ -85,18 +85,20 @@ export function pendingRecord({ at, sessionId, args, runsBefore, source = 'comma
 
 // 题面里界面上可能看不见、原文里却在的东西（复核：信任锚是「用户点的那张卡片上的字就是记下的字」，这几样会让两者不一样，夹进去的话就成了用户原话）：
 // 控制字符（换行、制表符除外）、格式字符与别的默认不可见的字（零宽、双向控制、标签字符、变体选择符……；表情用的零宽连接符与 U+FE0E、U+FE0F 除外）、
-// HTML 注释与标签、Markdown 的链接定义。
+// HTML 注释、声明、处理指令与标签，Markdown 的链接定义与行内链接、图片（链接目标与标题不显示），行分隔符与段分隔符（界面上可能显示成换行，契约只按换行符分行），
+// 私用区的字。
 const CTRL_RE = new RegExp('[' + BS + 'x00-' + BS + 'x08' + BS + 'x0b-' + BS + 'x1f' + BS + 'x7f-' + BS + 'x9f]')
-const INVISIBLE_RE = new RegExp('[' + BS + 'p{Cf}' + BS + 'p{Default_Ignorable_Code_Point}]', 'u')
+const INVISIBLE_RE = new RegExp('[' + BS + 'p{Cf}' + BS + 'p{Default_Ignorable_Code_Point}' + BS + 'p{Zl}' + BS + 'p{Zp}' + BS + 'p{Co}]', 'u')
 // 标签照 HTML 的写法认：字母开头的名字，后面紧跟空白、/ 或 >（「a<b，b>c」不算）。
-const HTML_RE = new RegExp('<!--|</?[A-Za-z][A-Za-z0-9-]*(?:' + BS + 's[^>]*)?/?>')
+const HTML_RE = new RegExp('<[!?]|</?[A-Za-z][A-Za-z0-9-]*(?:' + BS + 's[^>]*)?/?>')
 const LINK_DEF_RE = new RegExp('^ {0,3}' + BS + '[[^' + BS + ']' + BS + 'n]+' + BS + ']:', 'm')
+const INLINE_LINK_RE = new RegExp(BS + ']' + BS + '(')
 const EMOJI_JOINERS = new Set([0x200d, 0xfe0e, 0xfe0f])
 
 /** 题面里有没有界面上可能看不见的内容。 */
 export function hiddenIn(text) {
   if (typeof text !== 'string') return false
-  if (CTRL_RE.test(text) || HTML_RE.test(text) || LINK_DEF_RE.test(text)) return true
+  if (CTRL_RE.test(text) || HTML_RE.test(text) || LINK_DEF_RE.test(text) || INLINE_LINK_RE.test(text)) return true
   for (const ch of text) {
     if (EMOJI_JOINERS.has(ch.codePointAt(0))) continue
     if (INVISIBLE_RE.test(ch)) return true
@@ -126,8 +128,10 @@ export function briefAnswer(toolResponse) {
     }
     if (!like(answer)) continue
     const q = questions.find((x) => isPlainObject(x) && x.question === text)
-    if (normalizeLabel(answer) !== BRIEF_KEY) hits.push({ why: 'malformed' })
-    else if (q && q.multiSelect === true) hits.push({ why: 'multi' })
+    // 回答的键要对得上一道显示过的题（tool_response.questions 里题面逐字相同的那一道）：对不上的，记下的就不是用户看到的那张卡片，多选与备注也核不了。
+    if (!q) hits.push({ why: 'unmatched' })
+    else if (normalizeLabel(answer) !== BRIEF_KEY) hits.push({ why: 'malformed' })
+    else if (q.multiSelect === true) hits.push({ why: 'multi' })
     else if (isPlainObject(tr.annotations) && isPlainObject(tr.annotations[text]) && typeof tr.annotations[text].notes === 'string' && tr.annotations[text].notes.trim() !== '')
       hits.push({ why: 'notes' })
     else if (text.trim() === '') hits.push({ why: 'blank' })
@@ -153,13 +157,14 @@ const BRIEF_WHY = {
   array: '回答是好几项',
   malformed: `标签后面夹了别的话（要逐字是「${BRIEF_LABEL}」）`,
   blank: '题面是空的',
-  hidden: '题面里有界面上可能看不见的内容（控制字符、零宽或双向控制这类不可见的字、HTML 注释或标签、Markdown 链接定义），用户看到的与门禁记下的会不一样',
+  unmatched: '回答对不上任何一道显示过的题',
+  hidden: '题面里有界面上可能看不见的内容（控制字符、零宽或双向控制这类不可见的字、行分隔符、私用区的字、HTML 注释或标签、Markdown 的链接或图片），用户看到的与门禁记下的会不一样',
   'not-alone': '这一次问里还有别的题，那几题的答案进不了契约第 1 节',
   'no-session': '读不到这个会话的 id',
   'no-agent-team': '这个项目里还没有 .agent-team',
   'write-failed': '门禁写不进原话记录',
 }
-const FORM_SIDE = new Set(['blank', 'hidden', 'not-alone'])
+const FORM_SIDE = new Set(['blank', 'unmatched', 'hidden', 'not-alone'])
 const GATE_SIDE = new Set(['no-session', 'no-agent-team', 'write-failed'])
 const REASK = `单独问这一道题，单选，题面就是整份纯文本的需求稿，标签逐字写「${BRIEF_LABEL}」`
 
