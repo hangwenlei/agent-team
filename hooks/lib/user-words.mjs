@@ -20,16 +20,23 @@
 // 引用块（每行一个「>」或「> 」）也认——真实会话里两种写法都有（docs/50 §1）。按原话的行数往下认，原话里自带的「## 2. …」不会把它切断。
 // 复核（docs/50 §9）：比之前两边都把空白变体（不换行空格、全角空格、制表符这类）折成一个普通空格、连续空白算一个，去掉零宽与格式字符——
 // 实测 sonnet 照抄时把不换行空格换成了普通空格，拒绝理由里两段肉眼一样、改不出来，这一趟就推进不出第一段。
+// 需求稿（docs/95）：/agent-team:at 建 run 之前，项目经理照第 1 节「先把需求问清楚」问过用户、把问清的整理成一份需求稿，用 AskUserQuestion 单选问
+// 要不要照它开始——题面就是整份需求稿。用户选了规范标签「照这份需求开始」，批准记录器（gate.mjs 的 approval-ask）把题面当作这一次的原话，整份重写
+// 项目一级那份记录（source: 'ask'），之后的绑定、核对与命令带参数时一样。认的是题面（用户点的那张卡片上的字），不是项目经理在消息里另贴的那一份。
+// 只认 AskUserQuestion：用户在对话里单独发这一句，门禁不知道批的是哪一份。
 import { PLUGIN_PREFIX } from './decide.mjs'
 import { contractLines, numberedHeading } from './contract-base.mjs'
 import { isPlainObject } from './stages.mjs'
 import { USER_WORDS_FILE } from './control-files.mjs'
 import { quote } from './trusted.mjs'
+import { normalizeLabel } from './budget.mjs'
 
 export { USER_WORDS_FILE }
 
 // 认的命令：本插件的 at（插件名从 PLUGIN_PREFIX 取，与 settings.json 的 agent 同一个真源）。
 export const AT_COMMAND = `${PLUGIN_PREFIX}at`
+// 需求稿的规范标签（正文、README 与判据都从这里取）。
+export const BRIEF_LABEL = '照这份需求开始'
 const BOM = String.fromCharCode(0xfeff)
 const BS = String.fromCharCode(92)
 const TAB = String.fromCharCode(9)
@@ -62,9 +69,92 @@ export function blankAtSession(input) {
   return typeof sid === 'string' && sid !== '' ? sid : null
 }
 
-/** 项目一级那份记录的样子。 */
-export function pendingRecord({ at, sessionId, args, runsBefore }) {
-  return { at, session_id: sessionId, args, runs_before: Array.isArray(runsBefore) ? runsBefore.filter((n) => typeof n === 'string') : [], binding: null, bound: null, dropped: null }
+/** 项目一级那份记录的样子。source：'command'（命令带的参数）或 'ask'（用户批准的需求稿）。 */
+export function pendingRecord({ at, sessionId, args, runsBefore, source = 'command' }) {
+  return {
+    at,
+    session_id: sessionId,
+    args,
+    source: source === 'ask' ? 'ask' : 'command',
+    runs_before: Array.isArray(runsBefore) ? runsBefore.filter((n) => typeof n === 'string') : [],
+    binding: null,
+    bound: null,
+    dropped: null,
+  }
+}
+
+/**
+ * PostToolUse:AskUserQuestion 的 tool_response 里有没有批准需求稿：一个像样的都没有回 null；认上了回 { draft }（题面原样）；像是批准、却不记回 { why }。
+ * 不记的形状与返工批准同一套（approvals.mjs 的 askAnswers）：离开键盘自动提交（afk）、要追问（follow-up）、另写了一段话（response）、那道题带备注
+ * （notes）、多选题（multi）、答案是数组（array）——那几种情况下模型收到的不是一句干净的批准，门禁不能比模型看到的更宽。标签夹了别的话（malformed）、
+ * 题面是空的（blank）、一次问里不止一道题选了它（several，批的是哪一份说不清）也不记。
+ */
+export function briefAnswer(toolResponse) {
+  if (!isPlainObject(toolResponse) || !isPlainObject(toolResponse.answers)) return null
+  const tr = toolResponse
+  const questions = Array.isArray(tr.questions) ? tr.questions : []
+  // 用到时才归一化：加载这个模块时不调任何会被注入异常的内建（门禁代码加载失败会按安全边界拒绝 PreToolUse 上的每一次调用）。
+  const BRIEF_KEY = normalizeLabel(BRIEF_LABEL)
+  const hits = []
+  for (const [text, answer] of Object.entries(tr.answers)) {
+    const like = (a) => typeof a === 'string' && normalizeLabel(a).includes(BRIEF_KEY)
+    if (Array.isArray(answer)) {
+      if (answer.some(like)) hits.push({ why: 'array' })
+      continue
+    }
+    if (!like(answer)) continue
+    const q = questions.find((x) => isPlainObject(x) && x.question === text)
+    if (normalizeLabel(answer) !== BRIEF_KEY) hits.push({ why: 'malformed' })
+    else if (q && q.multiSelect === true) hits.push({ why: 'multi' })
+    else if (isPlainObject(tr.annotations) && isPlainObject(tr.annotations[text]) && typeof tr.annotations[text].notes === 'string' && tr.annotations[text].notes.trim() !== '')
+      hits.push({ why: 'notes' })
+    else if (text.trim() === '') hits.push({ why: 'blank' })
+    else hits.push({ draft: text })
+  }
+  if (!hits.length) return null
+  if (tr.afkTimeoutMs !== undefined) return { why: 'afk' }
+  if (tr.followUp === true) return { why: 'follow-up' }
+  if (typeof tr.response === 'string' && tr.response.trim() !== '') return { why: 'response' }
+  if (hits.length > 1) return { why: 'several' }
+  return hits[0]
+}
+
+// 需求稿没有记下的原因：前一组是用户这次的回答本身不是一句干净的批准（照用户的话改、再问），后一组是门禁这一侧记不下（请用户把需求稿贴在命令后面重发）。
+const BRIEF_WHY = {
+  afk: '用户离开了键盘，对话框自动提交了',
+  'follow-up': '用户要先追问',
+  response: '用户另写了一段话',
+  notes: '用户在选项旁写了备注',
+  multi: '那道题是多选',
+  array: '回答是好几项',
+  malformed: `标签夹了别的话（要逐字是「${BRIEF_LABEL}」）`,
+  blank: '题面是空的（题面要就是整份需求稿）',
+  several: '一次问里不止一道题选了它，分不清批的是哪一份',
+  'no-session': '读不到这个会话的 id',
+  'no-agent-team': '这个项目里还没有 .agent-team',
+  'write-failed': '门禁写不进原话记录',
+}
+const GATE_SIDE = new Set(['no-session', 'no-agent-team', 'write-failed'])
+
+/** 需求稿批准之后给项目经理的那一段（批准记录器在 PostToolUse 上回传）。why 为空是记下了；否则是 briefAnswer 或记录器给的原因。 */
+export function briefNotice(why = null) {
+  if (!why) {
+    return (
+      `【需求稿】门禁记下了用户批准的这份需求稿（就是那道题的题面，记在 .agent-team/${USER_WORDS_FILE}，换掉了之前记下的原话）。` +
+      '照 /agent-team:at 第 1 节接着建这一趟新 run，契约第 1 节逐字照抄它；推进出第一段时门禁拿它核。批准之前就建好的 run 不认它。'
+    )
+  }
+  const reason = BRIEF_WHY[why] ?? '回答的形状认不出'
+  if (GATE_SIDE.has(why)) {
+    return (
+      `【需求稿】门禁没有记下用户批准的这份需求稿：${reason}。请用户把这份需求稿原样贴在 /agent-team:at 后面重发一次（门禁在命令展开时记下它）；` +
+      '不要照现在这样往下建 run——那样契约第 1 节要么不核，要么拿之前记下的那一份核、对不上。'
+    )
+  }
+  return (
+    `【需求稿】用户这次的回答没有记成批准：${reason}。照用户的话改好需求稿，再单独问一次（单选，题面就是整份需求稿，标签逐字写「${BRIEF_LABEL}」）；` +
+    '在那之前不要建 run。'
+  )
 }
 
 /** 读一份记录（两级同一个形状，run 一级多一个 bound_at 也照读）；读不出、形状不对回 null。 */
@@ -85,6 +175,8 @@ export function readWords(bytes) {
     at: typeof v.at === 'string' ? v.at : null,
     session_id: v.session_id,
     args: v.args,
+    // 没有这个键的（这一版之前记的）是命令带的参数。
+    source: v.source === 'ask' ? 'ask' : 'command',
     runs_before: Array.isArray(v.runs_before) ? v.runs_before.filter((n) => typeof n === 'string') : [],
     binding: typeof v.binding === 'string' ? v.binding : null,
     bound: typeof v.bound === 'string' ? v.bound : null,
@@ -217,12 +309,15 @@ export function matchedSection1(contractText, args) {
 /**
  * 对不上的那一句（H6 的拒绝理由、写契约时的【契约】、【阶段】的补句共用）。原话与契约里的行都是磁盘上的值，过 quote。
  * 引之前去掉比对时本来就不计的那些看不见的字（复核 docs/59 §8）：quote 会把它们写成码点转义，照抄进第 1 节就成了几个可见的字，反倒对不上。
+ * source 是记录的来源（readWords 给的）：'ask' 说成用户批准的需求稿（docs/95），别的照命令带的参数说。
  */
-export function wordsMismatchText(m) {
+export function wordsMismatchText(m, source = 'command') {
   const shown = (s) => quote(typeof s === 'string' ? s.replace(FORMAT_RE, '') : s)
   const head =
-    '契约第 1 节对不上用户在 /agent-team:at 后面写的原话（门禁在用户发出那条命令时记下了它，原样在这一趟 run 目录的 ' +
-    `${USER_WORDS_FILE} 里，args 那一项）：`
+    source === 'ask'
+      ? `契约第 1 节对不上用户批准的需求稿（门禁在用户点「${BRIEF_LABEL}」时记下了它，原样在这一趟 run 目录的 ${USER_WORDS_FILE} 里，args 那一项）：`
+      : '契约第 1 节对不上用户在 /agent-team:at 后面写的原话（门禁在用户发出那条命令时记下了它，原样在这一趟 run 目录的 ' +
+        `${USER_WORDS_FILE} 里，args 那一项）：`
   if (!m || m.kind === 'no-section') return head + '契约里切不出第 1 节（「## 1. 用户原话」那一行）'
   if (m.kind === 'short') return head + `第 1 节到第 ${m.line} 行就没了，原话从这一行起还有 ${shown(m.want)} 等`
   if (m.kind === 'extra') return head + `原话之后、下一个编号节标题之前还多出一行 ${shown(m.got)}`
@@ -231,5 +326,5 @@ export function wordsMismatchText(m) {
 }
 
 export const WORDS_FIX =
-  '照那段话逐字抄进第 1 节（行尾空白不计，空白的写法不计，零宽字符、变体选择符这类看不见的字不计，整段写成引用块也认），你的理解写第 2 节；用户在那条命令之后改了需求的，修订写进第 4 节' +
+  '照那段话逐字抄进第 1 节（行尾空白不计，空白的写法不计，零宽字符、变体选择符这类看不见的字不计，整段写成引用块也认），你的理解写第 2 节；用户在那之后改了需求的，修订写进第 4 节' +
   '「修订记录」，第 1 节照原话留着'

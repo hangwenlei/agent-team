@@ -53,8 +53,8 @@ test('第 20 条修法 A：README 两半的目录树都列上两份原话记录�
     assert.ok(lines.some((l) => l.startsWith('├── ')) && lines.some((l) => l.startsWith('    ')), `${half}：${lines.join(' | ')}`)
     // 复核（docs/50 §9，正文低 5）：说明也钉住——原来只核行数与缩进，改坏说明照样全绿。
     const want = half === '中文'
-      ? ['你最近一次在 /agent-team:at 后面写的原话（门禁自己记）', '这一趟的需求原话（门禁记下，契约第 1 节对着它核）']
-      : ['the words you last wrote after /agent-team:at (recorded by the gates)', "this run's request in your words (recorded by the gates; the contract's first section is checked against it)"]
+      ? ['你最近一次在 /agent-team:at 后面写的原话，或者批准的需求稿（门禁自己记）', '这一趟的需求原话（门禁记下，契约第 1 节对着它核）']
+      : ['the words you last wrote after /agent-team:at, or the request write-up you approved (recorded by the gates)', "this run's request in your words (recorded by the gates; the contract's first section is checked against it)"]
     for (const w of want) assert.ok(lines.some((l) => l.includes(w)), `${half}：缺「${w}」`)
   }
 })

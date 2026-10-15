@@ -213,7 +213,7 @@ export function crashContext(check, err, recipientIsPm) {
   } else if (check === 'approval-ask') {
     // M3z（docs/34）：approval-prompt 在 UserPromptSubmit 上，什么都发不了（hookOutput），这里只有 approval-ask。
     text =
-      `【门禁】这次的回答没有记下——门禁自己出了错（${msg}）：用户选的若是「再返工一轮」或「照现状交付」，它没有记成批准。` +
+      `【门禁】这次的回答没有记下——门禁自己出了错（${msg}）：用户选的若是「再返工一轮」「照现状交付」或「照这份需求开始」，它没有记成批准。` +
       '重新问一次；再出错就停下，把这一段原样告诉用户。'
   } else {
     return null
@@ -262,6 +262,11 @@ export function systemMessage(kind, { cause, check } = {}) {
       return 'agent-team 照现状交付：已记下你的批准（只对批准那一刻的那份结论有效），项目经理已收到。'
     case 'deliver-skipped':
       return 'agent-team 照现状交付：这次的回答没有记成批准，项目经理已收到原因。'
+    // docs/95：批准记录器记下的需求稿（用户在 /agent-team:at 建 run 之前批准的那一份，契约第 1 节照它核）。
+    case 'brief-recorded':
+      return 'agent-team 需求稿：已记下你批准的这份需求稿，契约第 1 节照它核，项目经理已收到。'
+    case 'brief-skipped':
+      return 'agent-team 需求稿：这次的回答没有记成批准，项目经理已收到原因。'
     case 'input':
       if (RECORDERS.has(check)) {
         return 'agent-team 批准记录：读不出这次的 hook 输入，这次的回答没有记下。Claude Code 与插件的版本可能不匹配，两者都更新后再试。'

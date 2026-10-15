@@ -624,6 +624,41 @@ const SCENARIOS = [
     anchor: (all, P) => reached(all, P) && all.split('对不上用户在 /agent-team:at 后面写的原话').length - 1 >= 3,
   },
   {
+    // docs/95：同一个入口的另一个来源——用户批准的需求稿（批准记录器把 AskUserQuestion 的题面记进同一份 user-words.json，source 是 ask）。对不上时
+    // 换一种说法（「对不上用户批准的需求稿」），引的照旧过 quote。
+    name: '原话记录里用户批准的需求稿与契约第 1 节的行（【契约】、【阶段】补句、H6 推进出第一段的拒绝理由）',
+    disk: true,
+    state: (s) => ({ ...s, stage: 'S1', roster: [], history: [{ stage: 'S1', at: '2026-09-17T14:30:00Z' }], rework: {} }),
+    runFiles: {
+      'user-words.json': (P) => JSON.stringify({ at: 't', session_id: 's', args: P, source: 'ask', runs_before: [], bound: 'r1', dropped: null }),
+      '00-contract.md': (P) => {
+        const lines = P.split(/\r?\n/).map((l) => l.replace(/\s+$/, ''))
+        while (lines.length && lines[0] === '') lines.shift()
+        while (lines.length && lines[lines.length - 1] === '') lines.pop()
+        lines[lines.length - 1] += ' 改过'
+        return ['## 1. 用户原话', '', ...lines, '', '## 2. PM 的理解（可改）', ''].join('\n')
+      },
+    },
+    calls: ({ run }) => [
+      ['ledger', posted('agent-team:at-pm', join(run, '00-contract.md'))],
+      ['ledger', posted('agent-team:at-pm', join(run, 'state.json'))],
+      [
+        'rework',
+        {
+          hook_event_name: 'PreToolUse',
+          tool_name: 'Write',
+          agent_type: 'agent-team:at-pm',
+          session_id: 's',
+          tool_input: {
+            file_path: join(run, 'state.json'),
+            content: JSON.stringify({ ...baseState(), stage: 'S2', roster: [], history: ['S1', 'S2'].map((stage) => ({ stage, at: '2026-09-17T14:30:00Z' })), rework: {} }),
+          },
+        },
+      ],
+    ],
+    anchor: (all, P) => reached(all, P) && all.split('对不上用户批准的需求稿').length - 1 >= 3,
+  },
+  {
     // M4o 复核（docs/50 §9，门禁 T3）：同一个入口的另一句——原话照抄了，之后、下一个编号节标题之前多出一行（载荷），经【契约】与 H6 的拒绝理由
     // 回到文字里。原话是干净的一行，多出来的那一行整个是载荷（按 \n 断开的那一种，标签落在最后一段）。
     name: '契约第 1 节里原话之后多出来的那一行（【契约】、H6 推进出第一段的拒绝理由）',
