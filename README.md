@@ -84,6 +84,8 @@ claude --plugin-dir /path/to/agent-team
 
 需求还没想清楚也可以直接发。`/agent-team:at` 不带需求，或者话里还有几处没说清时，项目经理先问你几个问题（一次一个），整理成一份需求稿给你过目；你选「照这份需求开始」，就照它起这一趟，契约里记的是这份需求稿。话已经说清楚的，直接开始。
 
+在别处想好的需求（比如在没装 agent-team 的会话里用 superpowers 头脑风暴出的设计文档），只贴要做什么、给谁用、做完是什么样子、不做什么，不要整份贴：贴在 `/agent-team:at` 后面的每一句都会被当成你的原话。
+
 ### 一趟 run 怎么走
 
 <!-- 阶段与角色的真源是 stages.json；这张图的箭头数由 tests/readme-sync.test.mjs 钉成与阶段数相等 -->
@@ -166,7 +168,7 @@ flowchart TB
 > **这不是沙箱。** 写路径隔离按 `project.json` 的 `paths` 管项目经理以外的各个角色：在 run 目录之外，只能写划给自己的前缀，没有条目就哪都写不了——按设计不认领目录的 `at-qa` 与 `at-acceptance` 也一样，它们只写 run 目录里自己那份产物。划给一个角色的目录不连带它下面的 `CLAUDE.md`、`CLAUDE.local.md`、`.claude/`、`.git`——要写这几处，得把它们本身划过去（先问你）；目录下面另建 `.agent-team/` 谁都不行。`Bash` 没有任何门禁看着，而执行角色保留它来构建和测试。项目经理在实现之前（实现中有角色被拒时也会）照架构方案往 `paths` 里补前缀（只加不删；落在 `.claude/`、CI/CD、凭据这类位置的先问你；补了什么会告诉你），这些前缀留给以后各趟。
 
 > [!WARNING]
-> **主会话会被接管成 `at-pm`。** 它的工具面是 `Agent(...)`（受派发白名单约束）、`AskUserQuestion`、`Bash`、`Read`、`Glob`、`Grep`、`Write`、`Edit`——能改动的范围与普通会话相当，把它限制在目标项目里的是角色说明，不是工具权限。它拿不到你在普通会话里能用的 MCP 工具与网页搜索、抓取（WebSearch、WebFetch），团队里其余角色也拿不到——每个角色只拿自己清单里的工具。按上面的方式安装，影响范围只在安装它的那个项目目录；也不要用 `--agent`、或在你自己的设置里设 `agent` 键，把主会话换成别的角色，门禁按主会话的身份判定。
+> **主会话会被接管成 `at-pm`。** 它的工具面是 `Agent(...)`（受派发白名单约束）、`AskUserQuestion`、`Bash`、`Read`、`Glob`、`Grep`、`Write`、`Edit`——能改动的范围与普通会话相当，把它限制在目标项目里的是角色说明，不是工具权限。它拿不到你在普通会话里能用的 MCP 工具与网页搜索、抓取（WebSearch、WebFetch），团队里其余角色也拿不到——每个角色只拿自己清单里的工具。它也拿不到 Skill 工具，别的插件带的 skill 它调不起来。按上面的方式安装，影响范围只在安装它的那个项目目录；也不要用 `--agent`、或在你自己的设置里设 `agent` 键，把主会话换成别的角色，门禁按主会话的身份判定。
 
 > [!NOTE]
 > **设置里的 `agent` 会盖掉项目经理。** 用户、项目或本地设置里写了别的 `agent`（或者起会话时带了别的 `--agent`），主会话就不是 `agent-team:at-pm`，团队跑不起来（门禁会说出来）：去掉那一项设置，或者起会话时加 `--agent agent-team:at-pm`。
@@ -300,6 +302,8 @@ Loaded this way, pass the flag again every time you resume a session — see [Kn
 
 You can start before the request is worked out. When `/agent-team:at` comes without a request, or the request leaves things open, the project manager first asks you a few questions (one at a time) and writes up the request for you to review; pick 「照这份需求开始」 (start with this request) and the run starts from it, with that write-up recorded in the contract. A request that is already clear starts right away.
 
+If you worked the request out elsewhere (say, a design doc brainstormed with superpowers in a session without agent-team), paste only what to build, who it is for, what done looks like and what is out of scope, not the whole document: every sentence after `/agent-team:at` is taken as your own words.
+
 ### How a run flows
 
 <!-- stages.json is the source of truth for stages and roles; tests/readme-sync.test.mjs pins this diagram's arrow count to the number of stages -->
@@ -382,7 +386,7 @@ You can watch a role but not talk to it: roles report their questions to the pro
 > **This is not a sandbox.** Write-path isolation governs every team role except the project manager by the `paths` in `project.json`: outside the run directory a role may write only its own prefixes, and nothing at all without an entry — including `at-qa` and `at-acceptance`, which claim no directories by design and write only their own deliverable in the run directory. A claimed directory does not carry the `CLAUDE.md`, `CLAUDE.local.md`, `.claude/` or `.git` below it — those have to be claimed by name (after asking you) — and no role may create an `.agent-team/` inside it. `Bash` is not watched by any gate, and implementation roles keep it to build and test. Before implementation (and during it, when a role is refused) the project manager adds prefixes to `paths` from the architecture plan (it only adds; it asks you first for `.claude/`, CI/CD or credential locations; it tells you what it added); they stay for later runs.
 
 > [!WARNING]
-> **The main session is taken over as `at-pm`.** Its tool surface is `Agent(...)` (bound by the dispatch whitelist), `AskUserQuestion`, `Bash`, `Read`, `Glob`, `Grep`, `Write` and `Edit` — it can change anything an ordinary session can, and what keeps it inside the target project is its role definition, not its permissions. It does not get the MCP tools or the web search and fetch tools (WebSearch, WebFetch) that an ordinary session has, and no other role on the team gets them either: each role gets only the tools on its own list. Installed as above, its reach is limited to the one project directory that declares it. Don't swap the main session for another role with `--agent` or an `agent` key in your own settings either: the gates judge by the main session's identity.
+> **The main session is taken over as `at-pm`.** Its tool surface is `Agent(...)` (bound by the dispatch whitelist), `AskUserQuestion`, `Bash`, `Read`, `Glob`, `Grep`, `Write` and `Edit` — it can change anything an ordinary session can, and what keeps it inside the target project is its role definition, not its permissions. It does not get the MCP tools or the web search and fetch tools (WebSearch, WebFetch) that an ordinary session has, and no other role on the team gets them either: each role gets only the tools on its own list. It does not get the Skill tool either, so skills that come with other plugins are out of its reach. Installed as above, its reach is limited to the one project directory that declares it. Don't swap the main session for another role with `--agent` or an `agent` key in your own settings either: the gates judge by the main session's identity.
 
 > [!NOTE]
 > **An `agent` in your settings overrides the project manager.** If user, project or local settings name another `agent` (or the session was started with another `--agent`), the main session is not `agent-team:at-pm` and the team cannot run (the gates say so): remove that setting, or start the session with `--agent agent-team:at-pm`.
