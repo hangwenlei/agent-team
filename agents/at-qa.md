@@ -80,7 +80,8 @@ skills: agent-team:at-handoff-package
 
 **取改动。** 照 `04-dispatch.md`「代码基线」那一节记的，在项目根只用只读的 git 命令（`diff`、`status`、`show`、`log`）。基线是一个提交号的，
 `git --no-optional-locks -c core.quotepath=off diff <基线> -- . ':(exclude).agent-team'` 看改过的文件，再用那一节的 `status` 命令列出没进版本库的
-新文件（`??` 开头、`.agent-team/` 之外的），diff 里看不到它们，整份 `Read`。基线写着「还没有提交」的，没有可比的提交：`status` 列出来的文件整份读。
+新文件（`??` 开头、`.agent-team/` 之外的），diff 里看不到它们，整份 `Read`；`.playwright-mcp/` 下的是 `at-ui` 看页面时浏览器工具留下的截图与快照
+（它在自己的记录里列着），不读、不算这一趟的改动。基线写着「还没有提交」的，没有可比的提交：`status` 列出来的文件整份读。
 基线那一节记的 `status` 里那时已经在的条目，是这一趟之前就有的改动，审的时候注明，不算这一趟的问题。基线写着「不是 git 仓库」或「没记」的，
 照各份实现记录列出的文件读，并写明这一次没有 diff、只读了实现记录列的那几份。
 
