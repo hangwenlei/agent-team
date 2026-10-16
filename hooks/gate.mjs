@@ -3473,14 +3473,17 @@ function main() {
     const ownId = typeof input?.agent_id === 'string' && AGENT_ID_RE.test(input.agent_id) ? input.agent_id : null
     const elsewhere = ownId ? elsewhereOf(ctx, ownId) : null
     // docs/99：交回的两道与 H5b 同一个口径——不按这一趟核、放它交回；送达时停下行记回那一趟（via 交回、照报告认冒泡），它在那一趟里最后一条
-    // 停下行是交回送达记的，接着来的那一回 SubagentStop 不再另记。
+    // 停下行是交回送达记的，接着来的那一回 SubagentStop 照那一行的结果记（不带 via），不记成 pass。
     if (elsewhere && CHECK === 'handback') process.exit(0)
     if (elsewhere && CHECK === 'handback-sent' && input?.tool_response?.success !== true) process.exit(0)
     if (elsewhere && (CHECK === 'stop-gate' || CHECK === 'handback-sent')) {
       const { role: hisRole, stage: hisStage } = elsewhere.dispatch
-      if (CHECK === 'stop-gate' && endedByHandback(dispatchLogAt(elsewhere.dir), ownId)) process.exit(0)
       const sent = CHECK === 'handback-sent'
-      const outcome = sent && bubbleOf([input?.tool_input?.message]) !== null ? 'bubble' : 'pass'
+      let outcome = sent && bubbleOf([input?.tool_input?.message]) !== null ? 'bubble' : 'pass'
+      if (!sent) {
+        const theirs = dispatchLogAt(elsewhere.dir)
+        if (endedByHandback(theirs, ownId)) outcome = lastStop(theirs, ownId)
+      }
       const kept = recordElsewhere(
         elsewhere,
         stopLine({ at: new Date().toISOString(), agentId: ownId, role: hisRole, stage: hisStage, outcome, via: sent ? 'handback' : null }),
@@ -3559,14 +3562,20 @@ function main() {
     //     带冒泡的交回会一直被拒、冒泡的出口走不通——那一回带着冒泡的就放行、留痕，与 H5b 一样 fail open（H5b 的「拦过一回」是平台给的）。
     //   - handback-sent（PostToolUse:SubagentHandback）在送达（工具结果 success 为真）时记这一回停下：报告第一行是冒泡标记记 bubble，
     //     不是记 pass，都带 via: "handback"。
-    //   - H5b 见到它在派发记录里的最后一条停下行是交回送达记的，就知道这一回停下是交回结束的：不拦、不另记。
+    //   - H5b 见到它在派发记录里的最后一条停下行是交回送达记的，就知道这一回停下是交回结束的：不拦，照那一行的结果再记一行（不带 via）。
     if (CHECK === 'handback-sent') {
       if (input?.tool_response?.success === true) recordStop(bubbleOf([input?.tool_input?.message]) !== null ? 'bubble' : 'pass', 'handback')
       process.exit(0)
     }
+    // 只跳过交回之后的那一回：照交回送达那一行的结果再记一行（不带 via）——它之后被唤醒（用户续上它、它自己的后台子代理完成）再停下，
+    // 最后一条停下行就不是交回送达记的了，照常判（复核）。
     if (CHECK === 'stop-gate' && stopId) {
       const bytes = ctx.artifactBytes(DISPATCHES_FILE)
-      if (endedByHandback(readDispatchLog(bytes ? bytes.toString('utf8') : null), stopId)) process.exit(0)
+      const log = readDispatchLog(bytes ? bytes.toString('utf8') : null)
+      if (endedByHandback(log, stopId)) {
+        recordStop(lastStop(log, stopId))
+        process.exit(0)
+      }
     }
     if (CHECK === 'handback') {
       const bytes = stopId ? ctx.artifactBytes(DISPATCHES_FILE) : null

@@ -7,7 +7,7 @@
 //     （调试日志：Stop hook block discarded (turn ended by tool result, no model re-invoke)）；
 //   - 主会话收到的是一条交回消息：UserPromptSubmit 的 prompt 是 <agent-message from="<agent_id>">、一行顶格的框、缩进两格的报告；
 //     交回结束的那一次完成通知只进转录，不触发 UserPromptSubmit。
-// 修法：H5b 的判定挪到交回之前（handback），送达时记停下行（handback-sent，via: "handback"），H5b 认出交回结束的那一回停下、不拦不另记；
+// 修法：H5b 的判定挪到交回之前（handback），送达时记停下行（handback-sent，via: "handback"），H5b 认出交回之后的那一回停下、不拦，照交回的结果再记一行（只认这一回）；
 // 完成核验认交回消息（parseHandbacks）。没有交回的旧形状（manual 模式、旧的派发记录）照旧判——两种形状各有判据。
 // 一律经 tests/helpers/gate-runner.mjs 的 run 起门禁子进程，出口契约在那里核。
 import { test } from 'node:test'
@@ -132,7 +132,7 @@ test('交回之前：产物没交、报告第一行是冒泡、门禁还没拦�
   })
 })
 
-test('拦过一回之后交回同一份冒泡 → 放行；送达时记 bubble（via 交回）；接着那一回停下（没有 last_assistant_message）不拦、不另记', () => {
+test('拦过一回之后交回同一份冒泡 → 放行；送达时记 bubble（via 交回）；接着那一回停下（没有 last_assistant_message）不拦，照交回的结果再记一行', () => {
   inRun(S6, (dirs) => {
     const id = 'a0000000000000002'
     run('deliverable', launched(QA, id), GATE, dirs.projectDir)
@@ -146,10 +146,10 @@ test('拦过一回之后交回同一份冒泡 → 放行；送达时记 bubble�
     const stop = run('stop-gate', stopAfterHandback(QA, id, dirs), GATE, dirs.projectDir)
     assert.equal(stop.status, 0, stop.stderr)
     assert.equal(stop.stdout, '')
-    assert.deepEqual(stopLines(dirs).map((v) => [v.outcome, v.via]), [['block', undefined], ['bubble', 'handback']])
+    assert.deepEqual(stopLines(dirs).map((v) => [v.outcome, v.via]), [['block', undefined], ['bubble', 'handback'], ['bubble', undefined]])
     const log = logOf(dirs)
     assert.equal(lastStop(log, id), 'bubble')
-    assert.equal(endedByHandback(log, id), true)
+    assert.equal(endedByHandback(log, id), false, '只认交回之后的那一回')
   })
 })
 
@@ -165,7 +165,7 @@ test('产物没交、报告不是冒泡 → 拦过一回也照拒', () => {
   })
 })
 
-test('产物交了（测试报告第一行是结论）→ 放行；送达记 pass；接着那一回停下不另记', () => {
+test('产物交了（测试报告第一行是结论）→ 放行；送达记 pass；接着那一回停下不拦，照交回的结果再记一行', () => {
   inRun({ ...S6, artifacts: [...S6.artifacts] }, (dirs) => {
     writeFileSync(join(dirs.runDir, '06-test.md'), '结论：通过\n\n全部用例通过。\n', 'utf8')
     const id = 'a0000000000000004'
@@ -175,7 +175,7 @@ test('产物交了（测试报告第一行是结论）→ 放行；送达记 pas
     assert.equal(r.stdout, '')
     run('handback-sent', postHandback(QA, id, '测试报告写好了：06-test.md。', dirs), GATE, dirs.projectDir)
     assert.equal(run('stop-gate', stopAfterHandback(QA, id, dirs), GATE, dirs.projectDir).status, 0)
-    assert.deepEqual(stopLines(dirs).map((v) => [v.outcome, v.via]), [['pass', 'handback']])
+    assert.deepEqual(stopLines(dirs).map((v) => [v.outcome, v.via]), [['pass', 'handback'], ['pass', undefined]])
   })
 })
 
@@ -318,7 +318,7 @@ test('派发记录：不带 via 的旧停下行照旧读（不算交回结束）
   assert.equal(endedByHandback(again, 'a1'), false)
 })
 
-test('别的一趟派出去的：交回之前不按这一趟核、放它交回；送达记回那一趟（via 交回）；接着那一回停下不另记，这一趟一行都不记', () => {
+test('别的一趟派出去的：交回之前不按这一趟核、放它交回；送达记回那一趟（via 交回）；接着那一回停下照交回的结果记回那一趟，这一趟一行都不记', () => {
   const dirs = makeRun({ runId: 'r1', stage: 'S5', roster: ['at-architect'], stage_roles: {}, artifacts: ['03-arch.md', '04-dispatch.md'] })
   const r1 = join(dirs.projectDir, '.agent-team', 'runs', 'r1')
   const r2 = join(dirs.projectDir, '.agent-team', 'runs', 'r2')
@@ -337,7 +337,7 @@ test('别的一趟派出去的：交回之前不按这一趟核、放它交回�
     assert.equal(pre.stdout, '', 'r2 的 S5 也缺 05-impl/at-backend.md，不按 r2 拒')
     run('handback-sent', postHandback(BACKEND, id, report, dirs), GATE, dirs.projectDir)
     assert.equal(run('stop-gate', stopAfterHandback(BACKEND, id, dirs), GATE, dirs.projectDir).status, 0)
-    assert.deepEqual(stopLines(at).map((v) => [v.outcome, v.via]), [['pass', 'handback']])
+    assert.deepEqual(stopLines(at).map((v) => [v.outcome, v.via]), [['pass', 'handback'], ['pass', undefined]])
     assert.deepEqual(stopLines({ runDir: r2 }), [])
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
@@ -404,7 +404,7 @@ test('复核：带着项目经理身份交回（内部分叉）→ 不归它管�
   })
 })
 
-test('复核：别的一趟派出去的——没送达不记；送达时报告第一行是冒泡记 bubble（via 交回）', () => {
+test('复核：别的一趟派出去的——没送达不记；送达时报告第一行是冒泡记 bubble（via 交回），接着那一回停下照它记 bubble', () => {
   const dirs = makeRun({ runId: 'r1', stage: 'S5', roster: ['at-architect'], stage_roles: {}, artifacts: ['03-arch.md', '04-dispatch.md'] })
   const r1 = join(dirs.projectDir, '.agent-team', 'runs', 'r1')
   const r2 = join(dirs.projectDir, '.agent-team', 'runs', 'r2')
@@ -420,6 +420,9 @@ test('复核：别的一趟派出去的——没送达不记；送达时报告�
     assert.deepEqual(stopLines({ runDir: r1 }), [], '没送达不记')
     run('handback-sent', postHandback(BACKEND, id, report, dirs), GATE, dirs.projectDir)
     assert.deepEqual(stopLines({ runDir: r1 }).map((v) => [v.outcome, v.via]), [['bubble', 'handback']])
+    // 接着那一回停下：照交回送达那一行记 bubble，不记成 pass。
+    assert.equal(run('stop-gate', stopAfterHandback(BACKEND, id, dirs), GATE, dirs.projectDir).status, 0)
+    assert.deepEqual(stopLines({ runDir: r1 }).map((v) => [v.outcome, v.via]), [['bubble', 'handback'], ['bubble', undefined]])
   } finally {
     rmSync(dirs.projectDir, { recursive: true, force: true })
     rmSync(dirs.pluginDir, { recursive: true, force: true })
@@ -430,4 +433,18 @@ test('复核：parseHandbacks 框之上有一行没缩进 → 不认', () => {
   const ok = handbackPrompt('a1', '冒泡：x', { note: 'SECURITY WARNING: …' })
   assert.equal(parseHandbacks(ok).length, 1, '前置：框之上缩进的注记认得出')
   assert.deepEqual(parseHandbacks(ok.replace('  SECURITY WARNING', 'SECURITY WARNING')), [])
+})
+
+test('复核（安全审查）：交回过的子代理又被唤醒（用户续上、它自己的后台子代理完成）之后再停下 → 照常判：产物没交、不是冒泡就拦，记 block', () => {
+  inRun(S6, (dirs) => {
+    const id = 'a0000000000000021'
+    run('deliverable', launched(QA, id), GATE, dirs.projectDir)
+    run('handback', preHandback(QA, id, BUBBLE, dirs), GATE, dirs.projectDir)
+    run('handback', preHandback(QA, id, BUBBLE, dirs), GATE, dirs.projectDir)
+    run('handback-sent', postHandback(QA, id, BUBBLE, dirs), GATE, dirs.projectDir)
+    assert.equal(run('stop-gate', stopAfterHandback(QA, id, dirs), GATE, dirs.projectDir).status, 0, '交回之后的那一回不拦')
+    const woken = run('stop-gate', stopWithText(QA, id, dirs, { active: false, message: '后台任务跑完了。' }), GATE, dirs.projectDir)
+    assert.equal(woken.status, 2, '被唤醒之后的那一回照常判')
+    assert.equal(lastStop(logOf(dirs), id), 'block')
+  })
 })

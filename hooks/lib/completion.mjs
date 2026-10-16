@@ -228,7 +228,8 @@ export function lastStop(log, agentId) {
 
 /**
  * docs/99：这个子代理在派发记录里的最后一条停下行，是交回送达那一刻记的（via: "handback"）——它这一次运行是交回结束的，接着来的那一回
- * SubagentStop 拦了也会被平台丢掉，停下行已经记过。交回没送达（工具结果不是成功）不记那一行，之后它以文字停下时照常判。
+ * SubagentStop 拦了也会被平台丢掉，停下行已经记过。H5b 跳过那一回时照它的结果再记一行（不带 via），所以只认交回之后的那一回：它之后被唤醒
+ * 再停下照常判。交回没送达（工具结果不是成功）不记那一行，之后它以文字停下时照常判。
  */
 export function endedByHandback(log, agentId) {
   const v = log?.lastStopLine?.get(agentId)

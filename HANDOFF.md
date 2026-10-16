@@ -129,7 +129,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   auto 权限模式下子代理经 `SubagentHandback` 交回，交回结束它这一次运行，接着那一回 SubagentStop 没有 `last_assistant_message`、拦了也被平台丢掉：
   H5b 那一道判定挪到交回之前（`handback`，PreToolUse:SubagentHandback，交回的报告就是最后一条回复，「拦过一回」按派发记录认、拦截行记不下时带冒泡的放行；
   拒了交回就没发生），
-  送达时 `handback-sent` 记停下行（`via: "handback"`），H5b 见到最后一条停下行是它就不拦不另记（`completion.mjs` 的 `endedByHandback`）。理由在 `docs/99`。
+  送达时 `handback-sent` 记停下行（`via: "handback"`），H5b 只跳过交回之后的那一回停下、照它的结果再记一行（不带 `via`），被唤醒之后再停下照常判
+  （`completion.mjs` 的 `endedByHandback`）。理由在 `docs/99`。
 - **契约的账只认 `contract_sha`**：账本比对不看契约（`compareArtifacts` 排除 `CONTRACT_FILE`）；派发返回（H5a）与 PM 写 `state.json` 时拿
   `contract_sha` 比磁盘，对不上出【契约】——不报磁盘上算出来的值、不说「改成与磁盘一致」（照着磁盘改账就把漂移洗成了合法），合法修订的新值
   只从写契约那一次的回传来。H2 派验证段的产者（`stages.mjs` 的 `verifyStageOf`，按 `verifies` 派生，只核花名册里派得到的）之前也比一遍，排在 H2 最后，对不上就拒、出路是同一句【契约】
@@ -254,6 +255,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   扫行尾用 Node 或 `grep -U`：Git Bash 的 grep 不带 `-U` 看不见 CR，会报出假的「全是 LF」（`docs/39` §3）。
 - **后台 agent 与主会话共用工作树时**，别 `git add -A` / `checkout` / `reset`；要并行就用隔离 worktree。
 - `claude --resume` 不继承 `--plugin-dir`；local 安装下换了目录续会话，工具限制会整体掉光，而转录里看不出来。
+- **探针目录放在本工作树下时**，`--settings` 里加 `claudeMdExcludes` 排除本仓库与上一层的 `CLAUDE.md`：不然项目经理与每个子代理都把 HANDOFF 整份读一遍
+  （`docs/98` 那两场就是）。要看 hook 的原始输入，另挂一个只追加、不写 stdout、永远 exit 0 的记录钩子——门禁的留痕只有检查项名与退出码；做法在 `docs/99` §2.1。
 - 后台探针用 `claude --bg`，不用 `-p`（`-p` 下异步派发会卡死——这是 CLI 2.1.276 上的实测，`docs/13` §5.1；2.1.286 上一个 `-p` 会话跑完过 5 次异步派发，`docs/33` §3；要靠 `-p` 之前先在当前版本上核；SDK 宿主（`-p --input-format stream-json`）的驱动要等后台子代理跑完再关输入——第一次 result 就关，子代理的权限请求会报 `AbortError: Stream closed`，会话等满 600 秒（`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`）后把它杀掉，`docs/35` §4 `efd26cb1`）。收尾对每个会话先 `claude stop` 再 `claude rm`：
   没 stop 过的会话在 `~/.claude.json` 里留着 `lastGracefulShutdown: false`，会一直挂在桌面应用侧边栏的「Other」下；
   `claude rm` 只删 `~/.claude/jobs/<id>/`，转录不动。
