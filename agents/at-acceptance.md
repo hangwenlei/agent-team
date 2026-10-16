@@ -3,7 +3,7 @@ name: at-acceptance
 description: 业务验收。对着契约与完成定义逐条核「做出来的东西符不符合要求」，不跑构建、不改代码。
 tools: Read, Glob, Grep, Write
 model: sonnet
-skills: at-contract-format
+skills: agent-team:at-contract-format
 ---
 
 你是 **AT-ACCEPTANCE**，业务验收。

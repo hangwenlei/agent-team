@@ -45,7 +45,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - **`hooks/` 下的代码不用晚于 `MIN_NODE` 的内建；boot.mjs 还要能在 Node 12.17 上解析**（不用顶层 await、`?.`、`??`、
   `Object.hasOwn`，内建模块写 `'fs'` 不写 `'node:fs'`），好在旧 Node 上大声拒绝而不是静默放行。门禁子进程一律经
   `tests/helpers/gate-runner.mjs` 起（`tests/gate-runner.test.mjs` 钉着），最低版本作业才换得动它们。理由在 `docs/28`。
-- **任何角色都不授予 `Skill` / `SendMessage` / `ListAgents`**（规格 §6.1）。frontmatter 的 `skills:` 键是另一回事，允许。插件自带的 skill 不得声明 `context: fork`。
+- **任何角色都不授予 `Skill` / `SendMessage` / `ListAgents`**（规格 §6.1）。frontmatter 的 `skills:` 键是另一回事，允许，一律写全名 `agent-team:at-*`（裸名会被用户或项目层的同名 skill 抢先，实测在 `docs/97` §3）。插件自带的 skill 不得声明 `context: fork`。外部的设计方法只改写进自己的 skill（`at-ui-craft`，声明在 `THIRD_PARTY_NOTICES.md`），不跨插件引用（`docs/97` §1）。
 - **`at-outsider` 永远不进任何角色的 `Agent(...)` 宇宙，也不进任何 `can_delegate_to`。**
 - **发布纪律：每次推 `main` 都挪 `version`** —— 只碰散文 / `docs/` / `tests/` 挪最后一位，碰插件会加载的东西挪中间一位，任何一位不长到 `10`。
   理由：`claude plugin update` 比的是 `version` 字符串，不是 commit。CI 在推 main / 向 main 提 PR 时核它（`scripts/check-version-bump.mjs`，

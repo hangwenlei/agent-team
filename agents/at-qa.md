@@ -3,7 +3,7 @@ name: at-qa
 description: 测试角色。跑既有测试、读实现、判断失败原因，把结论写成自己那一段的产物；不改实现代码。
 tools: Bash, Read, Glob, Grep, Write
 model: sonnet
-skills: at-handoff-package
+skills: agent-team:at-handoff-package
 ---
 
 你是 **AT-QA**，测试角色。

@@ -34,7 +34,7 @@ const norm = (p) => p.split(sep).join('/')
 const RUNTIME_PROSE = () => [
   ...files('agents', (n) => n.endsWith('.md')),
   ...files('commands', (n) => n.endsWith('.md')),
-  ...files('skills', (n) => n === 'SKILL.md'),
+  ...files('skills', (n) => n.endsWith('.md')), // SKILL.md 与它按需 Read 的 references/*.md
   ...files('templates', () => true),
   'stages.produces.md',
 ]
@@ -59,7 +59,7 @@ function violations(rel, lines, joined) {
 }
 
 // 遍历的集合要有身份锚（docs/16 §3.2）：遍历坏了（一份都不收、后缀写错），下面几条在空集合上照绿。
-const MUST_PROSE = ['agents/at-pm.md', 'agents/at-qa.md', 'commands/at.md', 'commands/at-resume.md', 'skills/at-api-contract/SKILL.md', 'skills/at-handoff-package/SKILL.md', 'templates/04-dispatch.md', 'stages.produces.md']
+const MUST_PROSE = ['agents/at-pm.md', 'agents/at-qa.md', 'commands/at.md', 'commands/at-resume.md', 'skills/at-api-contract/SKILL.md', 'skills/at-handoff-package/SKILL.md', 'skills/at-ui-craft/references/motion.md', 'templates/04-dispatch.md', 'stages.produces.md']
 const MUST_CODE = ['hooks/gate.mjs', 'hooks/lib/ledger.mjs', 'hooks/lib/rework-guard.mjs', 'hooks/lib/state.mjs']
 
 test('锚：扫描集合里有该扫的那几份——否则下面几条在空集合或半个集合上空转', () => {

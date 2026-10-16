@@ -5,9 +5,9 @@ import { producedNames } from '../hooks/lib/stages.mjs'
 import { COMMAND_NAMES } from './helpers/command-names.mjs'
 
 const url = (p) => new URL(`../${p}`, import.meta.url)
-const SKILLS = ['at-contract-format', 'at-handoff-package', 'at-api-contract']
+const SKILLS = ['at-contract-format', 'at-handoff-package', 'at-api-contract', 'at-ui-craft']
 
-test('三个 skill 都在，没有多余的', () => {
+test('这几个 skill 都在，没有多余的', () => {
   assert.deepEqual(readdirSync(url('skills')).sort(), [...SKILLS].sort())
 })
 
