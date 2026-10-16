@@ -110,6 +110,12 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   `at-pm` 拿不到用户的 MCP 与网页工具，README 两半写着、双向判据钉着。验证段的产者（主会话除外）不持 `Edit`——摩擦，不是屏障。插件
   `settings.json` 的 `agent` 写全名 `agent-team:at-pm`（裸名会被项目或用户层同名的 `at-pm.md` 抢先当上主会话），`tests/plugin-name-sync.test.mjs`
   从 `PLUGIN_PREFIX` 派生。门禁按剥前缀的名字认 PM 不收紧。理由在 `docs/36`。
+- **MCP 只给叶子角色 `at-ui`，而且只到官方插件市场 Playwright 插件的具体工具**：插件装出来的工具名固定（`mcp__plugin_playwright_playwright__browser_*`），
+  `at-ui` 的 `tools:` 只列看页面要的那几个（打开、改尺寸、模拟媒体特性、截图、快照、关浏览器）——不授整台服务器，执行脚本、上传文件、拖放、对话框不给，
+  持 `Agent` 的角色不给；`WebSearch`、`WebFetch` 谁都不给。用户没装那个插件时名字静默不在、角色照常起（实测）。截图与快照落在项目根的
+  `.playwright-mcp/`，写路径隔离与账本看不见：只开本机起的页面、不带 `filename`、在记录里列出、用完关浏览器都靠正文，门禁不核（付了三样）；`at-qa` 审改动时跳过那个目录。
+  判据：`tests/tool-surface.test.mjs`（逐份期望值与授予形状）、`tests/ui-browser-prose.test.mjs`（正文与自检细则同一组规矩）、`tests/readme-sync.test.mjs`
+  （README 点名持有者）。理由在 `docs/98`。
 - **根级文件共列，不加 `shared` 键**：根级清单、构建配置、顶层测试目录列给每个会改它们的 S5 产者；S3 的「落盘清单」与 S4「照清单补 `paths`」
   是对齐的那一步（加了 `shared` 也省不掉，前缀按字面比、S0 时文件还不存在）。S5 被拒的在实现记录里留「被写路径隔离拒绝」一节、标「已解决」，
   PM、at-resume、at-qa 按它判交没交齐，执行段「齐了」时门禁提醒先读它（`IMPL_RECORD_NOTE`）。规格段的产者（S2 的 `at-ui`）被拒时，H3 与 H5b 按当前段给出路——写进这一段的产物、不补 `paths`

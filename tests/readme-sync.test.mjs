@@ -441,6 +441,12 @@ for (const f of [README_EN, README_ZH]) {
     const holders = PRODUCT_ROLES.filter((r) => r !== 'at-pm' && toolsOf(r).some((n) => isMcp(n) || isWeb(n)))
     const others = f === README_ZH ? '团队里其余角色也拿不到' : 'no other role on the team gets them either'
     assert.equal(p.includes(others), holders.length === 0, `${f}：「${others}」与其余角色的 tools: 对不上（持 MCP 或网页工具的：${holders.join('、') || '没有'}）`)
+    // docs/98：有人持的时候，那一段要点名是谁——反引号里点到的角色名（at-pm 除外）恰好是持有者，给了谁就写谁、写了谁就得真给了；
+    // 持的是 Playwright 插件那组工具时，写明 Playwright（用户装了那个插件才真的有）。
+    const named = PRODUCT_ROLES.filter((r) => r !== 'at-pm' && p.includes(`\`${r}\``))
+    assert.deepEqual(named, holders, `${f}：at-pm 那一段点名的角色（${named.join('、') || '没有'}）与持 MCP 或网页工具的角色（${holders.join('、') || '没有'}）对不上`)
+    const pw = holders.some((r) => toolsOf(r).some((n) => n.startsWith('mcp__plugin_playwright_playwright__')))
+    assert.equal(p.includes('Playwright'), pw, `${f}：at-pm 那一段写没写 Playwright 与有没有角色持 Playwright 插件那组工具对不上`)
   })
 }
 

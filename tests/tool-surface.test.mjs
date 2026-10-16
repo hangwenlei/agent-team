@@ -193,6 +193,8 @@ test('前置条件：agents/ 下每个 .md 都解得出至少一个工具名—�
 // 旧值时那条红。
 // M4b（docs/36，审查第 29 条）：十个团队角色加 Grep（只读、不经任何门禁；at-outsider 是派不起来的测试替身，保持最小）；
 // 写文档、不在验证段的 at-product、at-architect 加 Edit。at-qa、at-acceptance 不给 Edit，理由见下面那条判据。
+// docs/98：at-ui 加官方插件市场 Playwright 插件的一组看页面工具（名字固定，实测过拿得到、没装时静默不在），授予形状见文件末尾那一组。
+const PW = 'mcp__plugin_playwright_playwright__'
 const EXPECTED_TOOLS = {
   'at-acceptance.md': ['Glob', 'Grep', 'Read', 'Write'],
   'at-android.md': ['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write'],
@@ -204,7 +206,7 @@ const EXPECTED_TOOLS = {
   'at-pm.md': ['Agent', 'AskUserQuestion', 'Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write'],
   'at-product.md': ['Agent', 'Edit', 'Glob', 'Grep', 'Read', 'Write'],
   'at-qa.md': ['Bash', 'Glob', 'Grep', 'Read', 'Write'],
-  'at-ui.md': ['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write'],
+  'at-ui.md': ['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write', ...['close', 'emulate_media', 'navigate', 'resize', 'snapshot', 'take_screenshot'].map((t) => `${PW}browser_${t}`)].sort(),
 }
 
 test('十一份 agent 的 tools: 声明与预期逐份一致——加一个工具、少一个工具都红', () => {
@@ -308,4 +310,29 @@ test('M4b 验证段的产者（主会话除外）正文写明没有 Edit 是因�
   const qa = readFileSync(join(AGENTS_DIR, 'at-qa.md'), 'utf8')
   assert.ok(!qa.includes('是同一个理由'), 'at-qa.md 还在说「你也没有 Edit，是同一个理由」')
   assert.ok(qa.includes('不新增代码文件'), 'at-qa.md 的「不新增代码文件」不见了')
+})
+
+// ============================================================================ docs/98
+
+// MCP 的授予形状（docs/98 收窄 docs/36 §2.10）：插件写得出的 MCP 工具名只有插件装出来的那种（mcp__plugin_<插件>_<服务器>__<工具>），
+// 这里只认官方插件市场的 Playwright 插件。两条与具体给了谁无关、按裁定钉：只给不持 Agent 的叶子角色（协调者手里，网页内容能流进它写的派发单）；
+// 只能是裁定那一组「只够看」的具体工具——白名单，不是黑名单：那台服务器的工具会跟着上游版本长（路由、存 PDF、调页面自带的工具……），
+// 黑名单拦不住新来的；裸服务器名、通配也不在单子上（授整台服务器就把执行脚本、上传文件、拖放、对话框一起给了）。
+// 具体给了谁、给了哪几个由上面的 EXPECTED_TOOLS 钉；要往这份单子里加，先改 docs/98 的裁定。
+const LOOK_ONLY = ['browser_navigate', 'browser_resize', 'browser_emulate_media', 'browser_take_screenshot', 'browser_snapshot', 'browser_close']
+
+test('docs/98 MCP 工具只给叶子角色，只能是 Playwright 插件里裁定那一组只够看的具体工具', () => {
+  const holders = []
+  for (const file of AGENT_FILES) {
+    const names = declarationOf(file).names
+    const mcp = names.filter((n) => n.startsWith('mcp__'))
+    if (!mcp.length) continue
+    holders.push(file)
+    assert.ok(!names.includes('Agent'), `agents/${file} 持 Agent 又持 MCP 工具（${mcp.join('、')}）：协调者看到的网页内容能流进它写的派发单，先改 docs/98 的裁定`)
+    for (const n of mcp) {
+      const tool = n.startsWith(PW) ? n.slice(PW.length) : null
+      assert.ok(tool !== null && LOOK_ONLY.includes(tool), `agents/${file} 授了 ${n}：不在 docs/98 裁定的那一组里（别的服务器、裸服务器名、通配都不认；执行脚本、上传文件、拖放、对话框一律不给）`)
+    }
+  }
+  assert.ok(holders.length > 0, '前置：一个持 MCP 工具的角色都没有——这条判据在空转（at-ui 应当持那组看页面的工具）')
 })
