@@ -153,6 +153,10 @@ Playwright 工具与一个不存在的 `mcp__nonexistent__x`。项目经理派�
   没有出现这个工具，它跟着什么出现也没量。
 - 截图在一趟长 run 里累计占多少上下文：只有 A 这一个小样本。
 
+> 收口（2026-10-16，`docs/99`）：`SubagentHandback` 那一条量了——交回之后那一回 SubagentStop 没有 `last_assistant_message`，H5b 的拦截被平台丢掉、派发记录误记成拦；
+> 直接派的子代理交回之后完成通知只进转录，完成核验没跑。它跟着权限模式出现：auto 下启用、manual 下没有（源码里另有一个默认开着的开关）。修法是把 H5b 那一道
+> 判定挪到交回之前、送达时记停下行、完成核验认交回消息，改后实测过；从 `docs/00-开放边界.md` 删掉了这一条。
+
 ## 7. 归属
 
 - `agents/at-ui.md` 的 `tools:` 与「看页面实际长什么样」、`skills/at-ui-craft/SKILL.md` §10、`references/self-check.md` 的「怎么看页面」、`agents/at-qa.md`

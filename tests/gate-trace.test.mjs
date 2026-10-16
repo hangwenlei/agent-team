@@ -377,6 +377,41 @@ const SCENARIOS = [
     setup: () => ({ ...fromRun({ runId: 'r1', stage: 'S2' }), input: { hook_event_name: 'UserPromptSubmit', prompt: '继续' } }),
     shape: { status: 0, stdout: 'empty', stderr: 'empty' },
   },
+  // docs/99：auto 模式下交回之前的那一道（PreToolUse:SubagentHandback）与交回送达的记录（PostToolUse:SubagentHandback）。与上面 H5b 那几格
+  // 一样不带 agent_id——带了就往派发记录里记停下行，下面「不写文件」那条判据要的是留痕不改磁盘。
+  {
+    name: 'handback：产物在，放行',
+    check: 'handback',
+    setup: () => ({
+      ...fromRun({ runId: 'r1', stage: 'S2', artifacts: ['01-prd.md'] }),
+      input: { hook_event_name: 'PreToolUse', tool_name: 'SubagentHandback', agent_type: 'agent-team:at-product', tool_input: { message: '写好了。' } },
+    }),
+    shape: { status: 0, stdout: 'empty', stderr: 'empty' },
+  },
+  {
+    name: 'handback：产物缺、报告不是冒泡，拒（PreToolUse 的拒绝：exit 0 + stdout）',
+    check: 'handback',
+    setup: () => ({
+      ...fromRun({ runId: 'r1', stage: 'S2' }),
+      input: { hook_event_name: 'PreToolUse', tool_name: 'SubagentHandback', agent_type: 'agent-team:at-product', tool_input: { message: '写好了。' } },
+    }),
+    shape: { status: 0, stdout: 'nonempty', stderr: 'empty' },
+  },
+  {
+    name: 'handback-sent：送达，记停下行，静默',
+    check: 'handback-sent',
+    setup: () => ({
+      ...fromRun({ runId: 'r1', stage: 'S2' }),
+      input: {
+        hook_event_name: 'PostToolUse',
+        tool_name: 'SubagentHandback',
+        agent_type: 'agent-team:at-product',
+        tool_input: { message: '冒泡：缺输入' },
+        tool_response: { success: true, message: 'Report delivered to your caller.' },
+      },
+    }),
+    shape: { status: 0, stdout: 'empty', stderr: 'empty' },
+  },
   // M4d（docs/38，全量审查第 19 条）：完成核验。用户自己的话不是完成通知，静默。
   {
     name: 'completion：用户的话不是完成通知，静默',

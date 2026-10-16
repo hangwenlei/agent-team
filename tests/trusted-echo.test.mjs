@@ -30,6 +30,7 @@ import { runAsync } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { exoticPath } from '../hooks/lib/path-norm.mjs'
+import { HANDBACK_FRAME } from '../hooks/lib/completion.mjs'
 
 // 特殊字符一律用 fromCharCode 构造，不在源码里写 \u 转义（docs/27 §5）。
 const [LS, PS, NEL] = [0x2028, 0x2029, 0x85].map((c) => String.fromCharCode(c))
@@ -908,6 +909,22 @@ const SCENARIOS = [
     name: '完成核验：通知 <result> 第一行冒泡的理由',
     runFiles: { [DISPATCHES]: () => dispatchRecord() },
     calls: (_, P) => [['completion', notify({ result: `冒泡：${oneLine(P)}` })]],
+  },
+  // docs/99：auto 模式下的交回消息——报告在 <agent-message> 里、每一行缩进两格，第一行冒泡的理由同样是子代理写的文字。报告就在同一条消息里，
+  // 回传不引它（复核）：载荷一个字都不该出现，锚点认冒泡那一句的退路。
+  {
+    name: '完成核验：交回消息里报告第一行冒泡的理由（不回显）',
+    runFiles: { [DISPATCHES]: () => dispatchRecord() },
+    anchor: (text) => text.includes('冒泡了（理由写在它回报的下文里）'),
+    calls: (_, P) => [
+      [
+        'completion',
+        {
+          hook_event_name: 'UserPromptSubmit',
+          prompt: `<agent-message from="a0000000000000001">\n${HANDBACK_FRAME} The report follows:\n  冒泡：${oneLine(P)}\n</agent-message>`,
+        },
+      ],
+    ],
   },
   {
     name: '完成核验：通知的 <status>（不是 completed 的）',

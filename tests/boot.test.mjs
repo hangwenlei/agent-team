@@ -54,6 +54,16 @@ const INPUTS = {
   rework: { hook_event_name: 'PreToolUse', tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: '/p/x', content: '' } },
   deliverable: { hook_event_name: 'PostToolUse', tool_name: 'Agent', tool_input: { subagent_type: 'agent-team:at-product' } },
   'stop-gate': { hook_event_name: 'SubagentStop', agent_type: 'agent-team:at-product' },
+  // docs/99：CLI 2.1.301 auto 模式下交回的两道（键照实测）。
+  handback: { hook_event_name: 'PreToolUse', tool_name: 'SubagentHandback', agent_type: 'agent-team:at-product', agent_id: 'a0000000000000001', tool_input: { message: 'x' } },
+  'handback-sent': {
+    hook_event_name: 'PostToolUse',
+    tool_name: 'SubagentHandback',
+    agent_type: 'agent-team:at-product',
+    agent_id: 'a0000000000000001',
+    tool_input: { message: 'x' },
+    tool_response: { success: true, message: 'Report delivered to your caller.' },
+  },
   ledger: { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'at-pm', tool_input: { file_path: '/p/x', content: '' } },
   'approval-ask': {
     hook_event_name: 'PostToolUse',

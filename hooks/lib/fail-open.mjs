@@ -30,6 +30,8 @@ export const GATE_NAME = {
   readiness: '前置就绪',
   deliverable: '交付物核验',
   'stop-gate': '交付物核验',
+  handback: '交付物核验',
+  'handback-sent': '交付物核验',
   ledger: '账本',
   // M4k（docs/46，评审 F10）：两个记录器也记照现状交付——读不出输入、出错时还不知道是哪一种批准，叫「批准记录」。
   'approval-ask': '批准记录',

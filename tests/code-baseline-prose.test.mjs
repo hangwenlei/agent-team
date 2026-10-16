@@ -64,6 +64,45 @@ test('第 39 条：/agent-team:at 的「回退」——回到 S5 之前，照基
   for (const k of ROLLBACK) assert.ok(has(rb, k), `「回退」一节缺「${k}」`)
 })
 
+// docs/99：收口写交付文档时列出这一趟改了哪些文件——照代码基线、与「回退」同一套只读 git 命令；`.agent-team/` 与 `.playwright-mcp/` 不列；
+// 基线时已有改动的路径单列；基线记不了账的照实写、改按实现记录列。收口时告诉用户这份清单在哪，收不收进版本库由用户自己做（不给选项、不跑命令）。
+const DELIVERY = [
+  '交付文档里还要写**这一趟改了哪些文件**',
+  '照 `04-dispatch.md`「代码基线」那一节记的情形',
+  '与第 3 节的「回退」同一套只读 git 命令列出新增、修改、删除的文件',
+  '`git -c core.quotepath=off diff --name-status <基线> -- .` 列出改过、新加、删掉的',
+  '再用那一节的 `status` 命令补上没进版本库的新文件',
+  // 复核（docs/99 §9）：没有提交时 status 里已有的文件都是 `??`，比得出的只有新加、删掉；那时就在的文件一句话说明，不逐个列。
+  '基线写着「还没有提交」的，没有可比的提交：拿那一节记的 `status` 与现在的比，只分得出新加、删掉的文件',
+  '那时就在的文件这一趟改没改看不出来，写一句说明、不逐个列',
+  '这一趟里用户做了第一次提交的，也照实写明比不准',
+  '`.agent-team/` 与 `.playwright-mcp/`',
+  '下的不列',
+  '那时就已经有改动的路径单独列一组，注明是这一趟之前就有的改动',
+  '这份单子是自基线以来的',
+  '基线写着「不是 git 仓库」或「没记」的，写明这一趟对不了账，改照各份实现记录里写过的文件列',
+  '只列、不动',
+]
+const TELL = [
+  '这一趟改了哪些文件，告诉用户在 `08-delivery.md` 的哪一节',
+  '收不收进版本库、怎么收，由用户自己做',
+  '不列提交、丢弃这类选项让用户挑',
+  '你也不跑动工作树或历史的 `git` 命令',
+]
+test('docs/99：收口写交付文档时列出这一趟改了哪些文件；收口时告诉用户在哪、收不收进版本库由用户自己做', () => {
+  const at = read('commands/at.md')
+  const s6 = at.slice(at.indexOf('## 6. 收尾'))
+  const three = s6.slice(s6.indexOf('**三、写交付文档**'), s6.indexOf('**四、'))
+  const five = s6.slice(s6.indexOf('**五、'), s6.indexOf('**收口之后这一趟就冻结了**'))
+  assert.ok(three.length > 0 && five.length > 0, '前置：找不到第三步或第五步')
+  for (const k of DELIVERY) assert.ok(has(three, k), `第三步缺「${k}」`)
+  for (const k of TELL) assert.ok(has(five, k), `第五步缺「${k}」`)
+  // 只用只读的 git 子命令：与「回退」列文件那一句同一套（diff、status）。
+  const used = [...three.matchAll(/git (?:--no-optional-locks )?(?:-c \S+ )?([a-z-]+)/g)].map((m) => m[1])
+  assert.ok(used.length > 0, '前置：第三步一条 git 命令都没认出来')
+  for (const sub of used) assert.ok(['diff', 'status'].includes(sub), `第三步用了 git ${sub}`)
+})
+
 test('第 39 条：项目经理的红线与续跑接上代码基线——批准的退回不算代笔；停在 S4 的续跑核这一节', () => {
   assert.ok(has(read('agents/at-pm.md'), '用户批准、写进修订记录的退回代码基线不算，照 `/agent-team:at` 的「回退」只按文件退'), 'agents/at-pm.md')
   assert.ok(has(read('commands/at-resume.md'), '`04-dispatch.md` 要有「代码基线」一节，没有就照模板那一节现在补上'), 'commands/at-resume.md')
