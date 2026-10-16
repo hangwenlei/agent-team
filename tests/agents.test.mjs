@@ -17,6 +17,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { isContractWriter } from '../hooks/lib/contract-guard.mjs'
+import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
 import { decideWritePath } from '../hooks/lib/writepath.mjs'
 import { toolsDeclarationOf } from './helpers/agent-tools.mjs'
 import { EXPECTED_AGENTS } from './helpers/expected-agents.mjs'
@@ -654,31 +655,40 @@ test('角色正文里出现的每个 NN-*.md 产物名都是某个阶段的 prod
   }
 })
 
+// frontmatter 的 skills: 一律写全名（插件名加冒号）：平台按名字在全部 skill 里精确匹配，写裸名时用户或项目层的同名 skill 先命中（docs/97 实测），
+// 理由与 settings.json 的 agent 写全名相同。存在性判据剥掉前缀再查目录。
+const preloadedSkills = (f) => {
+  const line = fmOf(f).split(/\r?\n/).find((l) => /^skills:/.test(l.trim()))
+  return line ? line.replace(/^skills:\s*/, '').split(/[,\s]+/).filter(Boolean) : []
+}
+const bareSkill = (s) => (s.startsWith(PLUGIN_PREFIX) ? s.slice(PLUGIN_PREFIX.length) : s)
+
+test('frontmatter 的 skills: 每一项都写全名（带插件前缀）', () => {
+  for (const f of AGENTS) {
+    for (const s of preloadedSkills(f)) assert.ok(s.startsWith(PLUGIN_PREFIX), `agents/${f} 预加载 ${s}：写成 ${PLUGIN_PREFIX}${s}，裸名会被用户或项目层的同名 skill 抢先`)
+  }
+})
+
 test('frontmatter 的 skills: 引用的 skill 真的存在', () => {
   for (const f of AGENTS) {
-    const line = fmOf(f).split(/\r?\n/).find((l) => /^skills:/.test(l.trim()))
-    if (!line) continue
-    for (const s of line.replace(/^skills:\s*/, '').split(/[,\s]+/).filter(Boolean)) {
-      assert.ok(existsSync(url(`skills/${s}/SKILL.md`)), `agents/${f} 预加载 ${s}，但 skills/${s}/SKILL.md 不存在`)
+    for (const full of preloadedSkills(f)) {
+      const s = bareSkill(full)
+      assert.ok(existsSync(url(`skills/${s}/SKILL.md`)), `agents/${f} 预加载 ${full}，但 skills/${s}/SKILL.md 不存在`)
     }
   }
 })
 
 // skills/ 目录同样是一次目录扫描，同样可能因为扫描出问题而悄悄返回空——与 AGENTS
 // 是同一类风险，钉法照抄 tests/skills.test.mjs 第 8-10 行。
-const EXPECTED_SKILLS = ['at-api-contract', 'at-contract-format', 'at-handoff-package']
+const EXPECTED_SKILLS = ['at-api-contract', 'at-contract-format', 'at-handoff-package', 'at-ui-craft']
 
-test('skills/ 目录下恰好是这三个共享 skill——否则「每个 skill 至少被一个角色预加载」在对空集合空转', () => {
+test('skills/ 目录下恰好是这几个共享 skill——否则「每个 skill 至少被一个角色预加载」在对空集合空转', () => {
   assert.deepEqual(readdirSync(url('skills')).sort(), [...EXPECTED_SKILLS].sort())
 })
 
 test('每个 skill 至少被一个角色预加载——没人读的 skill 是死文件', () => {
   const referenced = new Set()
-  for (const f of AGENTS) {
-    const line = fmOf(f).split(/\r?\n/).find((l) => /^skills:/.test(l.trim()))
-    if (!line) continue
-    for (const s of line.replace(/^skills:\s*/, '').split(/[,\s]+/).filter(Boolean)) referenced.add(s)
-  }
+  for (const f of AGENTS) for (const s of preloadedSkills(f)) referenced.add(bareSkill(s))
   for (const s of readdirSync(url('skills'))) {
     assert.ok(referenced.has(s), `skills/${s} 没有任何角色预加载它`)
   }

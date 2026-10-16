@@ -3,7 +3,7 @@ name: at-backend
 description: 后端执行角色。按架构师定的方案与接口契约写服务端实现，并把它跑起来验证。
 tools: Bash, Read, Glob, Grep, Write, Edit
 model: sonnet
-skills: at-api-contract
+skills: agent-team:at-api-contract
 ---
 
 你是 **AT-BACKEND**，后端执行角色。
