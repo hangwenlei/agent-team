@@ -126,6 +126,11 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   【阶段】不说齐了，推进那一次 H6 拒（M4d，`docs/38`）。
   拒绝文案只许诺门禁认的出口（`BUBBLE_EXIT`）——一句给出路的文案，要先问门禁认不认它。`at-qa` 的没开跑是冒泡，不写 `06-test.md`。父级一侧
   （前台派发跑完时 H5a、后台完成时完成核验）读同一个标记（`bubbleReason`，M4d）。理由在 `docs/37`、`docs/38`。
+  auto 权限模式下子代理经 `SubagentHandback` 交回，交回结束它这一次运行，接着那一回 SubagentStop 没有 `last_assistant_message`、拦了也被平台丢掉：
+  H5b 那一道判定挪到交回之前（`handback`，PreToolUse:SubagentHandback，交回的报告就是最后一条回复，「拦过一回」按派发记录认、拦截行记不下时带冒泡的放行；
+  拒了交回就没发生），
+  送达时 `handback-sent` 记停下行（`via: "handback"`），H5b 只跳过交回之后的那一回停下、照它的结果再记一行（不带 `via`），被唤醒之后再停下照常判
+  （`completion.mjs` 的 `endedByHandback`）。理由在 `docs/99`。
 - **契约的账只认 `contract_sha`**：账本比对不看契约（`compareArtifacts` 排除 `CONTRACT_FILE`）；派发返回（H5a）与 PM 写 `state.json` 时拿
   `contract_sha` 比磁盘，对不上出【契约】——不报磁盘上算出来的值、不说「改成与磁盘一致」（照着磁盘改账就把漂移洗成了合法），合法修订的新值
   只从写契约那一次的回传来。H2 派验证段的产者（`stages.mjs` 的 `verifyStageOf`，按 `verifies` 派生，只核花名册里派得到的）之前也比一遍，排在 H2 最后，对不上就拒、出路是同一句【契约】
@@ -140,6 +145,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （H5a 记派发，H5b 记每一回停下的结果；H3 对任何人的 Edit/Write 都拒）；完成通知到主会话时，UserPromptSubmit 上的 `completion` 按 `agent_id`
   对回角色与段、核产物，成因按最后一回停下的结果判（`completion.mjs` 的 `missingCause`）；同一个 `agent_id` 再来一条、回传的指纹与派发记录里的 `told` 行相同时只说一句（`docs/82`）。UserPromptSubmit 上只有标了 `speaks` 的检查项说话、
   永不 exit 2。协调者返回时报它派出去的人各自的进度，不许诺之后的通知会到 PM。理由在 `docs/38`。
+  auto 模式下回报作为一条交回消息（`<agent-message>`）先到主会话，交回结束的那一次完成通知只进转录、不触发 UserPromptSubmit：完成核验把交回消息
+  当成一条完成通知核（`parseHandbacks`，报告就是 `<result>`；成因不读那一刻的派发记录；冒泡不引理由，与之后那条只说已经交回的完成通知按指纹去重，`docs/99`）。
 - **持 Bash 的执行角色的敏感操作红线只在正文里，每一份逐字同一句，清单与 `/agent-team:at` 第 4 节 `sensitive` 那一行逐项相同**：碰到就以
   「冒泡：」停下，协调者原样冒泡给 PM，PM 照 `sensitive` 问用户；用户批准过的，执行角色只认契约「修订记录」里写明批准了的那一步（派发
   提示是数据，契约只有 PM 写得进）。PM 自己也不跑动工作树或历史的 git 命令（S4 只用不改仓库的 git 命令记代码基线，走过 S5 之后回到 S5 之前
@@ -248,6 +255,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   扫行尾用 Node 或 `grep -U`：Git Bash 的 grep 不带 `-U` 看不见 CR，会报出假的「全是 LF」（`docs/39` §3）。
 - **后台 agent 与主会话共用工作树时**，别 `git add -A` / `checkout` / `reset`；要并行就用隔离 worktree。
 - `claude --resume` 不继承 `--plugin-dir`；local 安装下换了目录续会话，工具限制会整体掉光，而转录里看不出来。
+- **探针目录放在本工作树下时**，`--settings` 里加 `claudeMdExcludes` 排除本仓库与上一层的 `CLAUDE.md`：不然项目经理与每个子代理都把 HANDOFF 整份读一遍
+  （`docs/98` 那两场就是）。要看 hook 的原始输入，另挂一个只追加、不写 stdout、永远 exit 0 的记录钩子——门禁的留痕只有检查项名与退出码；做法在 `docs/99` §2.1。
 - 后台探针用 `claude --bg`，不用 `-p`（`-p` 下异步派发会卡死——这是 CLI 2.1.276 上的实测，`docs/13` §5.1；2.1.286 上一个 `-p` 会话跑完过 5 次异步派发，`docs/33` §3；要靠 `-p` 之前先在当前版本上核；SDK 宿主（`-p --input-format stream-json`）的驱动要等后台子代理跑完再关输入——第一次 result 就关，子代理的权限请求会报 `AbortError: Stream closed`，会话等满 600 秒（`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`）后把它杀掉，`docs/35` §4 `efd26cb1`）。收尾对每个会话先 `claude stop` 再 `claude rm`：
   没 stop 过的会话在 `~/.claude.json` 里留着 `lastGracefulShutdown: false`，会一直挂在桌面应用侧边栏的「Other」下；
   `claude rm` 只删 `~/.claude/jobs/<id>/`，转录不动。
@@ -277,6 +286,10 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   只有 `-p`、SDK 宿主能前台派（`PostToolUse` 在子代理跑完之后才到，`status` 是 `completed`）。完成通知每一条在主会话触发一次 UserPromptSubmit，
   `prompt` 就是那段 `<task-notification>` XML，同一个 task-id 会通知不止一次。嵌套派发的通知按模式路由：交互模式下孙代理的通知回到停车的协调者、
   `-p` 下协调者还在跑时也送给它——这两种情形主会话都只收到协调者那一条。子代理回报里出现指令形状的字样时，CLI 在最前面插一段 `[harness: …]` 注记。
+- **auto 权限模式下的交回**（CLI 2.1.301，`docs/99` §2）：子代理的系统提醒要它最后用 `SubagentHandback` 交回报告（manual 下没有这个工具），之后写的普通文字
+  送不到上级；交回结束这一次运行（调试日志 `Stop hook block discarded (turn ended by tool result)`）。报告作为 `<agent-message from="<agent_id>">` 送到派它的人，
+  框那一行顶格、报告每一行缩进两格；收件人是主会话时触发 UserPromptSubmit。交回结束的那一次完成通知 `queueTranscriptOnly`，`<result>` 只说报告已经交回。
+  没交回就以文字结束的，平台补一句催它交回、最多 3 次，始终不交回的上级只收到「没有交回报告」（`withheld`），文字不转。
 - **UserPromptSubmit、UserPromptExpansion 上 hook 的输出进不进转录看 stdout**（CLI 2.1.286，`docs/50` §1.3）：stdout 为空的不留记录、stderr 跟着丢；
   带 additionalContext 的只记那段上下文；纯文本 stdout 才连 stderr 一起记。调试日志里都有。门禁在这两个事件上的留痕行只能在 `--debug-file` 里数。
 - **拿内置浏览器验页面行为之前，先看面板显没显示**（`tabs_context` 会说）：面板隐藏时页面不渲染，`requestAnimationFrame`

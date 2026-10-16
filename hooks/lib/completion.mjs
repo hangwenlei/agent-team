@@ -15,12 +15,22 @@
 //   - 嵌套派发的通知路由按模式分：-p 下协调者还在跑，孙代理的通知送给协调者、不触发任何 hook；交互模式下协调者停车、被孙代理的通知
 //     唤醒。所以协调者返回时，它派出去的人的完成通知不一定会到 PM 那里——进度那一段不许诺「之后门禁会单独核它」。
 //
+// 平台事实（CLI 2.1.301，docs/99 §2）：auto 权限模式下子代理用 SubagentHandback 工具交回最后的报告，交回会结束它这一次运行。
+//   - 报告作为一条 user 消息送到派它的人那里；收件人是主会话时 UserPromptSubmit 随之触发，prompt 是 <agent-message from="<agent_id>">，
+//     下一行起是 CLI 的框（以 [Subagent hand-back] 开头的一行），报告的每一行都缩进两格（框之上可能还有一段同样缩进的注记，例如
+//     SECURITY WARNING），最后一行是 </agent-message>。认它的是 parseHandbacks。
+//   - 这一次运行的完成通知里 <result> 只说报告已经经交回送到、不再重复；交回结束的那一次，通知只进转录、不触发 UserPromptSubmit。
+//   - 那一回 SubagentStop 没有 last_assistant_message（最后一条只有工具调用），stop_hook_active 为假，拦了也被平台丢掉
+//     （turn ended by tool result）。所以交回之前的那一道判定挂在 PreToolUse:SubagentHandback 上，送达时由 PostToolUse 记停下行。
+//
 // 门禁专属文件 runs/<id>/dispatches.jsonl（control-files.mjs 的 GATE_FILES）：门禁自己追加，任何人的 Edit/Write 都拒。三种行（told 那一种在 toldLine 上方）：
 //   - { kind: "dispatch", at, agent_id, tool_use_id, role, stage, caller, caller_id, mode }：H5a 在团队角色的每一次派发返回时记（mode 是
 //     "background"（启动那一刻）或 "foreground"（跑完那一刻））。stage 是那一刻的 state.stage——完成时按派它时的那一段核，不按完成时的。
 //   - { kind: "stop", at, agent_id, role, stage, outcome }：H5b 每一回停下记一行，outcome 是 pass（放它停下）、bubble（认冒泡、放它停下）、
 //     block（拦）。复核（docs/38 §3）：原型只记拦截，「拦过一回」就被当成「平台静默放行」——可冒泡之前必然先被拦一回；进度也分不出
 //     「还在跑」与「已经停了」。现在成因按这个子代理最后一回停下的结果判。
+//     docs/99：交回送达时记的那一行多一个 via: "handback"（outcome 是 bubble 或 pass）；拦下交回的那一行与 H5b 拦的一样记 block。
+//     没有 via 的行照旧读，旧的派发记录不改判。
 // 只追加、一行一次写入（O_APPEND，几百字节）：并发的几个门禁进程各写各的整行，不读后判，不用锁。读的一方跳过解析不出的行。
 import { BUBBLE_MARK, bubbleReason } from './deliverable.mjs'
 import { isPlainObject } from './stages.mjs'
@@ -130,13 +140,45 @@ export function parseNotifications(prompt) {
   return out
 }
 
+// docs/99：交回消息的框——CLI 在 <agent-message> 里、报告之前写的那一行以它开头（顶格；报告与框之上的注记每一行都缩进两格，
+// 所以报告里写不出一行顶格的框，也写不出顶格的 </agent-message>）。
+export const HANDBACK_FRAME = '[Subagent hand-back]'
+const HANDBACK_OPEN_RE = /^<agent-message from="([A-Za-z0-9_-]{1,64})">$/
+const HANDBACK_CLOSE = '</agent-message>'
+
+/**
+ * docs/99：UserPromptSubmit 的 prompt 里的交回消息（auto 模式下子代理经 SubagentHandback 交回的报告）。认行首的 <agent-message from="…">、
+ * 到顶格的 </agent-message> 为止；里面要有一行顶格的框，框之上、之下的每一行都缩进两格，不然不认（别的会话发来的消息、形状变了的）。
+ * 返回与 parseNotifications 同形的 [{ taskIds: [from], toolUseId: null, status: null, result: 报告（去掉两格缩进）, handback: true }]。
+ */
+export function parseHandbacks(prompt) {
+  if (typeof prompt !== 'string' || !prompt.includes('<agent-message ')) return []
+  const lines = prompt.replace(/\r/g, '').split('\n')
+  const out = []
+  for (let i = 0; i < lines.length; i++) {
+    const m = HANDBACK_OPEN_RE.exec(lines[i])
+    if (!m) continue
+    const end = lines.indexOf(HANDBACK_CLOSE, i + 1)
+    if (end < 0) break
+    const body = lines.slice(i + 1, end)
+    i = end
+    const frame = body.findIndex((l) => l.startsWith(HANDBACK_FRAME))
+    if (frame < 0) continue
+    const indented = (l) => l.startsWith('  ')
+    const report = body.slice(frame + 1)
+    if (!body.slice(0, frame).every(indented) || !report.every(indented)) continue
+    out.push({ taskIds: [m[1]], toolUseId: null, status: null, result: report.map((l) => l.slice(2)).join('\n'), handback: true })
+  }
+  return out
+}
+
 export function dispatchLine({ at, agentId, toolUseId, role, stage, caller, callerId, mode }) {
   return JSON.stringify({ kind: 'dispatch', at, agent_id: agentId, tool_use_id: toolUseId ?? null, role, stage, caller, caller_id: callerId ?? null, mode })
 }
 
-/** H5b 一回停下的结果：pass（放它停下）、bubble（认冒泡、放它停下）、block（拦）。 */
-export function stopLine({ at, agentId, role, stage, outcome }) {
-  return JSON.stringify({ kind: 'stop', at, agent_id: agentId, role, stage, outcome })
+/** H5b 一回停下的结果：pass（放它停下）、bubble（认冒泡、放它停下）、block（拦）。via：'handback' 是交回送达那一刻记的（docs/99），别的不写这个键。 */
+export function stopLine({ at, agentId, role, stage, outcome, via = null }) {
+  return JSON.stringify({ kind: 'stop', at, agent_id: agentId, role, stage, outcome, ...(via === null ? {} : { via }) })
 }
 
 // docs/82（docs/38 §5「重复通知会重复回传」）：完成核验对一个子代理的完成通知回传过什么——那一段回传的指纹。平台对同一个 task-id 会送不止一条通知，
@@ -147,7 +189,7 @@ export function toldLine({ at, agentId, role, stage, sha }) {
 
 /**
  * dispatches.jsonl 的原文 → { dispatches: [派发行，按原顺序], stops: Map(agent_id → [结果，按原顺序]), blocks: Map(agent_id → 拦过几回),
- * told: Map(agent_id → 完成核验最后一次回传的指纹) }。
+ * told: Map(agent_id → 完成核验最后一次回传的指纹), lastStopLine: Map(agent_id → 它最后一条停下行) }。
  * 解析不出、形状不对的行跳过——这个文件 Edit/Write 写不进，Bash 写得进；角色名与段名照样不可信，用的一方再拿花名册与阶段链核（gate.mjs）。
  */
 export function readDispatchLog(text) {
@@ -155,7 +197,8 @@ export function readDispatchLog(text) {
   const stops = new Map()
   const blocks = new Map()
   const told = new Map()
-  if (typeof text !== 'string') return { dispatches, stops, blocks, told }
+  const lastStopLine = new Map()
+  if (typeof text !== 'string') return { dispatches, stops, blocks, told, lastStopLine }
   for (const line of text.split('\n')) {
     if (!line.trim()) continue
     let v
@@ -171,15 +214,26 @@ export function readDispatchLog(text) {
       if (!stops.has(v.agent_id)) stops.set(v.agent_id, [])
       stops.get(v.agent_id).push(v.outcome)
       if (v.outcome === 'block') blocks.set(v.agent_id, (blocks.get(v.agent_id) ?? 0) + 1)
+      lastStopLine.set(v.agent_id, v)
     } else if (v.kind === 'told' && typeof v.sha === 'string' && SHA_RE.test(v.sha)) told.set(v.agent_id, v.sha)
   }
-  return { dispatches, stops, blocks, told }
+  return { dispatches, stops, blocks, told, lastStopLine }
 }
 
 /** 这个子代理最后一回停下的结果（pass、bubble、block）；门禁没见它停下过返回 null。 */
 export function lastStop(log, agentId) {
   const s = log?.stops?.get(agentId)
   return Array.isArray(s) && s.length ? s[s.length - 1] : null
+}
+
+/**
+ * docs/99：这个子代理在派发记录里的最后一条停下行，是交回送达那一刻记的（via: "handback"）——它这一次运行是交回结束的，接着来的那一回
+ * SubagentStop 拦了也会被平台丢掉，停下行已经记过。H5b 跳过那一回时照它的结果再记一行（不带 via），所以只认交回之后的那一回：它之后被唤醒
+ * 再停下照常判。交回没送达（工具结果不是成功）不记那一行，之后它以文字停下时照常判。
+ */
+export function endedByHandback(log, agentId) {
+  const v = log?.lastStopLine?.get(agentId)
+  return isPlainObject(v) && v.via === 'handback'
 }
 
 /** 派发记录里，每一段派出去过的角色：{ 段: [角色] }。推进与收口判「这一段叫过谁」时并上它（advance.mjs 的 calledIn）。 */
@@ -235,10 +289,14 @@ export function statusPhrase(status) {
  * 没交齐的成因，依次：通知说它没正常结束（status）；它最后一回停下是冒泡、或者回报（剥掉 CLI 注记之后）第一行是冒泡标记（bubble）；
  * 它最后一回停下门禁拦了它、它却结束了（cap）；它最后一回停下门禁放行了（pass：那一刻它不在那一段的名单上——PM 推进或回退了；或者
  * 那时交了、之后又没了）；门禁没见它停下过（nostop）。
+ * handback（docs/99）：这是一条交回消息——交回之前门禁照 H5b 同一个判定核过，放它交回、报告又不是冒泡的，就是那一刻门禁放行了（pass）；
+ * 不读派发记录里最后一回停下的结果：交回消息与记停下行的那一道几乎同时到，那时记录里可能还是早先拦它的那一行。冒泡的不引理由：报告就在
+ * 同一条消息里、项目经理看得到；它之后再被唤醒、以文字结束时那条完成通知只说报告已经交回，回传因此逐字相同，按指纹去重（复核）。
  */
-export function missingCause({ status = null, last = null, bubble = null, blocks = 0 }) {
+export function missingCause({ status = null, last = null, bubble = null, blocks = 0, handback = false }) {
   if (status !== null && status !== 'completed') return { kind: 'status', status }
-  if (last === 'bubble' || bubble !== null) return { kind: 'bubble', reason: bubble }
+  if (last === 'bubble' || bubble !== null) return { kind: 'bubble', reason: handback ? null : bubble }
+  if (handback) return { kind: 'pass' }
   if (last === 'block') return { kind: 'cap', blocks }
   if (last === 'pass') return { kind: 'pass' }
   return { kind: 'nostop' }

@@ -60,6 +60,21 @@
             "statusMessage": "校验返工预算…"
           }
         ]
+      },
+      {
+        "matcher": "^SubagentHandback$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "handback"
+            ],
+            "timeout": 30,
+            "statusMessage": "校验交回…"
+          }
+        ]
       }
     ],
     "SubagentStop": [
@@ -91,6 +106,21 @@
             ],
             "timeout": 30,
             "statusMessage": "记录交付物校验…"
+          }
+        ]
+      },
+      {
+        "matcher": "^SubagentHandback$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "handback-sent"
+            ],
+            "timeout": 30,
+            "statusMessage": "记录交回…"
           }
         ]
       },

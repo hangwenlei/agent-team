@@ -238,7 +238,9 @@ test('systemMessage：固定文字、README 的叫法、不带受信前缀', () 
   assert.match(systemMessage('dispatch-unreadable', { cause: 'pointer' }), /前置就绪/)
   assert.match(systemMessage('unknown-stage'), /交付物核验/)
   assert.match(systemMessage('dispatch-unreadable', { cause: 'plugin' }), /重装或更新 agent-team 插件/)
-  assert.deepEqual(Object.keys(GATE_NAME).sort(), ['approval-ask', 'approval-prompt', 'completion', 'deliverable', 'ledger', 'readiness', 'stop-gate'])
+  assert.deepEqual(Object.keys(GATE_NAME).sort(), ['approval-ask', 'approval-prompt', 'completion', 'deliverable', 'handback', 'handback-sent', 'ledger', 'readiness', 'stop-gate'])
+  // docs/99：交回的两道是 H5b 挪到交回前后的那一半，README 那一侧同叫「交付物核验」。
+  for (const c of ['handback', 'handback-sent']) assert.equal(GATE_NAME[c], GATE_NAME['stop-gate'], c)
 })
 
 // M3z（docs/34）：记录器（approval-ask）不放行任何东西，它出错的后果是「这次的回答没有记下」——通用文案里的「放行」会说错后果（P3）。

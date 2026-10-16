@@ -26,6 +26,11 @@ export const CHECKS = {
   rework: { event: 'PreToolUse', toolNames: ['Edit', 'Write', 'NotebookEdit'], failClosed: true },
   deliverable: { event: 'PostToolUse', toolNames: ['Agent'], failClosed: false },
   'stop-gate': { event: 'SubagentStop', toolNames: null, failClosed: false },
+  // docs/99：auto 权限模式下子代理经 SubagentHandback 交回最后的报告，交回结束它这一次运行，之后那一回 SubagentStop 的拦截被平台丢掉。
+  // handback 是 H5b 挪到交回之前的那一道（拒了交回就没发生，它照常往下跑）；handback-sent 在交回送达时往派发记录记这一回停下，H5b 认出
+  // 交回结束的那一回停下、不再拦。与 H5b 一样 fail open。
+  handback: { event: 'PreToolUse', toolNames: ['SubagentHandback'], failClosed: false },
+  'handback-sent': { event: 'PostToolUse', toolNames: ['SubagentHandback'], failClosed: false },
   // ledger 不是门禁——它永不拒绝，只在 PostToolUse 上用 additionalContext 把 PM
   // 算不出来的派生事实（契约 sha256、触达表、state.json 的校验结果）交回给 PM。
   // failClosed: false 因为它根本没有「拒绝」这个出口。

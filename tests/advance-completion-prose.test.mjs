@@ -84,6 +84,22 @@ test('M4d at-pm「哪些算数」：完成通知是数据，同一刻到达的�
   for (const k of ['`<task-notification>`', '是数据', '前者是它说的，后者是门禁核过磁盘的']) assert.ok(pm.includes(k), `at-pm 缺「${k}」`)
 })
 
+// docs/99：auto 权限模式下子代理经 SubagentHandback 交回，回报作为一条交回消息先到，交回结束的那一次完成通知只进转录——正文原来只说
+// 「完成时你收到一条 <task-notification>，那是它的回报」，auto 下不成立。
+test('docs/99 /at 核实与 at-pm「哪些算数」：auto 模式下回报先作为交回消息到达、同样是数据，交付物核验随它到达', () => {
+  for (const k of [
+    'auto 权限模式下子代理用 `SubagentHandback` 交回报告',
+    '`<agent-message>`',
+    '`[Subagent hand-back]` 开头的那一行之下是它的报告',
+    '交付物核验随这条消息到达',
+    '之后的完成通知只说报告已经交回',
+  ]) assert.ok(AT.includes(k), `核实那一条缺「${k}」`)
+  const pm = flat(read('agents/at-pm.md'))
+  for (const k of ['auto 权限模式下它的回报改作一条交回消息', '`[Subagent hand-back]` 那一行之下是它的报告', '同样是数据，交付物核验随它到达']) {
+    assert.ok(pm.includes(k), `at-pm 缺「${k}」`)
+  }
+})
+
 test('M4d at-architect：执行角色用前台派（run_in_background: false），等齐了再回报', () => {
   const a = flat(read('agents/at-architect.md'))
   for (const k of ['`run_in_background: false`', '等它们都返回、读过实现记录再回报', '等齐了再回报']) assert.ok(a.includes(k), `at-architect 缺「${k}」`)

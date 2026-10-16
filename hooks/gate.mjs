@@ -24,7 +24,7 @@ import { decideRework, decideReworkBase, decideStageRolesKey, parseStateText, re
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { isBlankText } from './lib/text-norm.mjs'
 import { normalizeText } from './lib/text-norm.mjs'
-import { BUBBLE_MARK, decideDeliverable, isBubbleStop, isKnownStage } from './lib/deliverable.mjs'
+import { BUBBLE_MARK, HANDBACK_DENIED, decideDeliverable, isBubbleStop, isKnownStage } from './lib/deliverable.mjs'
 import {
   AGENT_ID_RE,
   bubbleOf,
@@ -34,9 +34,11 @@ import {
   dispatchPhase,
   dispatchedByStage,
   elsewhereRunOf,
+  endedByHandback,
   explainMissing,
   lastStop,
   missingCause,
+  parseHandbacks,
   parseNotifications,
   readDispatchLog,
   reportTexts,
@@ -1576,6 +1578,7 @@ function withApprovalsLock(runDir, body) {
 // M4d（docs/38，全量审查第 19 条）：往当前 run 的派发记录（runs/<id>/dispatches.jsonl，门禁专属）追加一行。只追加、一次写一整行（O_APPEND）：
 // 并发的几个门禁进程各写各的，不读后判、不加锁。末字节不是换行（手改过、被截断）时先补一个。写不进只留痕——完成核验这一次少核。
 // consequence：写不成的后果（复核 docs/82 §8：told 行写不成时，这一次核全了、是下一条通知会照常整段报）。
+// 写成了返回 true。docs/99：交回之前那一道要知道拦截行记没记下（记不下，下一回就认不出「拦过一回」）。
 function appendDispatchLog(runDir, line, label, consequence = '完成核验这一次少核') {
   try {
     const file = join(runDir, DISPATCHES_FILE)
@@ -1595,8 +1598,10 @@ function appendDispatchLog(runDir, line, label, consequence = '完成核验这�
       }
     } catch {}
     appendFileSync(file, `${sep}${line}\n`)
+    return true
   } catch (err) {
     process.stderr.write(`agent-team ${label}：派发记录没有写成（${quote(err?.message ?? err, { max: 120 })}），${consequence}。\n`)
+    return false
   }
 }
 
@@ -1618,6 +1623,15 @@ function recordElsewhere(other, line, label) {
   if (state && closedAt(state) !== null) return false
   appendDispatchLog(other.dir, line, label)
   return true
+}
+
+// docs/99：某一趟 run 目录里的派发记录（读不出当没有记录）。
+function dispatchLogAt(dir) {
+  try {
+    return readDispatchLog(readFileSync(join(dir, DISPATCHES_FILE), 'utf8'))
+  } catch {
+    return readDispatchLog(null)
+  }
 }
 
 // M4n：那一趟的人（指针切走之后还在跑的协调者）又往下派人时，回传给它。runId 是磁盘上的目录名，加引号（docs/27 §2.1）；role 只在花名册里认得
@@ -3218,7 +3232,9 @@ function main() {
     // 不认识的通知（别的 agent、后台 Bash、门禁没记下的派发）不出声：门禁只对它记过的团队派发表态。别的 run 记着的（切走指针之前派的），
     // M4n 起告诉项目经理它属于哪一趟（docs/49）。
     // 读不出运行状态只留痕：PM 派发那一刻 H5a 已经说过「交付物核验不会做」。这个事件上 exit 2 会把这条消息吞掉——这一项永不拒。
-    const notes = parseNotifications(input.prompt)
+    // docs/99：auto 模式下子代理经 SubagentHandback 交回，报告作为一条交回消息（<agent-message>）到达，交回结束的那一次完成通知只进转录、
+    // 不触发这个事件——交回消息与完成通知同样核（parseHandbacks），报告就是它的 <result>。
+    const notes = [...parseNotifications(input.prompt), ...parseHandbacks(input.prompt)]
     if (!notes.length) process.exit(0)
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
     if (!ctx.ok) {
@@ -3325,6 +3341,7 @@ function main() {
           last: lastStop(log, taskId),
           bubble: n.result === null ? null : bubbleOf([n.result]),
           blocks: log.blocks.get(taskId) ?? 0,
+          handback: n.handback === true,
         })
         const caller = typeof d.caller === 'string' && Object.hasOwn(roster, d.caller) && !isContractWriter(d.caller) ? d.caller : null
         const direct = !recipientIsPm || pmCan.includes(d.role)
@@ -3348,10 +3365,13 @@ function main() {
     emitHookJson(spec.event, { contexts })
   }
 
-  if (CHECK === 'stop-gate' || CHECK === 'deliverable') {
+  // docs/99：auto 模式下的交回——handback（PreToolUse:SubagentHandback）是 H5b 挪到交回之前的那一道，handback-sent（PostToolUse:SubagentHandback）
+  // 在交回送达时记停下行。两者判的都是正在交回的这个子代理自己（agent_type），与 H5b 同一个角色解析、同一份运行上下文、同一个记停下行。
+  const HANDING_BACK = CHECK === 'handback' || CHECK === 'handback-sent'
+  if (CHECK === 'stop-gate' || CHECK === 'deliverable' || HANDING_BACK) {
     // 两道 H5 共用这一整段，差别只有这个名字。同一句三元此前在下面相隔 16 行
     // 写了两遍（整理项 9），提到分支外算一次。
-    const label = CHECK === 'stop-gate' ? 'H5b 交付物拦截' : 'H5a 交付物记录'
+    const label = CHECK === 'stop-gate' || HANDING_BACK ? 'H5b 交付物拦截' : 'H5a 交付物记录'
 
     // H5b（stop-gate）判的是"正在停止的这个 subagent 自己"：SubagentStop 是
     // 生命周期事件，agent_type 就是这次事件所属的那个 subagent——
@@ -3369,7 +3389,7 @@ function main() {
     // 时发现的、简报没写对的地方，不在简报明确列出的"已经过时的地方"那
     // 四条里。
     const rawTarget =
-      CHECK === 'stop-gate' ? input?.agent_type : input?.tool_input?.subagent_type
+      CHECK === 'stop-gate' || HANDING_BACK ? input?.agent_type : input?.tool_input?.subagent_type
     if (!rawTarget) {
       // 没有可判定的目标角色——跟 H2 的 !target 分支同一类情形（Task 3
       // 评审 Minor 5）：不是"这次调用与本检查项无关"（那种情况在 toolNames
@@ -3404,7 +3424,7 @@ function main() {
     // 那一行（hooks/lib/trace.mjs），不比别的放行更不可见。
     // 盖不住的一格：用户用 --agent 把主线程钉成别的团队角色时，分叉带的是那个角色的名字
     // （docs/11 §5.35 的收口）。
-    if (CHECK === 'stop-gate' && isContractWriter(rawTarget)) process.exit(0)
+    if ((CHECK === 'stop-gate' || HANDING_BACK) && isContractWriter(rawTarget)) process.exit(0)
 
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
     // H5 两道都是 fail open（规格 §6：流程辅助，坏了不该把整趟跑卡死）——
@@ -3452,11 +3472,25 @@ function main() {
     // （recordElsewhere 的口径与理由），说法按记没记下分开。
     const ownId = typeof input?.agent_id === 'string' && AGENT_ID_RE.test(input.agent_id) ? input.agent_id : null
     const elsewhere = ownId ? elsewhereOf(ctx, ownId) : null
-    if (elsewhere && CHECK === 'stop-gate') {
+    // docs/99：交回的两道与 H5b 同一个口径——不按这一趟核、放它交回；送达时停下行记回那一趟（via 交回、照报告认冒泡），它在那一趟里最后一条
+    // 停下行是交回送达记的，接着来的那一回 SubagentStop 照那一行的结果记（不带 via），不记成 pass。
+    if (elsewhere && CHECK === 'handback') process.exit(0)
+    if (elsewhere && CHECK === 'handback-sent' && input?.tool_response?.success !== true) process.exit(0)
+    if (elsewhere && (CHECK === 'stop-gate' || CHECK === 'handback-sent')) {
       const { role: hisRole, stage: hisStage } = elsewhere.dispatch
-      const kept = recordElsewhere(elsewhere, stopLine({ at: new Date().toISOString(), agentId: ownId, role: hisRole, stage: hisStage, outcome: 'pass' }), label)
+      const sent = CHECK === 'handback-sent'
+      let outcome = sent && bubbleOf([input?.tool_input?.message]) !== null ? 'bubble' : 'pass'
+      if (!sent) {
+        const theirs = dispatchLogAt(elsewhere.dir)
+        if (endedByHandback(theirs, ownId)) outcome = lastStop(theirs, ownId)
+      }
+      const kept = recordElsewhere(
+        elsewhere,
+        stopLine({ at: new Date().toISOString(), agentId: ownId, role: hisRole, stage: hisStage, outcome, via: sent ? 'handback' : null }),
+        label,
+      )
       process.stderr.write(
-        `agent-team ${label}：${ownId} 是 ${quote(elsewhere.id)} 那一趟派出去的，current-run 指着别的一趟——不按这一趟核、放它停下` +
+        `agent-team ${label}：${ownId} 是 ${quote(elsewhere.id)} 那一趟派出去的，current-run 指着别的一趟——不按这一趟核、放它${sent ? '交回' : '停下'}` +
           `${kept ? '，停下行记回那一趟' : '（那一趟已经收口，不再记）'}。\n`,
       )
       process.exit(0)
@@ -3511,12 +3545,49 @@ function main() {
     // M4d 复核（docs/38 §3）：H5b 每一回停下都记一行结果——放行（pass）、冒泡（bubble）、拦（block）。完成核验与协调者进度按「这个子代理
     // 最后一回停下的结果」说成因、说它停没停：只记拦截时，「拦过一回」被当成「平台静默放行」（冒泡之前必然先被拦一回），进度也分不出
     // 「还在跑」与「已经停了」。只记团队角色、阶段链上的段、没收口的 run；写不进只留痕，拦不拦与记不记无关。
-    const stopId = CHECK === 'stop-gate' && typeof input?.agent_id === 'string' && AGENT_ID_RE.test(input.agent_id) ? input.agent_id : null
-    const recordStop = (outcome) => {
-      if (!stopId || closedAt(ctx.state) !== null || !isKnownStage(ctx.stages, ctx.state?.stage)) return
+    const stopId = (CHECK === 'stop-gate' || HANDING_BACK) && typeof input?.agent_id === 'string' && AGENT_ID_RE.test(input.agent_id) ? input.agent_id : null
+    const recordStop = (outcome, via = null) => {
+      if (!stopId || closedAt(ctx.state) !== null || !isKnownStage(ctx.stages, ctx.state?.stage)) return false
       const rosterNow = loadRoster()
-      if (!isPlainObject(rosterNow) || !Object.hasOwn(rosterNow, role)) return
-      appendDispatchLog(ctx.runDir, stopLine({ at: new Date().toISOString(), agentId: stopId, role, stage: ctx.state.stage, outcome }), label)
+      if (!isPlainObject(rosterNow) || !Object.hasOwn(rosterNow, role)) return false
+      return appendDispatchLog(ctx.runDir, stopLine({ at: new Date().toISOString(), agentId: stopId, role, stage: ctx.state.stage, outcome, via }), label)
+    }
+
+    // docs/99：auto 模式下子代理经 SubagentHandback 交回最后的报告，交回会结束它这一次运行——接着来的那一回 SubagentStop 没有
+    // last_assistant_message、拦了也被平台丢掉（turn ended by tool result）。所以：
+    //   - handback（PreToolUse:SubagentHandback）照 H5b 同一个判定核这次交回：产物缺、空、还旧的，或者验证段的结论第一行读不出的，
+    //     不是认得的冒泡就拒——拒了交回没有发生、它照常往下跑，看得到拒绝理由。认冒泡与 H5b 同一个 isBubbleStop：交回的报告就是
+    //     它最后一条回复；「已经被拦过一回」按派发记录里它有没有拦截行认（PreToolUse 的输入里没有 stop_hook_active）。拒的那一回与 H5b
+    //     拦的一样记 block。放行不记：交回还可能没送达。拦截行记不下的（认不出 agent_id、派发记录写不进），下一回认不出「拦过一回」，
+    //     带冒泡的交回会一直被拒、冒泡的出口走不通——那一回带着冒泡的就放行、留痕，与 H5b 一样 fail open（H5b 的「拦过一回」是平台给的）。
+    //   - handback-sent（PostToolUse:SubagentHandback）在送达（工具结果 success 为真）时记这一回停下：报告第一行是冒泡标记记 bubble，
+    //     不是记 pass，都带 via: "handback"。
+    //   - H5b 见到它在派发记录里的最后一条停下行是交回送达记的，就知道这一回停下是交回结束的：不拦，照那一行的结果再记一行（不带 via）。
+    if (CHECK === 'handback-sent') {
+      if (input?.tool_response?.success === true) recordStop(bubbleOf([input?.tool_input?.message]) !== null ? 'bubble' : 'pass', 'handback')
+      process.exit(0)
+    }
+    // 只跳过交回之后的那一回：照交回送达那一行的结果再记一行（不带 via）——它之后被唤醒（用户续上它、它自己的后台子代理完成）再停下，
+    // 最后一条停下行就不是交回送达记的了，照常判（复核）。
+    if (CHECK === 'stop-gate' && stopId) {
+      const bytes = ctx.artifactBytes(DISPATCHES_FILE)
+      const log = readDispatchLog(bytes ? bytes.toString('utf8') : null)
+      if (endedByHandback(log, stopId)) {
+        recordStop(lastStop(log, stopId))
+        process.exit(0)
+      }
+    }
+    if (CHECK === 'handback') {
+      const bytes = stopId ? ctx.artifactBytes(DISPATCHES_FILE) : null
+      const blockedBefore = stopId !== null && (readDispatchLog(bytes ? bytes.toString('utf8') : null).blocks.get(stopId) ?? 0) > 0
+      const report = input?.tool_input?.message
+      const reason = r.ok ? verdictStopReason(ctx, role) : r.reason
+      if (!reason || isBubbleStop({ stopHookActive: blockedBefore, lastMessage: report })) process.exit(0)
+      if (!recordStop('block') && isBubbleStop({ stopHookActive: true, lastMessage: report })) {
+        process.stderr.write(`agent-team ${label}：拦截行没有记下，下一回认不出它被拦过——这次交回带着冒泡标记，放行。\n`)
+        process.exit(0)
+      }
+      denyAndExit(`${reason}${HANDBACK_DENIED}`, spec.event)
     }
 
     const phase = CHECK === 'deliverable' ? dispatchPhase(input?.tool_response) : null
