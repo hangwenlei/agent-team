@@ -124,7 +124,7 @@ flowchart TB
 
 每次提问都会引用契约原文，给出 2–4 个具体选项、各自的后果和它的推荐；你的回答会作为修订写进契约。技术选型、裁掉哪些角色、代码风格这类事，它自己决定；只是要把测试整个裁掉（验收也就跟着没了）的，除非这一次只动了文档、或者你说过这一趟不要测试，它会先问你。
 
-另外，上一趟还没走完你又起了一趟新的，它会先问你接着跑哪一趟；项目在 git 仓库里时，初始化还会问一次要不要把 `.agent-team/` 加进 `.gitignore`。收口时，团队起过、还在跑的服务，它会逐个列出来问你要不要停。
+另外，上一趟还没走完你又起了一趟新的，它会先问你接着跑哪一趟；项目在 git 仓库里时，初始化还会问一次要不要把 `.agent-team/` 加进 `.gitignore`。收口时，团队记下来、还在跑的服务，它会列出来问你要不要停；命令行里带着项目文件夹名的其他进程只列给你看，不动。
 
 测试或验收没过时，只有选项「照现状交付」会被门禁记成照现状交付的批准，在对话里单独发一条只写这一句的消息也算；批准只对那一刻的测试报告或验收结论有效。
 
@@ -345,7 +345,7 @@ The project manager is the only role that talks to you, and it stops to ask only
 
 Each question quotes the contract and offers two to four concrete options with their consequences and a recommendation; your answer is added to the contract as a revision. Technology choices, which roles to leave out and code style are decided without asking you — except dropping testing altogether (which drops acceptance with it): unless the run only touches documentation or you said this run needs no testing, it asks you first.
 
-Also, if you start a new run while the previous one is unfinished, it first asks which one to continue; in a git repository, setup also asks once whether to add `.agent-team/` to `.gitignore`. When closing a run, it lists each service the team started that is still running and asks whether to stop it.
+Also, if you start a new run while the previous one is unfinished, it first asks which one to continue; in a git repository, setup also asks once whether to add `.agent-team/` to `.gitignore`. When closing a run, it lists the services the team recorded that are still running and asks whether to stop them; other processes whose command line mentions the project folder are only listed, never touched.
 
 When tests or acceptance did not pass, only the option 「照现状交付」 is recorded by the gates as approval to deliver as is, and a message containing just that line counts too; the approval only covers the test report or acceptance conclusion as it was at that moment.
 
