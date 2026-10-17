@@ -173,6 +173,9 @@ flowchart TB
 > [!NOTE]
 > **设置里的 `agent` 会盖掉项目经理。** 用户、项目或本地设置里写了别的 `agent`（或者起会话时带了别的 `--agent`），主会话就不是 `agent-team:at-pm`，团队跑不起来（门禁会说出来）：去掉那一项设置，或者起会话时加 `--agent agent-team:at-pm`。
 
+> [!NOTE]
+> **项目的 `CLAUDE.md` 引了很大的文档时，项目经理所在的主会话照样整份读它**（团队里的其余角色不自动带它，开工时只读项目根那一份）：在项目的 `.claude/settings.local.json` 里用 `claudeMdExcludes` 排除那几份文件（只对你自己生效）。
+
 > [!IMPORTANT]
 > **续会话要带上 `--plugin-dir`。** `claude --resume` 不会继承这个参数；忘了带，CLI 会打印 `Continuing with the default tools and system prompt — the agent's tool restrictions no longer apply.`，插件命令与全部角色限制随即失效。按 local 作用域安装时同理：只在安装它的项目目录里续会话。
 
@@ -390,6 +393,9 @@ You can watch a role but not talk to it: roles report their questions to the pro
 
 > [!NOTE]
 > **An `agent` in your settings overrides the project manager.** If user, project or local settings name another `agent` (or the session was started with another `--agent`), the main session is not `agent-team:at-pm` and the team cannot run (the gates say so): remove that setting, or start the session with `--agent agent-team:at-pm`.
+
+> [!NOTE]
+> **If the project's `CLAUDE.md` imports large documents, the main session, where the project manager runs, still reads them in full** (the other roles do not get it automatically and read only the one at the project root when they start): exclude those files with `claudeMdExcludes` in the project's `.claude/settings.local.json` (it applies to you only).
 
 > [!IMPORTANT]
 > **Pass `--plugin-dir` every time you resume.** `claude --resume` does not inherit it; forget it and the CLI prints `Continuing with the default tools and system prompt — the agent's tool restrictions no longer apply.`, after which the plugin's commands and every role restriction are gone. With a local-scope install the same holds for directories: resume only in the project directory that holds the install.
