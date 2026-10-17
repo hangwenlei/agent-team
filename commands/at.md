@@ -512,6 +512,25 @@ $ARGUMENTS
 （这一趟里用户做了第一次提交的，也照实写明比不准）。基线写着「不是 git 仓库」或「没记」的，写明这一趟对不了账，改照各份实现记录里写过的文件列。
 这里只跑上面那几条只读命令，只列、不动。
 
+交付文档里还要写**起过的服务**（`## 起过的服务` 一节）。各角色起过的服务记在各自那份产物的 `## 起过的服务` 里（`02-ui-spec.md`、`05-impl/` 下各份、`06-test.md`）；
+把它们收齐，连同你自己起了、要留着给用户看效果的（要起就在这一步之前起），逐个只读地核还在不在。先看记下的端口上有没有进程在监听——
+Windows 上在 `Bash` 里跑 `netstat -ano | grep -E ':<端口>\s' | grep LISTEN`（最后一列是 PID），macOS、Linux 上 `lsof -nP -iTCP:<端口> -sTCP:LISTEN`（没装 `lsof` 的用 `ss -ltnp`）；
+再看监听的那个 PID 与记下的 PID 的命令行——
+Windows 上 `powershell -NoProfile -Command '[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter "ProcessId=<PID>" | Format-List ProcessId,ParentProcessId,CommandLine'`，
+macOS、Linux 上 `ps -o pid,ppid,args -p <PID>`。命令行里有记下的那条命令里的程序或脚本名（`vite`、`http.server`、`tests.qa_sandbox.serve` 这类），或者父进程是记下的 PID，
+就算对得上。端口上还有对得上的进程在监听、或者记下的 PID 还在而且对得上的，就是还在跑：PID 换了也算（只停掉了外面一层的，这里才看得出来），记着停了的也照样核；
+PID 会被别的进程重用，对不上的不算还在跑，也不碰。
+再只读地列一遍命令行里带项目根文件夹名的进程——
+Windows 上 `powershell -NoProfile -Command '[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*<文件夹名>*" -and $_.CommandLine -notlike "*Get-CimInstance*" } | Format-List ProcessId,ParentProcessId,CommandLine'`，
+macOS、Linux 上 `ps -eo pid,ppid,args | grep -F <文件夹名> | grep -v 'grep -F'`。父进程是记下的 PID 的，归到那一条记录；别的记录里没有的只列出来，不碰——
+那可能是用户自己的编辑器、开发服务器。
+
+记录里的服务核出来还在跑的，收口之前用 `AskUserQuestion` 问用户要不要停：逐个写端口、PID、谁起的、起来做什么，选项「停掉」「留着」，推荐停掉（写在选项说明里）；
+你起给用户看效果的，题里给出打开的地址，请用户看完再答。这一问另算：不记 escalation、不动契约。
+用户选了停掉的，按核出来的 PID 停（Windows 上 `taskkill //PID <PID> //T //F` 连子进程一起停，macOS、Linux 上 `kill <PID>`）：端口只用来找、不用来杀，不按名字或端口一把杀；
+停完照上面再核一遍。用户要留着的、问不了用户的，不停。交付文档那一节逐个写明结果：停了、停不掉、用户要留着（写上怎么停）、问不了没停；记录里没有、只列出来的另列，
+注明不是团队记下的、没动，不写怎么停；这一趟没有起过服务、也没列出别的，写「没有」。
+
 **四、用同一次 Write 记 `never_invoked` 与 `closed_at`**（收口那一刻的时间，照门禁给的写，例：`"2026-10-01T15:00:00Z"`）——这就是收口标记。
 这一次不往 `history` 追加（推进进最后一段是之前单独那一次写入），已有的条目连时间也不改，`stage` 就是最后一段。收口之前确认没有还在跑的后台派发。
 收口那一次 H6 核：最后一段的前置与产物都在、不是空文件、读得出、不是上一轮的（整段裁掉、这一趟在那一段一个都没叫过的段产出的前置不要求）。
@@ -524,7 +543,8 @@ $ARGUMENTS
 然后告诉用户：产物清单（**去磁盘上核实过的**）、这趟叫了谁、谁没被叫过、
 有没有待办的升级、这一趟给 `.agent-team/project.json` 的 `paths` 补了哪些前缀、删改了哪些条目（补的前缀留给以后各趟）、`S5` 里被拒之后不做或改写到别处的、契约冲突里收窄到原话以内、你自己定的。
 这一趟改了哪些文件，告诉用户在 `08-delivery.md` 的哪一节；收不收进版本库、怎么收，由用户自己做：不列提交、丢弃这类选项让用户挑，你也不跑动工作树或历史的
-`git` 命令（红线照旧：要跑先照第 4 节的 `sensitive` 问）。这一趟定下的技术栈与
+`git` 命令（红线照旧：要跑先照第 4 节的 `sensitive` 问）。还在跑的服务（停不掉的、用户要留着的、问不了没停的），告诉用户在
+`08-delivery.md` 的 `## 起过的服务`，逐个说端口、PID、怎么停；只列出来的，告诉用户那一节另列着，不是团队记下的、没动。这一趟定下的技术栈与
 `project.json` 的 `stack` 对不上的（空目录起的项目照模板写的是占位），提示用户重跑 `/agent-team:at-init`。**哪一段是最后一段，以 `${CLAUDE_PLUGIN_ROOT}/stages.json` 为准，
 这里不复述。**
 

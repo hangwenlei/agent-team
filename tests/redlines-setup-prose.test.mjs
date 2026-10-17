@@ -238,3 +238,142 @@ test('M4e 第 39、25 条 at-init 收尾：在 git 仓库里才提；已忽略�
     assert.ok(has(s, sentence), `at-init 收尾缺：${sentence.slice(0, 40)}…`)
   }
 })
+
+// docs/101：一趟真实 run 收口之后还有两个服务在跑——项目经理收口前起给用户看效果的；收口那几步一句没提服务，子代理起过、停了的只写在
+// 各自的散文里。起过服务的角色在这一次交的 .md 产物里写同一个标题的一节、停下之前停掉自己起的；项目经理收口时收齐这些记录，先按记下的
+// 端口、再按 PID 只读地核（换了 PID 的照样认，命令行对不上的不碰），再列一遍命令行带项目根文件夹名的进程（没记录的只列不碰），还在跑的
+// 问用户，批准了才按核出来的 PID 停。门禁不看 Bash，这一层只在正文里（docs/101 §4 付了三样）。标题只在这里写一次，几处都从它拼。
+// 复核（docs/101 §8）：逐句钉挡不住挪位置、在两句之间插一句说反的话——收口那一块整块连着比；角色与项目经理那一句连同它后面紧跟着的
+// 那一句一起比；派生出来的产物要落在「收齐」那一句的括号里，不是第三步随便哪里。
+const SERVICES_HEAD = '## 起过的服务'
+const SERVICE_NOTE =
+  `起过服务的，在这一次交的 \`.md\` 产物里写一节 \`${SERVICES_HEAD}\`，一个服务一行：起的命令、端口、PID（Windows 上写 \`taskkill\` 认的那个）、停没停。` +
+  '停下之前——冒泡也一样——把自己起的都停掉，核过进程不在了、端口不再监听；停不掉的，那一行写明还在跑，项目经理收口时照它核。'
+// 那一句后面紧跟着的：改代码的那一类是加依赖那一句，只跑测试的那一类是测试报告第一行那一句。
+const AFTER_SERVICE_IMPL = '加依赖先用 `Edit` 改清单'
+const AFTER_SERVICE_QA = '**`06-test.md` 的第一行写总的结论'
+const PM_SERVICE_NOTE =
+  `你自己起的服务用完就停；收口时要留着给用户看效果的，照 \`/agent-team:at\` 第 6 节写进交付文档的 \`${SERVICES_HEAD}\`，与执行角色记下的一起核、问用户` +
+  '——那一问里用户选了停掉的，执行角色起的也照那一节按核出来的 PID 停，不再照 `sensitive` 记。'
+const PM_AFTER = '- **返工计数只许增，不许减。**'
+const BS = String.fromCharCode(92)
+// 收口第三步那一块：逐句、按顺序。
+const CLOSE_SERVICES = [
+  `交付文档里还要写**起过的服务**（\`${SERVICES_HEAD}\` 一节）。`,
+  `各角色起过的服务记在各自那份产物的 \`${SERVICES_HEAD}\` 里（\`02-ui-spec.md\`、\`05-impl/\` 下各份、\`06-test.md\`）；`,
+  '把它们收齐，连同你自己起了、要留着给用户看效果的（要起就在这一步之前起），逐个只读地核还在不在。',
+  '先看记下的端口上有没有进程在监听——',
+  `Windows 上在 \`Bash\` 里跑 \`netstat -ano | grep -E ':<端口>${BS}s' | grep LISTEN\`（最后一列是 PID），`,
+  'macOS、Linux 上 `lsof -nP -iTCP:<端口> -sTCP:LISTEN`（没装 `lsof` 的用 `ss -ltnp`）；',
+  '再看监听的那个 PID 与记下的 PID 的命令行——',
+  "Windows 上 `powershell -NoProfile -Command '[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process -Filter \"ProcessId=<PID>\" | Format-List ProcessId,ParentProcessId,CommandLine'`，",
+  'macOS、Linux 上 `ps -o pid,ppid,args -p <PID>`。',
+  '命令行里有记下的那条命令里的程序或脚本名（`vite`、`http.server`、`tests.qa_sandbox.serve` 这类），或者父进程是记下的 PID，就算对得上。',
+  '端口上还有对得上的进程在监听、或者记下的 PID 还在而且对得上的，就是还在跑：PID 换了也算（只停掉了外面一层的，这里才看得出来），记着停了的也照样核；',
+  'PID 会被别的进程重用，对不上的不算还在跑，也不碰。',
+  '再只读地列一遍命令行里带项目根文件夹名的进程——',
+  "Windows 上 `powershell -NoProfile -Command '[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like \"*<文件夹名>*\" -and $_.CommandLine -notlike \"*Get-CimInstance*\" } | Format-List ProcessId,ParentProcessId,CommandLine'`，",
+  "macOS、Linux 上 `ps -eo pid,ppid,args | grep -F <文件夹名> | grep -v 'grep -F'`。",
+  '父进程是记下的 PID 的，归到那一条记录；别的记录里没有的只列出来，不碰——那可能是用户自己的编辑器、开发服务器。',
+  '记录里的服务核出来还在跑的，收口之前用 `AskUserQuestion` 问用户要不要停：逐个写端口、PID、谁起的、起来做什么，选项「停掉」「留着」，推荐停掉（写在选项说明里）；',
+  '你起给用户看效果的，题里给出打开的地址，请用户看完再答。',
+  '这一问另算：不记 escalation、不动契约。',
+  '用户选了停掉的，按核出来的 PID 停（Windows 上 `taskkill //PID <PID> //T //F` 连子进程一起停，macOS、Linux 上 `kill <PID>`）：端口只用来找、不用来杀，不按名字或端口一把杀；',
+  '停完照上面再核一遍。',
+  '用户要留着的、问不了用户的，不停。',
+  '交付文档那一节逐个写明结果：停了、停不掉、用户要留着（写上怎么停）、问不了没停；记录里没有、只列出来的另列，注明不是团队记下的、没动，不写怎么停；',
+  '这一趟没有起过服务、也没列出别的，写「没有」。',
+]
+const CLOSE_TELL =
+  `还在跑的服务（停不掉的、用户要留着的、问不了没停的），告诉用户在 \`08-delivery.md\` 的 \`${SERVICES_HEAD}\`，逐个说端口、PID、怎么停；` +
+  '只列出来的，告诉用户那一节另列着，不是团队记下的、没动。'
+const PM_ASIDE = '`/agent-team:at` 第 6 节收口时问要不要停还在跑的服务那一问也另算：不记 escalation、不动契约。'
+const RESUME_RECHECK = '写收口标记之前，照那一节第三步把起过的服务重核一遍、还在跑的照它问用户，交付文档那一节照结果改'
+
+/** /agent-team:at 第 6 节里第 n 步（「**三、」到下一步「**四、」之前；第五步到「收口之后这一趟就冻结了」之前）。 */
+function closeStep(n) {
+  const at = read('commands/at.md')
+  const s6 = at.slice(at.indexOf('## 6. 收尾'))
+  const next = { 三: '**四、', 五: '**收口之后这一趟就冻结了**' }[n]
+  const i = s6.indexOf(`**${n}、`)
+  return i < 0 ? '' : s6.slice(i, s6.indexOf(next, i))
+}
+
+test('docs/101：每个持 Bash 的执行角色，停服务那一句后面紧跟着「起过的服务」那一句，再紧跟着原来的下一句——中间不许插话', () => {
+  for (const f of BASH_EXEC) {
+    const after = QA_LIKE.includes(f) ? AFTER_SERVICE_QA : AFTER_SERVICE_IMPL
+    assert.ok(has(bodyOf(f), STOP_NOTE + SERVICE_NOTE), `${f} 缺「起过的服务」那一句，或者它没紧跟在停服务那一句后面（逐字，空白不计）`)
+    assert.ok(has(bodyOf(f), STOP_NOTE + SERVICE_NOTE + after), `${f}「起过的服务」那一句后面插了话，或者后面不再是「${after}」`)
+  }
+})
+
+test('docs/101 PM 红线：停服务那一句后面紧跟着自己起的服务怎么办——用完就停，要留给用户看的写进交付文档那一节、收口时一起核、问用户，选了停掉的不再照 sensitive 记', () => {
+  const red = redLineSection(bodyOf(`${MAIN}.md`))
+  assert.ok(has(red, PM_PROCESS + STOP_NOTE + PM_SERVICE_NOTE), 'PM 的红线缺自己起的服务那一句（整句，紧跟在停服务那一句后面）')
+  assert.ok(has(red, PM_PROCESS + STOP_NOTE + PM_SERVICE_NOTE + PM_AFTER), 'PM 的红线里那一句后面插了话，或者下一条不再是返工计数那一条')
+})
+
+test('docs/101 收口第三步：收齐、先按端口再按 PID 只读地核、按项目根文件夹名列一遍（没记录的不碰）、还在跑的问用户、另算、批准了才按核出来的 PID 停——整块连着、顺序不变', () => {
+  const three = closeStep('三')
+  assert.ok(three.length > 0, '前置：找不到第三步')
+  for (const k of CLOSE_SERVICES) assert.ok(has(three, k), `第三步缺「${k.slice(0, 50)}…」`)
+  assert.ok(has(three, CLOSE_SERVICES.join('')), '第三步那一块的句子都在，但顺序变了或者中间插了话（整块连着比，空白不计）')
+})
+
+test('docs/101 收口第三步「收齐」那一句点名的产物从阶段链派生：持 Bash 的执行角色在哪一段交 .md，那一份就在那一句的括号里——加了角色或改了产物，这里跟着红', () => {
+  const stages = JSON.parse(read('stages.json'))
+  const want = new Set()
+  for (const s of Object.values(stages)) {
+    for (const r of s.producers ?? [s.role]) {
+      if (!BASH_EXEC.includes(`${r}.md`)) continue
+      const products = Array.isArray(s.produces) ? s.produces : (s.produces[r] ?? [])
+      for (const p of products) if (p.endsWith('.md')) want.add(p.includes('<role>') ? p.slice(0, p.indexOf('<role>')) : p)
+    }
+  }
+  // 身份锚：只钉「非空」挡不住少一个（docs/16 §3.13）——试验里留下记录的那两类（实现记录、测试报告）必须在里面。
+  assert.ok(want.has('05-impl/') && want.has('06-test.md'), `前置：派生出来的产物不对：${[...want].join('、')}`)
+  const three = closeStep('三')
+  const head = `各角色起过的服务记在各自那份产物的 \`${SERVICES_HEAD}\` 里（`
+  const i = three.indexOf(head)
+  assert.ok(i >= 0, '前置：找不到「收齐」那一句')
+  const list = three.slice(i + head.length, three.indexOf('）', i + head.length))
+  for (const p of want) assert.ok(list.includes(`\`${p}`), `「收齐」那一句的括号里没点到 ${p}`)
+})
+
+test('docs/101 收口第五步：还在跑的告诉用户在交付文档哪一节、怎么停，只列出来的不给停法；第 6 节不按名字、不按端口停进程', () => {
+  assert.ok(has(closeStep('五'), CLOSE_TELL), '第五步缺还在跑的服务那一句')
+  const at = read('commands/at.md')
+  const s6 = at.slice(at.indexOf('## 6. 收尾'))
+  for (const bad of ['/IM', 'pkill', 'killall', 'Stop-Process', 'kill-port', 'fuser -k']) assert.ok(!s6.includes(bad), `第 6 节出现了按名字或端口停进程的「${bad}」`)
+})
+
+test('docs/101 at-pm：收口时问要不要停服务那一问另算——不记 escalation、不动契约，与第 6 节同一个口径', () => {
+  const pm = bodyOf(`${MAIN}.md`)
+  const s = pm.slice(pm.indexOf('## 什么时候打断用户'), pm.indexOf('\n## ', pm.indexOf('## 什么时候打断用户') + 1))
+  assert.ok(has(s, PM_ASIDE), '「什么时候打断用户」缺那一问另算的一句')
+})
+
+test('docs/101 续跑：停在最后一段、产物齐了的，写收口标记之前照第 6 节第三步把起过的服务重核一遍、照它问', () => {
+  const resume = read('commands/at-resume.md')
+  const i = resume.indexOf('是阶段链最后一段、它的产物齐了')
+  assert.ok(i >= 0, '前置：找不到续跑停在最后一段的那一条')
+  const item = resume.slice(i, resume.indexOf('\n\n', i)) // 那一条是这一串的最后一条，到空行为止
+  assert.ok(has(item, RESUME_RECHECK), '续跑停在最后一段的那一条缺重核起过的服务那一句')
+})
+
+test('docs/101 README 两半「什么时候会问你」：收口时团队记下来、还在跑的服务列出来问你；带项目文件夹名的其他进程只列不动', () => {
+  const readme = read('README.md')
+  const en = readme.indexOf('<a id="english"></a>')
+  assert.ok(en > 0, '前置：找不到中英分界')
+  const flat = stripWs(readme)
+  const anchor = stripWs(readme.slice(0, en)).length
+  const zh = flat.indexOf(stripWs('收口时，团队记下来、还在跑的服务，它会列出来问你要不要停；命令行里带着项目文件夹名的其他进程只列给你看，不动。'))
+  const enAt = flat.indexOf(
+    stripWs(
+      'When closing a run, it lists the services the team recorded that are still running and asks whether to stop them; ' +
+        'other processes whose command line mentions the project folder are only listed, never touched.',
+    ),
+  )
+  assert.ok(zh >= 0 && zh < anchor, '中文那一半缺那一句')
+  assert.ok(enAt > anchor, '英文那一半缺那一句')
+})

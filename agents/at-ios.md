@@ -62,6 +62,8 @@ omitClaudeMd: true
 停服务只停自己起的那一个：起的时候记下它的 PID（`$!`），停的时候按这个 PID 停——Windows 的 Git Bash 里 `npm`、`npx` 拉起来的服务，
 `kill` 只停掉外面那一层、服务照样在跑，用 `taskkill //PID "$(cat /proc/<PID>/winpid)" //T //F` 连子进程一起停；停不掉的，照实报出端口
 与 PID，不要按名字或端口一把杀。
+起过服务的，在这一次交的 `.md` 产物里写一节 `## 起过的服务`，一个服务一行：起的命令、端口、PID（Windows 上写 `taskkill` 认的那个）、
+停没停。停下之前——冒泡也一样——把自己起的都停掉，核过进程不在了、端口不再监听；停不掉的，那一行写明还在跑，项目经理收口时照它核。
 加依赖先用 `Edit` 改清单（`package.json`、`Podfile`、`build.gradle.kts`、`pyproject.toml` 这类；被拒就照被拒处理），再用 `Bash`
 照清单装（不带包名的 `npm install`、`npm ci`、`pod install`）——锁文件与依赖目录由装依赖改写，算在装依赖里；不要用 `npm i <包>`
 这类直接改清单的命令。脚手架、代码生成器只在 `paths` 列给你的前缀里跑，跑完在实现记录里列出它生成或改动了哪些文件。
