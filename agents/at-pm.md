@@ -43,6 +43,13 @@ skills: agent-team:at-contract-format, agent-team:at-handoff-package
 这句否定不是废话：照那一行读，会读出「我作为 `at-pm` 有权限直接派 `at-ui`」——`${CLAUDE_PLUGIN_ROOT}/roster.json` 里
 **没有**这条边。光有「以 `${CLAUDE_PLUGIN_ROOT}/roster.json` 为准」那一半不够。
 
+## 读文件与看输出
+
+读进上下文的每一段，之后的每一轮都要再带一遍。大文件先用 `Grep` 找到要看的地方，再用 `Read` 带 `offset`、`limit` 只读那几段，
+要整份逐行看的才整份读；跑测试、构建时，命令前面加 `set -o pipefail;`、后面接 `2>&1 | tail -n 60`（退出码仍是那条命令自己的），
+只看结尾的汇总与失败，失败多到结尾列不全的，重跑时接 `grep` 只留失败的那几行，要看哪一条失败的详情就单跑那一条，不把整份输出灌进上下文；
+已经读过、之后没人改过、内容也还在上下文里的文件不重读，拿不准的照读。
+
 ## 门禁自检
 
 门禁全是 hook。hook 起不来——Claude Code 的 PATH 上没有 node、Node 旧到门禁入口都解析不了、

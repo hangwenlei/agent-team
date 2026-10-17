@@ -27,8 +27,8 @@ function recordOf(nn) {
 
 function datedRecords() {
   return readdirSync(DOCS)
-    .filter((f) => /^\d{2}-.*\.md$/.test(f) && !f.includes('附录') && Number(f.slice(0, 2)) >= FROM)
-    .map((f) => ({ nn: f.slice(0, 2), rel: `docs/${f}` }))
+    .filter((f) => /^\d{2,3}-.*\.md$/.test(f) && !f.includes('附录') && Number(f.split('-')[0]) >= FROM)
+    .map((f) => ({ nn: f.split('-')[0], rel: `docs/${f}` }))
 }
 
 function openSectionsOf(text) {
@@ -61,7 +61,8 @@ test('自检：pointsAt() 按边界认——§5.1 不算点到 §5，§10 不算
 test('第 47 条：docs/15 起每一份记录里记「当时没关上的」小节，都在 docs/00-开放边界.md 里被点到', () => {
   const index = read(INDEX)
   const records = datedRecords()
-  const latest = records.map((r) => r.nn).sort().at(-1)
+  // 按数排：编号到了三位数，按字符串排 100 会排在 15 前面，最新一份就认成了 99（docs/100）。
+  const latest = records.map((r) => r.nn).sort((a, b) => Number(a) - Number(b)).at(-1)
   const all = records.flatMap(({ nn, rel }) => openSectionsOf(read(rel)).map((sec) => ({ nn, rel, sec })))
   assert.ok(all.length > 0 && all.some((s) => s.nn === latest), `前置：一节都没认出来，或者最新一份记录（docs/${latest}）没被扫到——这条判据空转了`)
   const missing = all.filter(({ nn, sec }) => !pointsAt(index, nn, sec)).map(({ nn, rel, sec }) => `${pointer(nn, sec)}（${rel}）`)
@@ -70,7 +71,7 @@ test('第 47 条：docs/15 起每一份记录里记「当时没关上的」小�
 
 test('第 47 条：docs/00-开放边界.md 点到的每一节都真的在——`docs/NN` §M 指得到那一份记录里那个编号的标题', () => {
   const index = read(INDEX)
-  const refs = [...index.matchAll(/`docs\/(\d{2})` §(\d+(?:\.\d+)*)/g)].map((m) => ({ nn: m[1], sec: m[2] }))
+  const refs = [...index.matchAll(/`docs\/(\d{2,3})` §(\d+(?:\.\d+)*)/g)].map((m) => ({ nn: m[1], sec: m[2] }))
   assert.ok(refs.length > 0, '前置：索引里一个指针都没抽到')
   const dangling = []
   for (const { nn, sec } of refs) {

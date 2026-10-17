@@ -13,6 +13,12 @@
 // 正则不锚行首，值里的 `---` 会被当成收尾，后面的键全丢）、会被 YAML 读成别的类型的值（null、true、数字……）、键重复、不是
 // 一行一个「key: 值」（折行与块序列）。不声称封闭：平台换了解析器或退路之后的别的差异，这里挡不住。
 // 代价：值里不能写半角「: 」（写全角「：」）。
+//
+// 窄口（docs/100）：`omitClaudeMd: true` 一行。键名带大写、值是布尔，照上面两条本该挡下；平台只认这个拼法（键名不做归一化），
+// 所以开一个只认这一行的口子，别的键照旧只许小写与连字符、别的布尔照旧挡。平台怎么读它（CLI 2.1.301 读插件 agent 的那一段）：
+// YAML 先解析整份 frontmatter，`true` 读成布尔 true；加载器拿到的值是布尔 true 或字符串 "true" 才开（frontmatter 走「给值补引号再解析」
+// 那条退路时读到的是字符串，照样开），别的一律当没写、不报错。所以值只认逐字的 `true`：`True`、`TRUE` 在 YAML 里也是布尔、平台照开，
+// 按行读的判据却看见另一个字；`yes`、`on`、带引号的写法要么被这里的别的规矩挡下，要么平台静默不开——两边读出的东西不一样。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
@@ -32,6 +38,8 @@ function frontmatterFiles() {
 const BAD_START = /^[-?:,[\]{}#&*!|>'"%@`]/
 // 会被 YAML 读成 null、布尔或数字的朴素标量。
 const TYPED = /^(?:null|Null|NULL|~|true|True|TRUE|false|False|FALSE|yes|Yes|YES|no|No|NO|on|On|ON|off|Off|OFF|[-+]?(?:\d[\d_]*(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)$/
+// 窄口：这几个键只许写成这一个值（见文件头）。键名不在「小写与连字符」里，值是布尔——都只对这一对放行。
+const NARROW = new Map([['omitClaudeMd', 'true']])
 
 /** 逐条返回这份文件的 frontmatter 不在受限写法里的地方；空数组 = 合规。行尾的 CR 先剥掉（CRLF 的签出照样判）。 */
 function frontmatterProblems(text) {
@@ -45,6 +53,13 @@ function frontmatterProblems(text) {
     if (line.trim() === '') continue
     if (line.includes('\t')) problems.push(`有制表符：${JSON.stringify(line)}`)
     if (line.includes('---')) problems.push(`行里有 ---（平台截 frontmatter 的正则会把它当收尾）：${JSON.stringify(line)}`)
+    const narrow = /^([A-Za-z][A-Za-z-]*): (.+)$/.exec(line)
+    if (narrow && NARROW.has(narrow[1])) {
+      if (seen.has(narrow[1])) problems.push(`键重复：${narrow[1]}`)
+      seen.add(narrow[1])
+      if (narrow[2] !== NARROW.get(narrow[1])) problems.push(`${narrow[1]} 只许逐字写成 ${NARROW.get(narrow[1])}：${JSON.stringify(narrow[2])}`)
+      continue
+    }
     const m = /^([a-z][a-z-]*): (.+)$/.exec(line)
     if (!m) {
       problems.push(`不是「key: 值」一行：${JSON.stringify(line)}`)
@@ -94,6 +109,30 @@ test('自检：受限写法的判据认得出三种已知违规——值里的�
     assert.ok(frontmatterProblems(bad.split('\n').join('\r\n')).length > 0, bad)
   }
   assert.ok(frontmatterProblems(GOOD.replace('model: sonnet', 'model: sonnet\nmodel: opus')).some((p) => p.startsWith('键重复')))
+})
+
+test('自检：窄口只认逐字的「omitClaudeMd: true」一行——别的拼法、别的值、别的布尔键都照旧挡；CRLF 上一样', () => {
+  const ok = GOOD.replace('model: sonnet', 'model: sonnet\nomitClaudeMd: true')
+  assert.deepEqual(frontmatterProblems(ok), [])
+  assert.deepEqual(frontmatterProblems(ok.split('\n').join('\r\n')), [])
+  const cases = [
+    'omitClaudeMd: True',
+    'omitClaudeMd: TRUE',
+    'omitClaudeMd: yes',
+    "omitClaudeMd: 'true'",
+    'omitClaudeMd: true ',
+    'omitClaudeMd: false',
+    'omitclaudemd: true',
+    'OmitClaudeMd: true',
+    'omit-claude-md: true',
+    'background: true',
+    'omitClaudeMd: true\nomitClaudeMd: true',
+  ]
+  for (const line of cases) {
+    const bad = GOOD.replace('model: sonnet', `model: sonnet\n${line}`)
+    assert.ok(frontmatterProblems(bad).length > 0, line)
+    assert.ok(frontmatterProblems(bad.split('\n').join('\r\n')).length > 0, line)
+  }
 })
 
 test('前置：扫到的 frontmatter 文件里有主会话的角色、每条命令、每个 skill——否则下一条在半个清单上空转', () => {
