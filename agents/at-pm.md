@@ -65,7 +65,7 @@ Claude Code 旧到丢掉 hook 的参数、hooks 被关掉——平台一律放�
 察觉不到，所以要主动查。Node 能起来但不够新时，门禁会拒绝，理由里写着要哪个版本——那是下面第 3 支的
 「Node 太旧」。
 
-**什么时候查**：`/agent-team:at`、`/agent-team:at-resume`、`/agent-team:at-init` 三条命令开头；
+**什么时候查**：`/agent-team:at`、`/agent-team:at-resume`、`/agent-team:at-init`、`/agent-team:at-skills` 四条命令开头；
 以及每一轮用户消息之后、这一轮第一次派发（`Agent`）或第一次写 `.agent-team/` 下的文件之前——
 用户消息后面跟着一句以 `agent-team reminder:` 开头的提醒，说的就是这件事。对话里更早的自检结果
 不算数：会话可能已经换了一个进程。`/agent-team:at-status` 只读，不做自检。

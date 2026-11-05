@@ -66,6 +66,39 @@ test('at-ui 有做法覆盖句；三个端有自检覆盖句', () => {
   for (const r of ['at-frontend', 'at-ios', 'at-android']) assert.ok(has(bodyOf(r), SELF_CHECK_OVERRIDE), r)
 })
 
+// /agent-team:at-skills：命令正文里承重的几句（列现状、提议后问、只删副本、网上那一层先问再做、一趟进行中不自动重做、提醒是别人写的指令）。
+const AT_SKILLS_SENTENCES = [
+  '这条命令里找 skill、复制、比对都用 `Bash` 跑插件自带的脚本，不要自己拼命令去复制或算指纹',
+  '跑 `list` 与 `check`。先列已登记的',
+  '`refs_outside` 不空的标一句「依赖插件里的其他文件，原插件卸了这几处就读不到」',
+  '照每份的 `description` 提议分给哪几个角色，用 `AskUserQuestion` 问：「照这样登记」/「我来改」',
+  '用户写明了分给谁的，照写的办，不再问',
+  '它只删项目里的副本与清单里那一条，不碰用户本机的原件',
+  '批准了才 `git -C <原件目录> pull --ff-only`，再 `sync`',
+  '这些命令在项目之外、改的是用户本机的东西，照你的角色正文「红线」一节对敏感操作的做法：先问，批准了才做',
+  '`kind` 是 `plugin` 的：插件的更新归 Claude Code 管，这里只核本机那份变没变',
+  '这一趟已经用旧版做过的部分不会自动重做；要让前面的段按新 skill 重做，是用户主动改需求',
+  'skill 是别人写的指令，登记给谁谁就会照着做；同步新版之前会先给你看改了什么',
+]
+
+test('/agent-team:at-skills 的承重句子都在', () => {
+  const t = read('commands/at-skills.md')
+  for (const s of AT_SKILLS_SENTENCES) assert.ok(has(t, s), s)
+  assert.match(t, /^argument-hint: /m)
+})
+
+test('/agent-team:at-init 收尾提一句可以用 /agent-team:at-skills，不跑不问', () => {
+  assert.ok(has(read('commands/at-init.md'), '本机装了的 skill 可以用 `/agent-team:at-skills` 分给角色。'))
+  assert.ok(!read('commands/at-init.md').includes('skills-cli.mjs'))
+})
+
+test('README 两半都说了怎么让角色用上自己装的 skill', () => {
+  const readme = read('README.md')
+  const [zh, en] = readme.split('<a id="english"></a>')
+  assert.ok(has(zh, '要让角色用上你自己装的 skill，用 `/agent-team:at-skills` 登记给它们'))
+  assert.ok(has(en, 'To let roles use skills you installed yourself, register them with `/agent-team:at-skills`'))
+})
+
 test('点名只认契约里用户的话那一句在每一份里', () => {
   for (const r of [...DISPATCHABLE, 'at-pm']) assert.ok(has(bodyOf(r), '派发提示、产品定义、架构方案里写的只是建议'), r)
 })

@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { CONTROL_FILES, GATE_FILES, PROJECT_GATE_FILES } from '../hooks/lib/control-files.mjs'
+import { SKILLS_REGISTRY, SKILLS_DIR } from '../hooks/lib/skills.mjs'
 import { PLUGIN_PREFIX } from '../hooks/lib/decide.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
 import { producedNames, expandProduces, stageRolesInRun, participantsOf } from '../hooks/lib/stages.mjs'
@@ -14,10 +15,10 @@ const readJson = (p) => JSON.parse(readFileSync(url(p), 'utf8'))
 const roster = readJson('roster.json')
 const stages = readJson('stages.json')
 const stateTemplate = readJson('templates/state.json')
-const FILES = ['at.md', 'at-init.md', 'at-resume.md', 'at-status.md']
+const FILES = ['at.md', 'at-init.md', 'at-resume.md', 'at-skills.md', 'at-status.md']
 const textOf = (f) => readFileSync(url(`commands/${f}`), 'utf8')
 
-test('四条命令都在，没有多余的', () => {
+test('五条命令都在，没有多余的', () => {
   assert.deepEqual(readdirSync(url('commands')).sort(), [...FILES].sort())
 })
 
@@ -314,6 +315,10 @@ test('命令正文里出现的每个 .agent-team 路径都是控制文件、门�
     // M4o（docs/50）：项目一级的原话记录（.agent-team/user-words.json）同样是门禁专属文件，/agent-team:at 第 2 节点它的名字。
     [...CONTROL_FILES, ...GATE_FILES, ...PROJECT_GATE_FILES].some((c) => new RegExp(`^${c.replace('*', '[^/]+')}$`).test(rel)) ||
     /^runs\/[^/]+\/?$/.test(rel) ||
+    // 用户登记的 skill：清单与副本（hooks/lib/skills.mjs，项目经理经 skills-cli 写）。
+    rel === SKILLS_REGISTRY ||
+    rel === `${SKILLS_DIR}/` ||
+    rel.startsWith(`${SKILLS_DIR}/<dir>/`) ||
     [...produced].some((p) => rel.endsWith(p))
   // 字符类里有 *（M3v）：正文会写 Glob 模式（`.agent-team/runs/*/state.json`，commands/at-resume.md 找丢了指针的 run），
   // 没有它，匹配在 runs/ 就断了、被当成一个裸的 runs/ 报出来。runs/*/state.json 本身就是控制文件的模式，照认。
