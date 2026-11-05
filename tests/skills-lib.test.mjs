@@ -141,8 +141,11 @@ test('syncSkills 不带角色时沿用原有的；新登记却没给角色的报
   assert.equal(fresh.synced.length, 0)
   assert.equal(fresh.errors.length, 1)
   syncSkills({ agentTeamDir, installed, names: ['plain'], roles: ['at-qa'], now: NOW })
-  syncSkills({ agentTeamDir, installed, names: ['plain'], roles: null, now: NOW })
+  const again = syncSkills({ agentTeamDir, installed, names: ['plain'], roles: null, now: '2026-11-06T00:00:00.000Z' })
+  assert.deepEqual(again.errors, [])
+  assert.deepEqual(again.synced.map((s) => s.name), ['plain'])
   assert.deepEqual(readRegistry(agentTeamDir).skills.plain.roles, ['at-qa'])
+  assert.equal(readRegistry(agentTeamDir).skills.plain.synced_at, '2026-11-06T00:00:00.000Z')
 })
 
 test('assignRoles 只改角色、不复制', () => {
