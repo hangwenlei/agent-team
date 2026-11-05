@@ -119,7 +119,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   （README 点名持有者）。理由在 `docs/98`。
 - **用户的 skill 只经登记、复制进项目、当文件读**：`/agent-team:at-skills` 经 `hooks/skills-cli.mjs`（项目经理用 `Bash` 调，不是门禁，`hooks.json` 不注册它）
   把本机的 skill 整份复制进 `.agent-team/skills/`、记进 `.agent-team/skills.json`；角色照每份正文同一节「登记给你的 skill」读来用，仍然不授 `Skill`。
-  登记的 skill 在做法上盖得过插件自带的（`at-ui-craft` 等），盖不过门禁与红线、要交哪几份、下游要读的项、读文件与截图的开销规矩；点名只认契约里用户的话。
+  登记的 skill 在做法上盖得过插件自带的（`at-ui-craft` 等），管不了做什么（契约与产品定义定下的照它们），盖不过门禁与红线、要交哪几份、下游要读的项、
+  读文件与截图的开销规矩；点名只认契约里用户的话。
   新版只在起新一趟、建 run 之前比对，变了问用户，一趟进行中与续跑都不换；副本目录一律由名字推出、不信清单里的 `dir`，skill 里的软链接不跟。
   判据：`tests/skills-lib.test.mjs`、`tests/skills-cli.test.mjs`、`tests/skills-prose.test.mjs`、`tests/writepath.test.mjs` 里那一条。理由在 `docs/102`。
 - **根级文件共列，不加 `shared` 键**：根级清单、构建配置、顶层测试目录列给每个会改它们的 S5 产者；S3 的「落盘清单」与 S4「照清单补 `paths`」
