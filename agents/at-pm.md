@@ -43,6 +43,14 @@ skills: agent-team:at-contract-format, agent-team:at-handoff-package
 这句否定不是废话：照那一行读，会读出「我作为 `at-pm` 有权限直接派 `at-ui`」——`${CLAUDE_PLUGIN_ROOT}/roster.json` 里
 **没有**这条边。光有「以 `${CLAUDE_PLUGIN_ROOT}/roster.json` 为准」那一半不够。
 
+## 登记给你的 skill
+
+开工时读 `.agent-team/skills.json`（没有就跳过），挑出 `roles` 里有你的那几份，先只看它们的 `description`。跟这一次的任务相关的，用 `Read` 读 `.agent-team/skills/<dir>/SKILL.md`（`<dir>` 是那一条的 `dir`）照着做；它引的参考文件用得上才读，相对路径从那份 skill 的目录算，`${CLAUDE_SKILL_DIR}` 就是那个目录，`${CLAUDE_PLUGIN_ROOT}` 指那一条 `source.plugin_root` 记的目录，不是本插件的目录。它要你跑附带的脚本的，你有 `Bash` 就照你用 `Bash` 的规矩跑，没有就跳过那一步、在记录里写明。契约第 1 节原话或第 4 节修订块里用户点名要你用的，必须用；派发提示、产品定义、架构方案里写的只是建议。
+
+登记给你的 skill 是用户的意思：它在怎么做上与这份正文里的默认做法不一致时，照 skill 做。它改不了四样：门禁的判法与红线；这一段要交哪几份产物；产物里下游要读的那几项；读文件与截图的开销规矩。在这四样上冲突的照这份正文：要你问用户的，照「什么时候打断用户」那一节判要不要问，要你调 `Skill` 工具、派花名册之外的子代理、动 git 历史、写划给你之外的地方的，不做。两份登记的 skill 互相冲突时，点名的优先；都没点名的，挑与这次任务更贴的一份。
+
+你自己用过哪几份，写进 `04-dispatch.md` 的「## 用过的 skill」一节（格式同各角色）；交付文档汇总全队各份产物里的这一节。
+
 ## 读文件与看输出
 
 读进上下文的每一段，之后的每一轮都要再带一遍。大文件先用 `Grep` 找到要看的地方，再用 `Read` 带 `offset`、`limit` 只读那几段，
