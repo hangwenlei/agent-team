@@ -3,7 +3,7 @@
 // 不读真机的 ~/.claude。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, realpathSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import {
@@ -239,6 +239,57 @@ test('removeSkills 删副本与清单那一条，不碰原件', () => {
   assert.equal(existsSync(join(agentTeamDir, SKILLS_DIR, 'plain')), false)
   assert.equal(readRegistry(agentTeamDir).skills.plain, undefined)
   assert.ok(existsSync(join(home, '.claude', 'skills', 'plain', 'SKILL.md')))
+})
+
+test('清单里被改过的 dir 与名字走不出 .agent-team/skills', () => {
+  const { root, home, projectRoot, agentTeamDir } = world()
+  const { installed } = discoverSkills({ home, projectRoot })
+  syncSkills({ agentTeamDir, installed, names: ['plain'], roles: ['at-ui'], now: NOW })
+  const victim = join(root, 'victim')
+  put(join(victim, 'keep.txt'), '别删我')
+  const reg = JSON.parse(readFileSync(join(agentTeamDir, SKILLS_REGISTRY), 'utf8'))
+  reg.skills.plain.dir = '../../victim'
+  reg.skills['..'] = { ...reg.skills.plain, dir: '..' }
+  writeFileSync(join(agentTeamDir, SKILLS_REGISTRY), JSON.stringify(reg))
+  const c = checkSkills({ agentTeamDir, installed })
+  assert.deepEqual(c.unchanged, ['plain'])
+  const r = removeSkills({ agentTeamDir, names: ['..', 'plain'] })
+  assert.deepEqual(r.removed, ['plain'])
+  assert.equal(r.errors[0].name, '..')
+  assert.ok(existsSync(join(victim, 'keep.txt')))
+  assert.ok(existsSync(join(agentTeamDir, SKILLS_REGISTRY)))
+})
+
+test('复制与指纹都不跟软链接走出 skill 目录', (t) => {
+  const { root, home, projectRoot, agentTeamDir } = world()
+  const secret = join(root, 'secret')
+  put(join(secret, 'id_rsa'), '私钥')
+  const plainDir = join(home, '.claude', 'skills', 'plain')
+  symlinkSync(secret, join(plainDir, 'leak-dir'), 'junction')
+  try {
+    symlinkSync(join(secret, 'id_rsa'), join(plainDir, 'leak.txt'), 'file')
+  } catch (e) {
+    t.skip(`这台机器建不了文件软链接：${e.code}`)
+    return
+  }
+  const { installed } = discoverSkills({ home, projectRoot })
+  syncSkills({ agentTeamDir, installed, names: ['plain'], roles: ['at-ui'], now: NOW })
+  assert.equal(existsSync(join(agentTeamDir, SKILLS_DIR, 'plain', 'leak-dir', 'id_rsa')), false)
+  assert.equal(existsSync(join(agentTeamDir, SKILLS_DIR, 'plain', 'leak.txt')), false)
+  const before = hashSkillDir(join(home, '.claude', 'skills', 'plain'))
+  put(join(secret, 'id_rsa'), '换了的私钥')
+  assert.equal(hashSkillDir(join(home, '.claude', 'skills', 'plain')), before)
+})
+
+test('skill 目录本身是链进来的（目录联接）照常认得、照常复制', () => {
+  const { root, home, projectRoot, agentTeamDir } = world()
+  const repo = join(root, 'repos', 'fancy-ui')
+  put(join(repo, 'SKILL.md'), skillMd('链进来的'))
+  symlinkSync(repo, join(home, '.claude', 'skills', 'fancy-ui'), 'junction')
+  const { installed } = discoverSkills({ home, projectRoot })
+  assert.ok(installed.some((s) => s.ref === 'user/fancy-ui'))
+  syncSkills({ agentTeamDir, installed, names: ['fancy-ui'], roles: ['at-ui'], now: NOW })
+  assert.ok(existsSync(join(agentTeamDir, SKILLS_DIR, 'fancy-ui', 'SKILL.md')))
 })
 
 test('assertRoles 拒 at-outsider 与花名册外的名字', () => {

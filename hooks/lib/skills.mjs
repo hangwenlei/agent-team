@@ -22,24 +22,19 @@ export function skillDirName(name) {
   return mapped.replace(/[. ]+$/, '')
 }
 
-// 目录下全部文件的相对路径（`/` 分隔、排好序），跳过 .git 目录与指向目录的软链接；目录不在给空数组。
+// 目录下全部文件的相对路径（`/` 分隔、排好序），跳过 .git 目录；目录不在给空数组。
+// skill 目录里面的软链接（文件的、目录的、Windows 的目录联接）一律不跟：一份 skill 里放一个指向 ~/.ssh 的链接，
+// 复制时就会把它带进项目。skill 目录本身是软链接（用户常把克隆下来的仓库链进 ~/.claude/skills）照常读。
 function filesUnder(dir) {
   const out = []
   const walk = (abs, rel) => {
     for (const d of readdirSync(abs, { withFileTypes: true })) {
+      if (d.isSymbolicLink()) continue
       const childAbs = path.join(abs, d.name)
       const childRel = rel ? `${rel}/${d.name}` : d.name
-      let isDir = d.isDirectory()
-      let isFile = d.isFile()
-      if (d.isSymbolicLink()) {
-        let st = null
-        try { st = statSync(childAbs) } catch { st = null }
-        isDir = false
-        isFile = Boolean(st && st.isFile())
-      }
-      if (isDir) {
+      if (d.isDirectory()) {
         if (d.name !== '.git') walk(childAbs, childRel)
-      } else if (isFile) {
+      } else if (d.isFile()) {
         out.push(childRel)
       }
     }
@@ -116,13 +111,32 @@ export function readSkillMeta(dir) {
   return { description, has_scripts, bytes, refs_outside: [...refs].sort() }
 }
 
-// 一个目录下每个带 SKILL.md 的子目录。
+// 一个目录下每个带 SKILL.md 的子目录（子目录本身是指向目录的软链接也算）。
 function skillDirsIn(parent) {
   if (!existsSync(parent)) return []
+  const isDirLike = (d) => {
+    if (d.isDirectory()) return true
+    if (!d.isSymbolicLink()) return false
+    try {
+      return statSync(path.join(parent, d.name)).isDirectory()
+    } catch {
+      return false
+    }
+  }
   return readdirSync(parent, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && existsSync(path.join(parent, d.name, 'SKILL.md')))
+    .filter((d) => isDirLike(d) && existsSync(path.join(parent, d.name, 'SKILL.md')))
     .map((d) => d.name)
     .sort()
+}
+
+// 一份登记的副本在项目里的目录：一律由名字推出来，不信清单里记的 dir（清单谁都能用 Bash 改）；
+// 推出来不是 .agent-team/skills 下面的一层目录（空名字、`.`、`..`）给 null。
+function copyPathOf(agentTeamDir, name) {
+  const dir = skillDirName(name)
+  if (!dir || dir === '.' || dir === '..') return null
+  const base = path.resolve(agentTeamDir, SKILLS_DIR)
+  const full = path.resolve(base, dir)
+  return path.dirname(full) === base ? full : null
 }
 
 function samePath(a, b) {
@@ -259,8 +273,13 @@ export function syncSkills({ agentTeamDir, installed, names, roles, now }) {
       errors.push({ name: wanted, message: `${key} 还没登记过，要说分给哪几个角色` })
       continue
     }
-    const dir = skillDirName(key)
-    copyDir(skill.path, path.join(agentTeamDir, SKILLS_DIR, dir))
+    const copyPath = copyPathOf(agentTeamDir, key)
+    if (!copyPath) {
+      errors.push({ name: wanted, message: `${key} 这个名字推不出副本的目录名` })
+      continue
+    }
+    const dir = path.basename(copyPath)
+    copyDir(skill.path, copyPath)
     const sha = hashSkillDir(skill.path)
     const source = { kind: skill.kind, ref: skill.ref, path: skill.path }
     if (skill.kind === 'plugin') Object.assign(source, { plugin: skill.plugin, version: skill.version, plugin_root: skill.plugin_root })
@@ -294,8 +313,8 @@ export function checkSkills({ agentTeamDir, installed }) {
   const result = { unchanged: [], changed: [], missing: [], copy_missing: [] }
   for (const name of Object.keys(reg.skills).sort()) {
     const entry = reg.skills[name]
-    const copyPath = path.join(agentTeamDir, SKILLS_DIR, String(entry?.dir ?? skillDirName(name)))
-    if (!existsSync(copyPath)) {
+    const copyPath = copyPathOf(agentTeamDir, name)
+    if (!copyPath || !existsSync(copyPath)) {
       result.copy_missing.push(name)
       continue
     }
@@ -326,7 +345,12 @@ export function removeSkills({ agentTeamDir, names }) {
       errors.push({ name, message: `${name} 没登记过` })
       continue
     }
-    rmSync(path.join(agentTeamDir, SKILLS_DIR, String(entry.dir ?? skillDirName(name))), { recursive: true, force: true })
+    const copyPath = copyPathOf(agentTeamDir, name)
+    if (!copyPath) {
+      errors.push({ name, message: `${name} 这个名字推不出副本的目录名，没有删任何东西` })
+      continue
+    }
+    rmSync(copyPath, { recursive: true, force: true })
     delete reg.skills[name]
     removed.push(name)
   }
