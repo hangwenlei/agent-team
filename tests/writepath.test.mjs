@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { decideWritePath, stageOwnerOfRunPath } from '../hooks/lib/writepath.mjs'
 import { norm } from '../hooks/lib/path-norm.mjs'
+import { SKILLS_REGISTRY, SKILLS_DIR } from '../hooks/lib/skills.mjs'
 import { resolve } from 'node:path'
 import { readFileSync } from 'node:fs'
 
@@ -433,4 +434,21 @@ test('第 33 条（WP1）：前缀按目录边界认——src/server 盖不住 s
   assert.equal(r('/proj/src/server').decision, 'allow')
   assert.equal(r('/proj/src/server2/api.ts').decision, 'deny')
   assert.equal(r('/proj/src/serverless.ts').decision, 'deny')
+})
+
+// 用户登记的 skill 复制在 .agent-team/skills/ 下、清单是 .agent-team/skills.json：角色读它们照做，所以角色不能改它们——
+// 哪怕 paths 里把那个目录写给了它（.agent-team 不划给任何角色）。项目经理经 skills-cli 写，这里放行。
+test('只有项目经理写得进 .agent-team/skills.json 与 .agent-team/skills/ 下', () => {
+  const dispatchable = [...new Set(Object.values(ROSTER).flatMap((r) => r.can_delegate_to ?? []))]
+  const claimed = { paths: { ...PROJECT.paths, 'at-ui': ['.agent-team/skills/'], 'at-qa': ['.agent-team/'] } }
+  for (const rel of [SKILLS_REGISTRY, `${SKILLS_DIR}/ui-kit__polish/SKILL.md`]) {
+    const filePath = `${AT}/${rel}`
+    for (const role of dispatchable) {
+      for (const project of [PROJECT, claimed]) {
+        const d = decideWritePath({ roster: ROSTER, role, filePath, project, runDir: RUN, stages: STAGES, agentTeamDir: AT })
+        assert.equal(d.decision, 'deny', `${role} ${rel}`)
+      }
+    }
+    assert.equal(call('at-pm', filePath).decision, 'allow', rel)
+  }
 })
