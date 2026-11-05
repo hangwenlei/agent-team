@@ -99,6 +99,28 @@ test('README 两半都说了怎么让角色用上自己装的 skill', () => {
   assert.ok(has(en, 'To let roles use skills you installed yourself, register them with `/agent-team:at-skills`'))
 })
 
+// /agent-team:at 里的四处：建 run 之前核新版（没变不出声、一趟进行中与续跑不做）、S1 处理点名、推进前核点名用上没有、交付文档汇总。
+const AT_SECTIONS = JSON.parse(readFileSync(new URL('./fixtures/skills-at-sections.json', import.meta.url), 'utf8'))
+
+test('/agent-team:at 的四段各在、各在该在的那一节', () => {
+  const t = read('commands/at.md')
+  const sectionOf = (n) => {
+    const start = t.indexOf(`\n## ${n}.`)
+    const end = t.indexOf('\n## ', start + 1)
+    return t.slice(start, end < 0 ? undefined : end)
+  }
+  for (const [key, n] of [['RUN_START_CHECK', 1], ['S1_NAMED_SKILL', 2], ['ADVANCE_NAMED_CHECK', 3], ['DELIVERY_SKILLS', 6]]) {
+    assert.ok(has(sectionOf(n), AT_SECTIONS[key]), `${key} 不在第 ${n} 节`)
+    assert.equal(stripWs(t).split(stripWs(AT_SECTIONS[key])).length - 1, 1, `${key} 不止一处`)
+  }
+  assert.ok(has(AT_SECTIONS.RUN_START_CHECK, '都是空的，什么都不说，往下建'))
+  assert.ok(has(AT_SECTIONS.RUN_START_CHECK, '一趟进行中、续跑时都不做这一步'))
+})
+
+test('续跑不核 skill 新版', () => {
+  assert.ok(!read('commands/at-resume.md').includes('skills-cli.mjs'))
+})
+
 test('点名只认契约里用户的话那一句在每一份里', () => {
   for (const r of [...DISPATCHABLE, 'at-pm']) assert.ok(has(bodyOf(r), '派发提示、产品定义、架构方案里写的只是建议'), r)
 })

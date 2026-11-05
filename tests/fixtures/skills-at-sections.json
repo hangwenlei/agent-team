@@ -1,0 +1,6 @@
+{
+  "RUN_START_CHECK": "**建 run 之前核登记的 skill**：`.agent-team/skills.json` 在的话，用 `Bash` 跑 `node \"${CLAUDE_PLUGIN_ROOT}/hooks/skills-cli.mjs\" check`。`changed`、`missing`、`copy_missing` 都是空的，什么都不说，往下建。`changed` 不空的：列出是哪几份、改了哪些文件；`SKILL.md` 改了的读一下原件与副本的差异，用一两句话说大概改了什么，用 `AskUserQuestion` 问「同步这几份」还是「这一趟先不换」，选了同步的跑 `sync` 加那几个名字。这一问不记 escalation、不动契约。`missing`、`copy_missing` 不空的告诉用户一句，照项目里还在的副本跑。问不了用户的会话里不同步，回复里说一句哪几份本机有新版。一趟进行中、续跑时都不做这一步。",
+  "S1_NAMED_SKILL": "原话里点名要用某份 skill 的：用 `Bash` 跑 `node \"${CLAUDE_PLUGIN_ROOT}/hooks/skills-cli.mjs\" list`。skill 与角色都说得清、本机恰好装了一份这个名字的，直接 `sync` 登记给那个角色（已登记、只是没分给它的用 `assign`），回复里告诉用户；说不清给谁、本机没装、或者同名的有几份，用 `AskUserQuestion` 问。问不了用户的会话里不猜，照没有这份 skill 往下做，交付文档与回复里写明。",
+  "ADVANCE_NAMED_CHECK": "契约第 1 节原话或第 4 节修订块里用户点名要某个角色用的 skill，推进出它那一段之前看它产物里的「用过的 skill」有没有这一份；没有的照同段重派，派发提示里写明要用哪一份。",
+  "DELIVERY_SKILLS": "交付文档里加「## 用过的 skill」：汇总各份产物里的那一节（名字、`sha` 前 8 位、谁用的）；没人用过就不写这一节。"
+}
