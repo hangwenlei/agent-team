@@ -1,0 +1,87 @@
+# 角色用上本机 skill
+
+> 2026-11-05，分支 `worktree-skills-into-roles`。起因是插件作者自己用下来觉得团队做出来的 UI 不够满意，在 GitHub 上找到了更好用的开源 UI skill，
+> 想让 `at-ui` 用上；别的角色同理。设计与实施计划经过一轮头脑风暴、用户批准：`docs/superpowers/specs/2026-11-05-角色用上本机skill-design.md`、
+> `docs/superpowers/plans/2026-11-05-角色用上本机skill.md`。
+
+## 0. 一句话结论
+
+- **新命令 `/agent-team:at-skills`**：项目经理经 `Bash` 调插件自带的 `hooks/skills-cli.mjs`（不是门禁），把用户本机装的 skill（用户层、git 克隆的、
+  项目层、已装插件带的）整份复制进 `.agent-team/skills/<dir>/`、记进 `.agent-team/skills.json`（分给哪几个角色、来源、指纹、同步时间）。
+- **角色怎么用**：九个被派得到的角色同一节「登记给你的 skill」，项目经理一版自己的——开工时读清单、只看用途，用得上才读那份 `SKILL.md`；
+  契约里用户点名的必须用；做法上与插件自带的（`at-ui-craft` 等）不一致时照 skill，盖不过四样（门禁与红线、要交哪几份、下游要读的项、开销规矩）；
+  用过的记进产物的「用过的 skill」、交付文档汇总。
+- **更新**：只在 `/agent-team:at` 起新一趟、建 run 之前比对本机原件与副本，没变不出声，变了问用户再同步；一趟进行中、续跑都不换。
+  网上那一层只在用户发起检查时查（git 克隆的 `fetch` 后看落后几个提交，批准了才 `pull --ff-only`）。
+- **不授 `Skill`、不加门禁**：角色写不进清单与副本靠现有的写路径隔离（`.agent-team` 不划给任何角色），新判据钉住。
+
+## 1. 起因
+
+用户要两种用法：角色自己判断着用、用户点名用，而且不离开团队。三种做法里选了「登记后复制进项目」（设计 §4）：开 `Skill` 工具要推翻长期决策、
+角色看得到本机全部 skill（含管流程的）、带 `context: fork` 的会另起子代理绕开派发白名单（`docs/06`）；改写进插件自带 skill 满足不了「装了就用」。
+
+## 2. 裁定
+
+设计里标「我的裁定」的照设计；实现时另做的裁定：
+
+- 清单的 `source` 多记一个 `ref`，`check` 按它重新认原件——插件升级换了 `installPath`、用户层的目录变成 git 克隆，照样认得。
+- 副本目录一律由名字推出（`skillDirName`：`:` 换成 `__`，Windows 不收的字符换成 `_`），**不信清单里记的 `dir`**；推不出一层目录的名字（空、`.`、`..`）
+  不复制、不删。起因是提交之后的后台安全审查：清单谁都能用 `Bash` 改，`remove` 原来照清单里的 `dir` 删目录。
+- skill 目录里面的软链接（文件的、目录的、Windows 的目录联接）复制与算指纹都不跟；skill 目录本身是链进 `~/.claude/skills` 的照常认。起因同上：
+  一份 skill 里放一个指向 `~/.ssh` 的链接，原来会被复制进项目。
+- 插件类的网上新版只核本机那份：当前 CLI 没有只读地查插件新版的子命令（`claude plugin --help` 核过），照设计的退路告诉用户可以 `claude plugin update`。
+- `/agent-team:at-skills` 开头做门禁自检（它会写 `.agent-team`）；README 两半「安装」一节与 `at-pm` 的「门禁自检」一节点名它。
+- `argument-hint` 不以「[」开头：受限写法不许值以 YAML 指示符开头。
+- `~/.claude/skills/synced/`（从 claude.ai 同步下来的 skill，多套一层目录）与 skills-dir 形式的插件（`~/.claude/skills/<名>/.claude-plugin`）不认：
+  两者在平台上叫什么名字本机核不了，登进 §5。
+
+## 3. 判据
+
+- `tests/skills-lib.test.mjs`：目录名、指纹（与写入顺序无关、跳过 `.git`、改一个字节就变）、差异、用途与越出自己目录的 `${CLAUDE_PLUGIN_ROOT}` 引用、
+  四类来源都找得到且跳过 agent-team 自己、插件清单坏了不影响另两类、同步整份复制与写清单、撞名报错、不带角色沿用原有的、只改角色、副本被删、
+  插件升级换目录、原件不见了、去掉不碰原件、角色白名单、清单坏了抛错不改文件、清单里被改过的 `dir` 走不出 skills 目录、不跟软链接、链进来的目录照常认。
+- `tests/skills-cli.test.mjs`：输出一份 JSON、`sync` 之后 `list` 带出分给谁、`check` 没变时全空、清单坏了退出码 2 且不改文件、`--roles at-outsider` 退出码 2
+  且什么都不写、没有 `.agent-team` 退出码 2、认不出的子命令、`assign` 与 `remove`。子进程经 `tests/helpers/gate-runner.mjs` 起（`run` 多了 `args` 选项）。
+- `tests/skills-prose.test.mjs`：九个角色逐字同一节、紧跟「项目自己的约定」；项目经理那一版排在「读文件与看输出」之前；UI 与三个端的覆盖句；
+  点名只认用户的话；`/agent-team:at-skills` 的承重句子；`/agent-team:at-init` 收尾那一句；README 两半；`/agent-team:at` 的四段各在该在的节、各只一处；
+  续跑不核新版。
+- `tests/writepath.test.mjs`：每个被派得到的角色写 `.agent-team/skills.json` 与 `.agent-team/skills/` 下都被拒，`paths` 里写明了那个目录也拒；项目经理放行。
+- `tests/commands.test.mjs`：五条命令；命令正文里的 `.agent-team` 路径白名单认清单与副本。
+
+## 4. 门禁不核（三样）
+
+角色读没读登记的 skill、照没照做、有没有拿 skill 去盖「改不了的四样」，门禁都看不见。
+
+- **拒绝的判据长什么样**：H5b 在角色停下时读它产物里的「用过的 skill」，契约点名的没出现就拦。
+- **它打不红的那一刀**：角色照抄一行「用过的 skill」却没照做；或者照 skill 做了、却顺手少交了一项下游要读的内容。前者门禁分不出，后者要读懂产物。
+- **什么会让答案改变**：一趟真实 run 的转录里出现角色点名的 skill 没用、却写了「用过」，或者拿 skill 当理由少交了东西。
+
+## 5. 仍然开着的边界
+
+- 角色照不照登记的 skill 做、盖不盖得过插件自带的做法、四样有没有守住，只靠正文（付了三样，§4）。
+- skill 是第三方写的指令，里面可能有叫角色越界的话：写路径隔离照旧挡写入，`Bash` 不挡（不是沙箱，既有边界）。
+- 持 `Bash` 的角色能改 `.agent-team/skills.json` 与副本（`Bash` 不受门禁管）；副本目录由名字推出，改清单删不到 skills 目录之外。
+- 插件带的 skill 引用插件里别的文件时回原插件目录去读：在项目之外、可能弹读文件确认、不受同步与指纹管；原插件卸了就读不到（`check` 报不出这一种）。
+- skill 目录里的软链接一律不复制：靠软链接组织文件的 skill 复制进来会缺东西。
+- 插件类的网上新版只核本机那份。
+- `~/.claude/skills/synced/` 与 skills-dir 形式的插件不认。
+- `installed_plugins.json` 里不是 user 作用域的条目，项目路径的字段名没在真实的 local 安装上核过：带 `projectPath` 的按它比，不带的照算、标 `scope_unverified`。
+- 点名的 skill 没用上，推进之前靠项目经理读「用过的 skill」核，门禁不核。
+
+## 6. 没量到的
+
+- 文件软链接那条判据在本机 Windows 上跳过（没开开发者模式，建软链接报 EPERM），红绿只在 CI 的 Linux、macOS 上跑。
+- 几 MB、上千个文件的 skill 复制与算指纹要多久。
+- macOS、Linux 上真实安装的路径与 `installed_plugins.json` 的形状。
+
+## 7. 版本
+
+7.7.0：新命令与角色正文都是插件会加载的，挪中间一位。
+
+## 8. 变异与实测
+
+**变异**（备份用 `cp` 放仓库外，改完跑、还原）：
+
+- `skillDirsIn` 不认链进来的目录：「skill 目录本身是链进来的」红。
+- `writepath.mjs` 里 `.agent-team` 那一道改成 `if (false)`：新的写路径判据红（同文件别的判据都没红——这一格原来没人钉）。
+- 安全审查那两条：「清单里被改过的 `dir`」在修之前红；软链接那条在本机跳过（§6）。
