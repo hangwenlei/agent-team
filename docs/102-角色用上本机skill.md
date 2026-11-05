@@ -53,6 +53,8 @@
   命令正文：已登记的只改角色用 `assign`，同步新版用 `sync --update`，且先照第 7 节问过用户。
 - **复制时跳过会被自动加载的位置**：`CLAUDE.md`、`CLAUDE.local.md`、`.claude`、`.git`（目录或文件）、`.agent-team`，哪一层都认、不分大小写，不复制也不进指纹，
   `list` 报出跳过了哪几处。名单从 `writepath.mjs` 导出（`AUTOLOADED_NAMES`），与写路径隔离认的是同一份。
+- **副本的落脚处是链接就不动**（推上去之后的后台安全审查）：目录名推出来之后只按字面核，`.agent-team/skills`、某份副本的目录、`skills.json` 被换成软链接或目录联接时，
+  写与删会跟着走到项目外面。这三处是链接的，`sync`、`remove` 给错误消息、不动，`check` 报 `copy_changed`。`.agent-team` 本身是不是链接不核（有人会把它链到别处放）。
 - **`/agent-team:at-skills` 里的几问另算**（审阅者标的小问题，按影响升了一级）：照「红线」那一节问用户要不要更新本机，原来会顺着敏感操作的流程往进行中那一趟
   记 escalation、加修订块；命令正文写明不记、不动契约。
 

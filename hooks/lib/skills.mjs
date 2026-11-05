@@ -4,7 +4,7 @@
 // 不是门禁：这里的函数会读写文件。只用 MIN_NODE 有的同步 API（不用 fs.cpSync，自己递归复制）。
 // installed_plugins.json 只在这一个文件里读——它的格式是平台的，变了只改这一处。
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { AUTOLOADED_NAMES } from './writepath.mjs'
 
@@ -147,6 +147,22 @@ function copyPathOf(agentTeamDir, name) {
   return path.dirname(full) === base ? full : null
 }
 
+function isLink(p) {
+  try {
+    return lstatSync(p).isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
+// 上面那一道只按字面核：.agent-team/skills 或某份副本的目录被换成软链接、目录联接的话，写与删会跟着它走到项目外面去。
+// 这两处是链接就不动（给错误消息），由人去看是谁换的。
+function linkedCopyReason(agentTeamDir, copyPath) {
+  if (isLink(path.resolve(agentTeamDir, SKILLS_DIR))) return `.agent-team/${SKILLS_DIR} 是一个链接，不往里写也不从里删`
+  if (isLink(copyPath)) return `.agent-team/${SKILLS_DIR}/${path.basename(copyPath)} 是一个链接，不往里写也不从里删`
+  return null
+}
+
 function samePath(a, b) {
   const n = (p) => {
     const r = path.resolve(p)
@@ -279,7 +295,9 @@ export function readRegistry(agentTeamDir) {
 
 function writeRegistry(agentTeamDir, reg) {
   mkdirSync(agentTeamDir, { recursive: true })
-  writeFileSync(path.join(agentTeamDir, SKILLS_REGISTRY), `${JSON.stringify(reg, null, 2)}\n`)
+  const file = path.join(agentTeamDir, SKILLS_REGISTRY)
+  if (isLink(file)) throw new Error(`${SKILLS_REGISTRY} 是一个链接，不写它`)
+  writeFileSync(file, `${JSON.stringify(reg, null, 2)}\n`)
 }
 
 function copyDir(src, dst) {
@@ -345,6 +363,11 @@ export function syncSkills({ agentTeamDir, installed, names, roles, now, update 
       errors.push({ name: wanted, message: `${key} 这个名字推不出副本的目录名` })
       continue
     }
+    const linked = linkedCopyReason(agentTeamDir, copyPath)
+    if (linked) {
+      errors.push({ name: wanted, message: linked })
+      continue
+    }
     const old = reg.skills[key]
     if (isPlainObject(old) && !update && (old.source?.ref !== skill.ref || hashSkillDir(skill.path) !== old.sha)) {
       errors.push({ name: wanted, message: `${key} 已经登记过，本机这一份和登记时不一样了：先给用户看改了什么，用户同意后带 --update 再同步` })
@@ -402,7 +425,7 @@ export function checkSkills({ agentTeamDir, installed }) {
       result.copy_missing.push(name)
       continue
     }
-    if (hashSkillDir(copyPath) !== entry?.sha) {
+    if (linkedCopyReason(agentTeamDir, copyPath) || hashSkillDir(copyPath) !== entry?.sha) {
       result.copy_changed.push(name)
       continue
     }
@@ -436,6 +459,11 @@ export function removeSkills({ agentTeamDir, names }) {
     const copyPath = copyPathOf(agentTeamDir, name)
     if (!copyPath) {
       errors.push({ name, message: `${name} 这个名字推不出副本的目录名，没有删任何东西` })
+      continue
+    }
+    const linked = linkedCopyReason(agentTeamDir, copyPath)
+    if (linked) {
+      errors.push({ name, message: `${linked}，没有删任何东西` })
       continue
     }
     rmSync(copyPath, { recursive: true, force: true })

@@ -361,6 +361,32 @@ test('同步写下占位符的对应关系：自己目录指项目里的副本�
   assert.deepEqual(reg.plain.placeholders, { '${CLAUDE_SKILL_DIR}': '.agent-team/skills/plain' })
 })
 
+test('skills 目录、副本目录、清单被换成链接时不跟着写、不跟着删', () => {
+  const { root, home, projectRoot, agentTeamDir } = world()
+  const { installed } = discoverSkills({ home, projectRoot })
+  const outside = join(root, 'outside')
+  put(join(outside, 'keep.txt'), '别动我')
+  // 副本目录是一个指向项目外的目录联接：sync 不写进去，remove 不删它指着的东西。
+  syncSkills({ agentTeamDir, installed, names: ['plain'], roles: ['at-ui'], now: NOW })
+  rmSync(join(agentTeamDir, SKILLS_DIR, 'plain'), { recursive: true })
+  symlinkSync(outside, join(agentTeamDir, SKILLS_DIR, 'plain'), 'junction')
+  const s = syncSkills({ agentTeamDir, installed, names: ['plain'], roles: null, now: NOW })
+  assert.equal(s.synced.length, 0)
+  assert.equal(existsSync(join(outside, 'SKILL.md')), false)
+  assert.deepEqual(checkSkills({ agentTeamDir, installed }).copy_changed, ['plain'])
+  const r = removeSkills({ agentTeamDir, names: ['plain'] })
+  assert.equal(r.removed.length, 0)
+  assert.ok(existsSync(join(outside, 'keep.txt')))
+  // skills 目录本身是联接：同样拒。
+  const fresh = world()
+  const elsewhere = join(fresh.root, 'elsewhere')
+  put(join(elsewhere, 'keep.txt'), '别动我')
+  symlinkSync(elsewhere, join(fresh.agentTeamDir, SKILLS_DIR), 'junction')
+  const t = syncSkills({ agentTeamDir: fresh.agentTeamDir, installed: discoverSkills({ home: fresh.home, projectRoot: fresh.projectRoot }).installed, names: ['plain'], roles: ['at-ui'], now: NOW })
+  assert.equal(t.synced.length, 0)
+  assert.equal(existsSync(join(elsewhere, 'plain')), false)
+})
+
 test('assertRoles 拒 at-outsider 与花名册外的名字', () => {
   assert.throws(() => assertRoles(['at-outsider'], roster))
   assert.throws(() => assertRoles(['nobody'], roster))
