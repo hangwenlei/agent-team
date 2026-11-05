@@ -87,11 +87,11 @@ test('discoverSkills 找全四类、跳过 agent-team 自己', () => {
   assert.deepEqual(errors, [])
   assert.deepEqual(installed.map((s) => [s.kind, s.ref]).sort(), [
     ['git', 'user/cloned'],
-    ['plugin', 'ui-kit:polish'],
+    ['plugin', 'ui-kit@mkt:polish'],
     ['project', 'project/local-one'],
     ['user', 'user/plain'],
   ])
-  const polish = installed.find((s) => s.ref === 'ui-kit:polish')
+  const polish = installed.find((s) => s.ref === 'ui-kit@mkt:polish')
   assert.equal(polish.name, 'ui-kit:polish')
   assert.equal(polish.version, '1.0.0')
   assert.equal(polish.plugin, 'ui-kit@mkt')
@@ -255,6 +255,110 @@ test('skill 目录本身是链进来的（目录联接）照常认得、照常�
   assert.ok(installed.some((s) => s.ref === 'user/fancy-ui'))
   syncSkills({ agentTeamDir, installed, names: ['fancy-ui'], roles: ['at-ui'], now: NOW })
   assert.ok(existsSync(join(agentTeamDir, SKILLS_DIR, 'fancy-ui', 'SKILL.md')))
+})
+
+// ---- 终审之后的修补 ----
+
+test('两个市场里同名的插件都列出来、ref 带市场，按名字认到启用着的那一个', () => {
+  const { home, projectRoot, agentTeamDir } = world()
+  const other = join(home, 'plugcache', 'ui-kit-other', '2.0.0')
+  put(join(other, 'skills', 'polish', 'SKILL.md'), skillMd('另一个市场的同名插件'))
+  const list = JSON.parse(readFileSync(join(home, '.claude', 'plugins', 'installed_plugins.json'), 'utf8'))
+  list.plugins['ui-kit@other'] = [{ scope: 'user', installPath: other, version: '2.0.0' }]
+  put(join(home, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify(list))
+  put(join(home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'ui-kit@mkt': false, 'ui-kit@other': true } }))
+  const { installed } = discoverSkills({ home, projectRoot })
+  const both = installed.filter((s) => s.name === 'ui-kit:polish')
+  assert.deepEqual(both.map((s) => [s.ref, s.enabled]).sort(), [['ui-kit@mkt:polish', false], ['ui-kit@other:polish', true]])
+  const r = syncSkills({ agentTeamDir, installed, names: ['ui-kit:polish'], roles: ['at-ui'], now: NOW })
+  assert.deepEqual(r.errors, [])
+  assert.equal(readRegistry(agentTeamDir).skills['ui-kit:polish'].source.ref, 'ui-kit@other:polish')
+})
+
+test('installed_plugins.json 版本认不出、形状变了，都进 errors', () => {
+  const { home, projectRoot } = world()
+  const file = join(home, '.claude', 'plugins', 'installed_plugins.json')
+  const base = JSON.parse(readFileSync(file, 'utf8'))
+  put(file, JSON.stringify({ ...base, version: 99 }))
+  let r = discoverSkills({ home, projectRoot })
+  assert.ok(r.installed.some((s) => s.kind === 'plugin'), '版本认不出也照旧试着读')
+  assert.match(r.errors.map((e) => e.message).join('\n'), /版本/)
+  put(file, JSON.stringify({ version: 2, plugins: { 'ui-kit@mkt': { scope: 'user', installPath: 'x' } } }))
+  assert.equal(discoverSkills({ home, projectRoot }).errors.length, 1)
+  put(file, JSON.stringify({ version: 2, plugins: { 'ui-kit@mkt': [{ scope: 'user', path: 'x' }] } }))
+  assert.equal(discoverSkills({ home, projectRoot }).errors.length, 1)
+  put(file, 'null')
+  r = discoverSkills({ home, projectRoot })
+  assert.equal(r.errors.length, 1)
+  assert.ok(r.installed.some((s) => s.kind === 'user'))
+})
+
+test('check 报出项目里被改过的副本', () => {
+  const { home, projectRoot, agentTeamDir } = world()
+  const { installed } = discoverSkills({ home, projectRoot })
+  syncSkills({ agentTeamDir, installed, names: ['plain', 'cloned'], roles: ['at-ui'], now: NOW })
+  put(join(agentTeamDir, SKILLS_DIR, 'plain', 'SKILL.md'), '被人改过\n')
+  rmSync(join(agentTeamDir, SKILLS_DIR, 'cloned', 'SKILL.md'))
+  const r = checkSkills({ agentTeamDir, installed })
+  assert.deepEqual(r.copy_changed, ['cloned', 'plain'])
+  assert.deepEqual(r.unchanged, [])
+})
+
+test('已登记、本机原件又变了的，sync 不带 update 拒绝、副本不动；带 update 才换', () => {
+  const { home, projectRoot, agentTeamDir } = world()
+  syncSkills({ agentTeamDir, installed: discoverSkills({ home, projectRoot }).installed, names: ['plain'], roles: ['at-ui'], now: NOW })
+  put(join(home, '.claude', 'skills', 'plain', 'SKILL.md'), skillMd('第二版'))
+  const installed = discoverSkills({ home, projectRoot }).installed
+  const refused = syncSkills({ agentTeamDir, installed, names: ['plain'], roles: ['at-ui', 'at-qa'], now: NOW })
+  assert.equal(refused.synced.length, 0)
+  assert.match(refused.errors[0].message, /update/)
+  assert.ok(readFileSync(join(agentTeamDir, SKILLS_DIR, 'plain', 'SKILL.md'), 'utf8').includes('普通的用户层 skill'))
+  assert.deepEqual(readRegistry(agentTeamDir).skills.plain.roles, ['at-ui'])
+  const ok = syncSkills({ agentTeamDir, installed, names: ['plain'], roles: null, now: NOW, update: true })
+  assert.deepEqual(ok.errors, [])
+  assert.ok(readFileSync(join(agentTeamDir, SKILLS_DIR, 'plain', 'SKILL.md'), 'utf8').includes('第二版'))
+})
+
+test('assignRoles 能只加、只减，不丢原来分给的', () => {
+  const { home, projectRoot, agentTeamDir } = world()
+  syncSkills({ agentTeamDir, installed: discoverSkills({ home, projectRoot }).installed, names: ['plain'], roles: ['at-ui'], now: NOW })
+  assignRoles({ agentTeamDir, names: ['plain'], add: ['at-qa', 'at-ui'] })
+  assert.deepEqual(readRegistry(agentTeamDir).skills.plain.roles, ['at-ui', 'at-qa'])
+  assignRoles({ agentTeamDir, names: ['plain'], remove: ['at-ui'] })
+  assert.deepEqual(readRegistry(agentTeamDir).skills.plain.roles, ['at-qa'])
+  assert.equal(assignRoles({ agentTeamDir, names: ['plain'], remove: ['at-qa'] }).errors.length, 1, '减到一个都不剩的拒绝')
+  assert.deepEqual(readRegistry(agentTeamDir).skills.plain.roles, ['at-qa'])
+})
+
+test('skill 里会被平台自动加载的位置不复制、不进指纹，并报出跳过了什么', () => {
+  const { home, projectRoot, agentTeamDir } = world()
+  const dir = join(home, '.claude', 'skills', 'plain')
+  const before = hashSkillDir(dir)
+  put(join(dir, 'CLAUDE.md'), '开发用的说明')
+  put(join(dir, 'claude.local.md'), '本地说明')
+  put(join(dir, '.claude', 'skills', 'inner', 'SKILL.md'), skillMd('嵌套的'))
+  put(join(dir, '.agent-team', 'current-run'), 'x')
+  put(join(dir, '.git'), 'gitdir: ../somewhere\n')
+  put(join(dir, 'docs', 'CLAUDE.md'), '子目录里的')
+  assert.equal(hashSkillDir(dir), before)
+  assert.deepEqual(readSkillMeta(dir).skipped, ['.agent-team', '.claude', '.git', 'CLAUDE.md', 'claude.local.md', 'docs/CLAUDE.md'])
+  syncSkills({ agentTeamDir, installed: discoverSkills({ home, projectRoot }).installed, names: ['plain'], roles: ['at-ui'], now: NOW })
+  for (const rel of ['CLAUDE.md', 'claude.local.md', '.claude', '.agent-team', '.git', 'docs/CLAUDE.md']) {
+    assert.equal(existsSync(join(agentTeamDir, SKILLS_DIR, 'plain', ...rel.split('/'))), false, rel)
+  }
+})
+
+test('同步写下占位符的对应关系：自己目录指项目里的副本，插件根指原插件目录', () => {
+  const { home, projectRoot, agentTeamDir, pluginSkillDir } = world()
+  syncSkills({ agentTeamDir, installed: discoverSkills({ home, projectRoot }).installed, names: ['ui-kit:polish', 'plain'], roles: ['at-ui'], now: NOW })
+  const reg = readRegistry(agentTeamDir).skills
+  const slash = (p) => p.split('\\').join('/')
+  assert.deepEqual(reg['ui-kit:polish'].placeholders, {
+    '${CLAUDE_PLUGIN_ROOT}/skills/polish': '.agent-team/skills/ui-kit__polish',
+    '${CLAUDE_SKILL_DIR}': '.agent-team/skills/ui-kit__polish',
+    '${CLAUDE_PLUGIN_ROOT}': slash(dirname(dirname(pluginSkillDir))),
+  })
+  assert.deepEqual(reg.plain.placeholders, { '${CLAUDE_SKILL_DIR}': '.agent-team/skills/plain' })
 })
 
 test('assertRoles 拒 at-outsider 与花名册外的名字', () => {

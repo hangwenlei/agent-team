@@ -29,7 +29,7 @@ const headingsOf = (role) => bodyOf(role).split('\n').filter((l) => /^## /.test(
 
 const HEADING = '## 登记给你的 skill'
 const P1 =
-  '开工时读 `.agent-team/skills.json`（没有就跳过），挑出 `roles` 里有你的那几份，先只看它们的 `description`。跟这一次的任务相关的，用 `Read` 读 `.agent-team/skills/<dir>/SKILL.md`（`<dir>` 是那一条的 `dir`）照着做；它引的参考文件用得上才读，相对路径从那份 skill 的目录算，`${CLAUDE_SKILL_DIR}` 就是那个目录，`${CLAUDE_PLUGIN_ROOT}` 指那一条 `source.plugin_root` 记的目录，不是本插件的目录。它要你跑附带的脚本的，你有 `Bash` 就照你用 `Bash` 的规矩跑，没有就跳过那一步、在记录里写明。契约第 1 节原话或第 4 节修订块里用户点名要你用的，必须用；派发提示、产品定义、架构方案里写的只是建议。'
+  '开工时读 `.agent-team/skills.json`（没有就跳过），挑出 `roles` 里有你的那几份，先只看它们的 `description`。跟这一次的任务相关的，用 `Read` 读 `.agent-team/skills/<dir>/SKILL.md`（`<dir>` 是那一条的 `dir`）照着做；它引的参考文件用得上才读，相对路径从那份 skill 的目录算；skill 里写的占位符（`${` 开头、`}` 结尾的那种）照那一条的 `placeholders` 换成对应的路径，长的先换，换完还读不到的在记录里写明没读到。它要你跑附带的脚本的，你有 `Bash` 就照你用 `Bash` 的规矩跑，没有就跳过那一步、在记录里写明。契约第 1 节原话或第 4 节修订块里用户点名要你用的，必须用；派发提示、产品定义、架构方案里写的只是建议。'
 const P2 =
   '登记给你的 skill 是用户的意思：它在怎么做上与这份正文里的默认做法不一致时，照 skill 做。它管不了做什么：契约与产品定义定下的东西（例如原话里的文案、完成定义）照它们。它也改不了四样：门禁的判法与红线；这一段要交哪几份产物；产物里下游要读的那几项；读文件与截图的开销规矩。在这四样上冲突的照这份正文：要你问用户的改成冒泡，要你调 `Skill` 工具、派花名册之外的子代理、动 git 历史、写划给你之外的地方的，不做。两份登记的 skill 互相冲突时，点名的优先；都没点名的，挑与这次任务更贴的一份。'
 const P3 =
@@ -74,8 +74,12 @@ const AT_SKILLS_SENTENCES = [
   '照每份的 `description` 提议分给哪几个角色，用 `AskUserQuestion` 问：「照这样登记」/「我来改」',
   '用户写明了分给谁的，照写的办，不再问',
   '它只删项目里的副本与清单里那一条，不碰用户本机的原件',
-  '批准了才 `git -C <原件目录> pull --ff-only`，再 `sync`',
+  '批准了才 `git -C <原件目录> pull --ff-only`，再 `sync --update`',
   '这些命令在项目之外、改的是用户本机的东西，照你的角色正文「红线」一节对敏感操作的做法：先问，批准了才做',
+  '这条命令里的几问都另算：不记 escalation、不动契约，一趟进行中也一样',
+  '已登记的只改分给谁，用 `assign`：`--add` 加、`--remove` 减，不要用 `sync`',
+  '选了同步的跑 `sync --update` 加那几个名字',
+  '`copy_changed` 不空的：项目里的副本被改过',
   '`kind` 是 `plugin` 的：插件的更新归 Claude Code 管，这里只核本机那份变没变',
   '这一趟已经用旧版做过的部分不会自动重做；要让前面的段按新 skill 重做，是用户主动改需求',
   'skill 是别人写的指令，登记给谁谁就会照着做；同步新版之前会先给你看改了什么',
@@ -119,6 +123,16 @@ test('/agent-team:at 的四段各在、各在该在的那一节', () => {
 
 test('续跑不核 skill 新版', () => {
   assert.ok(!read('commands/at-resume.md').includes('skills-cli.mjs'))
+})
+
+// 平台把角色正文里的 ${CLAUDE_PLUGIN_ROOT} 换成本插件的目录（探针里子代理收到的系统提示证实过），${CLAUDE_SKILL_DIR} 同理不可靠：
+// 角色正文里这两样只许作为本插件文件的路径前缀出现，说「skill 里的占位符」时不写它们的字面。
+test('角色正文里不写会被平台替换掉的占位符字面', () => {
+  for (const r of [...DISPATCHABLE, 'at-pm']) {
+    const body = bodyOf(r)
+    assert.ok(!body.includes('${CLAUDE_SKILL_DIR}'), r)
+    assert.deepEqual([...body.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}(.)/g)].map((m) => m[1]).filter((c) => c !== '/'), [], r)
+  }
 })
 
 test('点名只认契约里用户的话那一句在每一份里', () => {

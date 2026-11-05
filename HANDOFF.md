@@ -121,7 +121,9 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   把本机的 skill 整份复制进 `.agent-team/skills/`、记进 `.agent-team/skills.json`；角色照每份正文同一节「登记给你的 skill」读来用，仍然不授 `Skill`。
   登记的 skill 在做法上盖得过插件自带的（`at-ui-craft` 等），管不了做什么（契约与产品定义定下的照它们），盖不过门禁与红线、要交哪几份、下游要读的项、
   读文件与截图的开销规矩；点名只认契约里用户的话。
-  新版只在起新一趟、建 run 之前比对，变了问用户，一趟进行中与续跑都不换；副本目录一律由名字推出、不信清单里的 `dir`，skill 里的软链接不跟。
+  新版只在起新一趟、建 run 之前比对（原件变了、副本被改过），变了问用户、`sync --update` 才换，一趟进行中与续跑都不换；副本目录一律由名字推出、不信清单里的
+  `dir`，skill 里的软链接与会被自动加载的位置（`writepath.mjs` 的 `AUTOLOADED_NAMES`）不复制。角色正文不写 `${CLAUDE_PLUGIN_ROOT}` 以外的占位符字面，也不拿它当
+  「skill 里的那个占位符」说——平台会把正文里的它换成本插件的目录；skill 里的占位符照清单每一条的 `placeholders` 换。
   判据：`tests/skills-lib.test.mjs`、`tests/skills-cli.test.mjs`、`tests/skills-prose.test.mjs`、`tests/writepath.test.mjs` 里那一条。理由在 `docs/102`。
 - **根级文件共列，不加 `shared` 键**：根级清单、构建配置、顶层测试目录列给每个会改它们的 S5 产者；S3 的「落盘清单」与 S4「照清单补 `paths`」
   是对齐的那一步（加了 `shared` 也省不掉，前缀按字面比、S0 时文件还不存在）。S5 被拒的在实现记录里留「被写路径隔离拒绝」一节、标「已解决」，

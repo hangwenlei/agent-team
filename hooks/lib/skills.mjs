@@ -6,6 +6,7 @@
 import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { AUTOLOADED_NAMES } from './writepath.mjs'
 
 export const SKILLS_REGISTRY = 'skills.json'
 export const SKILLS_DIR = 'skills'
@@ -22,24 +23,30 @@ export function skillDirName(name) {
   return mapped.replace(/[. ]+$/, '')
 }
 
-// 目录下全部文件的相对路径（`/` 分隔、排好序），跳过 .git 目录；目录不在给空数组。
+// 不复制、不进指纹的名字（哪一层都认、不分大小写）：会被平台自动加载或执行的位置——CLAUDE.md、CLAUDE.local.md、.claude、
+// .git（目录或文件）、.agent-team。从 GitHub 克隆的 skill 常带开发用的 CLAUDE.md，复制进项目就成了项目里的一份指令。
+const SKIPPED_NAMES = new Set(AUTOLOADED_NAMES)
+
+// 目录下全部文件的相对路径（`/` 分隔、排好序）；目录不在给空数组。skipped 给了的话，把跳过的位置（上面那几类名字）收进去。
 // skill 目录里面的软链接（文件的、目录的、Windows 的目录联接）一律不跟：一份 skill 里放一个指向 ~/.ssh 的链接，
 // 复制时就会把它带进项目。skill 目录本身是软链接（用户常把克隆下来的仓库链进 ~/.claude/skills）照常读。
-function filesUnder(dir) {
+function filesUnder(dir, skipped = null) {
   const out = []
   const walk = (abs, rel) => {
     for (const d of readdirSync(abs, { withFileTypes: true })) {
       if (d.isSymbolicLink()) continue
       const childAbs = path.join(abs, d.name)
       const childRel = rel ? `${rel}/${d.name}` : d.name
-      if (d.isDirectory()) {
-        if (d.name !== '.git') walk(childAbs, childRel)
-      } else if (d.isFile()) {
-        out.push(childRel)
+      if (SKIPPED_NAMES.has(d.name.toLowerCase())) {
+        if (skipped) skipped.push(childRel)
+        continue
       }
+      if (d.isDirectory()) walk(childAbs, childRel)
+      else if (d.isFile()) out.push(childRel)
     }
   }
   if (existsSync(dir)) walk(dir, '')
+  if (skipped) skipped.sort()
   return out.sort()
 }
 
@@ -93,9 +100,10 @@ function descriptionOf(text) {
 
 const PLUGIN_REF = /\$\{CLAUDE_PLUGIN_ROOT\}\/([^\s`'"()<>\]，。；：、）]+)/g
 
-/** 一份 skill 目录的说明：一句用途、有没有附带脚本、总字节数、越出自己目录的 ${CLAUDE_PLUGIN_ROOT} 引用。 */
+/** 一份 skill 目录的说明：一句用途、有没有附带脚本、总字节数、越出自己目录的 ${CLAUDE_PLUGIN_ROOT} 引用、复制时跳过的位置。 */
 export function readSkillMeta(dir) {
-  const files = filesUnder(dir)
+  const skipped = []
+  const files = filesUnder(dir, skipped)
   const skillMd = path.join(dir, 'SKILL.md')
   const description = existsSync(skillMd) ? descriptionOf(readFileSync(skillMd, 'utf8')) : ''
   const has_scripts = files.some((r) => r.startsWith('scripts/') || SCRIPT_EXT.has(path.extname(r).toLowerCase()))
@@ -108,7 +116,7 @@ export function readSkillMeta(dir) {
       if (ref !== own && !ref.startsWith(`${own}/`)) refs.add(ref)
     }
   }
-  return { description, has_scripts, bytes, refs_outside: [...refs].sort() }
+  return { description, has_scripts, bytes, refs_outside: [...refs].sort(), skipped }
 }
 
 // 一个目录下每个带 SKILL.md 的子目录（子目录本身是指向目录的软链接也算）。
@@ -149,6 +157,27 @@ function samePath(a, b) {
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
 
+// 插件启用没有：用户层 settings.json、项目的 settings.json、settings.local.json 里的 enabledPlugins，后读的盖前面的。
+// 读不出来的那一份当没有（只用来在同名的几份里挑一个，挑不出就叫用户挑）。
+function enabledPluginsOf(home, projectRoot) {
+  const out = new Map()
+  for (const file of [
+    path.join(home, '.claude', 'settings.json'),
+    path.join(projectRoot, '.claude', 'settings.json'),
+    path.join(projectRoot, '.claude', 'settings.local.json'),
+  ]) {
+    let s = null
+    try {
+      s = JSON.parse(readFileSync(file, 'utf8'))
+    } catch {
+      s = null
+    }
+    if (!isPlainObject(s) || !isPlainObject(s.enabledPlugins)) continue
+    for (const [k, v] of Object.entries(s.enabledPlugins)) if (typeof v === 'boolean') out.set(k, v)
+  }
+  return out
+}
+
 /**
  * 本机装了哪些 skill：用户层（<home>/.claude/skills，目录里有 .git 的算 git）、项目层（<projectRoot>/.claude/skills）、
  * 已装插件带的（installed_plugins.json 每条的 installPath/skills）。selfPlugin 自己的不列。
@@ -169,24 +198,39 @@ export function discoverSkills({ home, projectRoot, selfPlugin = 'agent-team' })
     add(path.join(projectSkills, name), { name, ref: `project/${name}`, kind: 'project' })
   }
 
+  // 没装任何插件时这个文件可以不在，不算错；在、却认不出的，插件那一块进 errors（用户才知道为什么插件没列出来）。
   const listFile = path.join(home, '.claude', 'plugins', 'installed_plugins.json')
+  const listError = (message) => errors.push({ source: 'installed_plugins.json', message })
   if (existsSync(listFile)) {
     let list = null
     try {
       list = JSON.parse(readFileSync(listFile, 'utf8'))
+      if (!isPlainObject(list)) {
+        listError('认不出它的格式（顶层不是一个对象）')
+        list = null
+      }
     } catch (e) {
-      errors.push({ source: 'installed_plugins.json', message: `读不出来：${e.message}` })
+      listError(`读不出来：${e.message}`)
     }
-    if (list !== null && !isPlainObject(list?.plugins)) {
-      errors.push({ source: 'installed_plugins.json', message: '认不出它的格式（没有 plugins 对象）' })
+    if (list !== null && !isPlainObject(list.plugins)) {
+      listError('认不出它的格式（没有 plugins 对象）')
       list = null
     }
+    if (list !== null && list.version !== 2) listError(`认不出它的版本（${JSON.stringify(list.version)}，这里认的是 2），照旧试着读了`)
+    const enabled = enabledPluginsOf(home, projectRoot)
     const seen = new Set()
     for (const [key, entries] of Object.entries(list?.plugins ?? {})) {
       const pluginName = key.split('@')[0]
-      if (pluginName === selfPlugin || !Array.isArray(entries)) continue
+      if (pluginName === selfPlugin) continue
+      if (!Array.isArray(entries)) {
+        listError(`${key} 那一项不是数组，跳过了`)
+        continue
+      }
       for (const entry of entries) {
-        if (!isPlainObject(entry) || typeof entry.installPath !== 'string') continue
+        if (!isPlainObject(entry) || typeof entry.installPath !== 'string') {
+          listError(`${key} 有一条没有 installPath，跳过了`)
+          continue
+        }
         let unverified = false
         if (entry.scope !== 'user') {
           if (typeof entry.projectPath === 'string') {
@@ -196,17 +240,19 @@ export function discoverSkills({ home, projectRoot, selfPlugin = 'agent-team' })
           }
         }
         const skillsRoot = path.join(entry.installPath, 'skills')
+        // ref 带上市场：两个市场里同名的插件（本机就有）各列一份，按名字认时由 resolveSkill 挑启用着的那一个或者叫用户挑。
         for (const dirName of skillDirsIn(skillsRoot)) {
-          const ref = `${pluginName}:${dirName}`
+          const ref = `${key}:${dirName}`
           if (seen.has(ref)) continue
           seen.add(ref)
           add(path.join(skillsRoot, dirName), {
-            name: ref,
+            name: `${pluginName}:${dirName}`,
             ref,
             kind: 'plugin',
             plugin: key,
             version: typeof entry.version === 'string' ? entry.version : null,
             plugin_root: entry.installPath,
+            enabled: enabled.has(key) ? enabled.get(key) : null,
             ...(unverified ? { scope_unverified: true } : {}),
           })
         }
@@ -252,12 +298,33 @@ function resolveSkill(installed, wanted) {
   if (byRef.length === 1) return { skill: byRef[0] }
   const byName = installed.filter((s) => s.name === wanted)
   if (byName.length === 1) return { skill: byName[0] }
+  // 两个市场里同名的插件：恰好一份启用着的，就是用户平时在用的那一份。
+  const enabledOnes = byName.filter((s) => s.enabled === true)
+  if (byName.length > 1 && enabledOnes.length === 1) return { skill: enabledOnes[0] }
   if (byName.length > 1) return { error: `本机有几份都叫 ${wanted}，用 ref 指明是哪一份：${byName.map((s) => s.ref).join('、')}` }
   return { error: `本机没有找到 ${wanted}` }
 }
 
-/** 整份复制进项目、写清单。roles 为 null 时沿用清单里原有的角色；新登记却没给角色的报错。 */
-export function syncSkills({ agentTeamDir, installed, names, roles, now }) {
+// 角色读副本时把 skill 里的占位符换成哪里：自己的目录指项目里的副本（相对项目根），插件根指原插件目录（插件带的 skill 引插件里别的文件时）。
+// 角色正文里不写这几个占位符的字面——平台会把正文里的 ${CLAUDE_PLUGIN_ROOT} 换成本插件的目录；写在 JSON 里的不换。
+// 占位符拆成常量再拼：源码里不留「插件根加斜杠」的字面，免得被当成一处指给模型读的插件文件（tests/version-bump.test.mjs 照这个形状抽）。
+const PLUGIN_ROOT_PH = '${CLAUDE_PLUGIN_ROOT}'
+const SKILL_DIR_PH = '${CLAUDE_SKILL_DIR}'
+function placeholdersOf(skill, dir) {
+  const copy = `.agent-team/${SKILLS_DIR}/${dir}`
+  const out = { [SKILL_DIR_PH]: copy }
+  if (skill.kind === 'plugin') {
+    out[[PLUGIN_ROOT_PH, 'skills', path.basename(skill.path)].join('/')] = copy
+    out[PLUGIN_ROOT_PH] = String(skill.plugin_root).split('\\').join('/')
+  }
+  return out
+}
+
+/**
+ * 整份复制进项目、写清单。roles 为 null 时沿用清单里原有的角色；新登记却没给角色的报错。
+ * 已登记的、本机原件（或来源）和登记时不一样了：不带 update 拒绝、副本不动——换版本要先给用户看改了什么、问过再换。
+ */
+export function syncSkills({ agentTeamDir, installed, names, roles, now, update = false }) {
   const reg = readRegistry(agentTeamDir)
   const synced = []
   const errors = []
@@ -278,44 +345,65 @@ export function syncSkills({ agentTeamDir, installed, names, roles, now }) {
       errors.push({ name: wanted, message: `${key} 这个名字推不出副本的目录名` })
       continue
     }
+    const old = reg.skills[key]
+    if (isPlainObject(old) && !update && (old.source?.ref !== skill.ref || hashSkillDir(skill.path) !== old.sha)) {
+      errors.push({ name: wanted, message: `${key} 已经登记过，本机这一份和登记时不一样了：先给用户看改了什么，用户同意后带 --update 再同步` })
+      continue
+    }
     const dir = path.basename(copyPath)
     copyDir(skill.path, copyPath)
-    const sha = hashSkillDir(skill.path)
+    // 指纹按复制下来的副本算：复制途中原件又变了的话，记下的仍是项目里这一份的样子。
+    const sha = hashSkillDir(copyPath)
     const source = { kind: skill.kind, ref: skill.ref, path: skill.path }
     if (skill.kind === 'plugin') Object.assign(source, { plugin: skill.plugin, version: skill.version, plugin_root: skill.plugin_root })
-    reg.skills[key] = { dir, description: skill.description, roles: [...finalRoles], source, sha, synced_at: now }
+    reg.skills[key] = { dir, description: skill.description, roles: [...finalRoles], source, placeholders: placeholdersOf(skill, dir), sha, synced_at: now }
     synced.push({ name: key, dir, sha })
   }
   if (synced.length) writeRegistry(agentTeamDir, reg)
   return { synced, errors }
 }
 
-/** 只改登记过的 skill 分给谁，不复制。 */
-export function assignRoles({ agentTeamDir, names, roles }) {
+/** 只改登记过的 skill 分给谁，不复制：roles 整份换；add 加在后面（已有的不重复）；remove 减掉。减到一个不剩的拒绝。 */
+export function assignRoles({ agentTeamDir, names, roles = null, add = [], remove = [] }) {
   const reg = readRegistry(agentTeamDir)
   const assigned = []
   const errors = []
   for (const name of names) {
-    if (!isPlainObject(reg.skills[name])) {
+    const entry = reg.skills[name]
+    if (!isPlainObject(entry)) {
       errors.push({ name, message: `${name} 还没登记` })
       continue
     }
-    reg.skills[name].roles = [...roles]
+    let next = Array.isArray(roles) ? [...roles] : Array.isArray(entry.roles) ? [...entry.roles] : []
+    for (const r of add) if (!next.includes(r)) next.push(r)
+    next = next.filter((r) => !remove.includes(r))
+    if (next.length === 0) {
+      errors.push({ name, message: `${name} 减到一个角色都不剩了；不要它了就用 remove` })
+      continue
+    }
+    entry.roles = next
     assigned.push(name)
   }
   if (assigned.length) writeRegistry(agentTeamDir, reg)
   return { assigned, errors }
 }
 
-/** 本机原件对清单：没变、变了（附改了哪些文件）、原件不见了、项目里的副本不见了。按来源的 ref 重新认原件，插件升级换目录照样认得。 */
+/**
+ * 清单对本机原件与项目里的副本：没变、原件变了（附改了哪些文件）、原件不见了、副本不见了、副本被改过（和登记时的指纹对不上）。
+ * 按来源的 ref 重新认原件，插件升级换目录照样认得。
+ */
 export function checkSkills({ agentTeamDir, installed }) {
   const reg = readRegistry(agentTeamDir)
-  const result = { unchanged: [], changed: [], missing: [], copy_missing: [] }
+  const result = { unchanged: [], changed: [], missing: [], copy_missing: [], copy_changed: [] }
   for (const name of Object.keys(reg.skills).sort()) {
     const entry = reg.skills[name]
     const copyPath = copyPathOf(agentTeamDir, name)
     if (!copyPath || !existsSync(copyPath)) {
       result.copy_missing.push(name)
+      continue
+    }
+    if (hashSkillDir(copyPath) !== entry?.sha) {
+      result.copy_changed.push(name)
       continue
     }
     const src = installed.find((s) => s.ref === entry?.source?.ref)

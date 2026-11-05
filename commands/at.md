@@ -68,7 +68,7 @@ $ARGUMENTS
   改好，再问一次；只点了「再改改」、没说改哪里的，先问改哪里。回传说没有记成、没有记下的，照它说的办，不要往下建 run。用户在对话里单独发
   「照这份需求开始」不算——门禁不知道批的是哪一份——再用这道题问一次。
 
-**建 run 之前核登记的 skill**：`.agent-team/skills.json` 在的话，用 `Bash` 跑 `node "${CLAUDE_PLUGIN_ROOT}/hooks/skills-cli.mjs" check`。`changed`、`missing`、`copy_missing` 都是空的，什么都不说，往下建。`changed` 不空的：列出是哪几份、改了哪些文件；`SKILL.md` 改了的读一下原件与副本的差异，用一两句话说大概改了什么，用 `AskUserQuestion` 问「同步这几份」还是「这一趟先不换」，选了同步的跑 `sync` 加那几个名字。这一问不记 escalation、不动契约。`missing`、`copy_missing` 不空的告诉用户一句，照项目里还在的副本跑。问不了用户的会话里不同步，回复里说一句哪几份本机有新版。一趟进行中、续跑时都不做这一步。
+**建 run 之前核登记的 skill**：`.agent-team/skills.json` 在的话，用 `Bash` 跑 `node "${CLAUDE_PLUGIN_ROOT}/hooks/skills-cli.mjs" check`。`changed`、`copy_changed`、`missing`、`copy_missing` 都是空的，什么都不说，往下建。`changed` 不空的：列出是哪几份、改了哪些文件；`SKILL.md` 改了的读一下原件与副本的差异，用一两句话说大概改了什么。`copy_changed` 不空的：说项目里的副本被改过。这两样用同一道 `AskUserQuestion` 问「同步这几份」（照本机原件重新复制）还是「这一趟先不换」，选了同步的跑 `sync --update` 加那几个名字。这一问不记 escalation、不动契约。`missing`、`copy_missing` 不空的告诉用户一句，照项目里还在的副本跑。问不了用户的会话里不同步，回复里说一句哪几份本机有新版、哪几份副本被改过。一趟进行中、续跑时都不做这一步。
 
 - run id：`YYYYMMDD-HHmm-<slug>`，`slug` 用小写字母、数字与连字符，取自需求本身
   （例：`20260917-1430-login-sso`）。
@@ -105,7 +105,7 @@ $ARGUMENTS
 那一次 H6 拒。行尾空白、空白的写法不计，整段写成引用块（每行前面一个 `>`）也认。命令没带参数的、收口之后照第 6 节自己另起的一趟、这条命令
 之后续跑了别的一趟再另起的，门禁没有记下这一趟的原话，不核——这几种里问过需求、用户批准了需求稿的除外（门禁记下了那份需求稿）。
 
-原话里点名要用某份 skill 的：用 `Bash` 跑 `node "${CLAUDE_PLUGIN_ROOT}/hooks/skills-cli.mjs" list`。skill 与角色都说得清、本机恰好装了一份这个名字的，直接 `sync` 登记给那个角色（已登记、只是没分给它的用 `assign`），回复里告诉用户；说不清给谁、本机没装、或者同名的有几份，用 `AskUserQuestion` 问。问不了用户的会话里不猜，照没有这份 skill 往下做，交付文档与回复里写明。
+原话里点名要用某份 skill 的：用 `Bash` 跑 `node "${CLAUDE_PLUGIN_ROOT}/hooks/skills-cli.mjs" list`。skill 与角色都说得清、本机恰好装了一份这个名字的，直接 `sync` 登记给那个角色（已登记、只是没分给它的用 `assign --add`，不丢原来分给的），回复里告诉用户；说不清给谁、本机没装、或者同名的有几份，用 `AskUserQuestion` 问。问不了用户的会话里不猜，照没有这份 skill 往下做，交付文档与回复里写明。
 
 写完之后你会收到一段「agent-team 账本回传」，里面有契约的 sha256。**把那个值原样写进
 `state.json` 的 `contract_sha`**，不要自己拼一个。契约不进 `artifacts`：它的账只记在

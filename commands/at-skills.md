@@ -19,25 +19,28 @@ $ARGUMENTS
 这条命令里找 skill、复制、比对都用 `Bash` 跑插件自带的脚本，不要自己拼命令去复制或算指纹：
 
 ```sh
-node "${CLAUDE_PLUGIN_ROOT}/hooks/skills-cli.mjs" <子命令> [名字…] [--roles 角色,角色]
+node "${CLAUDE_PLUGIN_ROOT}/hooks/skills-cli.mjs" <子命令> [名字…] [--roles 角色,角色] [--add 角色,角色] [--remove 角色,角色] [--update]
 ```
 
-子命令：`list`（本机装了哪些、登记了哪些）、`sync`（整份复制进项目并登记；不带 `--roles` 时沿用原来分给谁）、`assign`（只改分给谁）、
-`check`（本机原件和项目里的副本一样不一样）、`remove`（去掉登记）。它输出一份 JSON；退出码是 2 的，照 `error` 里的话告诉用户，
+子命令：`list`（本机装了哪些、登记了哪些）、`sync`（整份复制进项目并登记；不带 `--roles` 时沿用原来分给谁；已登记、本机那份又变了的要带 `--update`，
+带之前照第 7 节问过用户）、`assign`（只改分给谁：`--add` 加、`--remove` 减、`--roles` 整份换）、`check`（本机原件变没变、项目里的副本被改过没有）、
+`remove`（去掉登记）。它输出一份 JSON；退出码是 2 的，照 `error` 里的话告诉用户，
 不要自己去改 `.agent-team/skills.json`。登记清单在 `.agent-team/skills.json`，副本在 `.agent-team/skills/<dir>/`。
 登记、同步、去掉之后再跑一次 `list` 核磁盘上的结果，不凭记忆说已经办好了。
 
 ## 2. 不带参数：列现状
 
-跑 `list` 与 `check`。先列已登记的：名字、分给了谁、本机那份和项目里的副本一样不一样（看 `check` 的 `changed`、`missing`、`copy_missing`）。
-再列本机装了、还没登记的：名字、一句用途（`description`）、来自哪里（`kind`）、有没有附带脚本、大小；
-`refs_outside` 不空的标一句「依赖插件里的其他文件，原插件卸了这几处就读不到」。最后告诉用户可以怎么登记。
+跑 `list` 与 `check`。先列已登记的：名字、分给了谁、本机那份和项目里的副本一样不一样（看 `check` 的 `changed`、`copy_changed`、`missing`、`copy_missing`）。
+再列本机装了、还没登记的：名字、一句用途（`description`）、来自哪里（`kind`；插件带的写上插件与市场，`enabled` 是 false 的标「这个插件停用着」）、
+有没有附带脚本、大小；`refs_outside` 不空的标一句「依赖插件里的其他文件，原插件卸了这几处就读不到」；`skipped` 不空的说一句复制时会跳过它里面的
+哪几处（会被自动加载的 `CLAUDE.md`、`.claude` 这类）。最后告诉用户可以怎么登记。
 
 ## 3. 登记
 
 用户没写分给谁的，照每份的 `description` 提议分给哪几个角色，用 `AskUserQuestion` 问：「照这样登记」/「我来改」。
 用户写明了分给谁的，照写的办，不再问。能登记给的只有花名册里派得到的角色和你自己。
 本机有几份同名的（`sync` 报撞名），把各份的 `ref` 与来源列给用户挑，用挑中的那个 `ref` 登记。`refs_outside` 不空的，登记前提醒一句。
+已登记的只改分给谁，用 `assign`：`--add` 加、`--remove` 减，不要用 `sync`——`sync` 会顺手把副本换成本机现在那一份。
 
 ## 4. 去掉
 
@@ -51,8 +54,9 @@ node "${CLAUDE_PLUGIN_ROOT}/hooks/skills-cli.mjs" <子命令> [名字…] [--rol
 - `kind` 是 `plugin` 的：插件的更新归 Claude Code 管，这里只核本机那份变没变；告诉用户插件可以用 `claude plugin update` 更新，更新之后再跑这条命令同步。
 - 其余的：照实说网上那一层查不了。
 
-有新提交的，用 `AskUserQuestion` 问用户要不要更新；批准了才 `git -C <原件目录> pull --ff-only`，再 `sync`。
+有新提交的，用 `AskUserQuestion` 问用户要不要更新；批准了才 `git -C <原件目录> pull --ff-only`，再 `sync --update`。
 这些命令在项目之外、改的是用户本机的东西，照你的角色正文「红线」一节对敏感操作的做法：先问，批准了才做，没批准的不做。
+这条命令里的几问都另算：不记 escalation、不动契约，一趟进行中也一样。
 
 ## 6. 一趟进行中
 
@@ -61,7 +65,8 @@ node "${CLAUDE_PLUGIN_ROOT}/hooks/skills-cli.mjs" <子命令> [名字…] [--rol
 ## 7. 同步本机的新版
 
 `check` 的 `changed` 不空的：列出是哪几份、改了哪些文件（`files`）；`SKILL.md` 改了的，读原件与副本（`source_path`、`copy_path`）比一下，
-用一两句话说大概改了什么。用 `AskUserQuestion` 问「同步这几份」还是「先不换」；选了同步的跑 `sync` 加那几个名字（不带 `--roles`，沿用原来分给谁）。
+用一两句话说大概改了什么。`copy_changed` 不空的：项目里的副本被改过，和登记时不一样了，照本机原件重新复制才回得去。
+这两样用同一道 `AskUserQuestion` 问「同步这几份」还是「先不换」；选了同步的跑 `sync --update` 加那几个名字（不带 `--roles`，沿用原来分给谁）。
 
 ## 8. 收尾
 

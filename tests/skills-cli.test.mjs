@@ -17,7 +17,7 @@ test('cli list 输出 JSON、退出码 0', () => {
   const r = cliIn(projectRoot)('list', ['--home', home])
   assert.equal(r.status, 0)
   const out = JSON.parse(r.stdout)
-  assert.deepEqual(out.installed.map((s) => s.ref).sort(), ['project/local-one', 'ui-kit:polish', 'user/cloned', 'user/plain'])
+  assert.deepEqual(out.installed.map((s) => s.ref).sort(), ['project/local-one', 'ui-kit@mkt:polish', 'user/cloned', 'user/plain'])
   assert.deepEqual(out.installed.find((s) => s.ref === 'user/plain').registered_roles, [])
 })
 
@@ -27,18 +27,33 @@ test('cli sync 之后 list 带出登记给谁；再 check：没变时 changed �
   const s = JSON.parse(cli('sync', ['ui-kit:polish', '--roles', 'at-ui,at-frontend', '--home', home]).stdout)
   assert.deepEqual(s.errors, [])
   const l = JSON.parse(cli('list', ['--home', home]).stdout)
-  assert.deepEqual(l.installed.find((x) => x.ref === 'ui-kit:polish').registered_roles, ['at-ui', 'at-frontend'])
+  assert.deepEqual(l.installed.find((x) => x.ref === 'ui-kit@mkt:polish').registered_roles, ['at-ui', 'at-frontend'])
   const c = JSON.parse(cli('check', ['--home', home]).stdout)
-  assert.deepEqual([c.changed, c.missing, c.copy_missing, c.unchanged], [[], [], [], ['ui-kit:polish']])
+  assert.deepEqual([c.changed, c.missing, c.copy_missing, c.copy_changed, c.unchanged], [[], [], [], [], ['ui-kit:polish']])
 })
 
 test('cli refuses broken registry', () => {
   const { home, projectRoot, agentTeamDir } = world()
   writeFileSync(join(agentTeamDir, 'skills.json'), '{bad')
-  const r = cliIn(projectRoot)('sync', ['ui-kit:polish', '--roles', 'at-ui', '--home', home])
-  assert.equal(r.status, 2)
-  assert.match(JSON.parse(r.stdout).error, /^skills\.json 读不出来：/)
+  const cli = cliIn(projectRoot)
+  for (const [sub, args] of [['list', []], ['check', []], ['sync', ['ui-kit:polish', '--roles', 'at-ui']], ['assign', ['plain', '--add', 'at-ui']], ['remove', ['plain']]]) {
+    const r = cli(sub, [...args, '--home', home])
+    assert.equal(r.status, 2, sub)
+    assert.match(JSON.parse(r.stdout).error, /^skills\.json 读不出来：/, sub)
+  }
   assert.equal(readFileSync(join(agentTeamDir, 'skills.json'), 'utf8'), '{bad')
+})
+
+test('cli sync 对已登记、本机又变了的要带 --update；assign --add 只加不丢', () => {
+  const { home, projectRoot } = world()
+  const cli = cliIn(projectRoot)
+  cli('sync', ['plain', '--roles', 'at-ui', '--home', home])
+  writeFileSync(join(home, '.claude', 'skills', 'plain', 'SKILL.md'), '---\ndescription: 第二版\n---\n')
+  assert.equal(JSON.parse(cli('sync', ['plain', '--home', home]).stdout).errors.length, 1)
+  assert.deepEqual(JSON.parse(cli('sync', ['plain', '--update', '--home', home]).stdout).errors, [])
+  assert.deepEqual(JSON.parse(cli('assign', ['plain', '--add', 'at-qa', '--home', home]).stdout).assigned, ['plain'])
+  const l = JSON.parse(cli('list', ['--home', home]).stdout)
+  assert.deepEqual(l.installed.find((x) => x.ref === 'user/plain').registered_roles, ['at-ui', 'at-qa'])
 })
 
 test('cli 拒 --roles at-outsider，什么都不写', () => {
