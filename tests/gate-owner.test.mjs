@@ -244,6 +244,52 @@ test('hook 输入没有 session_id：不按会话拦', () => {
   })
 })
 
+// ---------------------------------------------------------------------------------------------------------------------------------
+// H2：别的会话的主线程以这一趟的名义派人。
+const dispatchBy = (projectDir, sid, over = {}) =>
+  run(
+    'readiness',
+    {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Agent',
+      agent_type: PM,
+      session_id: sid,
+      tool_input: { subagent_type: 'agent-team:at-product', description: 'x', prompt: 'x' },
+      ...over,
+    },
+    GATE,
+    projectDir,
+  )
+
+test('别的会话的主线程派 at-product，H2 拒，理由含「派人」「归另一个会话」', () => {
+  world(({ projectDir }) => {
+    createRun(projectDir, 'r1', { sid: 's-1' })
+    const out = dispatchBy(projectDir, 's-2')
+    assert.equal(decisionOf(out.stdout)?.permissionDecision, 'deny')
+    assert.match(reasonOf(out), /派人/)
+    assert.match(reasonOf(out), /归另一个会话/)
+  })
+})
+
+test('建这一趟的会话派人，不出这条理由', () => {
+  world(({ projectDir }) => {
+    createRun(projectDir, 'r1', { sid: 's-1' })
+    assert.doesNotMatch(reasonOf(dispatchBy(projectDir, 's-1')), OWNED)
+  })
+})
+
+test('带 agent_id 的协调者往下派，不走这一道', () => {
+  world(({ projectDir }) => {
+    createRun(projectDir, 'r1', { sid: 's-1' })
+    const out = dispatchBy(projectDir, 's-2', {
+      agent_type: 'agent-team:at-product',
+      agent_id: 'a0123456789abcdef',
+      tool_input: { subagent_type: 'agent-team:at-ui', description: 'x', prompt: 'x' },
+    })
+    assert.doesNotMatch(reasonOf(out), OWNED)
+  })
+})
+
 test('带 agent_id 的子代理写 run 目录：不走这一道（照原来的写路径隔离判）', () => {
   world(({ projectDir }) => {
     const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })

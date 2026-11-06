@@ -48,7 +48,7 @@ import {
 import { mayWaive, dispatchedIn, wholeStageTrimmed, trimmedAt } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, OWNER_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
-import { ownerDenyReason, ownerRecord, ownerWriteBlock, readOwner } from './lib/owner.mjs'
+import { ownerDenyReason, ownerDispatchBlock, ownerRecord, ownerWriteBlock, readOwner } from './lib/owner.mjs'
 import {
   CONTRACT_BASE_FILE,
   DRIFT_FIX,
@@ -1936,6 +1936,13 @@ function main() {
   }
 
   if (CHECK === 'readiness') {
+    // 一趟只归一个会话（hooks/lib/owner.mjs）：主线程（项目经理、不带 agent_type 的主会话；不带 agent_id）在 current-run 指着的一趟归别的会话、还没收口时
+    // 派人，拒。排在读运行上下文之前：它只看指针、那一趟的收口与归属，读不出运行上下文时照样判。子代理往下派照旧按派发记录认，不归这一道管。
+    if (!malformedCaller(input) && isContractWriter(callerOf(input)) && typeof input.agent_id !== 'string') {
+      const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+      const block = ownerDispatchBlock({ sessionId: input.session_id, pointerId: pointerIdOf(agentTeamDir), infoOf: ownerInfoOf(agentTeamDir) })
+      if (block) denyAndExit(ownerDenyReason(block) + selfCheckIdentity(input, '派发'), spec.event)
+    }
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
     // H2 是流程辅助：读不到运行上下文时 fail open，但规格 §6 写的是
     // allow + warning，不是静默放行——必须留痕，不能一声不吭就 exit(0)。
