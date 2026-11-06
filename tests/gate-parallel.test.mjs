@@ -193,8 +193,7 @@ test('主线程读不到会话 id：挑不出这一趟，照 current-run 判，s
   withProject(TWO(), (p) => {
     const out = write(p, join(p, '.agent-team', 'runs', 't1', '04-dispatch.md'), { sid: null })
     assert.equal(denied(out), false)
-    assert.match(out.stderr, /读不到会话 id/)
-    assert.match(out.stderr, /current-run/)
+    assert.match(out.stderr, /挑这一趟：hook 输入里读不到会话 id[^\n]*按 current-run 判/)
   })
 })
 
@@ -309,7 +308,7 @@ test('认领：a1 先写 web/a.ts，记进 t1 的认领（t2 的没有）；a2 �
     assert.equal(denied(land(p, join(p, 'web', 'a.ts'), A1)), false)
     assert.match(claimsOf(p, 't1'), /a\.ts/)
     assert.equal(claimsOf(p, 't2'), '')
-    for (const file of [join(p, 'web', 'a.ts'), join(p, 'web', '.', 'a.ts')]) {
+    for (const file of [join(p, 'web', 'a.ts'), p + '/web/./a.ts']) {
       const out = write(p, file, A2)
       assert.equal(denied(out), true, file)
       assert.match(reasonOf(out), /"t1"/)

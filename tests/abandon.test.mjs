@@ -47,10 +47,13 @@ test('abandonAnswer：单独一道单选题里干净地选了「放弃这一趟�
   assert.deepEqual(takeoverAnswer({ questions: [{ question: 'Q', multiSelect: false }], answers: { Q: TAKEOVER_LABEL } }), { label: TAKEOVER_LABEL, question: 'Q' })
 })
 
-test('abandonLine 与 readAbandoned：只认 kind 为 abandon 的行', () => {
-  assert.equal(readAbandoned(abandonLine({ at: T, runId: 'r1' }) + '\n'), true)
-  assert.equal(readAbandoned('{"kind":"tweak-done","contract":"x"}\n{bad\n'), false)
-  assert.equal(readAbandoned(null), false)
+test('abandonLine 与 readAbandoned：只认 kind 为 abandon、run 是这一趟的行', () => {
+  const isR1 = (id) => id === 'r1'
+  assert.equal(readAbandoned(abandonLine({ at: T, runId: 'r1' }) + '\n', isR1), true)
+  assert.equal(readAbandoned(abandonLine({ at: T, runId: 'r2' }) + '\n', isR1), false, '别的一趟的批准不算')
+  assert.equal(readAbandoned('{"kind":"abandon","at":"t"}\n', isR1), false, '没写 run 的不算')
+  assert.equal(readAbandoned('{"kind":"tweak-done","contract":"x"}\n{bad\n', isR1), false)
+  assert.equal(readAbandoned(null, isR1), false)
 })
 
 test('abandonNotice：记下了给出写法（closed_at 与 abandoned: true、stage 与 history 原样）；没记下说原因', () => {

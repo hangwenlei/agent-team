@@ -2883,7 +2883,11 @@ function main() {
       } catch {}
       // 放弃收尾（hooks/lib/abandon.mjs）：abandoned 的形状与放弃那一次的条件（批准记在同一个目录的 approvals.jsonl）。放弃那一次不核产物：
       // decideClosing 的关上判据与下面收口、推进时读产物的几条（契约基线、测试报告、验收结论、「可以了，收尾」）都不跑。
-      const ab = decideAbandon({ before, after, approved: readAbandoned(approvalsText) })
+      const ab = decideAbandon({
+        before,
+        after,
+        approved: readAbandoned(approvalsText, (id) => RUN_ID.test(id) && norm(join(agentTeamDir, 'runs', id)) === norm(runDir)),
+      })
       if (!ab.ok) denyAndExit(ab.reason, spec.event)
       const abandoning = isAbandoning(before, after)
       const closing = abandoning ? { ok: true } : decideClosing({ before, after, stages: stagesForRework, diskSha, atPath: join(ROOT, 'commands', 'at.md'), dispatched })

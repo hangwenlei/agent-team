@@ -25,14 +25,17 @@ export function abandonLine({ at, runId }) {
   return JSON.stringify({ kind: ABANDON_KIND, at, run: runId })
 }
 
-/** approvals.jsonl 的原文里有没有放弃的批准。 */
-export function readAbandoned(text) {
-  if (typeof text !== 'string') return false
+/**
+ * approvals.jsonl 的原文里有没有放弃这一趟的批准：kind 是 abandon、run 是这一趟（isThisRun(run) 为真；调用方按规范化之后的目录比）。
+ * 绑 run id：批准记录 Edit/Write 写不进，Bash 拷得进——别的一趟的批准拷过来不算。
+ */
+export function readAbandoned(text, isThisRun) {
+  if (typeof text !== 'string' || typeof isThisRun !== 'function') return false
   for (const line of text.split('\n')) {
     if (!line.trim()) continue
     try {
       const v = JSON.parse(line)
-      if (isPlainObject(v) && v.kind === ABANDON_KIND) return true
+      if (isPlainObject(v) && v.kind === ABANDON_KIND && typeof v.run === 'string' && v.run !== '' && isThisRun(v.run)) return true
     } catch {}
   }
   return false
