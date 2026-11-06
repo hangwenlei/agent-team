@@ -549,3 +549,50 @@ test('第 33 条（C9）：current-run 末尾带 LF、CRLF、空白——照样�
     }
   }
 })
+
+// 并行微调（边看边改微调的设计 §5.8）：微调不写 current-run。第一趟就是微调的项目、指针不在而 runs/ 下只有微调的目录（state 写着 tweak、run 目录里
+// 绑着 at-tweak 的原话记录），不是「有人建过完整的 run 而指针丢了」——判 no-run。混进一个别的 run 目录照旧判读不出。
+function tweakDir(projectDir, id, command = 'at-tweak') {
+  const dir = join(projectDir, '.agent-team', 'runs', id)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'state.json'), JSON.stringify({ run_id: id, mode: 'tweak', stage: 'S5', history: [{ stage: 'S1', at: 't' }] }))
+  writeFileSync(join(dir, 'user-words.json'), JSON.stringify({ at: 't', session_id: 's-1', args: '改', source: 'command', command, bound: id }))
+  return dir
+}
+
+test('current-run 不在、runs/ 下只有微调的目录：kind 是 no-run；混进一个不是微调的 run 目录照旧 unreadable', () => {
+  const dirs = makeRun({ runId: 'full1', stage: 'S2', stages: STAGES })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'full1'), { recursive: true, force: true })
+    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'))
+    tweakDir(dirs.projectDir, 't1')
+    tweakDir(dirs.projectDir, 't2')
+    assert.equal(readRunContext(dirs.projectDir, dirs.pluginDir).kind, 'no-run')
+    tweakDir(dirs.projectDir, 'x1', 'at')
+    const ctx = readRunContext(dirs.projectDir, dirs.pluginDir)
+    assert.equal(ctx.kind, 'unreadable')
+    assert.equal(ctx.cause, 'pointer')
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('readRunContext 给了 runId：不读 current-run，读那一趟；id 不合法、目录不在归 unreadable', () => {
+  const dirs = makeRun({ runId: 'r42', stage: 'S2', stages: STAGES })
+  try {
+    writeFileSync(join(dirs.pluginDir, 'stages.tweak.json'), JSON.stringify({ S5: { role: 'at-backend', produces: ['05-impl/<role>.md'] } }))
+    tweakDir(dirs.projectDir, 't1')
+    const ctx = readRunContext(dirs.projectDir, dirs.pluginDir, { runId: 't1' })
+    assert.equal(ctx.ok, true, ctx.reason)
+    assert.equal(ctx.runId, 't1')
+    assert.equal(ctx.state.mode, 'tweak')
+    for (const runId of ['../x', 'nope']) {
+      const bad = readRunContext(dirs.projectDir, dirs.pluginDir, { runId })
+      assert.equal(bad.ok, false, runId)
+      assert.equal(bad.kind, 'unreadable', runId)
+    }
+    assert.equal(readRunContext(dirs.projectDir, dirs.pluginDir).runId, 'r42', '不给 runId 照旧读指针')
+  } finally {
+    cleanup(dirs)
+  }
+})

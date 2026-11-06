@@ -78,6 +78,16 @@ test('ownerWriteBlock：别的会话写有归属、没收口的一趟里的文�
   assert.equal(ownerWriteBlock({ sessionId: 's-2', target: null, pointerId: 'r1', infoOf, same }), null)
 })
 
+// 并行微调：微调不占 current-run，建 run 那一次的互斥由 H6 判（parallel.mjs）——指针指着别的会话的一趟微调时，另建一趟不按归属拦。
+test('ownerWriteBlock：指针指着别的会话的一趟微调时另建一趟，不按归属拦；指着别的会话的完整一趟照旧拦', () => {
+  const same = (a, b) => a === b
+  const creating = { kind: 'run-file', runId: 'r2', creatingState: true }
+  const tweakInfo = (id) => (id === 'r1' ? { closed: false, owner: { session_id: 's-1', via: 'create' }, tweak: true } : null)
+  assert.equal(ownerWriteBlock({ sessionId: 's-2', target: creating, pointerId: 'r1', infoOf: tweakInfo, same }), null)
+  const fullInfo = (id) => (id === 'r1' ? { closed: false, owner: { session_id: 's-1', via: 'create' }, tweak: false } : null)
+  assert.deepEqual(ownerWriteBlock({ sessionId: 's-2', target: creating, pointerId: 'r1', infoOf: fullInfo, same }), { runId: 'r1', kind: 'create', via: 'create' })
+})
+
 test('ownerWriteBlock：指针指着别的会话的一趟时另建一趟、切走，拒；指针空着时指到别的会话的一趟放行（接回丢了指针的那一趟要走这一步）', () => {
   const infoOf = (id) => (id === 'r1' ? { closed: false, owner: { session_id: 's-1', via: 'takeover' } } : null)
   const same = (a, b) => a === b

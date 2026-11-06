@@ -122,6 +122,9 @@ import { norm, underDir } from './path-norm.mjs'
 import { normalizeText } from './text-norm.mjs'
 import { isStageChain } from './stages.mjs'
 import { stagesFileFor } from './tweak.mjs'
+import { readWords } from './user-words.mjs'
+import { isTweakRun } from './runpick.mjs'
+import { USER_WORDS_FILE } from './control-files.mjs'
 // reason 会进拒绝理由、stderr 留痕；JSON.parse 的异常消息会引用文件原文，一律过 quote（M3s，docs/27）。
 import { inline, quote } from './trusted.mjs'
 
@@ -233,10 +236,23 @@ function hasAgentTeamDir(dir) {
 // 由 projectRootFrom 定出来。
 // pluginDir：插件根，放 stages.json。两者不是同一个目录——插件文件要用
 // ${CLAUDE_PLUGIN_ROOT} 定位。混用会在真实环境里读不到东西而单测照样绿。
-export function readRunContext(projectDir, pluginDir) {
+// 并行微调：runs/ 下这个目录是不是一趟门禁记过的微调（state.json 写着 tweak、run 目录里绑着 at-tweak 的原话记录）。读不出来都算不是——更严的一侧。
+function isTweakRunDir(dir) {
+  try {
+    const state = JSON.parse(normalizeText(readFileSync(join(dir, 'state.json'), 'utf8')))
+    return isTweakRun({ state, words: readWords(readFileSync(join(dir, USER_WORDS_FILE))) })
+  } catch {
+    return false
+  }
+}
+
+// 并行微调：第三个参数给了 runId（门禁按会话或 agent_id 挑出来的那一趟微调，gate.mjs 的 runCtxFor）就不读 current-run，直接读那一趟——
+// id 照 RUN_ID 核、目录要在，失败归 unreadable（cause: 'pointer'，与指针坏了同一族）。不给照旧按 current-run。
+export function readRunContext(projectDir, pluginDir, { runId: picked = null } = {}) {
   try {
     const base = join(projectDir, '.agent-team')
     const pointer = join(base, 'current-run')
+    if (typeof picked === 'string') return readRunAt(base, pluginDir, picked, `挑出来的这一趟 ${quote(picked)}`)
     if (!existsSync(pointer)) {
       // 指针不在有两种截然不同的成因，靠 runs/ 空不空分开（M3c，完整论证在文件
       // 头部 ③ 那一段）：runs/ 不存在或没有子目录 = 从来没有人建过 run，是干净的缺席，
@@ -273,7 +289,9 @@ export function readRunContext(projectDir, pluginDir) {
             reason: `找不到 ${inline(pointer)}，而 ${inline(runsDir)} 读不出来：${quote(err.message, { max: 120 })}`,
           }
         }
-        if (entries.length > 0) {
+        // 并行微调（边看边改微调的设计 §5.8）：微调不写 current-run。runs/ 下只有门禁记过的微调时，不是「有人建过完整的 run 而指针不在」——
+        // 第一趟就是微调的项目、完整的一趟收口之后又跑了几趟微调都会这样。照「没有进行中的完整 run」判（no-run）；混进一个别的目录照旧读不出。
+        if (entries.length > 0 && !entries.every((e) => isTweakRunDir(join(runsDir, e.name)))) {
           return {
             ok: false,
             kind: 'unreadable',
@@ -320,92 +338,7 @@ export function readRunContext(projectDir, pluginDir) {
     // 单独一个 `.`（run 目录就是 runs/ 本身），与 NTFS 的目录流后缀 `r1::$INDEX_ALLOCATION`
     // （指向 runs/r1，字面上却是另一个名字，run 目录的判定随之错位）。命令正文规定的 run id
     // 形状（日期-时刻-slug）是这个白名单的子集。
-    if (!RUN_ID.test(runId)) {
-      return {
-        ok: false,
-        kind: 'unreadable',
-        cause: 'pointer',
-        agentTeamDir: base,
-        reason:
-          `current-run 内容不是合法的 run id（只允许字母、数字、点、下划线、连字符，且以字母或数字开头）：` +
-          quote(runId),
-      }
-    }
-
-    const runDir = join(base, 'runs', runId)
-    if (!existsSync(runDir)) {
-      // current-run 指向的 run 目录不存在——指针指向了一个从没建出来、
-      // 或已经被清理掉的 run。归 unreadable，不是 no-run：pointer 在就意味着
-      // 有人开过 run，这不是干净的缺席，而是一个坏掉的 run。与上面「空文件」
-      // 那一条是同一条理由的两个实物，完整论证见文件头部，不在这里重复第二遍。
-      return {
-        ok: false,
-        kind: 'unreadable',
-        cause: 'pointer',
-        agentTeamDir: base,
-        reason: `current-run 指向 ${inline(runId)}，但 ${inline(runDir)} 不存在`,
-      }
-    }
-
-    // 走到这里，run 目录本身已确认存在——下面几步读到的任何失败都是
-    // 「这个真实存在的 run 读不出来」，不再有 no-run 的可能，一律 unreadable。
-    const state = readJson(join(runDir, 'state.json'))
-    if (!state.ok) return { ok: false, kind: 'unreadable', cause: 'state', agentTeamDir: base, reason: state.reason }
-
-    // 单个微调：按这一趟的 mode 选阶段链（微调走 stages.tweak.json，别的——缺、full、坏值——走 stages.json）。
-    const stagesFile = stagesFileFor(state.value)
-    const stages = readJson(join(pluginDir, stagesFile))
-    if (!stages.ok) return { ok: false, kind: 'unreadable', cause: 'plugin', agentTeamDir: base, reason: stages.reason }
-    // M3v 复核（docs/30 §3）：解析得出、形状不对的阶段链（{}、某一段的值不是对象）也是插件坏了。此前它算读出来了，每一次派发
-    // 都落进 unknown-stage，门禁把原因说成 state.stage、叫 PM 去动 history；H3 也把 PM 的产物说成「不是任何阶段的 produces」。
-    // 只核最外一层：各段里面的字段由各个消费方自己防。谓词与 H6 判「读不出阶段链」共用 stages.mjs 的 isStageChain（M3y）。
-    if (!isStageChain(stages.value)) {
-      return {
-        ok: false,
-        kind: 'unreadable',
-        cause: 'plugin',
-        agentTeamDir: base,
-        reason: `${inline(join(pluginDir, stagesFile))} 的形状不对：要至少有一个阶段，每个阶段都是一个对象`,
-      }
-    }
-
-    const projectPath = join(base, 'project.json')
-    const project = existsSync(projectPath) ? readJson(projectPath) : { ok: true, value: null }
-    if (!project.ok) return { ok: false, kind: 'unreadable', cause: 'project', agentTeamDir: base, reason: project.reason }
-
-    return {
-      ok: true,
-      runId,
-      runDir,
-      state: state.value,
-      stages: stages.value,
-      project: project.value,
-      // agentTeamDir 是 .agent-team 本身（runDir 的爷爷目录）。H3 判定控制文件要用
-      // 它：current-run / project.json / reach.json 都在这一层、不在 runDir 里。
-      // 让 decideWritePath 自己从 runDir 往上推两级也行，但那会是第二处「.agent-team
-      // 在哪」的知识——这个文件已经是那条知识的唯一来源（上面的 base），直接给出去。
-      agentTeamDir: base,
-      artifactExists(rel) {
-        // join 放在 try 里面：rel 理论上总是 stages.json 里 requires/produces
-        // 数组的字符串元素，但这层防御不该指望调用方守规矩——同一个教训
-        // （I3）在这个闭包里单独存在一份，join 本身也不能留在 try 之外。
-        try {
-          return statSync(join(runDir, rel)).isFile()
-        } catch {
-          return false
-        }
-      },
-      // 与 artifactExists 同构：ledger 要拿 00-contract.md 的字节去算 sha256。
-      // 读不到一律返回 null，绝不抛——这个模块对外的硬契约是「所有失败都返回数据，
-      // 不抛异常」，闭包里也不例外（join 也在 try 里面，理由同 artifactExists）。
-      artifactBytes(rel) {
-        try {
-          return readFileSync(join(runDir, rel))
-        } catch {
-          return null
-        }
-      },
-    }
+    return readRunAt(base, pluginDir, runId, null)
   } catch (err) {
     // 兜底分支：projectDir/pluginDir 传了非字符串导致 join() 同步抛出，
     // 或者任何没预料到的异常。这不是「没有 run」——门禁自己都不知道出了
@@ -417,5 +350,96 @@ export function readRunContext(projectDir, pluginDir) {
     // 调用方按「取不到 agentTeamDir 就照原路 fail open」处理，见 hooks/gate.mjs 的
     // ledger 分支。
     return { ok: false, kind: 'unreadable', cause: 'plugin', reason: `读取运行上下文失败：${quote(err.message, { max: 120 })}` }
+  }
+}
+
+// 读 runs/<runId>/ 那一趟：id 照 RUN_ID 核、目录要在，再读 state.json、阶段链、project.json。picked 为 null 时 runId 来自 current-run（报错照指针说），
+// 不是 null 时是门禁挑出来的那一趟（报错照它说）。调用方的 try 兜住意外异常。
+function readRunAt(base, pluginDir, runId, picked) {
+  if (!RUN_ID.test(runId)) {
+    return {
+      ok: false,
+      kind: 'unreadable',
+      cause: 'pointer',
+      agentTeamDir: base,
+      reason:
+        `${picked ? `${picked}的 id` : 'current-run 内容'}不是合法的 run id（只允许字母、数字、点、下划线、连字符，且以字母或数字开头）：` +
+        quote(runId),
+    }
+  }
+
+  const runDir = join(base, 'runs', runId)
+  if (!existsSync(runDir)) {
+    // current-run 指向的 run 目录不存在——指针指向了一个从没建出来、
+    // 或已经被清理掉的 run。归 unreadable，不是 no-run：pointer 在就意味着
+    // 有人开过 run，这不是干净的缺席，而是一个坏掉的 run。与上面「空文件」
+    // 那一条是同一条理由的两个实物，完整论证见文件头部，不在这里重复第二遍。
+    return {
+      ok: false,
+      kind: 'unreadable',
+      cause: 'pointer',
+      agentTeamDir: base,
+      reason: picked ? `${picked}的 run 目录 ${inline(runDir)} 不存在` : `current-run 指向 ${inline(runId)}，但 ${inline(runDir)} 不存在`,
+    }
+  }
+
+  // 走到这里，run 目录本身已确认存在——下面几步读到的任何失败都是
+  // 「这个真实存在的 run 读不出来」，不再有 no-run 的可能，一律 unreadable。
+  const state = readJson(join(runDir, 'state.json'))
+  if (!state.ok) return { ok: false, kind: 'unreadable', cause: 'state', agentTeamDir: base, reason: state.reason }
+
+  // 单个微调：按这一趟的 mode 选阶段链（微调走 stages.tweak.json，别的——缺、full、坏值——走 stages.json）。
+  const stagesFile = stagesFileFor(state.value)
+  const stages = readJson(join(pluginDir, stagesFile))
+  if (!stages.ok) return { ok: false, kind: 'unreadable', cause: 'plugin', agentTeamDir: base, reason: stages.reason }
+  // M3v 复核（docs/30 §3）：解析得出、形状不对的阶段链（{}、某一段的值不是对象）也是插件坏了。此前它算读出来了，每一次派发
+  // 都落进 unknown-stage，门禁把原因说成 state.stage、叫 PM 去动 history；H3 也把 PM 的产物说成「不是任何阶段的 produces」。
+  // 只核最外一层：各段里面的字段由各个消费方自己防。谓词与 H6 判「读不出阶段链」共用 stages.mjs 的 isStageChain（M3y）。
+  if (!isStageChain(stages.value)) {
+    return {
+      ok: false,
+      kind: 'unreadable',
+      cause: 'plugin',
+      agentTeamDir: base,
+      reason: `${inline(join(pluginDir, stagesFile))} 的形状不对：要至少有一个阶段，每个阶段都是一个对象`,
+    }
+  }
+
+  const projectPath = join(base, 'project.json')
+  const project = existsSync(projectPath) ? readJson(projectPath) : { ok: true, value: null }
+  if (!project.ok) return { ok: false, kind: 'unreadable', cause: 'project', agentTeamDir: base, reason: project.reason }
+
+  return {
+    ok: true,
+    runId,
+    runDir,
+    state: state.value,
+    stages: stages.value,
+    project: project.value,
+    // agentTeamDir 是 .agent-team 本身（runDir 的爷爷目录）。H3 判定控制文件要用
+    // 它：current-run / project.json / reach.json 都在这一层、不在 runDir 里。
+    // 让 decideWritePath 自己从 runDir 往上推两级也行，但那会是第二处「.agent-team
+    // 在哪」的知识——这个文件已经是那条知识的唯一来源（上面的 base），直接给出去。
+    agentTeamDir: base,
+    artifactExists(rel) {
+      // join 放在 try 里面：rel 理论上总是 stages.json 里 requires/produces
+      // 数组的字符串元素，但这层防御不该指望调用方守规矩——同一个教训
+      // （I3）在这个闭包里单独存在一份，join 本身也不能留在 try 之外。
+      try {
+        return statSync(join(runDir, rel)).isFile()
+      } catch {
+        return false
+      }
+    },
+    // 与 artifactExists 同构：ledger 要拿 00-contract.md 的字节去算 sha256。
+    // 读不到一律返回 null，绝不抛——这个模块对外的硬契约是「所有失败都返回数据，
+    // 不抛异常」，闭包里也不例外（join 也在 try 里面，理由同 artifactExists）。
+    artifactBytes(rel) {
+      try {
+        return readFileSync(join(runDir, rel))
+      } catch {
+        return null
+      }
+    },
   }
 }
