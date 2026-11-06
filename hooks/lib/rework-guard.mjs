@@ -43,6 +43,7 @@ import { SHA_RE } from './contract-hash.mjs'
 // 第 17 条（推进判据）：离开一段时核缺的、空文件、没记账；一次只推进一段。
 import { decideSingleStep, departureBlockers, departureLines } from './advance.mjs'
 import { EMPTY_SHA, gateClock } from './closing.mjs'
+import { TWEAK_MODE, modeOf } from './tweak.mjs'
 
 function counts(history) {
   const c = {}
@@ -272,6 +273,24 @@ export function decideStageRolesKey({ before, after, creating = false }) {
   if (creating) return { ok: false, reason: STAGE_ROLES_CREATE }
   if (isPlainObject(before) && isPlainObject(before.stage_roles)) return { ok: false, reason: STAGE_ROLES_DROP }
   return { ok: true }
+}
+
+/**
+ * 单个微调：这一趟是哪种（state 的 mode）在建 run 那一次定下，之后不许改——改了门禁就换一条阶段链判同一份磁盘状态。写入之前读得出 state.json、
+ * 而写入前后 modeOf 不同（缺与 full 都是 full）就拒；建 run 那一次（写之前读不出）随便写哪种。
+ */
+export function decideModeKey({ before, after }) {
+  if (!isPlainObject(before) || !isPlainObject(after)) return { ok: true }
+  const was = modeOf(before)
+  const now = modeOf(after)
+  if (was === now) return { ok: true }
+  return {
+    ok: false,
+    reason:
+      `agent-team H6：state.json 的 mode 建好之后不许改（这一趟是 ${was === TWEAK_MODE ? '微调（"tweak"）' : '完整的一趟（"full"）'}，这次写成了 ` +
+      `${now === TWEAK_MODE ? '"tweak"' : '"full" 或去掉了它'}）——门禁按它选阶段链，改了就换一条链判同一份磁盘状态。照原样带着它重写；要换成另一种，` +
+      '另起一趟（完整的用 /agent-team:at，微调用 /agent-team:at-tweak）。',
+  }
 }
 
 /**

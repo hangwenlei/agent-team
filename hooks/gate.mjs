@@ -20,7 +20,8 @@ import { projectRootFrom, readProjectConfig, readRunContext, RUN_ID } from './li
 import { candidateStages, decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
-import { decideRework, decideReworkBase, decideStageRolesKey, parseStateText, replayEdit } from './lib/rework-guard.mjs'
+import { decideModeKey, decideRework, decideReworkBase, decideStageRolesKey, parseStateText, replayEdit } from './lib/rework-guard.mjs'
+import { stagesFileFor } from './lib/tweak.mjs'
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { isBlankText } from './lib/text-norm.mjs'
 import { normalizeText } from './lib/text-norm.mjs'
@@ -2451,7 +2452,8 @@ function main() {
       // 当一条都没有——更严的一侧；拒绝理由末尾的诊断会说批准为什么可能记不下。
       let stagesForRework = null
       try {
-        stagesForRework = JSON.parse(normalizeText(readFileSync(join(ROOT, 'stages.json'), 'utf8')))
+        // 单个微调：按这次写入之后的那份（读不出时写入之前的）state.json 的 mode 选阶段链；mode 改不了由下面 decideModeKey 拒。
+        stagesForRework = JSON.parse(normalizeText(readFileSync(join(ROOT, stagesFileFor(after ?? before)), 'utf8')))
       } catch {
         stagesForRework = null
       }
@@ -2504,6 +2506,8 @@ function main() {
       const runSeen = GATE_FILES.map((p) => p.split('/').pop()).some((n) => existsSync(join(dirname(filePath), n)))
       const sk = decideStageRolesKey({ before, after, creating: before === null && beforeText === null && !runSeen })
       if (!sk.ok) denyAndExit(sk.reason, spec.event)
+      const mk = decideModeKey({ before, after })
+      if (!mk.ok) denyAndExit(mk.reason, spec.event)
 
       // M3y（docs/33，全量审查第 15 条）：rework_base——回退那一次写入照磁盘记下各份产物的 sha，之后原样带着，推进离开一段时
       // 那一段里不许还有上一轮的产物。规则在 decideReworkBase（hooks/lib/rework-guard.mjs 的 M3y 一节），这里只做 I/O：
@@ -3328,7 +3332,7 @@ function main() {
     const wordsHead = chars.length ? chars.slice(0, 40).join('') + (chars.length > 40 ? '…' : '') : null
     let delivered = false
     try {
-      const stages = JSON.parse(normalizeText(readFileSync(join(ROOT, 'stages.json'), 'utf8')))
+      const stages = JSON.parse(normalizeText(readFileSync(join(ROOT, stagesFileFor(st)), 'utf8')))
       const last = lastStageId(stages)
       const products = last ? productsOfStage(stages[last]) : []
       delivered =

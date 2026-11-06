@@ -121,6 +121,7 @@ import { dirname, join, resolve } from 'node:path'
 import { norm, underDir } from './path-norm.mjs'
 import { normalizeText } from './text-norm.mjs'
 import { isStageChain } from './stages.mjs'
+import { stagesFileFor } from './tweak.mjs'
 // reason 会进拒绝理由、stderr 留痕；JSON.parse 的异常消息会引用文件原文，一律过 quote（M3s，docs/27）。
 import { inline, quote } from './trusted.mjs'
 
@@ -351,7 +352,9 @@ export function readRunContext(projectDir, pluginDir) {
     const state = readJson(join(runDir, 'state.json'))
     if (!state.ok) return { ok: false, kind: 'unreadable', cause: 'state', agentTeamDir: base, reason: state.reason }
 
-    const stages = readJson(join(pluginDir, 'stages.json'))
+    // 单个微调：按这一趟的 mode 选阶段链（微调走 stages.tweak.json，别的——缺、full、坏值——走 stages.json）。
+    const stagesFile = stagesFileFor(state.value)
+    const stages = readJson(join(pluginDir, stagesFile))
     if (!stages.ok) return { ok: false, kind: 'unreadable', cause: 'plugin', agentTeamDir: base, reason: stages.reason }
     // M3v 复核（docs/30 §3）：解析得出、形状不对的阶段链（{}、某一段的值不是对象）也是插件坏了。此前它算读出来了，每一次派发
     // 都落进 unknown-stage，门禁把原因说成 state.stage、叫 PM 去动 history；H3 也把 PM 的产物说成「不是任何阶段的 produces」。
@@ -362,7 +365,7 @@ export function readRunContext(projectDir, pluginDir) {
         kind: 'unreadable',
         cause: 'plugin',
         agentTeamDir: base,
-        reason: `${inline(join(pluginDir, 'stages.json'))} 的形状不对：要至少有一个阶段，每个阶段都是一个对象`,
+        reason: `${inline(join(pluginDir, stagesFile))} 的形状不对：要至少有一个阶段，每个阶段都是一个对象`,
       }
     }
 
