@@ -48,7 +48,7 @@ import {
 import { mayWaive, dispatchedIn, wholeStageTrimmed, trimmedAt } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, OWNER_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
-import { ownerRecord } from './lib/owner.mjs'
+import { ownerDenyReason, ownerRecord, ownerWriteBlock, readOwner } from './lib/owner.mjs'
 import {
   CONTRACT_BASE_FILE,
   DRIFT_FIX,
@@ -1261,6 +1261,53 @@ function pointerIdOf(agentTeamDir) {
   }
 }
 
+// 一趟只归一个会话（hooks/lib/owner.mjs）：某一趟收没收口、归哪个会话——给 ownerWriteBlock、ownerDispatchBlock 的 infoOf。id 不合法、run 目录不在：null。
+// state.json 读不出来当没收口；owner.json 不在当没有归属，在却读不出来：留痕、当没有（少拦）。同一个 id 只读一次。
+function ownerInfoOf(agentTeamDir) {
+  const runsDir = join(agentTeamDir, 'runs')
+  const seen = new Map()
+  return (id) => {
+    if (typeof id !== 'string' || !RUN_ID.test(id)) return null
+    if (seen.has(id)) return seen.get(id)
+    const dir = join(runsDir, id)
+    let info = null
+    if (existsSync(dir)) {
+      let bytes = null
+      try {
+        bytes = readFileSync(join(dir, OWNER_FILE))
+      } catch {}
+      const owner = bytes === null ? null : readOwner(bytes)
+      if (bytes !== null && !owner) process.stderr.write(`agent-team 会话归属：${quote(id)} 那一趟的归属记录在却读不出来，这一次不按会话管它。\n`)
+      info = { closed: runClosed(dir), owner }
+    }
+    seen.set(id, info)
+    return info
+  }
+}
+
+// 一趟只归一个会话：主线程这次写的是什么——current-run（{ kind: 'pointer', newId }，newId 是 Write 新内容里的 run id，认不出为 null）、某一趟 run 目录里的
+// 文件（{ kind: 'run-file', runId, creatingState }，creatingState：写的是那一趟的 state.json、写之前它不在）、别的（null）。目录名照这次给的路径原样取
+// （规范化之后的路径在 Windows、macOS 上折成了小写）。
+function ownerTargetOf(agentTeamDir, filePath, toolName, toolInput) {
+  if (typeof filePath !== 'string' || filePath === '') return null
+  const runsDir = join(agentTeamDir, 'runs')
+  const target = norm(filePath)
+  if (target === norm(join(agentTeamDir, 'current-run'))) {
+    const c = toolName === 'Write' && typeof toolInput?.content === 'string' ? toolInput.content.trim() : null
+    return { kind: 'pointer', newId: c && RUN_ID.test(c) ? c : null }
+  }
+  const base = norm(runsDir)
+  if (!target.startsWith(`${base}/`)) return null
+  const rel = target.slice(base.length + 1).split('/')
+  if (!rel[0]) return null
+  let id = rel[0]
+  try {
+    const seg = relative(runsDir, filePath).split(/[\\/]/)[0]
+    if (seg && !seg.startsWith('..') && norm(join(runsDir, seg)) === norm(join(runsDir, rel[0]))) id = seg
+  } catch {}
+  return { kind: 'run-file', runId: id, creatingState: rel.length === 2 && rel[1] === 'state.json' && !existsSync(filePath) }
+}
+
 // M4p：【指针】那一段。两个 run id 都是磁盘上的值（目录名、current-run 的内容），过 quote；文件名与角色名是插件自己的名字。复核（docs/51 §8）：
 // 出路按情形给——新建的就是那一趟（指针指过去；契约与项目经理自己的产物原样重写拿回传，别的角色的产物指过去之后 H3 拒项目经理写它，派它的产者
 // 重交）；写错了目录（照原样写进指针指着的那一趟，那一趟读不出来时不给）；要接着做那一趟（用户定过放弃的、拿不准的先问用户，它已经收口就不能接着做）。
@@ -2037,6 +2084,23 @@ function main() {
     // 下面「花名册外的调用者放行」）。
     if (malformedCaller(input)) denyAndExit(malformedCallerReason('写入'), spec.event)
     const role = callerOf(input)
+
+    // 一趟只归一个会话（hooks/lib/owner.mjs）：主线程（项目经理、不带 agent_type 的主会话；不带 agent_id）写别的会话的一趟、另建一趟、把 current-run
+    // 从它切走或指到它，拒。排在主线程豁免与读运行上下文之前：豁免放行的正是主线程，建 run 那一刻运行上下文也读不出来。子代理照旧按派发记录认回
+    // 派它的那一趟，不归这一道管。hook 输入里读不到会话 id 时判不出来，不拦。
+    if (isContractWriter(role) && typeof input.agent_id !== 'string') {
+      const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+      const runsDir = join(agentTeamDir, 'runs')
+      const block = ownerWriteBlock({
+        sessionId: input.session_id,
+        target: ownerTargetOf(agentTeamDir, checked, input.tool_name, input.tool_input),
+        pointerId: pointerIdOf(agentTeamDir),
+        infoOf: ownerInfoOf(agentTeamDir),
+        same: (a, b) => norm(join(runsDir, a)) === norm(join(runsDir, b)),
+      })
+      if (block) denyAndExit(ownerDenyReason(block) + selfCheckIdentity(input, '写入'), spec.event)
+    }
+
     if (role === MAIN) process.exit(0)
 
     const ctx = readRunContext(ROOT_PROJECT, ROOT)

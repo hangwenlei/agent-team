@@ -143,3 +143,111 @@ test('owner.json 任何人用 Edit/Write 都拒，项目经理也拒', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// H3：别的会话的主线程写这一趟、另建一趟、切走或指到它。
+const reasonOf = (out) => decisionOf(out.stdout)?.permissionDecisionReason ?? ''
+const writeBy = (projectDir, file, sid, over = {}) => {
+  const input = preWrite(file, '# x' + String.fromCharCode(10), sid, over)
+  if ('agent_type' in over && over.agent_type === undefined) delete input.agent_type
+  return run('writepath', input, GATE, projectDir)
+}
+const OWNED = /会话归属/
+
+test('别的会话写这一趟的 state.json、契约、04-dispatch.md，H3 拒（项目经理与不带 agent_type 的主会话都拒）', () => {
+  world(({ projectDir }) => {
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    for (const f of ['state.json', '00-contract.md', '04-dispatch.md']) {
+      for (const over of [{}, { agent_type: undefined }]) {
+        const out = writeBy(projectDir, join(dir, f), 's-2', over)
+        assert.equal(decisionOf(out.stdout)?.permissionDecision, 'deny', f)
+        assert.match(reasonOf(out), /归另一个会话/, f)
+        assert.match(reasonOf(out), /\/agent-team:at-resume/, f)
+        assert.match(reasonOf(out), /别的会话的一趟/, f)
+      }
+    }
+  })
+})
+
+test('建这一趟的会话照常写', () => {
+  world(({ projectDir }) => {
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    assert.equal(decisionOf(writeBy(projectDir, join(dir, '00-contract.md'), 's-1').stdout), null)
+  })
+})
+
+test('已收口的一趟不按会话拦', () => {
+  world(({ projectDir }) => {
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    writeFileSync(join(dir, 'state.json'), JSON.stringify({ ...stateOf('r1'), closed_at: '2026-11-05T12:00:00Z' }, null, 2))
+    assert.doesNotMatch(reasonOf(writeBy(projectDir, join(dir, '04-dispatch.md'), 's-2')), OWNED)
+  })
+})
+
+test('没有 owner.json 的旧 run 不按会话拦', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S1' })
+  try {
+    const dir = join(dirs.projectDir, '.agent-team', 'runs', 'r1')
+    assert.equal(decisionOf(writeBy(dirs.projectDir, join(dir, '00-contract.md'), 's-2').stdout), null)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('owner.json 坏了：不按会话拦，stderr 留痕', () => {
+  world(({ projectDir }) => {
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    writeFileSync(ownerPath(dir), '{')
+    const out = writeBy(projectDir, join(dir, '00-contract.md'), 's-2')
+    assert.doesNotMatch(reasonOf(out), OWNED)
+    assert.match(out.stderr, /归属记录/)
+  })
+})
+
+test('别的会话另建一趟（写 runs/r2/state.json，写之前不在），拒，理由含「不能另建一趟」；主人自己另建放行', () => {
+  world(({ projectDir }) => {
+    createRun(projectDir, 'r1', { sid: 's-1' })
+    const r2 = join(projectDir, '.agent-team', 'runs', 'r2', 'state.json')
+    const out = run('writepath', preWrite(r2, JSON.stringify(stateOf('r2')), 's-2'), GATE, projectDir)
+    assert.equal(decisionOf(out.stdout)?.permissionDecision, 'deny')
+    assert.match(reasonOf(out), /不能另建一趟/)
+    assert.doesNotMatch(reasonOf(run('writepath', preWrite(r2, JSON.stringify(stateOf('r2')), 's-1'), GATE, projectDir)), OWNED)
+  })
+})
+
+test('别的会话写 current-run（切到 r2、或原样写 r1），拒；主人放行', () => {
+  world(({ projectDir }) => {
+    createRun(projectDir, 'r1', { sid: 's-1' })
+    const ptr = join(projectDir, '.agent-team', 'current-run')
+    for (const content of ['r2', 'r1']) {
+      const out = run('writepath', preWrite(ptr, content, 's-2'), GATE, projectDir)
+      assert.equal(decisionOf(out.stdout)?.permissionDecision, 'deny', content)
+      assert.match(reasonOf(out), /current-run/, content)
+    }
+    assert.doesNotMatch(reasonOf(run('writepath', preWrite(ptr, 'r2', 's-1'), GATE, projectDir)), OWNED)
+  })
+})
+
+test('current-run 里写的 id 与目录名大小写不同（非 Linux）：照样认成那一趟、拒另建', { skip: process.platform === 'linux' }, () => {
+  world(({ projectDir }) => {
+    createRun(projectDir, 'r1', { sid: 's-1' })
+    point(projectDir, 'R1')
+    const r2 = join(projectDir, '.agent-team', 'runs', 'r2', 'state.json')
+    assert.match(reasonOf(run('writepath', preWrite(r2, JSON.stringify(stateOf('r2')), 's-2'), GATE, projectDir)), /不能另建一趟/)
+  })
+})
+
+test('hook 输入没有 session_id：不按会话拦', () => {
+  world(({ projectDir }) => {
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    assert.doesNotMatch(reasonOf(writeBy(projectDir, join(dir, '00-contract.md'), null)), OWNED)
+  })
+})
+
+test('带 agent_id 的子代理写 run 目录：不走这一道（照原来的写路径隔离判）', () => {
+  world(({ projectDir }) => {
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    const out = writeBy(projectDir, join(dir, '01-prd.md'), 's-2', { agent_type: 'agent-team:at-product', agent_id: 'a0123456789abcdef' })
+    assert.doesNotMatch(reasonOf(out), OWNED)
+  })
+})
