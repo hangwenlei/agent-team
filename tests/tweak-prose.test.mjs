@@ -21,8 +21,8 @@ function section(text, n) {
 
 test('at-tweak.md 有第 0–5 节；逐字带「可以了，收尾」「再改」、mode 写 "tweak"、点名短链文件', () => {
   for (const n of [0, 1, 2, 3, 4, 5]) section(TWEAK, n)
-  assert.ok(section(TWEAK, 3).includes('「' + DONE_LABEL + '」'), DONE_LABEL)
-  assert.ok(section(TWEAK, 3).includes('「再改」'))
+  // 问法那一句整句钉：第 3 节别处也提到这个标签，只看字在不在，问法改掉了也照绿（变异核过）。
+  assert.ok(section(TWEAK, 3).includes('标签逐字写「' + DONE_LABEL + '」与「再改」'), DONE_LABEL)
   assert.ok(section(TWEAK, 1).includes('`mode` 写 `"tweak"`'))
   assert.ok(TWEAK.includes(TWEAK_STAGES_FILE))
   // 谁改：从短链与 project.json 取，不写死角色名清单（tests/commands.test.mjs 的那一条钉着）。
