@@ -42,7 +42,7 @@ claude plugin install agent-team@agent-team-marketplace --scope local
 - **Claude Code 2.1.276 或更新**。桌面端保持应用为最新即可。
 - **原生 Windows 上要装 Git for Windows**。团队角色跑命令只用 `Bash`（Git Bash）；没装的话 Claude Code 只给 PowerShell，角色装依赖、编译、跑测试都做不了，项目经理会停下来告诉你。
 
-Node 找不到、旧到门禁起不来，或者 hooks 被关掉时，平台不拦任何调用，门禁一道都不生效，界面上至多一行不起眼的灰字。所以项目经理在 `/agent-team:at`、`/agent-team:at-resume`、`/agent-team:at-init`、`/agent-team:at-skills` 开头，以及之后你每发一条消息、它这一轮第一次派发或写 `.agent-team` 之前（续会话之后也一样），都会做一次**门禁自检**：故意写一个门禁一定会拦下的文件。每次自检都会在界面上留下一条被拦下的写入（显示为一条错误），内容以「门禁自检：在线」开头——那就是自检，属预期。门禁没拦下它，项目经理会停下来，告诉你怎么查。`/agent-team:at-status` 只读，不做这项检查。
+Node 找不到、旧到门禁起不来，或者 hooks 被关掉时，平台不拦任何调用，门禁一道都不生效，界面上至多一行不起眼的灰字。所以项目经理在 `/agent-team:at`、`/agent-team:at-tweak`、`/agent-team:at-resume`、`/agent-team:at-init`、`/agent-team:at-skills` 开头，以及之后你每发一条消息、它这一轮第一次派发或写 `.agent-team` 之前（续会话之后也一样），都会做一次**门禁自检**：故意写一个门禁一定会拦下的文件。每次自检都会在界面上留下一条被拦下的写入（显示为一条错误），内容以「门禁自检：在线」开头——那就是自检，属预期。门禁没拦下它，项目经理会停下来，告诉你怎么查。`/agent-team:at-status` 只读，不做这项检查。
 
 Node 起得来但太旧时，门禁会拒绝每一次派发与写入，并写明要装哪个版本。自检不核 Claude Code 的版本：版本不够时，门禁可能照常在跑、自检也通过，分层派发却走不通——所以要自己确认，终端里用 `claude --version`，桌面端保持应用为最新。
 
@@ -79,6 +79,7 @@ claude --plugin-dir /path/to/agent-team
 |---|---|
 | `/agent-team:at-init` | **先跑它，每个项目一次。** 勘察项目，写出 `.agent-team/project.json` |
 | `/agent-team:at <需求>` | **起一趟 run。** 原话逐字写进契约，从 `S1` 一路带到 `S8` |
+| `/agent-team:at-tweak <要改什么>` | **交付之后的小改动。** 项目经理直接派开发角色，改了给你看，你说「可以了，收尾」才跑测试、交付 |
 | `/agent-team:at-status` | **看进度。** 只读：当前阶段、产物、返工与待你回答的问题 |
 | `/agent-team:at-resume` | **接着跑。** 上下文压缩后或换了会话时，从磁盘恢复这一趟 |
 | `/agent-team:at-skills` | **给角色配 skill。** 把本机装的 skill 登记给角色、复制进项目；有新版时先问你再同步 |
@@ -265,7 +266,7 @@ Then start a new session in that directory — the main session is the project m
 - **Claude Code 2.1.276 or later.** For the desktop app, keeping the app up to date is enough.
 - **On native Windows, Git for Windows.** The roles run commands only through `Bash` (Git Bash); without it Claude Code offers only PowerShell, so the roles cannot install, build or test, and the project manager stops and tells you.
 
-If Node is missing or too old for the gates to start, or hooks are disabled, the platform blocks nothing: no gate takes effect, and at most one easy-to-miss grey line appears. That is why the project manager runs a **gate self-check** at the start of `/agent-team:at`, `/agent-team:at-resume`, `/agent-team:at-init` and `/agent-team:at-skills`, and again after each message you send, before its first dispatch or first write under `.agent-team` in that turn (including after a session is resumed): it deliberately writes a file the gates always block. Each self-check shows up as a blocked write (shown as an error) whose text starts with the self-check's “online” message — that is expected. If the gates fail to block it, the project manager stops and tells you what to check. `/agent-team:at-status` is read-only and skips this check.
+If Node is missing or too old for the gates to start, or hooks are disabled, the platform blocks nothing: no gate takes effect, and at most one easy-to-miss grey line appears. That is why the project manager runs a **gate self-check** at the start of `/agent-team:at`, `/agent-team:at-tweak`, `/agent-team:at-resume`, `/agent-team:at-init` and `/agent-team:at-skills`, and again after each message you send, before its first dispatch or first write under `.agent-team` in that turn (including after a session is resumed): it deliberately writes a file the gates always block. Each self-check shows up as a blocked write (shown as an error) whose text starts with the self-check's “online” message — that is expected. If the gates fail to block it, the project manager stops and tells you what to check. `/agent-team:at-status` is read-only and skips this check.
 
 If Node starts but is too old, the gates refuse every dispatch and write and say which version to install. The self-check does not check the Claude Code version: on an older Claude Code the gates may run and the self-check pass while layered dispatch still fails — so check it yourself with `claude --version` in a terminal, and keep the desktop app up to date.
 
@@ -302,6 +303,7 @@ Loaded this way, pass the flag again every time you resume a session — see [Kn
 |---|---|
 | `/agent-team:at-init` | **First, once per project.** Writes `.agent-team/project.json` |
 | `/agent-team:at <requirement>` | **Start a run.** Your words become the contract; it runs `S1` to `S8` |
+| `/agent-team:at-tweak <change>` | **Small changes after delivery.** The project manager dispatches developers directly and shows you each round; tests and delivery only after you pick 「可以了，收尾」 |
 | `/agent-team:at-status` | **Check progress.** Stage, deliverables, rework, open questions |
 | `/agent-team:at-resume` | **Resume a run.** After compaction or in a new session |
 | `/agent-team:at-skills` | **Give roles your skills.** Register skills installed on this machine to roles (copied into the project); asks before syncing a newer version |

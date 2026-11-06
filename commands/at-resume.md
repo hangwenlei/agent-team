@@ -37,6 +37,9 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 ## 2. 核实磁盘，不要相信状态文件说的一切
 
+**微调这一趟**（`state.json` 的 `mode` 是 `"tweak"`）：阶段链是 `${CLAUDE_PLUGIN_ROOT}/stages.tweak.json`（S1、S4、S5、S6、S8），先 `Read`
+`${CLAUDE_PLUGIN_ROOT}/commands/at-tweak.md` 照它接着走（它说「照 /agent-team:at 第几节」的地方再读 `at.md` 的那一节）；下面这一段与核实磁盘照旧，只是段与产物按短链。
+
 **先读规矩**：上下文可能已经压缩掉了 `/agent-team:at` 的正文——动手之前先 `Read` `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 3–6 节
 （逐段推进、回退、问用户、收尾），下面说「照 /agent-team:at 第几节」的地方照它办，不凭记忆。
 

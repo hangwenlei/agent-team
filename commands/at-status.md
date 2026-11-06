@@ -66,6 +66,8 @@ run:        <run_id>
 待办升级:    <escalations 里 answer 是空串的（问了、用户还没答）；没有就写「无」>
 ```
 
+`state.json` 的 `mode` 是 `"tweak"` 的，在 `run:` 那一行后面标「（微调）」，产物按 `${CLAUDE_PLUGIN_ROOT}/stages.tweak.json` 的五段列（S1、S4、S5、S6、S8）。
+
 命令展开时的回传里有【会话】一段的，在 `run:` 那一行后面标「（归另一个会话）」，并把回传里起的时间与原话开头照抄一句：这个会话只能看，
 不能接着跑它；要接手照 `/agent-team:at-resume` 第 1 节办。
 

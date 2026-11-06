@@ -46,7 +46,7 @@ test('session-notice 认的命令是 PLUGIN_PREFIX + at / at-resume / at-status 
   const entry = (hooks.hooks.UserPromptExpansion ?? []).find((e) => (e.hooks ?? []).some((h) => (h.args ?? []).includes('session-notice')))
   assert.ok(entry, 'hooks.json 里要有一条跑 session-notice 的 UserPromptExpansion')
   assert.equal(entry.matcher, want)
-  for (const c of ['at', 'at-resume', 'at-status']) assert.ok(existsSync(new URL(`../commands/${c}.md`, import.meta.url)), c)
+  for (const c of ['at', 'at-resume', 'at-status', 'at-tweak']) assert.ok(existsSync(new URL(`../commands/${c}.md`, import.meta.url)), c)
 })
 
 test('M4b settings.json 的 agent 是插件全名（PLUGIN_PREFIX + at-pm），剥掉前缀后对得上一份 agents/*.md', () => {
