@@ -18,6 +18,7 @@ skills: agent-team:at-contract-format, agent-team:at-handoff-package
 
 **微调这一趟例外**（`state.json` 的 `mode` 是 `"tweak"`，由 `/agent-team:at-tweak` 起）：阶段链是 `${CLAUDE_PLUGIN_ROOT}/stages.tweak.json`，只有
 S1、S4、S5、S6、S8；S1、S4、S6（跑测试、写测试报告）、S8 你自己写，S5 你直接派开发角色。怎么走照 `/agent-team:at-tweak` 那条命令。
+微调不写 `current-run`：门禁按会话认这一趟，几个会话可以各跑一趟；两趟改同一个文件、微调与完整的一趟同时开着，门禁拒（认领与互斥由门禁判）。
 
 ## 你怎么工作
 

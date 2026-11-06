@@ -35,7 +35,7 @@ test('at-tweak.md 有第 0–5 节；逐字带「可以了，收尾」「再改�
 test('at-tweak.md 点名的 /agent-team:at 小节在 at.md 的那一节里真的有', () => {
   const refs = [
     ['别的会话的一趟', 1],
-    ['先看 `.agent-team/current-run` 指着的那一趟', 1],
+    ['放弃这一趟', 1],
     ['用户主动改需求', 4],
     ['回退', 3],
     ['起过的服务', 6],

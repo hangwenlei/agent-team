@@ -88,6 +88,8 @@ claude --plugin-dir /path/to/agent-team
 
 在别处想好的需求（比如在没装 agent-team 的会话里用 superpowers 头脑风暴出的设计文档），只贴要做什么、给谁用、做完是什么样子、不做什么，不要整份贴：贴在 `/agent-team:at` 后面的每一句都会被当成你的原话。
 
+小改动用 `/agent-team:at-tweak`：几个会话可以同时各跑一趟微调，门禁记下每一趟改过的文件，两趟不会改同一个文件（后来的那一趟要等先改的那一趟收尾）。开着微调的时候起不了完整的一趟，开着完整的一趟时也起不了微调。哪一趟不想做了可以放弃：项目经理列出改过的文件、问你退不退回，你选「放弃这一趟」，它就冻结，不再挡别的。
+
 ### 一趟 run 怎么走
 
 <!-- 阶段与角色的真源是 stages.json；这张图的箭头数由 tests/readme-sync.test.mjs 钉成与阶段数相等 -->
@@ -311,6 +313,8 @@ Loaded this way, pass the flag again every time you resume a session — see [Kn
 You can start before the request is worked out. When `/agent-team:at` comes without a request, or the request leaves things open, the project manager first asks you a few questions (one at a time) and writes up the request for you to review; pick 「照这份需求开始」 (start with this request) and the run starts from it, with that write-up recorded in the contract. A request that is already clear starts right away.
 
 If you worked the request out elsewhere (say, a design doc brainstormed with superpowers in a session without agent-team), paste only what to build, who it is for, what done looks like and what is out of scope, not the whole document: every sentence after `/agent-team:at` is taken as your own words.
+
+Small changes go through `/agent-team:at-tweak`: several sessions can each run a tweak at the same time; the gates record the files each tweak changes, so two tweaks never edit the same file (the later one waits for the earlier one to wrap up). While a tweak is open you cannot start a full run, and while a full run is open you cannot start a tweak. You can abandon a run you no longer want: the project manager lists the changed files, asks whether to revert them, and once you pick 「放弃这一趟」 (abandon this run) it is frozen and stops blocking others.
 
 ### How a run flows
 
