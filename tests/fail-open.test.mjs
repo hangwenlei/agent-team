@@ -95,7 +95,7 @@ test('runContextFix：每个原因各有一句修法，互不相同', () => {
   const texts = CAUSES.map((c) => runContextFix(c))
   for (const t of texts) assert.ok(typeof t === 'string' && t.length > 10)
   assert.equal(new Set(texts).size, CAUSES.length)
-  assert.deepEqual([...CAUSES].sort(), ['plugin', 'pointer', 'project', 'runs', 'state'])
+  assert.deepEqual([...CAUSES].sort(), ['agent', 'plugin', 'pointer', 'project', 'runs', 'state'])
 })
 
 test('runContextFix：丢指针给找法与多 run 的规则，不列目录名', () => {

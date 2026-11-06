@@ -98,7 +98,7 @@ const dispatch = (projectDir, target, sid, check = 'readiness') =>
 /** 写一个文件：who 是 { sid } 的项目经理（主线程）或 { role, agentId, sid } 的子代理；sid 为 null 时不带 session_id。 */
 const write = (projectDir, file, who, { check = 'writepath', event = 'PreToolUse', content = 'x' } = {}) => {
   const input = { hook_event_name: event, tool_name: 'Write', tool_input: { file_path: file, content } }
-  input.agent_type = who.role ? 'agent-team:' + who.role : PM
+  input.agent_type = who.agentType ?? (who.role ? 'agent-team:' + who.role : PM)
   if (who.agentId) input.agent_id = who.agentId
   if (who.sid !== null && who.sid !== undefined) input.session_id = who.sid
   return run(check, input, GATE, projectDir)
@@ -137,6 +137,30 @@ test('认不出是哪一趟派的团队角色：开着微调时拒、叫它冒�
   })
   withProject({ runs: [] }, (p) => {
     assert.equal(denied(write(p, join(p, 'web', 'x.ts'), { role: 'at-frontend', agentId: 'zz', sid: 's-1' })), false)
+  })
+})
+
+// 安全审查：只有微调、判 no-run 时，花名册外的调用者（别家插件的子代理）不许写 .agent-team/ 下的文件——微调的 state.json、契约都在那里；项目文件照旧能写。
+test('只有微调、没有 current-run：花名册外的子代理写微调的 state.json、契约，H3 拒（契约 H4 也拒）；写项目文件照旧放行', () => {
+  withProject(TWO(), (p) => {
+    const other = { agentType: 'helper:writer', agentId: 'o1', sid: 's-1' }
+    assert.equal(denied(write(p, join(p, '.agent-team', 'runs', 't1', 'state.json'), other)), true)
+    assert.equal(denied(write(p, join(p, '.agent-team', 'runs', 't1', '00-contract.md'), other)), true)
+    assert.equal(denied(write(p, join(p, '.agent-team', 'runs', 't1', '00-contract.md'), other, { check: 'contract' })), true, 'H4 同样拒')
+    assert.equal(denied(write(p, join(p, 'web', 'x.ts'), other)), false)
+  })
+})
+
+// 安全审查：开着微调时，团队角色的子代理只有在 current-run 那一趟的派发记录里确有它时才退回按指针判；不然认不出、拒，叫它冒泡。
+test('current-run 指着一趟完整的 run、又开着微调：派发记录里哪儿都没有的团队角色拒；在 current-run 那一趟派发记录里的照它判', () => {
+  const opts = TWO()
+  opts.pointer = 'f1'
+  opts.runs.push({ id: 'f1', mode: 'full', stage: 'S5', owner: 's-9', dispatches: [{ agent_id: 'af', role: 'at-frontend' }] })
+  withProject(opts, (p) => {
+    const out = write(p, join(p, 'web', 'x.ts'), { role: 'at-frontend', agentId: 'zz', sid: 's-1' })
+    assert.equal(denied(out), true)
+    assert.match(reasonOf(out), /冒泡：/)
+    assert.equal(denied(write(p, join(p, 'web', 'x.ts'), { role: 'at-frontend', agentId: 'af', sid: 's-9' })), false)
   })
 })
 
@@ -189,4 +213,49 @@ test('门禁源码里读运行上下文只有一处（runCtxFor）：每一次�
   const calls = code.split('readRunContext(').length - 1
   assert.equal(calls, 1, `gate.mjs 里 readRunContext( 出现 ${calls} 次`)
   assert.match(src, /function runCtxFor\([^)]*\)\s*\{[\s\S]{0,600}readRunContext\(/)
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// 互斥（hooks/lib/parallel.mjs 的 decideExclusion）：H6 在建 run 的那一次判。夹具照真实顺序：命令展开时记下的原话还挂着，项目经理直接 Write 新一趟的 state.json。
+const pendingWords = (p, sid, command = 'at-tweak') =>
+  writeFileSync(
+    join(p, '.agent-team', 'user-words.json'),
+    JSON.stringify({ version: 2, sessions: { [sid]: { at: AT, session_id: sid, args: '标题改大', source: 'command', command, runs_before: [], binding: null, bound: null, dropped: null } } }),
+  )
+const create = (p, id, mode, sid) =>
+  run(
+    'rework',
+    { hook_event_name: 'PreToolUse', tool_name: 'Write', agent_type: PM, session_id: sid, tool_input: { file_path: join(p, '.agent-team', 'runs', id, 'state.json'), content: JSON.stringify(stateOf(id, { mode, stage: 'S1' }), null, 2) } },
+    GATE,
+    p,
+  )
+
+test('互斥：current-run 指着一趟没收口的完整需求时建微调，H6 拒；指针不在、只有别的会话的微调开着时放行；同一个会话再建一趟，拒', () => {
+  withProject({ pointer: 'f1', runs: [{ id: 'f1', mode: 'full', stage: 'S3', owner: 's-9' }] }, (p) => {
+    pendingWords(p, 's-3')
+    const out = create(p, 't3', 'tweak', 's-3')
+    assert.equal(denied(out), true)
+    assert.match(reasonOf(out), /互斥/)
+    assert.match(reasonOf(out), /"f1"/)
+  })
+  withProject({ runs: [{ id: 't1', owner: 's-1' }] }, (p) => {
+    pendingWords(p, 's-3')
+    assert.equal(denied(create(p, 't3', 'tweak', 's-3')), false)
+    pendingWords(p, 's-1')
+    const again = create(p, 't4', 'tweak', 's-1')
+    assert.equal(denied(again), true)
+    assert.match(reasonOf(again), /"t1"/)
+  })
+})
+
+test('互斥：有微调没收口时建完整的一趟，H6 拒，理由列出那一趟；它收口之后放行', () => {
+  withProject({ runs: [{ id: 't1', owner: 's-1' }] }, (p) => {
+    const out = create(p, 'f9', 'full', 's-3')
+    assert.equal(denied(out), true)
+    assert.match(reasonOf(out), /"t1"/)
+    assert.match(reasonOf(out), /有微调开着/)
+  })
+  withProject({ runs: [{ id: 't1', owner: 's-1', extra: { closed_at: AT } }] }, (p) => {
+    assert.equal(denied(create(p, 'f9', 'full', 's-3')), false)
+  })
 })

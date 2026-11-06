@@ -22,6 +22,7 @@ import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideModeKey, decideRework, decideReworkBase, decideStageRolesKey, parseStateText, replayEdit } from './lib/rework-guard.mjs'
 import { isTweakRun, pickRun } from './lib/runpick.mjs'
+import { decideExclusion } from './lib/parallel.mjs'
 import { TWEAK_MODE, TWEAK_STAGES_FILE, decideTweakDone, doneAnswer, doneLine, doneNotice, implStageOf, modeOf, promptDone, readDoneShas, stagesFileFor, tweakRoster } from './lib/tweak.mjs'
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { isBlankText } from './lib/text-norm.mjs'
@@ -1366,7 +1367,44 @@ function pickedRunOf(input, agentId = input?.agent_id) {
 // （tests/gate-parallel.test.mjs 钉着）。
 function runCtxFor(input, agentId = input?.agent_id) {
   const picked = pickedRunOf(input, agentId)
+  if (!picked && unclaimedTeamAgent(input, agentId)) {
+    // 开着微调、团队角色的子代理哪一趟的派发记录里都没有（current-run 那一趟的也没有）：不退回按指针判、也不按「没有 run」放行——判读不出，
+    // H3、H4 照「读不出」拒，叫它冒泡（安全审查：退回按指针判，一次没记下的派发就绕开了认领与写路径隔离）。
+    return {
+      ok: false,
+      kind: 'unreadable',
+      cause: 'agent',
+      agentTeamDir: join(ROOT_PROJECT, '.agent-team'),
+      reason: '项目里开着微调，门禁认不出你是哪一趟派的（哪一趟的派发记录里都没有你）。以「冒泡：」停下，把这一句原样回报派你的项目经理',
+    }
+  }
   return readRunContext(ROOT_PROJECT, ROOT, picked ? { runId: picked.runId } : undefined)
+}
+
+// 并行微调（安全审查）：这一次是不是「开着微调、却认不出是哪一趟派的团队角色子代理」——带 agent_id、调用者是花名册里的角色（项目经理除外）、
+// 有没收尾的微调、current-run 那一趟的派发记录里也没有它。花名册外的子代理（别家插件的）不归这一条：它们本来就不在任何派发记录里。
+function unclaimedTeamAgent(input, agentId) {
+  try {
+    if (typeof agentId !== 'string' || agentId === '' || malformedCaller(input)) return false
+    const role = callerOf(input)
+    if (isContractWriter(role) || !Object.hasOwn(loadRoster() ?? {}, role)) return false
+    const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+    if (!tweaksAt(agentTeamDir).some((t) => t.open)) return false
+    const pid = pointerIdOf(agentTeamDir)
+    return !(pid && agentIdsAt(join(agentTeamDir, 'runs', pid)).includes(agentId))
+  } catch {
+    return false
+  }
+}
+
+// 并行微调（安全审查）：只有微调、判「没有 run」时，非项目经理写 .agent-team/ 下的文件（微调的 state.json、契约、产物都在那里）——H3、H4 拒。
+// 没有微调的项目不归这一条（自举不变）。
+function tweakDirsUnguarded(ctx, role, filePath) {
+  try {
+    return !isContractWriter(role) && typeof filePath === 'string' && underDir(filePath, ctx.agentTeamDir) && tweaksAt(ctx.agentTeamDir).length > 0
+  } catch {
+    return false
+  }
 }
 
 // 一趟只归一个会话：主线程这次写的是什么——
@@ -2378,6 +2416,14 @@ function main() {
             spec.event,
           )
         }
+        if (tweakDirsUnguarded(ctx, role, checked)) {
+          denyAndExit(
+            `agent-team 写路径门禁：${inline(checked)} 在 .agent-team/ 下——这个项目里只有微调、没有进行中的完整 run，那里是各趟微调的 run 目录与控制文件，` +
+              '只有项目经理能写。你要是哪一趟微调派出去的，把这一句冒泡给项目经理。' +
+              selfCheckIdentity(input, '写入'),
+            spec.event,
+          )
+        }
         process.stderr.write(failOpenNotice('H3 写路径门禁', ctx))
         process.exit(0)
       }
@@ -2502,6 +2548,11 @@ function main() {
     // 前提也是"一个 run 正在跑"。
     if (!ctx.ok) {
       if (ctx.kind === 'no-run') {
+        // 并行微调（安全审查）：只有微调时，各趟微调的契约在 .agent-team/ 下——与 H3 同一条，非项目经理不许写。
+        const fp = input.tool_name === 'NotebookEdit' ? input?.tool_input?.notebook_path : input?.tool_input?.file_path
+        if (tweakDirsUnguarded(ctx, callerOf(input), fp)) {
+          denyAndExit(`agent-team 契约保护：${inline(fp)} 在微调的 run 目录所在的 .agent-team/ 下，只有项目经理能写。` + selfCheckIdentity(input, '写入'), spec.event)
+        }
         process.stderr.write(failOpenNotice('H4 契约保护', ctx))
         process.exit(0)
       }
@@ -2697,6 +2748,22 @@ function main() {
         firstStage: isStageChain(stagesForRework) ? Object.keys(stagesForRework)[0] : null,
       })
       if (!mk.ok) denyAndExit(mk.reason, spec.event)
+      // 并行微调（hooks/lib/parallel.mjs）：建 run 的那一次判互斥——完整的一趟开着不能起微调，微调开着不能起完整的一趟，一个会话同一时刻只有一趟微调。
+      // 「完整的一趟」只认 current-run 指着的那一趟（不是这次建的）；微调按 tweaksAt 列没收尾的（不含这次建的）。
+      if (before === null && beforeText === null && !runSeen) {
+        const pid = pointerIdOf(agentTeamDir)
+        const pinfo = pid && norm(join(agentTeamDir, 'runs', pid)) !== norm(runDir) ? ownerInfoOf(agentTeamDir)(pid) : null
+        const ex = decideExclusion({
+          creating: true,
+          mode: modeOf(after),
+          sessionId: input.session_id,
+          pointerRun: pinfo ? { id: pid, open: !pinfo.closed, tweak: pinfo.tweak === true } : null,
+          openTweaks: tweaksAt(agentTeamDir)
+            .filter((t) => t.open && norm(t.dir) !== norm(runDir))
+            .map((t) => ({ id: t.id, owner: t.owner })),
+        })
+        if (!ex.ok) denyAndExit(ex.reason, spec.event)
+      }
 
       // M3y（docs/33，全量审查第 15 条）：rework_base——回退那一次写入照磁盘记下各份产物的 sha，之后原样带着，推进离开一段时
       // 那一段里不许还有上一轮的产物。规则在 decideReworkBase（hooks/lib/rework-guard.mjs 的 M3y 一节），这里只做 I/O：

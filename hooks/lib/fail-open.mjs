@@ -22,7 +22,7 @@ import { quote, trustedBlock } from './trusted.mjs'
 export const SECOND_WRITE_NOTE = 'agent-team：这次进程已经写出过结果，崩溃之后照那个结果退出，不再写第二份。'
 
 // hooks/lib/runctx.mjs 的 unreadable 出口带的 cause。
-export const CAUSES = ['pointer', 'runs', 'state', 'project', 'plugin']
+export const CAUSES = ['pointer', 'runs', 'state', 'project', 'plugin', 'agent']
 
 // README 里的门禁名（「顺序由门禁强制」那一条）；ledger 不是门禁，用户那一侧叫它账本。
 // M3z（docs/34）：两个返工批准记录器（approval-ask、approval-prompt）用户那一侧叫「返工批准」。
@@ -47,6 +47,7 @@ const CAUSE_PHRASE = {
   state: '当前 run 的 state.json 读不出来',
   project: '.agent-team/project.json 读不出来',
   plugin: '插件自己的文件读不出来',
+  agent: '项目里开着微调，这个子代理哪一趟的派发记录里都没有',
 }
 const causePhrase = (cause) => CAUSE_PHRASE[cause] ?? '运行状态读不出来'
 
@@ -68,6 +69,7 @@ const FIX = {
     '写回之后告诉用户 state.json 是重建的、哪些字段是照猜补的。',
   project: '用 Write 写回一份合法的完整 `.agent-team/project.json`（照 /agent-team:at-init 第 2、3 节）。',
   plugin: '改 `.agent-team` 修不好它：停下，告诉用户重装或更新 agent-team 插件，不要去改插件目录下的文件。',
+  agent: '这个子代理不是门禁记下的派发（派发记录在派的那一刻由门禁写）：让它以「冒泡：」停下，项目经理照它那一趟重新派它。',
 }
 const FALLBACK = '把这件事告诉用户：门禁读不出这个项目的运行状态，原因不明。'
 
