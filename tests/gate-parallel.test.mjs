@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { reworkFromHistory } from '../hooks/lib/state.mjs'
-import { ownerRecord } from '../hooks/lib/owner.mjs'
+import { ownerRecord, TAKEOVER_LABEL } from '../hooks/lib/owner.mjs'
 import { dispatchLine } from '../hooks/lib/completion.mjs'
 
 const NL = String.fromCharCode(10)
@@ -383,5 +383,50 @@ test('放弃一趟完整的需求：current-run 指着 s-1 的 f1（停在 S3）
     writeFileSync(join(p, '.agent-team', 'runs', 'f1', 'state.json'), JSON.stringify(abandoned))
     pendingWords(p, 's-1')
     assert.equal(denied(create(p, 't3', 'tweak', 's-1')), false)
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// 命令展开时的【微调】（session-notice）与接手别的会话的微调（approval-ask 认「在这个会话接手」）。
+const expand = (p, command, sid) =>
+  run(
+    'session-notice',
+    { hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'agent-team:' + command, command_args: '改个字', command_source: 'plugin', prompt: '/agent-team:' + command + ' 改个字', session_id: sid },
+    GATE,
+    p,
+  )
+const askTakeover = (p, runId, sid) => {
+  const questions = [{ question: `原来那个会话已经关了，要在这个会话接手 ${runId} 吗？`, header: '接手', multiSelect: false, options: [{ label: TAKEOVER_LABEL, description: '' }, { label: '回那个会话', description: '' }] }]
+  return run(
+    'approval-ask',
+    { hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion', agent_type: PM, session_id: sid, tool_input: { questions }, tool_response: { questions, answers: { [questions[0].question]: TAKEOVER_LABEL } } },
+    GATE,
+    p,
+  )
+}
+const ownerOf = (p, id) => JSON.parse(readFileSync(join(p, '.agent-team', 'runs', id, 'owner.json'), 'utf8')).session_id
+
+test('命令展开：t1（s-1）开着——s-2 的 /agent-team:at 收到【微调】与「有微调开着」；s-1 的 /agent-team:at-tweak 收到「先收尾」；s-3 的 /agent-team:at-resume 收到接手那条出路', () => {
+  withProject({ runs: [{ id: 't1', owner: 's-1' }] }, (p) => {
+    const at = ctxText(expand(p, 'at', 's-2'))
+    assert.match(at, /【微调】/)
+    assert.match(at, /"t1"/)
+    assert.match(at, /有微调开着/)
+    assert.match(ctxText(expand(p, 'at-tweak', 's-1')), /先收尾/)
+    assert.match(ctxText(expand(p, 'at-resume', 's-3')), /在这个会话接手/)
+  })
+  withProject({ runs: [] }, (p) => assert.equal(ctxText(expand(p, 'at', 's-2')), '', '没有微调不出声'))
+})
+
+test('接手别的会话的微调：s-3 选「在这个会话接手」、题面带 t1——改归 s-3，之后 s-3 派人按 t1 判；名下已有 t2 的 s-2 接手 t1 不记', () => {
+  withProject({ runs: [{ id: 't1', owner: 's-1' }, { id: 't2', owner: 's-2' }] }, (p) => {
+    const no = askTakeover(p, 't1', 's-2')
+    assert.match(ctxText(no), /一个会话同一时刻只做一趟/)
+    assert.equal(ownerOf(p, 't1'), 's-1')
+    const yes = askTakeover(p, 't1', 's-3')
+    assert.match(ctxText(yes), /已记下/)
+    assert.equal(ownerOf(p, 't1'), 's-3')
+    assert.equal(denied(dispatch(p, 'at-frontend', 's-3')), false)
+    assert.equal(denied(write(p, join(p, '.agent-team', 'runs', 't1', '04-dispatch.md'), { sid: 's-1' })), true, '原来的会话再写，拒')
   })
 })

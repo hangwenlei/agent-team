@@ -10,6 +10,7 @@
 import { quote } from './trusted.mjs'
 import { TWEAK_MODE } from './tweak.mjs'
 import { isPlainObject } from './stages.mjs'
+import { TAKEOVER_LABEL } from './owner.mjs'
 
 const isSid = (v) => typeof v === 'string' && v !== ''
 const HEAD = 'agent-team H6 互斥：'
@@ -53,4 +54,50 @@ export function decideExclusion({ creating, mode, sessionId, pointerRun = null, 
     }
   }
   return { ok: true }
+}
+
+// 一趟微调的说法：run id、起的时间、原话开头（都是磁盘上的值，过 quote；读不出的那一样不说）。
+function describe(t, mine = false) {
+  const facts = [
+    mine ? '这个会话的' : null,
+    typeof t.startedAt === 'string' && t.startedAt !== '' ? `${quote(t.startedAt)} 起` : null,
+    typeof t.wordsHead === 'string' && t.wordsHead !== '' ? `原话开头 ${quote(t.wordsHead)}` : null,
+  ].filter(Boolean)
+  return `${quote(t.id)}${facts.length ? `（${facts.join('，')}）` : ''}`
+}
+
+/**
+ * 命令展开那一刻给项目经理的【微调】一段（session-notice）。mine：这个会话名下没收口的那一趟 { id, startedAt, wordsHead } 或 null；others：别的会话名下没收口的。
+ * 都空回 null。command：'at' | 'at-tweak' | 'at-resume' | 'at-status'。
+ */
+export function tweaksNotice({ command, mine = null, others = [] }) {
+  const rest = Array.isArray(others) ? others.filter((t) => isPlainObject(t) && typeof t.id === 'string') : []
+  const own = isPlainObject(mine) && typeof mine.id === 'string' ? mine : null
+  if (!own && !rest.length) return null
+  const all = [...(own ? [describe(own, true)] : []), ...rest.map((t) => describe(t))].join('、')
+  if (command === 'at') {
+    return `【微调】这个项目里还有微调没收口：${all}。开着微调的时候不能起完整的一趟：照 /agent-team:at 第 1 节「有微调开着」办，不读别的、不写任何文件。`
+  }
+  if (command === 'at-tweak') {
+    if (own) {
+      return (
+        `【微调】这个会话已经有一趟没收口的微调 ${describe(own)}：一个会话同一时刻只做一趟。照 /agent-team:at-tweak 第 1 节问用户：先收尾那一趟，` +
+        '还是把这次的话当成那一趟的下一轮。'
+      )
+    }
+    return `【微调】别的会话开着这几趟微调：${all}。可以并行，照常往下起这一趟；碰到它们认领的文件，门禁会拒你派出去的人。`
+  }
+  if (command === 'at-resume') {
+    const parts = []
+    if (own) parts.push(`这个会话的那一趟微调 ${describe(own)} 还没收口：照 /agent-team:at-tweak 接着走它（不看 current-run）。`)
+    if (rest.length) {
+      parts.push(
+        `别的会话名下还开着这几趟微调：${rest.map((t) => describe(t)).join('、')}。原来的会话关了、要在这个会话接手其中一趟的，` +
+          `照 /agent-team:at-resume 第 1 节「别的会话的一趟」问用户，题面原样写那一趟的 run id，标签「${TAKEOVER_LABEL}」。`,
+      )
+    }
+    return `【微调】${parts.join('')}`
+  }
+  if (command === 'at-status') return `【微调】没收口的微调：${all}。报进度时一并列出，说明各归哪个会话。`
+  return null
 }

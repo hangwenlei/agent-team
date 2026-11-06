@@ -22,7 +22,7 @@ import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideModeKey, decideRework, decideReworkBase, decideStageRolesKey, parseStateText, replayEdit } from './lib/rework-guard.mjs'
 import { isTweakRun, pickRun } from './lib/runpick.mjs'
-import { decideExclusion } from './lib/parallel.mjs'
+import { decideExclusion, tweaksNotice } from './lib/parallel.mjs'
 import { abandonAnswer, abandonLine, abandonNotice, decideAbandon, isAbandoning, readAbandoned } from './lib/abandon.mjs'
 import { claimLine, readClaims, claimBlock, claimDenyReason } from './lib/claims.mjs'
 import { TWEAK_MODE, TWEAK_STAGES_FILE, decideTweakDone, doneAnswer, doneLine, doneNotice, implStageOf, modeOf, promptDone, readDoneShas, stagesFileFor, tweakRoster } from './lib/tweak.mjs'
@@ -1768,7 +1768,7 @@ function recordTakeover(input) {
   const a = takeoverAnswer(input?.tool_response)
   if (!a) return null
   const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
-  const runId = pointerIdOf(agentTeamDir)
+  let runId = pointerIdOf(agentTeamDir)
   const skip = (why) => {
     process.stderr.write(`agent-team approval-ask：没有记成接手（${why}）。\n`)
     return { kind: 'takeover-skipped', notice: takeoverNotice({ runId, why }) }
@@ -1776,12 +1776,21 @@ function recordTakeover(input) {
   if (a.why) return skip(a.why)
   const sid = input.session_id
   if (typeof sid !== 'string' || sid === '') return skip('no-session')
-  const info = runId ? ownerInfoOf(agentTeamDir)(runId) : null
+  const infoOf = ownerInfoOf(agentTeamDir)
+  // 候选：current-run 指着的那一趟（目录在的），加上别的会话名下没收尾的微调（并行微调：微调不占 current-run，原会话关了要在这里接手）。
+  const open = tweaksAt(agentTeamDir).filter((t) => t.open)
+  const candidates = [...new Set([...(runId && infoOf(runId) ? [runId] : []), ...open.filter((t) => t.owner !== sid).map((t) => t.id)])]
+  if (!candidates.length) return skip('no-run')
+  // 绑在用户看到的那一趟上：题面里要原样写着恰好一个候选的 run id。
+  const named = candidates.filter((id) => mentionsRunId(a.question, id))
+  if (named.length !== 1) return skip('unbound')
+  runId = named[0]
+  const info = infoOf(runId)
   if (!info) return skip('no-run')
-  // 绑在用户看到的那一趟上：题面里要原样写着 current-run 现在指着的那一趟的 run id。
-  if (!mentionsRunId(a.question, runId)) return skip('unbound')
   if (info.closed) return skip('closed')
   if (info.owner && info.owner.session_id === sid) return skip('already-mine')
+  // 一个会话同一时刻只做一趟微调：名下已有一趟没收尾的，不再接手另一趟微调。
+  if (info.tweak === true && open.some((t) => t.owner === sid)) return skip('has-tweak')
   try {
     const rec = ownerRecord({ sessionId: sid, at: new Date().toISOString(), via: 'takeover', previous: info.owner ? info.owner.session_id : null })
     writeFileSync(join(agentTeamDir, 'runs', runId, OWNER_FILE), `${JSON.stringify(rec, null, 2)}\n`)
@@ -2262,6 +2271,30 @@ function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, reci
     }
   })
   return coordinatorProgress({ role: coordinator, stageId, rows, recipientIsPm, selfDone, selfMissing, impl: isRolePatternStage(stage) })
+}
+
+// 一趟只归一个会话：命令展开时的【会话】——current-run 指着的那一趟归另一个会话、没收口。停在最后一段、产物都写了的说「只差收口」。
+function ownerNoticeFor(command, agentTeamDir, runId, info) {
+  const runDir = join(agentTeamDir, 'runs', runId)
+  const st = runStateOf(runDir)
+  let delivered = false
+  try {
+    const stages = JSON.parse(normalizeText(readFileSync(join(ROOT, stagesFileFor(st)), 'utf8')))
+    const last = lastStageId(stages)
+    const products = last ? productsOfStage(stages[last]) : []
+    delivered =
+      isPlainObject(st) &&
+      st.stage === last &&
+      products.length > 0 &&
+      products.every((n) => {
+        try {
+          return !isBlankText(readFileSync(join(runDir, n)))
+        } catch {
+          return false
+        }
+      })
+  } catch {}
+  return sessionNotice({ command, runId, startedAt: startedAtOf(st), wordsHead: wordsHeadOf(runWords(runDir)), delivered, via: info.owner.via })
 }
 
 function main() {
@@ -3713,36 +3746,20 @@ function main() {
     const command = typeof input.command_name === 'string' ? stripPluginPrefix(input.command_name) : ''
     if (input.expansion_type !== 'slash_command' || !['at', 'at-resume', 'at-status', 'at-tweak'].includes(command) || input.command_name === command) process.exit(0)
     const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+    const contexts = []
     const runId = pointerIdOf(agentTeamDir)
-    if (!runId) process.exit(0)
-    const info = ownerInfoOf(agentTeamDir)(runId)
-    if (!blocksMe(info, input.session_id)) process.exit(0)
-    const runDir = join(agentTeamDir, 'runs', runId)
-    const st = runStateOf(runDir)
-    const first = isPlainObject(st) && Array.isArray(st.history) ? st.history[0] : null
-    const startedAt = isPlainObject(first) && typeof first.at === 'string' ? first.at : null
-    const words = runWords(runDir)
-    const line = words ? words.args.split(/\r?\n/).find((l) => l.trim() !== '') : null
-    const chars = typeof line === 'string' ? Array.from(line.trim()) : []
-    const wordsHead = chars.length ? chars.slice(0, 40).join('') + (chars.length > 40 ? '…' : '') : null
-    let delivered = false
-    try {
-      const stages = JSON.parse(normalizeText(readFileSync(join(ROOT, stagesFileFor(st)), 'utf8')))
-      const last = lastStageId(stages)
-      const products = last ? productsOfStage(stages[last]) : []
-      delivered =
-        isPlainObject(st) &&
-        st.stage === last &&
-        products.length > 0 &&
-        products.every((n) => {
-          try {
-            return !isBlankText(readFileSync(join(runDir, n)))
-          } catch {
-            return false
-          }
-        })
-    } catch {}
-    emitHookJson(spec.event, { contexts: [sessionNotice({ command, runId, startedAt, wordsHead, delivered, via: info.owner.via })] })
+    const info = runId ? ownerInfoOf(agentTeamDir)(runId) : null
+    // 并行微调：current-run 指着的是一趟微调（升级之前的单个微调）时不说【会话】——微调不占 current-run，由下面的【微调】说。
+    if (info && info.tweak !== true && blocksMe(info, input.session_id)) contexts.push(ownerNoticeFor(command, agentTeamDir, runId, info))
+    // 并行微调（hooks/lib/parallel.mjs）：这个项目里没收尾的微调——这个会话名下的、别的会话名下的。
+    const sid = typeof input.session_id === 'string' && input.session_id !== '' ? input.session_id : null
+    const open = tweaksAt(agentTeamDir).filter((t) => t.open)
+    const desc = (t) => ({ id: t.id, startedAt: startedAtOf(t.state), wordsHead: wordsHeadOf(t.words) })
+    const mineT = sid ? (open.find((t) => t.owner === sid) ?? null) : null
+    const tn = tweaksNotice({ command, mine: mineT ? desc(mineT) : null, others: open.filter((t) => t !== mineT).map(desc) })
+    if (tn) contexts.push(tn)
+    if (!contexts.length) process.exit(0)
+    emitHookJson(spec.event, { contexts })
   }
 
   if (CHECK === 'approval-ask' || CHECK === 'approval-prompt') {

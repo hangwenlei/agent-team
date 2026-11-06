@@ -200,7 +200,8 @@ const TAKEOVER_WHY = {
   malformed: `标签后面夹了别的话（要逐字是「${TAKEOVER_LABEL}」或「${TAKEOVER_CLOSE_LABEL}」）`,
   unmatched: '回答对不上任何一道显示过的题',
   'not-alone': '这一次问里还有别的题',
-  unbound: '题面里没有 current-run 现在指着的那一趟的 run id（门禁认不出用户批的是哪一趟：问的可能是别的一趟，或者问和答之间指针换了）',
+  unbound: '题面里没有要接手的那一趟的 run id（current-run 现在指着的那一趟，或者别的会话开着的一趟微调；门禁认不出用户批的是哪一趟：问的可能是别的一趟，或者问和答之间指针换了）',
+  'has-tweak': '这个会话已经有一趟没收口的微调（一个会话同一时刻只做一趟）',
 }
 const ANSWER_SIDE = new Set(['afk', 'follow-up', 'response', 'notes', 'multi', 'array', 'malformed', 'unmatched', 'not-alone'])
 
