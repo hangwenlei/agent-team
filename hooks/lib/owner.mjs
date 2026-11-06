@@ -53,12 +53,12 @@ const blockOf = (runId, info, kind) => ({ runId, kind, via: info.owner.via === '
 /**
  * 主线程这一次写入碰不碰别的会话的一趟。
  * target：{ kind: 'run-file', runId, creatingState }（写 runs/<id>/ 下的文件；creatingState：写的是那一趟的 state.json、写之前它不在）、
- * { kind: 'pointer', newId, newUnknown }（写 current-run；newId 是改完之后里面的 run id，不是合法 run id 为 null；newUnknown：算不出改完是什么）或
- * null（不归这一道管）。infoOf(id) → { closed, owner } | null；same(a, b) 判两个 run id 是不是同一个目录；listRuns() → runs/ 下的目录名（只在 newUnknown
- * 时用：改完可能指向任何一趟，有一趟挡这个会话就拒）。
+ * { kind: 'pointer' }（写 current-run）或 null（不归这一道管）。infoOf(id) → { closed, owner } | null；same(a, b) 判两个 run id 是不是同一个目录。
+ * 写 current-run 只看它现在指着的那一趟挡不挡这个会话（切走）；改成指向哪一趟不看：指针空着（丢了、指着已收口或自己的一趟）时指到别的会话的一趟放行——
+ * 单是指过去什么都拿不到（写与派照旧被拒），而丢了指针、放弃了的那一趟要在别的会话里接回，正得先把指针指过去，接手才认得到它。
  * @returns {null | { runId: string, kind: 'run'|'create'|'pointer', via: 'create'|'takeover' }}
  */
-export function ownerWriteBlock({ sessionId, target, pointerId, infoOf, same, listRuns = () => [] }) {
+export function ownerWriteBlock({ sessionId, target, pointerId, infoOf, same }) {
   if (!isSid(sessionId) || !isPlainObject(target)) return null
   const eq = (a, b) => typeof a === 'string' && typeof b === 'string' && same(a, b)
   const check = (id, kind) => {
@@ -72,18 +72,7 @@ export function ownerWriteBlock({ sessionId, target, pointerId, infoOf, same, li
     if (target.creatingState === true && typeof pointerId === 'string' && !eq(pointerId, target.runId)) return check(pointerId, 'create')
     return null
   }
-  if (target.kind === 'pointer') {
-    const away = check(pointerId, 'pointer')
-    if (away) return away
-    if (target.newUnknown === true) {
-      for (const id of listRuns()) {
-        const b = check(id, 'pointer')
-        if (b) return b
-      }
-      return null
-    }
-    return check(target.newId, 'pointer')
-  }
+  if (target.kind === 'pointer') return check(pointerId, 'pointer')
   return null
 }
 
@@ -104,7 +93,7 @@ export function ownerDenyReason(block) {
     block.via === 'takeover' ? `${R} 这一趟已经被另一个会话接手、还没收口` : `${R} 这一趟归另一个会话（建它的那个会话）、还没收口`
   let what
   if (block.kind === 'create') what = `current-run 指着的 ${whose}，这个会话不能另建一趟。`
-  else if (block.kind === 'pointer') what = `${whose}，这个会话不能把 current-run 从它切走，也不能把 current-run 指到它。`
+  else if (block.kind === 'pointer') what = `${whose}，这个会话不能把 current-run 从它切走。`
   else if (block.kind === 'dispatch') what = `current-run 指着的 ${whose}，这个会话不能以它的名义派人。`
   else what = `${whose}，这个会话不能写它。`
   return `agent-team 会话归属：${what}${OUT_WAY}`
@@ -181,7 +170,7 @@ export function sessionNotice({ command, runId, startedAt = null, wordsHead = nu
 }
 
 const TAKEOVER_WHY = {
-  'no-run': 'current-run 没有指着一趟读得出来、还没收口的 run',
+  'no-run': 'current-run 没有指着一趟读得出来的 run（指针不在、读不出来，或者指着的那一趟目录不在）',
   closed: '那一趟已经收口，不用接手',
   'already-mine': '那一趟本来就归这个会话',
   'no-session': '读不到这个会话的 id',
@@ -208,7 +197,9 @@ export function takeoverNotice({ runId, why = null }) {
   let way
   if (why === 'unbound') way = '要接手的话，先重读 current-run，再单独问一次这一道单选题，题面里原样写上那一趟的 run id（标签逐字），用户选了才算。'
   else if (ANSWER_SIDE.has(why)) way = '要接手的话，单独再问一次这一道单选题（题面里原样写上那一趟的 run id，标签逐字），用户选了才算。'
-  else if (why === 'already-mine' || why === 'closed' || why === 'no-run') way = '照命令正文往下做，不用接手。'
+  else if (why === 'no-run')
+    way = '要接回的那一趟还没收口的话，先照命令正文把 current-run 指到它（指针空着、或者指着已收口或这个会话自己的一趟时门禁放行），再单独问一次（题面带它的 run id）。'
+  else if (why === 'already-mine' || why === 'closed') way = '照命令正文往下做，不用接手。'
   else way = '这一趟仍归原来那个会话：告诉用户这次接手没有成，这个会话不写它、不以它的名义派人。'
   return `【会话】这次的回答没有记成接手：${reason}。${way}`
 }

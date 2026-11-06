@@ -281,20 +281,55 @@ const editPointer = (projectDir, old_string, new_string, sid) => ({
   tool_input: { file_path: join(projectDir, '.agent-team', 'current-run'), old_string, new_string },
 })
 
-test('别的会话用 Edit 把 current-run 从自己那一趟改指到别的会话的一趟，拒', () => {
+test('别的会话用 Edit 把 current-run 从别的会话的一趟切走（算不算得出改完是什么都一样），拒', () => {
   world(({ projectDir }) => {
     twoRuns(projectDir)
-    const out = run('writepath', editPointer(projectDir, 'r0', 'r1', 's-2'), GATE, projectDir)
-    assert.equal(decisionOf(out.stdout)?.permissionDecision, 'deny')
-    assert.match(reasonOf(out), /"r1"/)
+    point(projectDir, 'r1')
+    for (const old of ['r1', '不在文件里']) {
+      const out = run('writepath', editPointer(projectDir, old, 'r0', 's-2'), GATE, projectDir)
+      assert.equal(decisionOf(out.stdout)?.permissionDecision, 'deny', old)
+      assert.match(reasonOf(out), /"r1"/, old)
+    }
   })
 })
 
-test('用 Edit 改 current-run、算不出改完是什么，而有一趟别的会话的 run 开着，拒', () => {
+test('指针指着自己的一趟时，把 current-run 改指到别的会话的一趟放行（单是指过去，写与派照旧被拒）', () => {
   world(({ projectDir }) => {
     twoRuns(projectDir)
-    const out = run('writepath', editPointer(projectDir, '不在文件里', 'r1', 's-2'), GATE, projectDir)
-    assert.equal(decisionOf(out.stdout)?.permissionDecision, 'deny')
+    assert.equal(decisionOf(run('writepath', editPointer(projectDir, 'r0', 'r1', 's-2'), GATE, projectDir).stdout), null)
+    point(projectDir, 'r1')
+    assert.match(reasonOf(writeBy(projectDir, join(projectDir, '.agent-team', 'runs', 'r1', '00-contract.md'), 's-2')), /归另一个会话/)
+    assert.match(reasonOf(dispatchBy(projectDir, 's-2')), /归另一个会话/)
+  })
+})
+
+test('丢了指针之后，另一个会话把 current-run 写回那一趟（放行）、选「在这个会话接手」（记下），之后照常写', () => {
+  world(({ projectDir }) => {
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    rmSync(join(projectDir, '.agent-team', 'current-run'))
+    // 指针不在时接手：不记，回传叫它先把指针指过去。
+    const early = run('approval-ask', askTakeover(TAKEOVER_LABEL, 's-2'), GATE, projectDir)
+    assert.match(JSON.parse(early.stdout).hookSpecificOutput.additionalContext, /current-run 指到/)
+    assert.equal(ownerOf(dir).session_id, 's-1')
+    const ptr = join(projectDir, '.agent-team', 'current-run')
+    assert.equal(decisionOf(run('writepath', preWrite(ptr, 'r1', 's-2'), GATE, projectDir).stdout), null)
+    point(projectDir, 'r1')
+    run('approval-ask', askTakeover(TAKEOVER_LABEL, 's-2'), GATE, projectDir)
+    assert.equal(ownerOf(dir).session_id, 's-2')
+    assert.equal(decisionOf(writeBy(projectDir, join(dir, '00-contract.md'), 's-2').stdout), null)
+  })
+})
+
+test('放弃了的那一趟（指针指着同一个会话另起的、已收口的一趟）被另一个会话接回', () => {
+  world(({ projectDir }) => {
+    const { dir: r1 } = createRun(projectDir, 'r1', { sid: 's-1' })
+    const { dir: r2 } = createRun(projectDir, 'r2', { sid: 's-1' })
+    writeFileSync(join(r2, 'state.json'), JSON.stringify({ ...stateOf('r2'), closed_at: '2026-11-05T12:00:00Z' }, null, 2))
+    const ptr = join(projectDir, '.agent-team', 'current-run')
+    assert.equal(decisionOf(run('writepath', preWrite(ptr, 'r1', 's-2'), GATE, projectDir).stdout), null)
+    point(projectDir, 'r1')
+    run('approval-ask', askTakeover(TAKEOVER_LABEL, 's-2'), GATE, projectDir)
+    assert.equal(ownerOf(r1).session_id, 's-2')
   })
 })
 

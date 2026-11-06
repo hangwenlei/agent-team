@@ -1286,31 +1286,17 @@ function ownerInfoOf(agentTeamDir) {
 }
 
 // 一趟只归一个会话：主线程这次写的是什么——
-//   - current-run：{ kind: 'pointer', newId, newUnknown }。两路都认：规范化之后的路径就是它（经链接、8.3 短名写进去的），或者叶名是它、所在目录就是
-//     .agent-team（剥掉流后缀、结尾的点与空格：那些写法在 Windows 上落到的正是指针）。改完之后的内容：
-//     Write 就是新全文，Edit 照平台的口径在磁盘那份上重放（replayEdit）；算不出来（找不到 old_string、NotebookEdit……）标 newUnknown；
+//   - current-run：{ kind: 'pointer' }。两路都认：规范化之后的路径就是它（经链接、8.3 短名写进去的），或者叶名是它、所在目录就是
+//     .agent-team（剥掉流后缀、结尾的点与空格：那些写法在 Windows 上落到的正是指针）。改成指向哪一趟不看（ownerWriteBlock 只判切走）；
 //   - 某一趟 run 目录里的文件：{ kind: 'run-file', runId, creatingState }。runId 取规范化之后的那一段（解析过链接、目录联接与别名，Windows、macOS 上折成
 //     小写）：照字面取的话，经一个名字不合 run id 格式的链接写进去，就查不到那一趟的归属。creatingState：写的是那一趟的 state.json、写之前它不在；
 //   - 别的：null。
-function ownerTargetOf(agentTeamDir, filePath, toolName, toolInput) {
+function ownerTargetOf(agentTeamDir, filePath) {
   if (typeof filePath !== 'string' || filePath === '') return null
   const runsDir = join(agentTeamDir, 'runs')
   const target = norm(filePath)
   const pointerPath = join(agentTeamDir, 'current-run')
-  if (target === norm(pointerPath) || (leafName(filePath) === 'current-run' && norm(dirname(filePath)) === norm(agentTeamDir))) {
-    let after = null
-    if (toolName === 'Write') after = typeof toolInput?.content === 'string' ? toolInput.content : null
-    else if (toolName === 'Edit') {
-      let before = null
-      try {
-        before = readFileSync(filePath, 'utf8')
-      } catch {}
-      after = replayEdit({ before, oldString: toolInput?.old_string, newString: toolInput?.new_string, replaceAll: toolInput?.replace_all === true })
-    }
-    if (typeof after !== 'string') return { kind: 'pointer', newId: null, newUnknown: true }
-    const c = after.trim()
-    return { kind: 'pointer', newId: RUN_ID.test(c) ? c : null, newUnknown: false }
-  }
+  if (target === norm(pointerPath) || (leafName(filePath) === 'current-run' && norm(dirname(filePath)) === norm(agentTeamDir))) return { kind: 'pointer' }
   const base = norm(runsDir)
   if (!target.startsWith(`${base}/`)) return null
   const rel = target.slice(base.length + 1).split('/')
@@ -1318,14 +1304,6 @@ function ownerTargetOf(agentTeamDir, filePath, toolName, toolInput) {
   return { kind: 'run-file', runId: rel[0], creatingState: rel.length === 2 && rel[1] === 'state.json' && !existsSync(filePath) }
 }
 
-// runs/ 下的目录名；读不出来当一个都没有。
-function runDirNames(agentTeamDir) {
-  try {
-    return readdirSync(join(agentTeamDir, 'runs'))
-  } catch {
-    return []
-  }
-}
 
 // 一趟只归一个会话：项目一级的原话记录按会话分开记（hooks/lib/user-words.mjs 的 readWordsBook）。readWordsBookAt 只读；updateWordsBook 在锁里读出整张表、
 // 交给 update 改（回 null 是不改）、写回——表空了就删掉文件（与原来清掉单份记录时一样）。写不进的异常照抛，调用方各自留痕。
@@ -2180,11 +2158,10 @@ function main() {
       const runsDir = join(agentTeamDir, 'runs')
       const block = ownerWriteBlock({
         sessionId: input.session_id,
-        target: ownerTargetOf(agentTeamDir, checked, input.tool_name, input.tool_input),
+        target: ownerTargetOf(agentTeamDir, checked),
         pointerId: pointerIdOf(agentTeamDir),
         infoOf: ownerInfoOf(agentTeamDir),
         same: (a, b) => norm(join(runsDir, a)) === norm(join(runsDir, b)),
-        listRuns: () => runDirNames(agentTeamDir),
       })
       if (block) denyAndExit(ownerDenyReason(block) + selfCheckIdentity(input, '写入'), spec.event)
     }

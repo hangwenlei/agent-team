@@ -78,7 +78,7 @@ test('ownerWriteBlock：别的会话写有归属、没收口的一趟里的文�
   assert.equal(ownerWriteBlock({ sessionId: 's-2', target: null, pointerId: 'r1', infoOf, same }), null)
 })
 
-test('ownerWriteBlock：指针指着别的会话的一趟时另建一趟、切走或指过去，拒', () => {
+test('ownerWriteBlock：指针指着别的会话的一趟时另建一趟、切走，拒；指针空着时指到别的会话的一趟放行（接回丢了指针的那一趟要走这一步）', () => {
   const infoOf = (id) => (id === 'r1' ? { closed: false, owner: { session_id: 's-1', via: 'takeover' } } : null)
   const same = (a, b) => a === b
   assert.deepEqual(
@@ -90,11 +90,8 @@ test('ownerWriteBlock：指针指着别的会话的一趟时另建一趟、切�
     kind: 'pointer',
     via: 'takeover',
   })
-  assert.deepEqual(ownerWriteBlock({ sessionId: 's-2', target: { kind: 'pointer', newId: 'r1' }, pointerId: null, infoOf, same }), {
-    runId: 'r1',
-    kind: 'pointer',
-    via: 'takeover',
-  })
+  // 指针空着（丢了、指着已收口或自己的一趟）：指过去放行——单是指过去什么都拿不到，写与派照旧被拒，直到用户在这个会话接手。
+  assert.equal(ownerWriteBlock({ sessionId: 's-2', target: { kind: 'pointer' }, pointerId: null, infoOf, same }), null)
   // 不是在建（state.json 已经在）、写的也不是那一趟：不归这一道管。
   assert.equal(ownerWriteBlock({ sessionId: 's-2', target: { kind: 'run-file', runId: 'r2', creatingState: false }, pointerId: 'r1', infoOf, same }), null)
   // 建的就是指针指着的那一趟（同一个目录）：按 run-file 那一支判，不另算 create。
@@ -107,17 +104,12 @@ test('ownerWriteBlock：指针指着别的会话的一趟时另建一趟、切�
   assert.equal(ownerWriteBlock({ sessionId: 's-1', target: { kind: 'pointer', newId: 'r2' }, pointerId: 'r1', infoOf, same }), null)
 })
 
-test('ownerWriteBlock：改 current-run 却算不出改完指向哪一趟（newUnknown），有一趟挡我就拒', () => {
+test('ownerWriteBlock：改 current-run 只看它现在指着的那一趟挡不挡我（改成什么不看）', () => {
   const infoOf = (id) => (id === 'r1' ? { closed: false, owner: { session_id: 's-1', via: 'create' } } : null)
   const same = (a, b) => a === b
-  const target = { kind: 'pointer', newId: null, newUnknown: true }
-  assert.deepEqual(ownerWriteBlock({ sessionId: 's-2', target, pointerId: 'r0', infoOf, same, listRuns: () => ['r0', 'r1'] }), {
-    runId: 'r1',
-    kind: 'pointer',
-    via: 'create',
-  })
-  assert.equal(ownerWriteBlock({ sessionId: 's-2', target, pointerId: 'r0', infoOf, same, listRuns: () => ['r0'] }), null)
-  assert.equal(ownerWriteBlock({ sessionId: 's-1', target, pointerId: 'r0', infoOf, same, listRuns: () => ['r0', 'r1'] }), null)
+  assert.deepEqual(ownerWriteBlock({ sessionId: 's-2', target: { kind: 'pointer' }, pointerId: 'r1', infoOf, same }), { runId: 'r1', kind: 'pointer', via: 'create' })
+  assert.equal(ownerWriteBlock({ sessionId: 's-2', target: { kind: 'pointer' }, pointerId: 'r0', infoOf, same }), null)
+  assert.equal(ownerWriteBlock({ sessionId: 's-1', target: { kind: 'pointer' }, pointerId: 'r1', infoOf, same }), null)
 })
 
 test('ownerDispatchBlock：指针指着别的会话的一趟时，主线程派人拒', () => {
@@ -137,6 +129,7 @@ test('ownerDenyReason：说归另一个会话（接手过的说被接手），�
   assert.match(ownerDenyReason({ runId: 'r1', kind: 'run', via: 'takeover' }), /被另一个会话接手/)
   assert.match(ownerDenyReason({ runId: 'r1', kind: 'create', via: 'create' }), /不能另建一趟/)
   assert.match(ownerDenyReason({ runId: 'r1', kind: 'pointer', via: 'create' }), /current-run/)
+  assert.doesNotMatch(ownerDenyReason({ runId: 'r1', kind: 'pointer', via: 'create' }), /指到它/)
   assert.match(ownerDenyReason({ runId: 'r1', kind: 'dispatch', via: 'create' }), /派人/)
 })
 
@@ -201,6 +194,9 @@ test('sessionNotice：三条命令各自的出路；交付了只差收口的另�
 test('takeoverNotice：记下了说改归这个会话、原会话再写会被拒；没记下说为什么', () => {
   assert.match(takeoverNotice({ runId: 'r1', why: null }), /^【会话】[\s\S]*已记下[\s\S]*"r1"[\s\S]*改归这个会话/)
   assert.match(takeoverNotice({ runId: 'r1', why: 'unbound' }), /run id/)
+  // 指针不在、指着已收口的一趟：不是「不用接手」——要接回的那一趟先把指针指过去。
+  assert.match(takeoverNotice({ runId: null, why: 'no-run' }), /先.*current-run 指到/)
+  assert.doesNotMatch(takeoverNotice({ runId: null, why: 'no-run' }), /不用接手/)
   for (const why of ['no-run', 'closed', 'already-mine', 'no-session', 'write-failed', 'multi', 'notes', 'follow-up', 'unbound']) {
     const t = takeoverNotice({ runId: 'r1', why })
     assert.match(t, /没有记成接手/, why)
