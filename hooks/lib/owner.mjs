@@ -154,7 +154,8 @@ export function takeoverAnswer(toolResponse) {
 }
 
 /**
- * 命令展开那一刻给项目经理的【会话】一段：current-run 指着的那一趟归另一个会话。command：'at' | 'at-resume' | 'at-status'。
+ * 命令展开那一刻给项目经理的【会话】一段：current-run 指着的那一趟归另一个会话。command：'at' | 'at-resume' | 'at-status' | 'at-tweak'（at-tweak 与 at
+ * 同一条出路：照 /agent-team:at 第 1 节「别的会话的一趟」问）。
  * startedAt（那一趟 history 第一条的时间）、wordsHead（原话开头）都是磁盘上的值，过 quote；读不出来为 null，不说那一样。
  */
 export function sessionNotice({ command, runId, startedAt = null, wordsHead = null, delivered = false, via = 'create' }) {

@@ -59,7 +59,8 @@ export const CHECKS = {
   // 一趟只归一个会话（hooks/lib/owner.mjs）：/agent-team:at、at-resume、at-status 展开时，current-run 指着的那一趟归另一个会话、还没收口，就用
   // additionalContext 告诉项目经理（【会话】），正文照它问用户。不是门禁：不拦任何东西（这个事件上 exit 2 会把用户的命令拦掉）。speaks：这个事件上
   // 只有它可以发受信回传（不发 systemMessage）；user-words 照旧一个字都不写。matcher 与插件名同步（tests/plugin-name-sync.test.mjs）。
-  'session-notice': { event: 'UserPromptExpansion', toolNames: null, matcher: '^agent-team:(at|at-resume|at-status)$', failClosed: false, speaks: true },
+  // 单个微调：/agent-team:at-tweak 起的也是一趟，同样要说。
+  'session-notice': { event: 'UserPromptExpansion', toolNames: null, matcher: '^agent-team:(at|at-resume|at-status|at-tweak)$', failClosed: false, speaks: true },
 }
 
 export const KNOWN_CHECKS = new Set(Object.keys(CHECKS))

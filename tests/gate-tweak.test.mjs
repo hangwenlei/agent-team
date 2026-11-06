@@ -177,6 +177,26 @@ test('H6：建 run 那一次写 mode 为 tweak——这个会话发过 /agent-te
   }
 })
 
+test('/agent-team:at-tweak 带参数展开：原话照样记下，建 run 时绑进 run 目录、记着是 at-tweak', () => {
+  const dirs = makeRun({ runId: 'r0', stage: 'S1' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r0'), { recursive: true, force: true })
+    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+    run('user-words', expandCmd('at-tweak'), GATE, dirs.projectDir)
+    const dir = join(dirs.projectDir, '.agent-team', 'runs', 'r1')
+    const content = JSON.stringify(stateOf('20261105-1000-tweak', { stage: 'S1' }), null, 2)
+    assert.equal(denied(write(dirs.projectDir, join(dir, 'state.json'), content, { check: 'rework' })), false)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'state.json'), content)
+    run('ledger', { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: PM, session_id: 's-1', tool_input: { file_path: join(dir, 'state.json') } }, GATE, dirs.projectDir)
+    const bound = JSON.parse(readFileSync(join(dir, 'user-words.json'), 'utf8'))
+    assert.equal(bound.command, 'at-tweak')
+    assert.equal(bound.args, '标题改大')
+  } finally {
+    cleanup(dirs)
+  }
+})
+
 test('H6：state.json 读不出来时写 mode tweak——run 目录里门禁绑进去的原话记录是 /agent-team:at-tweak 的放行，不是或没有的拒', () => {
   for (const [words, deny] of [
     ['at-tweak', false],

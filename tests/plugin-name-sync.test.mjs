@@ -38,10 +38,10 @@ test('M4o 原话记录器认的命令是 PLUGIN_PREFIX + at 与 at-tweak：hooks
 
 // 一趟只归一个会话：命令展开时告诉项目经理这一趟归另一个会话（session-notice），只认本插件的 at、at-resume、at-status 三条——插件改名时没跟上，
 // 【会话】就再也不说，别的会话里起 /agent-team:at 的项目经理只能等到写入被拒才知道。
-test('session-notice 认的命令是 PLUGIN_PREFIX + at / at-resume / at-status：hooks.json 与 checks.mjs 的 matcher 相同、三条命令都在', async () => {
+test('session-notice 认的命令是 PLUGIN_PREFIX + at / at-resume / at-status / at-tweak：hooks.json 与 checks.mjs 的 matcher 相同、四条命令都在', async () => {
   const hooks = JSON.parse(readFileSync(new URL('../hooks/hooks.json', import.meta.url), 'utf8'))
   const { CHECKS } = await import('../hooks/lib/checks.mjs')
-  const want = `^${PLUGIN_PREFIX}(at|at-resume|at-status)$`
+  const want = `^${PLUGIN_PREFIX}(at|at-resume|at-status|at-tweak)$`
   assert.equal(CHECKS['session-notice'].matcher, want)
   const entry = (hooks.hooks.UserPromptExpansion ?? []).find((e) => (e.hooks ?? []).some((h) => (h.args ?? []).includes('session-notice')))
   assert.ok(entry, 'hooks.json 里要有一条跑 session-notice 的 UserPromptExpansion')

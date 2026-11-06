@@ -3395,7 +3395,7 @@ function main() {
     // 项目经理（正文照它问用户）。不拦任何东西：这个事件上 exit 2 会把用户的命令拦掉。读不出来、判不出来的一律不出声；建它的会话、没有归属记录的旧 run、
     // 已收口的不出声——正常的一趟不多一个字。
     const command = typeof input.command_name === 'string' ? stripPluginPrefix(input.command_name) : ''
-    if (input.expansion_type !== 'slash_command' || !['at', 'at-resume', 'at-status'].includes(command) || input.command_name === command) process.exit(0)
+    if (input.expansion_type !== 'slash_command' || !['at', 'at-resume', 'at-status', 'at-tweak'].includes(command) || input.command_name === command) process.exit(0)
     const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
     const runId = pointerIdOf(agentTeamDir)
     if (!runId) process.exit(0)
