@@ -3373,6 +3373,10 @@ function main() {
         cause = ctx.cause ?? null
         const why = ctx.kind === 'no-run' ? 'no-run' : 'unreadable'
         results = found.items.map((item) => (item.stage ? { stage: item.stage, why } : item.deliver && !item.why ? { deliver: true, why } : item))
+      } else if (blocksMe(ownerInfoOf(ctx.agentTeamDir)(pointerIdOf(ctx.agentTeamDir)), input.session_id)) {
+        // 一趟只归一个会话：current-run 指着的那一趟归别的会话（指针空着时别的会话指得过来，为了接回丢了指针的一趟）——这个会话里的回答不记进它。
+        stages = ctx.stages
+        results = found.items.map((item) => (item.stage ? { stage: item.stage, why: 'other-session' } : item.deliver && !item.why ? { deliver: true, why: 'other-session' } : item))
       } else {
         stages = ctx.stages
         // 复核（platform-3）：读批准、判需不需要、追加，三步在一把锁里做——插件被加载了两份时，同一个事件上会并行起几个记录器，

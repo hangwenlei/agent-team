@@ -513,6 +513,27 @@ test('题面里没有 current-run 指着的那一趟的 run id（问的是别的
   })
 })
 
+// 指针空着时别的会话能把 current-run 指到这一趟（为了接回丢了指针的一趟），所以两个批准记录器要自己核归属：别的会话里的回答不记进这一趟。
+test('current-run 那一趟归别的会话时，两个批准记录器不记（返工批准、照现状交付），回传与留痕说归另一个会话', () => {
+  world(({ projectDir }) => {
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    const questions = [{ question: '要怎么办？', header: '交付', multiSelect: false, options: [{ label: '照现状交付', description: '' }, { label: '停在这里', description: '' }] }]
+    const ask = {
+      hook_event_name: 'PostToolUse',
+      tool_name: 'AskUserQuestion',
+      agent_type: PM,
+      session_id: 's-2',
+      tool_input: { questions },
+      tool_response: { questions, answers: { [questions[0].question]: '照现状交付' } },
+    }
+    const out = run('approval-ask', ask, GATE, projectDir)
+    assert.match(JSON.parse(out.stdout).hookSpecificOutput.additionalContext, /归另一个会话/)
+    const prompt = run('approval-prompt', { hook_event_name: 'UserPromptSubmit', session_id: 's-2', prompt: '再返工一轮：回到 S1' }, GATE, projectDir)
+    assert.match(prompt.stderr, /other-session/)
+    assert.equal(existsSync(join(dir, 'approvals.jsonl')), false)
+  })
+})
+
 test('选「接手并收口，再开始这次」同样记', () => {
   world(({ projectDir }) => {
     const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
