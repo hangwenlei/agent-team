@@ -53,11 +53,12 @@ const blockOf = (runId, info, kind) => ({ runId, kind, via: info.owner.via === '
 /**
  * 主线程这一次写入碰不碰别的会话的一趟。
  * target：{ kind: 'run-file', runId, creatingState }（写 runs/<id>/ 下的文件；creatingState：写的是那一趟的 state.json、写之前它不在）、
- * { kind: 'pointer', newId }（写 current-run；newId 是新内容里的 run id，认不出为 null）或 null（不归这一道管）。
- * infoOf(id) → { closed, owner } | null；same(a, b) 判两个 run id 是不是同一个目录。
+ * { kind: 'pointer', newId, newUnknown }（写 current-run；newId 是改完之后里面的 run id，不是合法 run id 为 null；newUnknown：算不出改完是什么）或
+ * null（不归这一道管）。infoOf(id) → { closed, owner } | null；same(a, b) 判两个 run id 是不是同一个目录；listRuns() → runs/ 下的目录名（只在 newUnknown
+ * 时用：改完可能指向任何一趟，有一趟挡这个会话就拒）。
  * @returns {null | { runId: string, kind: 'run'|'create'|'pointer', via: 'create'|'takeover' }}
  */
-export function ownerWriteBlock({ sessionId, target, pointerId, infoOf, same }) {
+export function ownerWriteBlock({ sessionId, target, pointerId, infoOf, same, listRuns = () => [] }) {
   if (!isSid(sessionId) || !isPlainObject(target)) return null
   const eq = (a, b) => typeof a === 'string' && typeof b === 'string' && same(a, b)
   const check = (id, kind) => {
@@ -71,7 +72,18 @@ export function ownerWriteBlock({ sessionId, target, pointerId, infoOf, same }) 
     if (target.creatingState === true && typeof pointerId === 'string' && !eq(pointerId, target.runId)) return check(pointerId, 'create')
     return null
   }
-  if (target.kind === 'pointer') return check(pointerId, 'pointer') || check(target.newId, 'pointer')
+  if (target.kind === 'pointer') {
+    const away = check(pointerId, 'pointer')
+    if (away) return away
+    if (target.newUnknown === true) {
+      for (const id of listRuns()) {
+        const b = check(id, 'pointer')
+        if (b) return b
+      }
+      return null
+    }
+    return check(target.newId, 'pointer')
+  }
   return null
 }
 

@@ -1285,27 +1285,44 @@ function ownerInfoOf(agentTeamDir) {
   }
 }
 
-// 一趟只归一个会话：主线程这次写的是什么——current-run（{ kind: 'pointer', newId }，newId 是 Write 新内容里的 run id，认不出为 null）、某一趟 run 目录里的
-// 文件（{ kind: 'run-file', runId, creatingState }，creatingState：写的是那一趟的 state.json、写之前它不在）、别的（null）。目录名照这次给的路径原样取
-// （规范化之后的路径在 Windows、macOS 上折成了小写）。
+// 一趟只归一个会话：主线程这次写的是什么——
+//   - current-run：{ kind: 'pointer', newId, newUnknown }。按叶名认（剥掉流后缀、结尾的点与空格：那些写法在 Windows 上落到的正是指针）。改完之后的内容：
+//     Write 就是新全文，Edit 照平台的口径在磁盘那份上重放（replayEdit）；算不出来（找不到 old_string、NotebookEdit……）标 newUnknown；
+//   - 某一趟 run 目录里的文件：{ kind: 'run-file', runId, creatingState }。runId 取规范化之后的那一段（解析过链接、目录联接与别名，Windows、macOS 上折成
+//     小写）：照字面取的话，经一个名字不合 run id 格式的链接写进去，就查不到那一趟的归属。creatingState：写的是那一趟的 state.json、写之前它不在；
+//   - 别的：null。
 function ownerTargetOf(agentTeamDir, filePath, toolName, toolInput) {
   if (typeof filePath !== 'string' || filePath === '') return null
   const runsDir = join(agentTeamDir, 'runs')
-  const target = norm(filePath)
-  if (target === norm(join(agentTeamDir, 'current-run'))) {
-    const c = toolName === 'Write' && typeof toolInput?.content === 'string' ? toolInput.content.trim() : null
-    return { kind: 'pointer', newId: c && RUN_ID.test(c) ? c : null }
+  if (leafName(filePath) === 'current-run' && norm(dirname(filePath)) === norm(agentTeamDir)) {
+    let after = null
+    if (toolName === 'Write') after = typeof toolInput?.content === 'string' ? toolInput.content : null
+    else if (toolName === 'Edit') {
+      let before = null
+      try {
+        before = readFileSync(filePath, 'utf8')
+      } catch {}
+      after = replayEdit({ before, oldString: toolInput?.old_string, newString: toolInput?.new_string, replaceAll: toolInput?.replace_all === true })
+    }
+    if (typeof after !== 'string') return { kind: 'pointer', newId: null, newUnknown: true }
+    const c = after.trim()
+    return { kind: 'pointer', newId: RUN_ID.test(c) ? c : null, newUnknown: false }
   }
+  const target = norm(filePath)
   const base = norm(runsDir)
   if (!target.startsWith(`${base}/`)) return null
   const rel = target.slice(base.length + 1).split('/')
   if (!rel[0]) return null
-  let id = rel[0]
+  return { kind: 'run-file', runId: rel[0], creatingState: rel.length === 2 && rel[1] === 'state.json' && !existsSync(filePath) }
+}
+
+// runs/ 下的目录名；读不出来当一个都没有。
+function runDirNames(agentTeamDir) {
   try {
-    const seg = relative(runsDir, filePath).split(/[\\/]/)[0]
-    if (seg && !seg.startsWith('..') && norm(join(runsDir, seg)) === norm(join(runsDir, rel[0]))) id = seg
-  } catch {}
-  return { kind: 'run-file', runId: id, creatingState: rel.length === 2 && rel[1] === 'state.json' && !existsSync(filePath) }
+    return readdirSync(join(agentTeamDir, 'runs'))
+  } catch {
+    return []
+  }
 }
 
 // M4p：【指针】那一段。两个 run id 都是磁盘上的值（目录名、current-run 的内容），过 quote；文件名与角色名是插件自己的名字。复核（docs/51 §8）：
@@ -2104,6 +2121,7 @@ function main() {
         pointerId: pointerIdOf(agentTeamDir),
         infoOf: ownerInfoOf(agentTeamDir),
         same: (a, b) => norm(join(runsDir, a)) === norm(join(runsDir, b)),
+        listRuns: () => runDirNames(agentTeamDir),
       })
       if (block) denyAndExit(ownerDenyReason(block) + selfCheckIdentity(input, '写入'), spec.event)
     }

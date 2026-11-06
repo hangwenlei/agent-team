@@ -6,7 +6,7 @@
 // 纯函数那一层在 tests/owner.test.mjs。夹具照真实会话的顺序：H6（写之前 state.json 不在）→ 落盘 → 账本 → 写指针。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
@@ -234,6 +234,75 @@ test('current-run 里写的 id 与目录名大小写不同（非 Linux）：照�
     point(projectDir, 'R1')
     const r2 = join(projectDir, '.agent-team', 'runs', 'r2', 'state.json')
     assert.match(reasonOf(run('writepath', preWrite(r2, JSON.stringify(stateOf('r2')), 's-2'), GATE, projectDir)), /不能另建一趟/)
+  })
+})
+
+test('别的会话用带流后缀、结尾带点的写法写 current-run，照样认成指针、拒', () => {
+  world(({ projectDir }) => {
+    createRun(projectDir, 'r1', { sid: 's-1' })
+    for (const leaf of ['current-run::$DATA', 'current-run.']) {
+      const out = run('writepath', preWrite(join(projectDir, '.agent-team', leaf), 'r2', 's-2'), GATE, projectDir)
+      assert.equal(decisionOf(out.stdout)?.permissionDecision, 'deny', leaf)
+      assert.match(reasonOf(out), /current-run/, leaf)
+    }
+  })
+})
+
+// 两趟：r0 归 s-2（指针指着它），r1 归 s-1、没收口。
+function twoRuns(projectDir) {
+  createRun(projectDir, 'r1', { sid: 's-1' })
+  const r0 = join(projectDir, '.agent-team', 'runs', 'r0')
+  mkdirSync(r0, { recursive: true })
+  writeFileSync(join(r0, 'state.json'), JSON.stringify(stateOf('r0'), null, 2))
+  writeFileSync(ownerPath(r0), JSON.stringify({ session_id: 's-2', at: 't', via: 'create', previous: null }))
+  point(projectDir, 'r0')
+}
+const editPointer = (projectDir, old_string, new_string, sid) => ({
+  hook_event_name: 'PreToolUse',
+  tool_name: 'Edit',
+  agent_type: PM,
+  session_id: sid,
+  tool_input: { file_path: join(projectDir, '.agent-team', 'current-run'), old_string, new_string },
+})
+
+test('别的会话用 Edit 把 current-run 从自己那一趟改指到别的会话的一趟，拒', () => {
+  world(({ projectDir }) => {
+    twoRuns(projectDir)
+    const out = run('writepath', editPointer(projectDir, 'r0', 'r1', 's-2'), GATE, projectDir)
+    assert.equal(decisionOf(out.stdout)?.permissionDecision, 'deny')
+    assert.match(reasonOf(out), /"r1"/)
+  })
+})
+
+test('用 Edit 改 current-run、算不出改完是什么，而有一趟别的会话的 run 开着，拒', () => {
+  world(({ projectDir }) => {
+    twoRuns(projectDir)
+    const out = run('writepath', editPointer(projectDir, '不在文件里', 'r1', 's-2'), GATE, projectDir)
+    assert.equal(decisionOf(out.stdout)?.permissionDecision, 'deny')
+  })
+})
+
+test('经一个名字不合 run id 格式的链接写进那一趟：照样认成那一趟、按会话拒', (t) => {
+  world(({ projectDir }) => {
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    const alias = join(projectDir, '.agent-team', 'runs', 'al@ias')
+    try {
+      symlinkSync(dir, alias, process.platform === 'win32' ? 'junction' : 'dir')
+    } catch (e) {
+      t.skip('建不了链接：' + e.code)
+      return
+    }
+    const out = writeBy(projectDir, join(alias, '00-contract.md'), 's-2')
+    assert.equal(decisionOf(out.stdout)?.permissionDecision, 'deny')
+    assert.match(reasonOf(out), OWNED)
+  })
+})
+
+test('run 目录名写成 Windows 会去掉的样子（结尾带空格）：照样认成那一趟、拒', { skip: process.platform !== 'win32' }, () => {
+  world(({ projectDir }) => {
+    createRun(projectDir, 'r1', { sid: 's-1' })
+    const out = writeBy(projectDir, join(projectDir, '.agent-team', 'runs', 'r1 ', '00-contract.md'), 's-2')
+    assert.equal(decisionOf(out.stdout)?.permissionDecision, 'deny')
   })
 })
 

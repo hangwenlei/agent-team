@@ -106,6 +106,19 @@ test('ownerWriteBlock：指针指着别的会话的一趟时另建一趟、切�
   assert.equal(ownerWriteBlock({ sessionId: 's-1', target: { kind: 'pointer', newId: 'r2' }, pointerId: 'r1', infoOf, same }), null)
 })
 
+test('ownerWriteBlock：改 current-run 却算不出改完指向哪一趟（newUnknown），有一趟挡我就拒', () => {
+  const infoOf = (id) => (id === 'r1' ? { closed: false, owner: { session_id: 's-1', via: 'create' } } : null)
+  const same = (a, b) => a === b
+  const target = { kind: 'pointer', newId: null, newUnknown: true }
+  assert.deepEqual(ownerWriteBlock({ sessionId: 's-2', target, pointerId: 'r0', infoOf, same, listRuns: () => ['r0', 'r1'] }), {
+    runId: 'r1',
+    kind: 'pointer',
+    via: 'create',
+  })
+  assert.equal(ownerWriteBlock({ sessionId: 's-2', target, pointerId: 'r0', infoOf, same, listRuns: () => ['r0'] }), null)
+  assert.equal(ownerWriteBlock({ sessionId: 's-1', target, pointerId: 'r0', infoOf, same, listRuns: () => ['r0', 'r1'] }), null)
+})
+
 test('ownerDispatchBlock：指针指着别的会话的一趟时，主线程派人拒', () => {
   const infoOf = (id) => (id === 'r1' ? { closed: false, owner: { session_id: 's-1', via: 'create' } } : null)
   assert.deepEqual(ownerDispatchBlock({ sessionId: 's-2', pointerId: 'r1', infoOf }), { runId: 'r1', kind: 'dispatch', via: 'create' })
