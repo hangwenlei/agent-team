@@ -196,6 +196,71 @@ test('H6：state.json 读不出来时写 mode tweak——run 目录里门禁绑�
 })
 
 // ---------------------------------------------------------------------------------------------------------------------------------
+// 测试段由项目经理产出；没有验收段的链收口时读测试报告。
+const BASE_FILES = { '00-contract.md': DOC('契约'), '04-dispatch.md': DOC('派发'), '05-impl/at-frontend.md': DOC('实现记录') }
+const advanceTo = (projectDir, runDir, to, extra = {}) => {
+  const now = JSON.parse(readFileSync(join(runDir, 'state.json'), 'utf8'))
+  const ids = ['S1', 'S4', 'S5', 'S6', 'S8']
+  const hist = H(...ids.slice(0, ids.indexOf(to) + 1))
+  const next = { ...now, stage: to, history: hist, rework: reworkFromHistory(hist), stage_roles: { S5: ['at-frontend'] }, ...extra }
+  return write(projectDir, join(runDir, 'state.json'), JSON.stringify(next, null, 2), { check: 'rework' })
+}
+
+test('微调里推出 S6：06-test.md 第一行「不通过」拒、读不出拒、「跑不起来」放行、「通过」放行', () => {
+  for (const [first, deny] of [
+    ['结论：不通过', true],
+    ['大概过了', true],
+    ['结论：跑不起来：没有测试命令', false],
+    ['结论：通过', false],
+  ]) {
+    withRun(
+      ({ projectDir, runDir }) => {
+        const out = advanceTo(projectDir, runDir, 'S8')
+        assert.equal(denied(out), deny, `${first}：${reasonOf(out)}`)
+      },
+      { stage: 'S6', history: H('S1', 'S4', 'S5', 'S6'), files: { ...BASE_FILES, '06-test.md': first + NL + NL + '跑了 npm test' + NL } },
+    )
+  }
+})
+
+test('微调里收口：测试报告「通过」放行；「跑不起来」「不通过」没有照现状交付的批准拒，理由说这一趟没有验收段', () => {
+  for (const [first, deny] of [
+    ['结论：通过', false],
+    ['结论：跑不起来：没有测试命令', true],
+  ]) {
+    withRun(
+      ({ projectDir, runDir }) => {
+        const out = advanceTo(projectDir, runDir, 'S8', { closed_at: '2026-11-05T12:00:00Z' })
+        assert.equal(denied(out), deny, `${first}：${reasonOf(out)}`)
+        if (deny) assert.match(reasonOf(out), /没有验收段/)
+      },
+      { stage: 'S8', history: H('S1', 'S4', 'S5', 'S6', 'S8'), files: { ...BASE_FILES, '06-test.md': first + NL, '08-delivery.md': DOC('交付') } },
+    )
+  }
+})
+
+test('微调里在 S8 选「照现状交付」：批准绑在测试报告上，之后收口放行', () => {
+  withRun(
+    ({ projectDir, runDir }) => {
+      const questions = [{ question: '测试跑不起来，要怎么办？', header: '交付', multiSelect: false, options: [{ label: '照现状交付', description: '' }, { label: '停在这里', description: '' }] }]
+      const ask = {
+        hook_event_name: 'PostToolUse',
+        tool_name: 'AskUserQuestion',
+        agent_type: PM,
+        session_id: 's-1',
+        tool_input: { questions },
+        tool_response: { questions, answers: { [questions[0].question]: '照现状交付' } },
+      }
+      const rec = run('approval-ask', ask, GATE, projectDir)
+      assert.match(JSON.parse(rec.stdout).hookSpecificOutput.additionalContext, /已记下照现状交付/)
+      const out = advanceTo(projectDir, runDir, 'S8', { closed_at: '2026-11-05T12:00:00Z' })
+      assert.equal(denied(out), false, reasonOf(out))
+    },
+    { stage: 'S8', history: H('S1', 'S4', 'S5', 'S6', 'S8'), files: { ...BASE_FILES, '06-test.md': '结论：跑不起来：没有测试命令' + NL, '08-delivery.md': DOC('交付') } },
+  )
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------
 // H1：微调这一趟里项目经理直接派开发角色。
 const DEVS = ['at-frontend', 'at-backend', 'at-ui', 'at-ios', 'at-android']
 const OTHERS = ['at-product', 'at-architect', 'at-qa', 'at-acceptance']

@@ -56,6 +56,35 @@ test('stages.tweak.json：段号是正常链的子集、产物名与同名段相
   assert.ok(!Object.values(STAGES).some((s) => s.test === true), '正常链不带 test')
 })
 
+test('testStageOf：短链的 S6（test: true、角色 at-pm）认得出，正常链照旧认 at-qa 那一段', async () => {
+  const { testStageOf } = await import('../hooks/lib/test-verdict.mjs')
+  assert.deepEqual(testStageOf(TWEAK), { stageId: 'S6', name: '06-test.md', implStage: 'S5' })
+  assert.deepEqual(testStageOf(STAGES), { stageId: 'S6', name: '06-test.md', implStage: 'S5' })
+})
+
+test('trimmedCloseBlock：没有验收段的链（短链）与验收整段裁掉同一个判法——通过放行，跑不起来、不通过、读不出拦，批准过的放行', async () => {
+  const { trimmedCloseBlock, trimmedCloseText } = await import('../hooks/lib/test-verdict.mjs')
+  const { sha256OfContract } = await import('../hooks/lib/contract-hash.mjs')
+  const state = { stage: 'S8', roster: [], stage_roles: {}, trimmed: {}, history: [] }
+  const of = (text) => trimmedCloseBlock({ stages: TWEAK, state, bytesOf: () => Buffer.from(text) })
+  assert.equal(of('结论：通过\n'), null)
+  for (const [text, verdict] of [
+    ['结论：跑不起来：没有测试命令\n', 'env'],
+    ['结论：不通过\n', 'fail'],
+    ['大概过了\n', null],
+  ]) {
+    const b = of(text)
+    assert.equal(b?.verdict, verdict, text)
+    assert.equal(b.accStageId, null)
+    const t = trimmedCloseText(b)
+    assert.match(t, /没有验收段/)
+    assert.doesNotMatch(t, /把验收派出去/)
+    assert.doesNotMatch(t, /null/)
+  }
+  const env = Buffer.from('结论：跑不起来\n')
+  assert.equal(trimmedCloseBlock({ stages: TWEAK, state, bytesOf: () => env, approvedShas: [sha256OfContract(env)] }), null)
+})
+
 test('implStageOf：正常链与短链都是 S5', () => {
   assert.equal(implStageOf(STAGES), 'S5')
   assert.equal(implStageOf(TWEAK), 'S5')

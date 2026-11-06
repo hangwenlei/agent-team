@@ -97,6 +97,24 @@ function project(body) {
   }
 }
 
+// 单个微调：需求稿批准沿用这个会话还挂着的那条命令（at-tweak 之后问清的需求稿建的仍是微调）；已经绑上或作废的旧记录不沿用——不然一次旧的 at-tweak
+// 会让之后的需求稿建成微调。
+test('批准：需求稿沿用这个会话还挂着的 at-tweak；绑上或作废了的旧 at-tweak 不沿用', () => {
+  project(({ projectDir }) => {
+    run('user-words', { ...expansion(ROUGH), command_name: 'agent-team:at-tweak', prompt: '/agent-team:at-tweak ' + ROUGH }, GATE, projectDir)
+    run('approval-ask', asked(BRIEF_LABEL), GATE, projectDir)
+    assert.equal(pendingOf(projectDir).command, 'at-tweak')
+  })
+  for (const mark of [{ bound: 'r0' }, { dropped: 'r0' }]) {
+    project(({ projectDir }) => {
+      const old = { at: 't', session_id: 's-1', args: '旧的微调', source: 'command', command: 'at-tweak', runs_before: [], binding: null, bound: null, dropped: null, ...mark }
+      writeFileSync(pendingPath(projectDir), JSON.stringify({ version: 2, sessions: { 's-1': old } }))
+      run('approval-ask', asked(BRIEF_LABEL), GATE, projectDir)
+      assert.equal(pendingOf(projectDir).command, 'at', JSON.stringify(mark))
+    })
+  }
+})
+
 test('批准：需求稿只写这个会话那一条，别的会话挂着的原话不动', () => {
   project(({ projectDir }) => {
     run('user-words', expansion('另一个会话的需求', 's-2'), GATE, projectDir)

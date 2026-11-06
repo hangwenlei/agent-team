@@ -1532,8 +1532,13 @@ function recordBrief(input) {
   } catch {}
   try {
     const rec = pendingRecord({ at: new Date().toISOString(), sessionId: sid, args: b.draft, runsBefore, source: 'ask' })
-    // 需求稿批准沿用这个会话之前那条命令（/agent-team:at-tweak 之后问清的需求稿，建的仍是微调）。
-    updateWordsBook(agentTeamDir, sid, (book) => withWords(book, sid, { ...rec, command: wordsFor(book, sid)?.command ?? 'at' }))
+    // 需求稿批准沿用这个会话还挂着（没绑、没作废）的那条命令（/agent-team:at-tweak 之后问清的需求稿，建的仍是微调）；绑上或作废了的旧记录不沿用——
+    // 不然一次旧的 at-tweak 会让之后的需求稿建成微调。
+    updateWordsBook(agentTeamDir, sid, (book) => {
+      const prev = wordsFor(book, sid)
+      const pending = prev && prev.bound === null && prev.dropped === null
+      return withWords(book, sid, { ...rec, command: pending ? prev.command : 'at' })
+    })
   } catch (e) {
     process.stderr.write(`agent-team approval-ask：需求稿记不下（${quote(e?.message ?? e, { max: 120 })}）。\n`)
     return skip('write-failed')
@@ -1638,7 +1643,10 @@ function acceptanceOnDisk(ctx, name, kind = 'acceptance', envNeedsApproval = fal
 function acceptanceTrimmedNow(ctx) {
   try {
     const acc = acceptanceOf(ctx.stages)
-    if (!acc || !testStageOf(ctx.stages) || !isStageChain(ctx.stages)) return false
+    const ts = testStageOf(ctx.stages)
+    if (!ts || !isStageChain(ctx.stages)) return false
+    // 单个微调：短链（测试段带 "test": true、链上没有验收段）与验收整段裁掉同一个判法；正常链被改坏、丢了验收段的不算。
+    if (!acc) return ctx.stages[ts.stageId]?.test === true
     const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
     const dispatched = logBytes ? dispatchedByStage(readDispatchLog(logBytes.toString('utf8'))) : null
     return wholeStageTrimmed(ctx.stages, acc.stageId, ctx.state, null, dispatched)
@@ -1733,7 +1741,9 @@ function withFileLock(dir, name, body) {
     try {
       fd = openSync(lock, 'wx')
     } catch (err) {
-      if (err?.code !== 'EEXIST') break
+      // Windows 上另一个进程正在删锁文件时，独占创建报 EPERM（还有 EACCES、EBUSY）而不是 EEXIST——那也是「锁被人拿着」，照样等；别的错（目录不在……）
+      // 才放弃加锁、照跑。只认 EEXIST 时十几个进程同时写，会有几个不等锁就写、互相覆盖。
+      if (err?.code !== 'EEXIST' && err?.code !== 'EPERM' && err?.code !== 'EACCES' && err?.code !== 'EBUSY') break
       try {
         if (Date.now() - statSync(lock).mtimeMs > 5000) {
           unlinkSync(lock)
@@ -2667,7 +2677,9 @@ function main() {
       // 读它的首行才有意义。批准读同一个目录下的 approvals.jsonl（上面读过；读不出来当一条都没有——更严的一侧）。
       const acceptanceDef = acceptanceOf(stagesForRework)
       // 评审 F11：阶段链读得出、却认不出验收那一段（插件的 stages.json 改坏了）：这一次不读验收结论，留一行痕。
-      if (isStageChain(stagesForRework) && !acceptanceDef) process.stderr.write('agent-team H6 验收结论：阶段链上认不出验收那一段，这一次不读验收结论。\n')
+      // 单个微调：短链本来就没有验收段（测试段带 "test": true），不留这一行；正常链被改坏、丢了验收段的照旧留。
+      const tweakTest = testStageOf(stagesForRework)
+      if (isStageChain(stagesForRework) && !acceptanceDef && stagesForRework[tweakTest?.stageId]?.test !== true) process.stderr.write('agent-team H6 验收结论：阶段链上认不出验收那一段，这一次不读验收结论。\n')
       const ac = decideAcceptance({
         before,
         after,
