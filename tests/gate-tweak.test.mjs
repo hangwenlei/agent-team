@@ -261,6 +261,70 @@ test('微调里在 S8 选「照现状交付」：批准绑在测试报告上，�
 })
 
 // ---------------------------------------------------------------------------------------------------------------------------------
+// 「可以了，收尾」：用户看过这一轮、满意了，门禁记下（绑在那一刻的契约上），H6 推进出 S5 时核。
+const askDone = (answer = '可以了，收尾', sid = 's-1') => {
+  const questions = [{ question: '标题改好了，刷新看看？', header: '这一轮', multiSelect: false, options: [{ label: '可以了，收尾', description: '' }, { label: '再改', description: '' }] }]
+  return {
+    hook_event_name: 'PostToolUse',
+    tool_name: 'AskUserQuestion',
+    agent_type: PM,
+    session_id: sid,
+    tool_input: { questions },
+    tool_response: { questions, answers: { [questions[0].question]: answer } },
+  }
+}
+const S5_RUN = { stage: 'S5', history: H('S1', 'S4', 'S5'), files: BASE_FILES }
+const ctxText = (out) => (out.stdout.trim() ? JSON.parse(out.stdout).hookSpecificOutput?.additionalContext ?? '' : '')
+
+test('微调停在 S5，用户选「可以了，收尾」：记进 approvals.jsonl（kind tweak-done、contract 是现在契约的 sha），回传【微调】已记下', async () => {
+  const { sha256OfContract } = await import('../hooks/lib/contract-hash.mjs')
+  withRun(({ projectDir, runDir }) => {
+    const out = run('approval-ask', askDone(), GATE, projectDir)
+    assert.match(ctxText(out), /【微调】[\s\S]*已记下/)
+    const line = JSON.parse(readFileSync(join(runDir, 'approvals.jsonl'), 'utf8').trim())
+    assert.equal(line.kind, 'tweak-done')
+    assert.equal(line.contract, sha256OfContract(readFileSync(join(runDir, '00-contract.md'))))
+  }, S5_RUN)
+})
+
+test('对话里单独发「可以了，收尾」同样记', () => {
+  withRun(({ projectDir, runDir }) => {
+    run('approval-prompt', { hook_event_name: 'UserPromptSubmit', session_id: 's-1', prompt: '可以了，收尾' }, GATE, projectDir)
+    assert.match(readFileSync(join(runDir, 'approvals.jsonl'), 'utf8'), /tweak-done/)
+  }, S5_RUN)
+})
+
+test('没有这条记录推出 S5：H6 拒；记下之后又改了契约：H6 拒；再选一次：放行', () => {
+  withRun(({ projectDir, runDir }) => {
+    const first = advanceTo(projectDir, runDir, 'S6')
+    assert.equal(denied(first), true)
+    assert.match(reasonOf(first), /可以了，收尾/)
+    run('approval-ask', askDone(), GATE, projectDir)
+    writeFileSync(join(runDir, '00-contract.md'), DOC('契约') + NL + '### 2026-11-05 · 用户主动提出' + NL + NL + '标题再大一号' + NL)
+    assert.equal(denied(advanceTo(projectDir, runDir, 'S6')), true, '又改了契约')
+    run('approval-ask', askDone(), GATE, projectDir)
+    const ok = advanceTo(projectDir, runDir, 'S6')
+    assert.equal(denied(ok), false, reasonOf(ok))
+  }, S5_RUN)
+})
+
+test('不是微调、不停在 S5、归别的会话：不记，回传说为什么', () => {
+  withRun(({ projectDir, runDir }) => {
+    assert.match(ctxText(run('approval-ask', askDone(), GATE, projectDir)), /没有记成/)
+    assert.equal(existsSync(join(runDir, 'approvals.jsonl')), false)
+  }, { mode: 'full', stage: 'S5', history: H('S1', 'S2', 'S3', 'S4', 'S5'), files: BASE_FILES })
+  withRun(({ projectDir, runDir }) => {
+    assert.match(ctxText(run('approval-ask', askDone(), GATE, projectDir)), /没有记成/)
+    assert.equal(existsSync(join(runDir, 'approvals.jsonl')), false)
+  }, { stage: 'S4', history: H('S1', 'S4'), files: BASE_FILES })
+  withRun(({ projectDir, runDir }) => {
+    writeFileSync(join(runDir, 'owner.json'), JSON.stringify({ session_id: 's-9', at: 't', via: 'create', previous: null }))
+    assert.match(ctxText(run('approval-ask', askDone(), GATE, projectDir)), /没有记成/)
+    assert.equal(existsSync(join(runDir, 'approvals.jsonl')), false)
+  }, S5_RUN)
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------
 // H1：微调这一趟里项目经理直接派开发角色。
 const DEVS = ['at-frontend', 'at-backend', 'at-ui', 'at-ios', 'at-android']
 const OTHERS = ['at-product', 'at-architect', 'at-qa', 'at-acceptance']

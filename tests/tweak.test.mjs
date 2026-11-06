@@ -85,6 +85,56 @@ test('trimmedCloseBlock：没有验收段的链（短链）与验收整段裁掉
   assert.equal(trimmedCloseBlock({ stages: TWEAK, state, bytesOf: () => env, approvedShas: [sha256OfContract(env)] }), null)
 })
 
+test('doneAnswer：只认单独一道单选题里干净地选了「可以了，收尾」', async () => {
+  const { doneAnswer } = await import('../hooks/lib/tweak.mjs')
+  const tr = (answer, extra = {}) => ({ questions: [{ question: 'Q', multiSelect: false }], answers: { Q: answer }, ...extra })
+  assert.deepEqual(doneAnswer(tr(DONE_LABEL)), { ok: true })
+  assert.deepEqual(doneAnswer(tr(DONE_LABEL + '（推荐）')), { ok: true })
+  assert.equal(doneAnswer(tr('再改')), null)
+  assert.equal(doneAnswer(null), null)
+  assert.deepEqual(doneAnswer(tr(DONE_LABEL + '，不过标题再大点')), { why: 'malformed' })
+  assert.deepEqual(doneAnswer(tr(DONE_LABEL, { annotations: { Q: { notes: '颜色再调' } } })), { why: 'notes' })
+  assert.deepEqual(doneAnswer({ questions: [{ question: 'Q', multiSelect: true }], answers: { Q: DONE_LABEL } }), { why: 'multi' })
+  assert.deepEqual(doneAnswer(tr(DONE_LABEL, { followUp: true })), { why: 'follow-up' })
+})
+
+test('promptDone：整条消息（去掉首尾空白、全半角）就是标签才算', async () => {
+  const { promptDone } = await import('../hooks/lib/tweak.mjs')
+  assert.equal(promptDone('可以了，收尾'), true)
+  assert.equal(promptDone('  可以了,收尾  '), true)
+  assert.equal(promptDone('可以了，收尾吧'), false)
+  assert.equal(promptDone('嗯，可以了，收尾'), false)
+  assert.equal(promptDone(null), false)
+})
+
+test('readDoneShas 与 doneLine：只认 kind 为 tweak-done、contract 是合法 sha 的行；返工批准的读法不认它', async () => {
+  const { readDoneShas, doneLine } = await import('../hooks/lib/tweak.mjs')
+  const { readGrants } = await import('../hooks/lib/budget.mjs')
+  const sha = 'sha256:' + 'a'.repeat(64)
+  const text = [doneLine({ at: 't', source: 'ask', contract: sha }), '{"kind":"tweak-done","contract":"x"}', '{bad', JSON.stringify({ rework_to: 'S5', covers: ['S5'] })].join('\n') + '\n'
+  assert.deepEqual(readDoneShas(text), [sha])
+  assert.deepEqual(readDoneShas(null), [])
+  assert.equal(readGrants(doneLine({ at: 't', source: 'ask', contract: sha }) + '\n', STAGES).length, 0)
+})
+
+test('decideTweakDone：微调从 S5 推进出去，要有绑在现在契约上的记录；正常一趟、不是从 S5 推进出去不核', async () => {
+  const { decideTweakDone } = await import('../hooks/lib/tweak.mjs')
+  const sha = 'sha256:' + 'b'.repeat(64)
+  const old = 'sha256:' + 'c'.repeat(64)
+  const st = (stage, mode = 'tweak') => ({ mode, stage })
+  const d = (before, after, doneShas) => decideTweakDone({ before, after, stages: TWEAK, contractSha: sha, doneShas })
+  assert.equal(d(st('S5'), st('S6'), [sha]).ok, true)
+  const no = d(st('S5'), st('S6'), [])
+  assert.equal(no.ok, false)
+  assert.match(no.reason, new RegExp(DONE_LABEL))
+  assert.equal(d(st('S5'), st('S6'), [old]).ok, false, '绑在旧契约上的不算')
+  assert.equal(d(st('S5'), st('S5'), []).ok, true, '还在 S5')
+  assert.equal(d(st('S4'), st('S5'), []).ok, true, '推进进 S5')
+  assert.equal(d(st('S6'), st('S5'), []).ok, true, '回退回 S5')
+  assert.equal(decideTweakDone({ before: st('S5', 'full'), after: st('S6', 'full'), stages: STAGES, contractSha: sha, doneShas: [] }).ok, true, '正常一趟')
+  assert.equal(d(null, st('S6'), []).ok, true, '读不出写入之前的不核')
+})
+
 test('implStageOf：正常链与短链都是 S5', () => {
   assert.equal(implStageOf(STAGES), 'S5')
   assert.equal(implStageOf(TWEAK), 'S5')

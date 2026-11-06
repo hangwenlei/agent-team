@@ -21,7 +21,7 @@ import { candidateStages, decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideModeKey, decideRework, decideReworkBase, decideStageRolesKey, parseStateText, replayEdit } from './lib/rework-guard.mjs'
-import { TWEAK_MODE, TWEAK_STAGES_FILE, modeOf, stagesFileFor, tweakRoster } from './lib/tweak.mjs'
+import { TWEAK_MODE, TWEAK_STAGES_FILE, decideTweakDone, doneAnswer, doneLine, doneNotice, implStageOf, modeOf, promptDone, readDoneShas, stagesFileFor, tweakRoster } from './lib/tweak.mjs'
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { isBlankText } from './lib/text-norm.mjs'
 import { normalizeText } from './lib/text-norm.mjs'
@@ -1589,6 +1589,40 @@ function recordTakeover(input) {
   return { kind: 'takeover-recorded', notice: takeoverNotice({ runId, why: null }) }
 }
 
+// 单个微调（hooks/lib/tweak.mjs）：用户说了「可以了，收尾」（AskUserQuestion 里干净地单选，或者对话里单独发这一句）——current-run 那一趟是微调、停在实现段、
+// 不归别的会话时，往它的 approvals.jsonl 追加一行，绑在门禁按磁盘算的契约 sha 上。回 null（不像这一句）或 { kind（给用户那一行）、notice（给项目经理那一段） }。
+function recordTweakDone(input, source) {
+  const hit = source === 'ask' ? doneAnswer(input?.tool_response) : promptDone(input?.prompt) ? { ok: true } : null
+  if (!hit) return null
+  const skip = (why) => {
+    process.stderr.write(`agent-team ${source === 'ask' ? 'approval-ask' : 'approval-prompt'}：没有记成「可以了，收尾」（${why}）。\n`)
+    return { kind: 'tweak-done-skipped', notice: doneNotice({ why }) }
+  }
+  if (hit.why) return skip(hit.why)
+  const ctx = readRunContext(ROOT_PROJECT, ROOT)
+  if (!ctx.ok) return skip('no-run')
+  if (modeOf(ctx.state) !== TWEAK_MODE) return skip('not-tweak')
+  if (ctx.state?.stage !== implStageOf(ctx.stages)) return skip('not-impl')
+  if (blocksMe(ownerInfoOf(ctx.agentTeamDir)(pointerIdOf(ctx.agentTeamDir)), input.session_id)) return skip('other-session')
+  const bytes = ctx.artifactBytes(CONTRACT_FILE)
+  if (!bytes) return skip('no-contract')
+  try {
+    withApprovalsLock(ctx.runDir, () => {
+      const file = join(ctx.runDir, APPROVALS_FILE)
+      let prev = null
+      try {
+        prev = readFileSync(file)
+      } catch {}
+      const sep = prev && prev.length && prev[prev.length - 1] !== 0x0a ? '\n' : ''
+      appendFileSync(file, `${sep}${doneLine({ at: new Date().toISOString(), source, contract: sha256OfContract(bytes) })}\n`)
+    })
+  } catch {
+    return skip('write-failed')
+  }
+  process.stderr.write(`agent-team ${source === 'ask' ? 'approval-ask' : 'approval-prompt'}：已记下「可以了，收尾」。\n`)
+  return { kind: 'tweak-done-recorded', notice: doneNotice({ why: null }) }
+}
+
 // M4o：这一趟 run 目录里的原话记录；没有回 null，在却读不出：留痕、当没有（少拦）。
 function runWords(runDir) {
   if (typeof runDir !== 'string') return null
@@ -2675,6 +2709,9 @@ function main() {
       // M4k（docs/46，docs/35 §5「收口不读验收结论」）：验收结论首行——推进出验收那一段与收口时，不是「结论：通过」、又没有门禁记下的
       // 照现状交付批准（approvals.jsonl 里 sha 等于它现在的 sha），拒（hooks/lib/verdict.mjs）。排在最后：对着上一版契约的结论先重出，
       // 读它的首行才有意义。批准读同一个目录下的 approvals.jsonl（上面读过；读不出来当一条都没有——更严的一侧）。
+      // 单个微调：推出实现段要用户对现在这份契约说过「可以了，收尾」（approvals.jsonl 里 tweak-done 那一行，hooks/lib/tweak.mjs 的 decideTweakDone）。
+      const td = decideTweakDone({ before, after, stages: stagesForRework, contractSha: diskSha(CONTRACT_FILE).sha, doneShas: readDoneShas(approvalsText) })
+      if (!td.ok) denyAndExit(td.reason, spec.event)
       const acceptanceDef = acceptanceOf(stagesForRework)
       // 评审 F11：阶段链读得出、却认不出验收那一段（插件的 stages.json 改坏了）：这一次不读验收结论，留一行痕。
       // 单个微调：短链本来就没有验收段（测试段带 "test": true），不留这一行；正常链被改坏、丢了验收段的照旧留。
@@ -3403,7 +3440,9 @@ function main() {
     const brief = ask ? recordBrief(input) : null
     // 一趟只归一个会话：接手也只在 AskUserQuestion 上认，与需求稿、返工、照现状交付互不相干。
     const takeover = ask ? recordTakeover(input) : null
-    const extras = [brief, takeover].filter(Boolean)
+    // 单个微调：「可以了，收尾」两个记录器都认（对话里单独发这一句的那一路什么都不回传，只留痕）。
+    const tweakDone = recordTweakDone(input, ask ? 'ask' : 'prompt')
+    const extras = [brief, takeover, ask ? tweakDone : null].filter(Boolean)
     // M4k（docs/46）：两个记录器也认「照现状交付」（候选 { deliver: true }，按 sha 绑在那一刻的验收结论上）。
     const found = ask
       ? askAnswers(input.tool_response)
