@@ -27,7 +27,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `hooks/boot.mjs` — 门禁的进程入口（`hooks/hooks.json` 里每一道门禁注册的都是它）：先比 `process.versions.node` 与 `MIN_NODE`，太旧就不加载 `gate.mjs`；版本够就动态 import `gate.mjs`。两种失败都照 `checks.mjs` 的失败策略表收尾。
 - `hooks/gate.mjs` — 门禁的判定主体，按 argv 分派检查项；`hooks/hooks.json` — 事件到检查项的注册，外加一条不走 node 的每轮自检提醒（UserPromptSubmit）。`hooks/lib/gate-check.mjs` — 门禁自检（协议在 `agents/at-pm.md` 的「门禁自检」一节）。
 - `hooks/lib/` — 判定用的纯函数（`runctx.mjs` 读运行上下文、`trace.mjs` 门禁留痕、`retry-budget.mjs` 那份重试上限说明的单一真源等）。
-- `agents/` — 各角色正文；`commands/` — 四条 `/agent-team:*` 命令。
+- `agents/` — 各角色正文；`commands/` — 五条 `/agent-team:*` 命令。
+- `hooks/skills-cli.mjs` 与 `hooks/lib/skills.mjs` — 用户 skill 的登记、复制、比对（`/agent-team:at-skills` 与起新一趟之前那一步经 `Bash` 调；不是门禁）。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
   `stages.produces.md` 是 at-resume 与 at-status 运行时让模型读的「一段该交哪些产物」；`stages.README.md` 只给维护者（理由、消费方表、开发史）。
 - `docs/91` — 遗留项的处置裁定与实测清单：不再从索引逐条挑，照它跑完实测再修补回归（维护者能跑的那几场结果在 `docs/92`，交给用户的两场与两场拒绝路实测在 `docs/93`、`docs/94`）。
@@ -116,6 +117,14 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   `.playwright-mcp/`，写路径隔离与账本看不见：只开本机起的页面、不带 `filename`、在记录里列出、用完关浏览器都靠正文，门禁不核（付了三样）；`at-qa` 审改动时跳过那个目录。
   判据：`tests/tool-surface.test.mjs`（逐份期望值与授予形状）、`tests/ui-browser-prose.test.mjs`（正文与自检细则同一组规矩）、`tests/readme-sync.test.mjs`
   （README 点名持有者）。理由在 `docs/98`。
+- **用户的 skill 只经登记、复制进项目、当文件读**：`/agent-team:at-skills` 经 `hooks/skills-cli.mjs`（项目经理用 `Bash` 调，不是门禁，`hooks.json` 不注册它）
+  把本机的 skill 整份复制进 `.agent-team/skills/`、记进 `.agent-team/skills.json`；角色照每份正文同一节「登记给你的 skill」读来用，仍然不授 `Skill`。
+  登记的 skill 在做法上盖得过插件自带的（`at-ui-craft` 等），管不了做什么（契约与产品定义定下的照它们），盖不过门禁与红线、要交哪几份、下游要读的项、
+  读文件与截图的开销规矩；点名只认契约里用户的话。
+  新版只在起新一趟、建 run 之前比对（原件变了、副本被改过），变了问用户、`sync --update` 才换，一趟进行中与续跑都不换；副本目录一律由名字推出、不信清单里的
+  `dir`，skill 里的软链接与会被自动加载的位置（`writepath.mjs` 的 `AUTOLOADED_NAMES`）不复制。角色正文不写 `${CLAUDE_PLUGIN_ROOT}` 以外的占位符字面，也不拿它当
+  「skill 里的那个占位符」说——平台会把正文里的它换成本插件的目录；skill 里的占位符照清单每一条的 `placeholders` 换。
+  判据：`tests/skills-lib.test.mjs`、`tests/skills-cli.test.mjs`、`tests/skills-prose.test.mjs`、`tests/writepath.test.mjs` 里那一条。理由在 `docs/102`。
 - **根级文件共列，不加 `shared` 键**：根级清单、构建配置、顶层测试目录列给每个会改它们的 S5 产者；S3 的「落盘清单」与 S4「照清单补 `paths`」
   是对齐的那一步（加了 `shared` 也省不掉，前缀按字面比、S0 时文件还不存在）。S5 被拒的在实现记录里留「被写路径隔离拒绝」一节、标「已解决」，
   PM、at-resume、at-qa 按它判交没交齐，执行段「齐了」时门禁提醒先读它（`IMPL_RECORD_NOTE`）。规格段的产者（S2 的 `at-ui`）被拒时，H3 与 H5b 按当前段给出路——写进这一段的产物、不补 `paths`

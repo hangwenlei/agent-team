@@ -114,6 +114,7 @@ description: 勘察当前项目，生成 .agent-team/project.json 与 reach.json
 
 告诉用户：勘察结果落在哪两个文件、各角色分到了哪些目录、有没有角色的触达超出自己的
 地盘，【project.json】里请确认的留下了哪几条、为什么。然后提示可以跑 `/agent-team:at <业务需求>` 起第一趟。
+本机装了的 skill 可以用 `/agent-team:at-skills` 分给角色。
 
 重跑时还要逐条告诉用户：和第 1 节那次 `Read` 读到的旧文件比，改了哪些键、为什么；旧文件解析不出来，就照实说。
 

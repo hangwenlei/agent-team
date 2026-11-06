@@ -51,9 +51,10 @@ export function hermeticEnv(base = process.env) {
 // 状态，不是这条分支的契约）。
 // env 是可选的第五个参数，缺省是「当前环境去掉留痕开关与 CLAUDE_PROJECT_DIR」（见上面 hermeticEnv）。
 // 第六个参数：nodeArgs 放在入口之前，用来预加载（-r 一个 .cjs：--import 要 Node 18.18 起才有，
-// 最低版本作业上会让子进程在「bad option」上直接退出）；node 换一个 node 来跑（tests/boot-old-node.test.mjs 用）。
-export function run(check, input, gate = GATE, cwd = undefined, env = hermeticEnv(), { nodeArgs = [], node = GATE_NODE, contract = true } = {}) {
-  const result = spawnSync(node, [...nodeArgs, gate, check], {
+// 最低版本作业上会让子进程在「bad option」上直接退出）；node 换一个 node 来跑（tests/boot-old-node.test.mjs 用）；
+// args 拼在 check 之后（门禁只认一个检查名，用不上；hooks/skills-cli.mjs 的子命令参数走这里，tests/skills-cli.test.mjs 用）。
+export function run(check, input, gate = GATE, cwd = undefined, env = hermeticEnv(), { nodeArgs = [], node = GATE_NODE, contract = true, args = [] } = {}) {
+  const result = spawnSync(node, [...nodeArgs, gate, check, ...args], {
     input: typeof input === 'string' ? input : JSON.stringify(input),
     encoding: 'utf8',
     cwd,

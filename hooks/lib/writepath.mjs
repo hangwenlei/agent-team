@@ -82,6 +82,9 @@ const GUARDED = new Map([
   ['.agent-team', { what: '它在一个 .agent-team 目录里——门禁会把那里当成另一个项目的根', way: '门禁不把它划给任何角色：别建它，冒泡给派你的上级。' }],
 ])
 
+// 这几类会被自动加载或执行的位置的名字（小写）。hooks/lib/skills.mjs 复制用户的 skill 进项目时照这一份跳过——两处各写一份会分叉。
+export const AUTOLOADED_NAMES = [...GUARDED.keys()]
+
 // 调用方先用 underAny 判过「在前缀之下」，这里却一条前缀都对不上：两边口径不一，不放行。
 const NO_MATCH = { what: '门禁核不出它落在你认领的哪一条前缀之下', way: '冒泡给派你的上级，由 PM 看 .agent-team/project.json 的 paths。' }
 
