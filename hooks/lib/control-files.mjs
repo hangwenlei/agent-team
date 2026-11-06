@@ -109,7 +109,8 @@ export const USER_WORDS_FILE = 'user-words.json'
  * 也当成它。 */
 export function mayBeGateFile(filePath) {
   const leaf = leafName(filePath)
-  return leaf === APPROVALS_FILE || leaf === DELIVERED_FILE || leaf === DISPATCHES_FILE || leaf === CONTRACT_BASE_FILE || leaf === USER_WORDS_FILE
+  // 叶名从两份清单派生：加一份门禁专属文件时这里不会漏认（一趟只归一个会话加 owner.json 时漏过一次）。
+  return GATE_FILES.some((p) => p.split('/').pop() === leaf) || PROJECT_GATE_FILES.includes(leaf)
 }
 
 /** 任何项目的 .agent-team/runs/<id>/ 下的门禁专属文件——按路径形状认，不只认门禁这一刻认的项目根：写别的项目的批准记录
