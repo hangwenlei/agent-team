@@ -29,6 +29,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `hooks/lib/` — 判定用的纯函数（`runctx.mjs` 读运行上下文、`trace.mjs` 门禁留痕、`retry-budget.mjs` 那份重试上限说明的单一真源等）。
 - `agents/` — 各角色正文；`commands/` — 五条 `/agent-team:*` 命令。
 - `hooks/skills-cli.mjs` 与 `hooks/lib/skills.mjs` — 用户 skill 的登记、复制、比对（`/agent-team:at-skills` 与起新一趟之前那一步经 `Bash` 调；不是门禁）。
+- `hooks/lib/owner.mjs` — 一趟只归一个会话：归属记录、主线程的写入与派发碰不碰别的会话的一趟、拒绝理由、接手标签与【会话】文案（I/O 在 `gate.mjs`）。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
   `stages.produces.md` 是 at-resume 与 at-status 运行时让模型读的「一段该交哪些产物」；`stages.README.md` 只给维护者（理由、消费方表、开发史）。
 - `docs/91` — 遗留项的处置裁定与实测清单：不再从索引逐条挑，照它跑完实测再修补回归（维护者能跑的那几场结果在 `docs/92`，交给用户的两场与两场拒绝路实测在 `docs/93`、`docs/94`）。
@@ -125,6 +126,14 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   `dir`，skill 里的软链接与会被自动加载的位置（`writepath.mjs` 的 `AUTOLOADED_NAMES`）不复制。角色正文不写 `${CLAUDE_PLUGIN_ROOT}` 以外的占位符字面，也不拿它当
   「skill 里的那个占位符」说——平台会把正文里的它换成本插件的目录；skill 里的占位符照清单每一条的 `placeholders` 换。
   判据：`tests/skills-lib.test.mjs`、`tests/skills-cli.test.mjs`、`tests/skills-prose.test.mjs`、`tests/writepath.test.mjs` 里那一条。理由在 `docs/102`。
+- **一趟只归一个会话，门禁按会话认**：建 run 的那一次由账本记下主人（`runs/<id>/owner.json`，门禁专属；「建 run」与 H6 认 `stage_roles` 同一个口径——
+  run 目录里还没有任何门禁专属文件）。主线程（项目经理、不带 `agent_type` 的主会话；不带 `agent_id`）对有主人、没收口、主人不是自己的一趟——写它的文件、
+  另建一趟、把 `current-run` 从它切走或指到它（指针两路都认：规范化之后的路径，或叶名加所在目录；Edit 照 `replayEdit` 重放，算不出时有一趟挡这个会话就拒）——
+  H3 拒，以它的名义派人 H2 拒；子代理照旧按派发记录认，不归这一道管。命令展开时（`session-notice`，UserPromptExpansion，`speaks`）门禁用【会话】告诉项目经理，
+  `/agent-team:at` 第 1 节与 `at-resume` 第 1 节「别的会话的一趟」照它问用户；接手只认 `AskUserQuestion` 里的「在这个会话接手」「接手并收口，再开始这次」，
+  而且题面里要原样写着那一趟的 run id（`owner.mjs` 的 `mentionsRunId`，按词边界认）。没有 `owner.json` 的旧 run 一切照旧。项目一级的原话记录按会话分开记
+  （`user-words.mjs` 的 `readWordsBook`，旧的单份记录照旧认）。标签与判定的单一真源是 `hooks/lib/owner.mjs`。判据：`tests/owner.test.mjs`、`tests/gate-owner.test.mjs`、
+  `tests/owner-prose.test.mjs`。理由在 `docs/103`；这是边看边改微调那份设计（`docs/superpowers/specs/2026-11-05-边看边改微调与会话归属-design.md`）的第一步。
 - **根级文件共列，不加 `shared` 键**：根级清单、构建配置、顶层测试目录列给每个会改它们的 S5 产者；S3 的「落盘清单」与 S4「照清单补 `paths`」
   是对齐的那一步（加了 `shared` 也省不掉，前缀按字面比、S0 时文件还不存在）。S5 被拒的在实现记录里留「被写路径隔离拒绝」一节、标「已解决」，
   PM、at-resume、at-qa 按它判交没交齐，执行段「齐了」时门禁提醒先读它（`IMPL_RECORD_NOTE`）。规格段的产者（S2 的 `at-ui`）被拒时，H3 与 H5b 按当前段给出路——写进这一段的产物、不补 `paths`
