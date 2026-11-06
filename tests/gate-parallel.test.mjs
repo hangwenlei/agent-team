@@ -10,6 +10,7 @@ import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { reworkFromHistory } from '../hooks/lib/state.mjs'
 import { ownerRecord, TAKEOVER_LABEL } from '../hooks/lib/owner.mjs'
 import { dispatchLine } from '../hooks/lib/completion.mjs'
+import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 
 const NL = String.fromCharCode(10)
 const PM = 'agent-team:at-pm'
@@ -428,5 +429,81 @@ test('接手别的会话的微调：s-3 选「在这个会话接手」、题面�
     assert.equal(ownerOf(p, 't1'), 's-3')
     assert.equal(denied(dispatch(p, 'at-frontend', 's-3')), false)
     assert.equal(denied(write(p, join(p, '.agent-team', 'runs', 't1', '04-dispatch.md'), { sid: 's-1' })), true, '原来的会话再写，拒')
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// 一整趟并行：两个会话各起一趟微调（不写 current-run）、交替推进、认领冲突一次、一趟收口一趟放弃，之后另一个会话起完整的一趟。夹具照真实顺序：
+// 命令展开记原话 → 每一次写入先过 H3、H4、H6，放行才落盘，再跑账本；派发过 H1、H2，启动那一刻 H5a 记派发。
+test('一整趟并行：s-1 的 t1 与 s-2 的 t2 同时走到 S5，a2 撞上 t1 认领的文件被拒；t1 收口、t2 放弃；之后 s-3 起完整的一趟放行；current-run 一直没写', () => {
+  withProject({ runs: [] }, (p) => {
+    const steps = []
+    const doWrite = (file, content, who) => {
+      for (const check of ['writepath', 'contract', 'rework']) {
+        const out = write(p, file, who, { check, content })
+        if (denied(out)) return { denied: true, check, reason: reasonOf(out) }
+      }
+      mkdirSync(join(file, '..'), { recursive: true })
+      writeFileSync(file, content)
+      write(p, file, who, { check: 'ledger', event: 'PostToolUse', content })
+      return { denied: false }
+    }
+    const must = (label, r) => {
+      steps.push(label)
+      assert.equal(r.denied, false, `${label}：${r.check} 拒了——${r.reason}`)
+    }
+    const dirOf = (id) => join(p, '.agent-team', 'runs', id)
+    const ids = ['S1', 'S4', 'S5', 'S6', 'S8']
+    const state = (id, stage, extra = {}) => JSON.stringify(stateOf(id, { stage, history: H(...ids.slice(0, ids.indexOf(stage) + 1)), extra }), null, 2)
+    const contractOf = (words) => ['# 00 契约', '', '## 1. 用户原话', '', words, '', '## 2. PM 的理解（可改）', '', '- 网页版。', '', '## 4. 修订记录', ''].join(NL)
+    const startTweak = (id, sid, words, agentId) => {
+      run('user-words', { hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'agent-team:at-tweak', command_args: words, command_source: 'plugin', prompt: '/agent-team:at-tweak ' + words, session_id: sid }, GATE, p)
+      const pm = { sid }
+      must(`${id} 建 run`, doWrite(join(dirOf(id), 'state.json'), state(id, 'S1'), pm))
+      const contract = contractOf(words)
+      must(`${id} 写契约`, doWrite(join(dirOf(id), '00-contract.md'), contract, pm))
+      const sha = sha256OfContract(Buffer.from(contract))
+      must(`${id} 推进到 S4`, doWrite(join(dirOf(id), 'state.json'), state(id, 'S4', { contract_sha: sha }), pm))
+      must(`${id} 写派发`, doWrite(join(dirOf(id), '04-dispatch.md'), DOC('派发：at-frontend'), pm))
+      must(`${id} 推进到 S5`, doWrite(join(dirOf(id), 'state.json'), state(id, 'S5', { contract_sha: sha }), pm))
+      for (const check of ['delegation', 'readiness']) assert.equal(denied(dispatch(p, 'at-frontend', sid, check)), false, `${id} 派 at-frontend（${check}）`)
+      run(
+        'deliverable',
+        { hook_event_name: 'PostToolUse', tool_name: 'Agent', agent_type: PM, session_id: sid, tool_input: { subagent_type: 'agent-team:at-frontend', description: 'x', prompt: 'x' }, tool_response: { isAsync: true, status: 'async_launched', agentId, description: 'x', prompt: 'x' } },
+        GATE,
+        p,
+      )
+      return sha
+    }
+    const sha1 = startTweak('t1', 's-1', '把首页标题改大', 'a1')
+    startTweak('t2', 's-2', '把页脚文字改成灰色', 'a2')
+    const A1w = { role: 'at-frontend', agentId: 'a1', sid: 's-1' }
+    const A2w = { role: 'at-frontend', agentId: 'a2', sid: 's-2' }
+    must('a1 改 web/a.ts', doWrite(join(p, 'web', 'a.ts'), 'a', A1w))
+    const clash = doWrite(join(p, 'web', 'a.ts'), 'b', A2w)
+    assert.equal(clash.denied, true, 'a2 撞上 t1 认领的文件')
+    assert.match(clash.reason, /"t1"/)
+    must('a2 改 web/b.ts', doWrite(join(p, 'web', 'b.ts'), 'b', A2w))
+    must('a1 写实现记录', doWrite(join(dirOf('t1'), '05-impl', 'at-frontend.md'), DOC('实现记录') + NL + '## 测试' + NL + NL + '只改文案，没有新行为' + NL, A1w))
+    must('a2 写实现记录', doWrite(join(dirOf('t2'), '05-impl', 'at-frontend.md'), DOC('实现记录') + NL + '## 测试' + NL + NL + '只改样式，没有新行为' + NL, A2w))
+    // t1：「可以了，收尾」→ S6 → S8 → 收口
+    const questions = [{ question: '改好了，刷新看看？', header: '这一轮', multiSelect: false, options: [{ label: '可以了，收尾', description: '' }, { label: '再改', description: '' }] }]
+    run('approval-ask', { hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion', agent_type: PM, session_id: 's-1', tool_input: { questions }, tool_response: { questions, answers: { [questions[0].question]: '可以了，收尾' } } }, GATE, p)
+    const booked = { contract_sha: sha1, stage_roles: { S5: ['at-frontend'] }, roster: ['at-frontend'] }
+    const S1W = { sid: 's-1' }
+    must('t1 推进到 S6', doWrite(join(dirOf('t1'), 'state.json'), state('t1', 'S6', booked), S1W))
+    must('t1 写测试报告', doWrite(join(dirOf('t1'), '06-test.md'), '结论：通过' + NL + NL + 'npm test：通过' + NL, S1W))
+    must('t1 推进到 S8', doWrite(join(dirOf('t1'), 'state.json'), state('t1', 'S8', booked), S1W))
+    must('t1 写交付文档', doWrite(join(dirOf('t1'), '08-delivery.md'), DOC('交付'), S1W))
+    must('t1 收口', doWrite(join(dirOf('t1'), 'state.json'), state('t1', 'S8', { ...booked, never_invoked: [], closed_at: new Date().toISOString() }), S1W))
+    // t2：放弃
+    askAbandon(p, 't2', 's-2')
+    const t2now = JSON.parse(readFileSync(join(dirOf('t2'), 'state.json'), 'utf8'))
+    must('t2 放弃', doWrite(join(dirOf('t2'), 'state.json'), JSON.stringify({ ...t2now, closed_at: new Date().toISOString(), abandoned: true }, null, 2), { sid: 's-2' }))
+    assert.equal(existsSync(join(p, '.agent-team', 'current-run')), false, '微调不写 current-run')
+    // 之后 s-3 起完整的一趟
+    must('s-3 建完整的一趟', doWrite(join(dirOf('f9'), 'state.json'), JSON.stringify(stateOf('f9', { mode: 'full', stage: 'S1' }), null, 2), { sid: 's-3' }))
+    assert.equal(ownerOf(p, 't1'), 's-1')
+    assert.equal(ownerOf(p, 't2'), 's-2')
   })
 })
