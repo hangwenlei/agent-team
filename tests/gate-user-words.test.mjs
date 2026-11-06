@@ -513,6 +513,23 @@ test('按会话分开记：两个会话先后展开 /agent-team:at，两份原�
   }
 })
 
+test('按会话分开记：别的会话已经绑上或作废的条目，下一次写回时清掉（这张表不只增不减）；还挂着的不动', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S1' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r1'), { recursive: true, force: true })
+    run('user-words', expansion(ARGS), GATE, dirs.projectDir)
+    run('user-words', expansion('还挂着的需求', { session_id: 's-3' }), GATE, dirs.projectDir)
+    createRun(dirs.projectDir, 'r1', { sid: 's-1' })
+    assert.equal(pendingOf(dirs.projectDir, 's-1').bound, 'r1')
+    run('user-words', expansion('另一个会话的需求', { session_id: 's-2' }), GATE, dirs.projectDir)
+    assert.equal(pendingOf(dirs.projectDir, 's-1'), null, 's-1 那一条已经绑上，清掉')
+    assert.equal(pendingOf(dirs.projectDir, 's-3').args, '还挂着的需求', '还挂着的不动')
+    assert.equal(pendingOf(dirs.projectDir, 's-2').args, '另一个会话的需求')
+  } finally {
+    cleanup(dirs)
+  }
+})
+
 test('按会话分开记：s-2 不带参数的命令只清掉 s-2 那一份', () => {
   const dirs = makeRun({ runId: 'r0', stage: 'S5' })
   try {

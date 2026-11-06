@@ -1315,11 +1315,16 @@ function readWordsBookAt(agentTeamDir) {
   }
 }
 
-function updateWordsBook(agentTeamDir, update) {
+// keep：这一次写的是哪个会话的。写回时顺手清掉别的会话里已经绑上或作废的条目——它们之后没有任何读者（run 目录里留着绑上的那一份），不清的话这张表
+// 只增不减、每个起过命令的会话都留着整段原话。还挂着的（没绑、没作废）不动。update 回 null（不改）时也不清。
+function updateWordsBook(agentTeamDir, keep, update) {
   const file = join(agentTeamDir, USER_WORDS_FILE)
   return withFileLock(agentTeamDir, USER_WORDS_FILE, () => {
-    const next = update(readWordsBookAt(agentTeamDir))
+    let next = update(readWordsBookAt(agentTeamDir))
     if (!next) return null
+    for (const [sid, rec] of Object.entries(next.sessions)) {
+      if (sid !== keep && (rec.bound !== null || rec.dropped !== null)) next = withWords(next, sid, null)
+    }
     if (Object.keys(next.sessions).length === 0) {
       if (existsSync(file)) unlinkSync(file)
     } else writeFileSync(file, bookText(next))
@@ -1402,7 +1407,7 @@ function settleWords({ runDir, agentTeamDir, sessionId, state, stages, creating 
   })
   if (!decision) return
   const patchMine = (patch) =>
-    updateWordsBook(agentTeamDir, (book) => {
+    updateWordsBook(agentTeamDir, sessionId, (book) => {
       const cur = wordsFor(book, sessionId)
       return cur ? withWords(book, sessionId, { ...cur, ...patch }) : null
     })
@@ -1469,7 +1474,7 @@ function finishWordsBinding(input, filePath) {
   const sameRun = (a, b) => norm(join(runsDir, a)) === norm(join(runsDir, b))
   if (!finishBinding(pending, { sessionId: sid, runId, sameRun }) || !existsSync(filePath)) return
   try {
-    updateWordsBook(agentTeamDir, (book) => {
+    updateWordsBook(agentTeamDir, sid, (book) => {
       const cur = wordsFor(book, sid)
       return cur ? withWords(book, sid, { ...cur, binding: null, bound: runId }) : null
     })
@@ -1506,7 +1511,7 @@ function recordBrief(input) {
   } catch {}
   try {
     const rec = pendingRecord({ at: new Date().toISOString(), sessionId: sid, args: b.draft, runsBefore, source: 'ask' })
-    updateWordsBook(agentTeamDir, (book) => withWords(book, sid, rec))
+    updateWordsBook(agentTeamDir, sid, (book) => withWords(book, sid, rec))
   } catch (e) {
     process.stderr.write(`agent-team approval-ask：需求稿记不下（${quote(e?.message ?? e, { max: 120 })}）。\n`)
     return skip('write-failed')
@@ -3268,7 +3273,7 @@ function main() {
     if (blank) {
       try {
         if (existsSync(join(agentTeamDir, USER_WORDS_FILE))) {
-          const done = updateWordsBook(agentTeamDir, (book) => {
+          const done = updateWordsBook(agentTeamDir, blank, (book) => {
             const p = wordsFor(book, blank)
             return p && p.bound === null && p.dropped === null ? withWords(book, blank, null) : null
           })
@@ -3294,7 +3299,7 @@ function main() {
     try {
       const rec = pendingRecord({ at: new Date().toISOString(), sessionId: w.sessionId, args: w.args, runsBefore })
       // 一趟只归一个会话：只换这个会话那一条，别的会话挂着的不动。
-      updateWordsBook(agentTeamDir, (book) => withWords(book, w.sessionId, rec))
+      updateWordsBook(agentTeamDir, w.sessionId, (book) => withWords(book, w.sessionId, rec))
       process.stderr.write('agent-team user-words：已记下 /agent-team:at 后面的原话。\n')
     } catch (e) {
       process.stderr.write(`agent-team user-words：原话记不下（${quote(e?.message ?? e, { max: 120 })}），这一趟契约第 1 节不跟它核。\n`)
