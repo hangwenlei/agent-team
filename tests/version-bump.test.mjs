@@ -51,6 +51,7 @@ test('插件会加载的每一类路径都被认出来——漏认一类，那�
     'templates/project.json',
     'settings.json',
     'stages.json',
+    'stages.tweak.json',
     'roster.json',
     'stages.produces.md',
     '.claude-plugin/marketplace.json',
@@ -74,6 +75,7 @@ test('PLUGIN_LOADED 与上一条逐一列举的清单一致——多认或少认
       'skills/',
       'stages.json',
       'stages.produces.md',
+      'stages.tweak.json',
       'templates/',
     ],
   )

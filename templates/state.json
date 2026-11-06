@@ -1,5 +1,6 @@
 {
   "run_id": "20260917-1430-example-slug",
+  "mode": "full",
   "stage": "S1",
   "contract_sha": "PENDING",
   "roster": [],

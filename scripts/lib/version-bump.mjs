@@ -21,6 +21,7 @@ export const PLUGIN_LOADED = [
   'templates/',
   'settings.json',
   'stages.json',
+  'stages.tweak.json',
   'roster.json',
   'stages.produces.md',
   '.claude-plugin/plugin.json',
