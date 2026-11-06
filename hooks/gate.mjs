@@ -1355,7 +1355,11 @@ function delegationRoster(input) {
     if (malformedCaller(input) || !isContractWriter(callerOf(input)) || typeof input?.agent_id === 'string') return roster
     const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
     const pid = pointerIdOf(agentTeamDir)
-    if (!pid || modeOf(runStateOf(join(agentTeamDir, 'runs', pid))) !== TWEAK_MODE) return roster
+    if (!pid) return roster
+    const runDir = join(agentTeamDir, 'runs', pid)
+    const st = runStateOf(runDir)
+    // 只认门禁记过的微调：state 写着 tweak、run 目录里绑着 /agent-team:at-tweak 的原话记录、还没收口。
+    if (modeOf(st) !== TWEAK_MODE || closedAt(st) !== null || runWords(runDir)?.command !== 'at-tweak') return roster
     const tweakStages = JSON.parse(normalizeText(readFileSync(join(ROOT, TWEAK_STAGES_FILE), 'utf8')))
     return tweakRoster(roster, tweakStages)
   } catch {
@@ -1528,7 +1532,8 @@ function recordBrief(input) {
   } catch {}
   try {
     const rec = pendingRecord({ at: new Date().toISOString(), sessionId: sid, args: b.draft, runsBefore, source: 'ask' })
-    updateWordsBook(agentTeamDir, sid, (book) => withWords(book, sid, rec))
+    // 需求稿批准沿用这个会话之前那条命令（/agent-team:at-tweak 之后问清的需求稿，建的仍是微调）。
+    updateWordsBook(agentTeamDir, sid, (book) => withWords(book, sid, { ...rec, command: wordsFor(book, sid)?.command ?? 'at' }))
   } catch (e) {
     process.stderr.write(`agent-team approval-ask：需求稿记不下（${quote(e?.message ?? e, { max: 120 })}）。\n`)
     return skip('write-failed')
@@ -2522,7 +2527,16 @@ function main() {
       const runSeen = GATE_FILES.map((p) => p.split('/').pop()).some((n) => existsSync(join(dirname(filePath), n)))
       const sk = decideStageRolesKey({ before, after, creating: before === null && beforeText === null && !runSeen })
       if (!sk.ok) denyAndExit(sk.reason, spec.event)
-      const mk = decideModeKey({ before, after })
+      // 单个微调：mode 为 tweak 的写入要有门禁记下的 /agent-team:at-tweak——建 run 那一次看这个会话挂着的原话记录，之后 state.json 读不出来时看 run 目录
+      // 里绑上的那一份（rework-guard.mjs 的 decideModeKey）。
+      const myWords = wordsFor(readWordsBookAt(agentTeamDir), input.session_id)
+      const mk = decideModeKey({
+        before,
+        after,
+        creating: before === null && beforeText === null && !runSeen,
+        tweakIntent: Boolean(myWords && myWords.command === 'at-tweak' && myWords.bound === null && myWords.dropped === null),
+        runTweak: runWords(dirname(filePath))?.command === 'at-tweak',
+      })
       if (!mk.ok) denyAndExit(mk.reason, spec.event)
 
       // M3y（docs/33，全量审查第 15 条）：rework_base——回退那一次写入照磁盘记下各份产物的 sha，之后原样带着，推进离开一段时
@@ -3317,7 +3331,7 @@ function main() {
       runsBefore = readdirSync(join(agentTeamDir, 'runs'))
     } catch {}
     try {
-      const rec = pendingRecord({ at: new Date().toISOString(), sessionId: w.sessionId, args: w.args, runsBefore })
+      const rec = pendingRecord({ at: new Date().toISOString(), sessionId: w.sessionId, args: w.args, runsBefore, command: w.command })
       // 一趟只归一个会话：只换这个会话那一条，别的会话挂着的不动。
       updateWordsBook(agentTeamDir, w.sessionId, (book) => withWords(book, w.sessionId, rec))
       process.stderr.write('agent-team user-words：已记下 /agent-team:at 后面的原话。\n')

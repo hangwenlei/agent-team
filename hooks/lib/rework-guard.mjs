@@ -279,10 +279,22 @@ export function decideStageRolesKey({ before, after, creating = false }) {
  * 单个微调：这一趟是哪种（state 的 mode）在建 run 那一次定下，之后不许改——改了门禁就换一条阶段链判同一份磁盘状态。写入之前读得出 state.json、
  * 而写入前后 modeOf 不同（缺与 full 都是 full）就拒；建 run 那一次（写之前读不出）随便写哪种。
  */
-export function decideModeKey({ before, after }) {
-  if (!isPlainObject(before) || !isPlainObject(after)) return { ok: true }
-  const was = modeOf(before)
+export function decideModeKey({ before, after, creating = false, tweakIntent = false, runTweak = false }) {
+  if (!isPlainObject(after)) return { ok: true }
   const now = modeOf(after)
+  if (!isPlainObject(before)) {
+    // 写之前读不出 state.json：写成完整的一趟（更严的链）照放；写成微调要有门禁记下的 /agent-team:at-tweak——建 run 那一次看这个会话挂着的原话记录
+    // （tweakIntent），之后（state.json 坏了在修）看 run 目录里绑上的那一份（runTweak）。
+    if (now !== TWEAK_MODE || (creating ? tweakIntent : runTweak)) return { ok: true }
+    return {
+      ok: false,
+      reason:
+        'agent-team H6：mode 写 "tweak" 的一趟只能由用户发 /agent-team:at-tweak 起——门禁' +
+        (creating ? '在这个会话里没有记到用户发过它（带着要改什么）' : '在这一趟的 run 目录里没有它的原话记录') +
+        '。用户发的是 /agent-team:at 的，照完整的一趟建（mode 写 "full"）；要按微调走，请用户发 /agent-team:at-tweak <要改什么>。',
+    }
+  }
+  const was = modeOf(before)
   if (was === now) return { ok: true }
   return {
     ok: false,

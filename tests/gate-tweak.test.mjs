@@ -60,12 +60,17 @@ function cleanup(dirs) {
   rmSync(dirs.pluginDir, { recursive: true, force: true })
 }
 
-// 一趟停在 stage 的 run（r1），state 照 stateOf；files 是 run 目录里先放好的产物。
-function withRun(body, { mode = 'tweak', stage = 'S5', history = null, files = {} } = {}) {
+// 门禁绑进 run 目录的原话记录（建微调那一次由 /agent-team:at-tweak 记下、建 run 时绑上）。
+const boundWords = (command = 'at-tweak') =>
+  JSON.stringify({ at: 't', session_id: 's-1', args: '标题改大', source: 'command', command, runs_before: [], binding: null, bound: 'r1', dropped: null, bound_at: 't' })
+
+// 一趟停在 stage 的 run（r1），state 照 stateOf；files 是 run 目录里先放好的产物。微调的一趟默认带着门禁绑进去的 at-tweak 原话记录（words: null 不放）。
+function withRun(body, { mode = 'tweak', stage = 'S5', history = null, files = {}, words = mode === 'tweak' ? 'at-tweak' : null } = {}) {
   const dirs = makeRun({ runId: 'r1', stage })
   try {
     const runDir = join(dirs.projectDir, '.agent-team', 'runs', 'r1')
     writeFileSync(join(runDir, 'state.json'), JSON.stringify(stateOf('20261105-1000-tweak', { mode, stage, history }), null, 2))
+    if (words) writeFileSync(join(runDir, 'user-words.json'), boundWords(words))
     for (const [name, text] of Object.entries(files)) {
       mkdirSync(join(runDir, name, '..'), { recursive: true })
       writeFileSync(join(runDir, name), text)
@@ -135,16 +140,58 @@ test('H6：建好之后把 mode 从 full 改成 tweak、从 tweak 改成 full、
   }
 })
 
-test('H6：建 run 的那一次写 mode 为 tweak 放行', () => {
-  const dirs = makeRun({ runId: 'r0', stage: 'S1' })
-  try {
-    rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r0'), { recursive: true, force: true })
-    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
-    const file = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
-    const out = write(dirs.projectDir, file, JSON.stringify(stateOf('20261105-1000-tweak', { stage: 'S1' }), null, 2), { check: 'rework' })
-    assert.equal(denied(out), false, reasonOf(out))
-  } finally {
-    cleanup(dirs)
+const expandCmd = (command, sid = 's-1', args = '标题改大') => ({
+  hook_event_name: 'UserPromptExpansion',
+  expansion_type: 'slash_command',
+  command_name: 'agent-team:' + command,
+  command_args: args,
+  command_source: 'plugin',
+  prompt: '/agent-team:' + command + ' ' + args,
+  session_id: sid,
+})
+
+// 微调这条短链只能由用户发 /agent-team:at-tweak 起（不然项目经理写一个 mode 就绕开了产品定义与架构）：建 run 那一次 H6 核这个会话的原话记录。
+test('H6：建 run 那一次写 mode 为 tweak——这个会话发过 /agent-team:at-tweak 放行；没发过、发的是 /agent-team:at、别的会话发的，拒', () => {
+  const cases = [
+    [['at-tweak', 's-1'], false],
+    [null, true],
+    [['at', 's-1'], true],
+    [['at-tweak', 's-2'], true],
+  ]
+  for (const [expanded, deny] of cases) {
+    const dirs = makeRun({ runId: 'r0', stage: 'S1' })
+    try {
+      rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r0'), { recursive: true, force: true })
+      rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+      if (expanded) run('user-words', expandCmd(expanded[0], expanded[1]), GATE, dirs.projectDir)
+      const file = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+      const out = write(dirs.projectDir, file, JSON.stringify(stateOf('20261105-1000-tweak', { stage: 'S1' }), null, 2), { check: 'rework' })
+      assert.equal(denied(out), deny, `${JSON.stringify(expanded)}：${reasonOf(out)}`)
+      if (deny) assert.match(reasonOf(out), /\/agent-team:at-tweak/)
+      // 建完整的一趟不受这一条管。
+      const full = write(dirs.projectDir, file, JSON.stringify(stateOf('20261105-1000-tweak', { mode: 'full', stage: 'S1' }), null, 2), { check: 'rework' })
+      assert.equal(denied(full), false, reasonOf(full))
+    } finally {
+      cleanup(dirs)
+    }
+  }
+})
+
+test('H6：state.json 读不出来时写 mode tweak——run 目录里门禁绑进去的原话记录是 /agent-team:at-tweak 的放行，不是或没有的拒', () => {
+  for (const [words, deny] of [
+    ['at-tweak', false],
+    ['at', true],
+    [null, true],
+  ]) {
+    withRun(
+      ({ projectDir, runDir }) => {
+        writeFileSync(join(runDir, 'state.json'), '{')
+        writeFileSync(join(runDir, 'dispatches.jsonl'), '')
+        const out = write(projectDir, join(runDir, 'state.json'), JSON.stringify(stateOf('20261105-1000-tweak', { stage: 'S5', history: H('S1', 'S4', 'S5') }), null, 2), { check: 'rework' })
+        assert.equal(denied(out), deny, `${words}：${reasonOf(out)}`)
+      },
+      { stage: 'S5', history: H('S1', 'S4', 'S5'), words },
+    )
   }
 })
 
@@ -172,6 +219,24 @@ test('正常一趟里项目经理派 at-frontend：H1 照旧拒；at-architect �
       assert.equal(denied(arch), false)
     },
     { mode: 'full', stage: 'S5', history: H('S1', 'S2', 'S3', 'S4', 'S5') },
+  )
+})
+
+test('H1：state 写着 tweak、却没有门禁绑进去的 /agent-team:at-tweak 原话记录（或已经收口）：照正常花名册判', () => {
+  for (const words of [null, 'at']) {
+    withRun(({ projectDir }) => assert.equal(denied(dispatch(projectDir, 'at-frontend', { check: 'delegation' })), true, String(words)), {
+      stage: 'S5',
+      history: H('S1', 'S4', 'S5'),
+      words,
+    })
+  }
+  withRun(
+    ({ projectDir, runDir }) => {
+      const st = JSON.parse(readFileSync(join(runDir, 'state.json'), 'utf8'))
+      writeFileSync(join(runDir, 'state.json'), JSON.stringify({ ...st, stage: 'S8', history: H('S1', 'S4', 'S5', 'S6', 'S8'), closed_at: '2026-11-05T12:00:00Z' }, null, 2))
+      assert.equal(denied(dispatch(projectDir, 'at-frontend', { check: 'delegation' })), true, '已收口')
+    },
+    { stage: 'S5', history: H('S1', 'S4', 'S5') },
   )
 })
 

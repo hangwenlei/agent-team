@@ -23,14 +23,16 @@ test('PLUGIN_PREFIX 与 plugin.json 的 name 保持一致', () => {
 // 退回默认主会话——主会话不再是 PM、门禁一路按主线程放行，而这一层不会出声，所以这里不写字面量。
 // M4o（docs/50）：原话记录器只认本插件的 at——hooks.json 的 matcher、checks.mjs 声明的 matcher、门禁认的命令名都从插件名来。插件改名时
 // 三处没跟上，记录器就再也不触发，契约第 1 节一声不响地不再核。
-test('M4o 原话记录器认的命令是 PLUGIN_PREFIX + at：hooks.json 与 checks.mjs 的 matcher、user-words.mjs 的 AT_COMMAND', async () => {
+test('M4o 原话记录器认的命令是 PLUGIN_PREFIX + at 与 at-tweak：hooks.json 与 checks.mjs 的 matcher、user-words.mjs 的 AT_COMMAND、tweak.mjs 的 TWEAK_COMMAND', async () => {
   const hooks = JSON.parse(readFileSync(new URL('../hooks/hooks.json', import.meta.url), 'utf8'))
   const { CHECKS } = await import('../hooks/lib/checks.mjs')
   const { AT_COMMAND } = await import('../hooks/lib/user-words.mjs')
-  const want = `^${PLUGIN_PREFIX}at$`
+  const { TWEAK_COMMAND } = await import('../hooks/lib/tweak.mjs')
+  const want = `^${PLUGIN_PREFIX}(at|at-tweak)$`
   assert.equal(CHECKS['user-words'].matcher, want)
   assert.equal(hooks.hooks.UserPromptExpansion?.[0]?.matcher, want)
   assert.equal(AT_COMMAND, `${PLUGIN_PREFIX}at`)
+  assert.equal(TWEAK_COMMAND, `${PLUGIN_PREFIX}at-tweak`)
   assert.ok(existsSync(new URL('../commands/at.md', import.meta.url)), '插件里得有 at 这条命令')
 })
 

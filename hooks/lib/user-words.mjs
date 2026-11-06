@@ -28,6 +28,7 @@ import { PLUGIN_PREFIX } from './decide.mjs'
 import { contractLines, numberedHeading } from './contract-base.mjs'
 import { isPlainObject } from './stages.mjs'
 import { USER_WORDS_FILE } from './control-files.mjs'
+import { TWEAK_COMMAND } from './tweak.mjs'
 import { quote } from './trusted.mjs'
 import { normalizeLabel } from './budget.mjs'
 
@@ -46,18 +47,28 @@ const FORMAT_RE = new RegExp('[' + BS + 'p{Cf}' + BS + 'p{Default_Ignorable_Code
 // 空白：制表符与 Unicode 的空格分隔符（不换行空格、全角空格、窄空格……），连续几个算一个。
 const SPACES_RE = new RegExp('[' + TAB + BS + 'p{Zs}]+', 'gu')
 
+// 单个微调：/agent-team:at-tweak 的原话同样记，记录里写明是哪条命令——建微调的一趟（state 的 mode 为 tweak）要这个会话发过 at-tweak 的记录，
+// 不然项目经理写一个 mode 就绕开了产品定义与架构。
 function isAt(input) {
-  return isPlainObject(input) && input.hook_event_name === 'UserPromptExpansion' && input.expansion_type === 'slash_command' && input.command_name === AT_COMMAND
+  return (
+    isPlainObject(input) &&
+    input.hook_event_name === 'UserPromptExpansion' &&
+    input.expansion_type === 'slash_command' &&
+    (input.command_name === AT_COMMAND || input.command_name === TWEAK_COMMAND)
+  )
 }
 
-/** UserPromptExpansion 的输入是不是 /agent-team:at 带着非空参数展开、带会话 id 的那一次：是就给 { args, sessionId }，否则 null。 */
+/**
+ * UserPromptExpansion 的输入是不是 /agent-team:at（或 at-tweak）带着非空参数展开、带会话 id 的那一次：是就给 { args, sessionId, command }，否则 null。
+ * command：'at' 或 'at-tweak'。
+ */
 export function wordsOf(input) {
   if (!isAt(input)) return null
   const args = input.command_args
   if (typeof args !== 'string' || args.trim() === '') return null
   const sid = input.session_id
   if (typeof sid !== 'string' || sid === '') return null
-  return { args, sessionId: sid }
+  return { args, sessionId: sid, command: input.command_name === TWEAK_COMMAND ? 'at-tweak' : 'at' }
 }
 
 /** /agent-team:at 不带参数展开的那一次：给会话 id（调用方清掉这个会话还挂着的那份），否则 null。 */
@@ -70,12 +81,14 @@ export function blankAtSession(input) {
 }
 
 /** 项目一级那份记录的样子。source：'command'（命令带的参数）或 'ask'（用户批准的需求稿）。 */
-export function pendingRecord({ at, sessionId, args, runsBefore, source = 'command' }) {
+export function pendingRecord({ at, sessionId, args, runsBefore, source = 'command', command = 'at' }) {
   return {
     at,
     session_id: sessionId,
     args,
     source: source === 'ask' ? 'ask' : 'command',
+    // 哪条命令起的：'at' 或 'at-tweak'（需求稿批准沿用这个会话之前那条命令的）。
+    command: command === 'at-tweak' ? 'at-tweak' : 'at',
     runs_before: Array.isArray(runsBefore) ? runsBefore.filter((n) => typeof n === 'string') : [],
     binding: null,
     bound: null,
@@ -260,6 +273,8 @@ function wordsOfValue(v) {
     args: v.args,
     // 没有这个键的（这一版之前记的）是命令带的参数。
     source: v.source === 'ask' ? 'ask' : 'command',
+    // 没有这个键的（这一版之前记的）、认不得的值都是 /agent-team:at。
+    command: v.command === 'at-tweak' ? 'at-tweak' : 'at',
     runs_before: Array.isArray(v.runs_before) ? v.runs_before.filter((n) => typeof n === 'string') : [],
     binding: typeof v.binding === 'string' ? v.binding : null,
     bound: typeof v.bound === 'string' ? v.bound : null,

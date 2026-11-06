@@ -15,6 +15,7 @@ import {
   section1Mismatch,
   wordsMismatchText,
   wordsOf,
+  blankAtSession,
   readWordsBook,
   wordsFor,
   withWords,
@@ -39,8 +40,11 @@ const expansion = (over = {}) => ({
 })
 
 test('wordsOf：只认 /agent-team:at 这条命令展开、参数不是空白、带会话 id 的那一次', () => {
-  assert.deepEqual(wordsOf(expansion()), { args: '做一个待办应用', sessionId: 's-1' })
-  assert.deepEqual(wordsOf(expansion({ command_args: '第一行' + NL + '  第二行  ' })), { args: '第一行' + NL + '  第二行  ', sessionId: 's-1' })
+  assert.deepEqual(wordsOf(expansion()), { args: '做一个待办应用', sessionId: 's-1', command: 'at' })
+  assert.deepEqual(wordsOf(expansion({ command_args: '第一行' + NL + '  第二行  ' })), { args: '第一行' + NL + '  第二行  ', sessionId: 's-1', command: 'at' })
+  // 单个微调：/agent-team:at-tweak 的原话同样记，记下是哪条命令（建微调的一趟要靠它）。
+  assert.deepEqual(wordsOf(expansion({ command_name: 'agent-team:at-tweak', command_args: '标题改大' })), { args: '标题改大', sessionId: 's-1', command: 'at-tweak' })
+  assert.equal(blankAtSession(expansion({ command_name: 'agent-team:at-tweak', command_args: ' ' })), 's-1')
   for (const name of ['agent-team:at-init', 'agent-team:at-resume', 'agent-team:at-status', 'at', 'probe:at', 'x:agent-team:at', '']) {
     assert.equal(wordsOf(expansion({ command_name: name })), null, name)
   }
@@ -53,8 +57,13 @@ test('wordsOf：只认 /agent-team:at 这条命令展开、参数不是空白、
 
 test('readWords：读得出的记录；剥 BOM；形状不对回 null；runs_before 只留字符串，bound、dropped 不是字符串当 null', () => {
   const rec = pendingRecord({ at: '2026-10-07T00:00:00.000Z', sessionId: 's-1', args: '做一个待办应用', runsBefore: ['r0'] })
-  assert.deepEqual(rec, { at: '2026-10-07T00:00:00.000Z', session_id: 's-1', args: '做一个待办应用', source: 'command', runs_before: ['r0'], binding: null, bound: null, dropped: null })
+  assert.deepEqual(rec, { at: '2026-10-07T00:00:00.000Z', session_id: 's-1', args: '做一个待办应用', source: 'command', command: 'at', runs_before: ['r0'], binding: null, bound: null, dropped: null })
   assert.deepEqual(readWords(Buffer.from(JSON.stringify(rec))), rec)
+  // 没有 command 的（这一版之前记的）是 /agent-team:at；认不得的值也当 at。
+  const { command, ...legacy } = rec
+  assert.equal(readWords(JSON.stringify(legacy)).command, 'at')
+  assert.equal(readWords(JSON.stringify({ ...rec, command: 'x' })).command, 'at')
+  assert.equal(readWords(JSON.stringify(pendingRecord({ at: 't', sessionId: 's-1', args: 'x', runsBefore: [], command: 'at-tweak' }))).command, 'at-tweak')
   assert.deepEqual(readWords(Buffer.from(BOM + JSON.stringify(rec))), rec)
   assert.deepEqual(readWords(JSON.stringify({ ...rec, runs_before: ['r0', 3, null, 'r1'], binding: 7, bound: 5, dropped: [] })), { ...rec, runs_before: ['r0', 'r1'] })
   assert.equal(readWords(JSON.stringify({ ...rec, binding: 'r1' })).binding, 'r1')
