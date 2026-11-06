@@ -37,6 +37,8 @@ const RUN_ID_RE = /^\d{8}-\d{4}-[a-z0-9][a-z0-9-]*$/
 // 不读：拼成 trimed，整段裁掉不算数；拼成 stage_role，按段的判据退回整趟 roster——原来一声不吭，现在 validateState 报它。
 export const STATE_KEYS = [
   'run_id',
+  // 单个微调：一趟是哪种——full（完整的一趟，模板写它；没有这个键的旧 run 也是）或 tweak（/agent-team:at-tweak 起的微调，门禁按 stages.tweak.json 判）。
+  'mode',
   'stage',
   'contract_sha',
   'roster',
@@ -388,6 +390,10 @@ export function validateState(state, { stages, grants } = {}) {
 
   if (typeof state.run_id !== 'string' || !RUN_ID_RE.test(state.run_id)) {
     p(`run_id 不是 YYYYMMDD-HHmm-<slug> 形状（拿到 ${quote(state.run_id)}）`)
+  }
+  // 单个微调：mode 只认 full 与 tweak（缺也算 full）。别的值门禁一律按 full 读——写成 Tweak 的微调会被当成完整的一趟判，所以要报出来。
+  if (Object.hasOwn(state, 'mode') && state.mode !== 'full' && state.mode !== 'tweak') {
+    p(`mode 是 ${quote(state.mode)}：它只能是 "full"（完整的一趟）或 "tweak"（微调），别的值门禁一律按 full 读`)
   }
   if (typeof state.stage !== 'string' || !state.stage) {
     p('stage 缺失或不是字符串')

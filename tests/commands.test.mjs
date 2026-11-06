@@ -15,10 +15,10 @@ const readJson = (p) => JSON.parse(readFileSync(url(p), 'utf8'))
 const roster = readJson('roster.json')
 const stages = readJson('stages.json')
 const stateTemplate = readJson('templates/state.json')
-const FILES = ['at.md', 'at-init.md', 'at-resume.md', 'at-skills.md', 'at-status.md']
+const FILES = ['at.md', 'at-init.md', 'at-resume.md', 'at-skills.md', 'at-status.md', 'at-tweak.md']
 const textOf = (f) => readFileSync(url(`commands/${f}`), 'utf8')
 
-test('五条命令都在，没有多余的', () => {
+test('命令文件逐个都在，没有多余的', () => {
   assert.deepEqual(readdirSync(url('commands')).sort(), [...FILES].sort())
 })
 

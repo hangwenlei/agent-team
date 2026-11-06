@@ -13,6 +13,9 @@ const unknownLines = (state) => validateState(state, { stages: STAGES }).problem
 
 test('已知键的单一真源与模板逐项相同；模板本身没有认不出的键', () => {
   assert.deepEqual([...STATE_KEYS].sort(), Object.keys(TEMPLATE).sort())
+  // 单个微调：一趟是哪种记在 mode（模板写 full；没有这个键的旧 run 也是 full）。
+  assert.ok(STATE_KEYS.includes('mode'))
+  assert.equal(TEMPLATE.mode, 'full')
   assert.deepEqual(unknownLines(base()), [])
 })
 
@@ -85,6 +88,16 @@ test('复核（docs/55 §8）：很长的键不拖慢门禁（长度差已经够
   const [line] = unknownLines({ ...base(), [huge]: 1 })
   assert.ok(line.includes('认不出的键') && !line.includes('是不是'), line.slice(0, 80))
   assert.ok(Date.now() - t0 < 2000, `用了 ${Date.now() - t0}ms`)
+})
+
+test('mode：full、tweak、缺都不报；别的值（拼错、类型不对）报出来，门禁按 full 读', () => {
+  const kindLines = (state) => validateState(state, { stages: STAGES }).problems.filter((m) => m.includes('mode'))
+  for (const ok of [base(), { ...base(), mode: 'tweak' }, (({ mode, ...rest }) => rest)(base())]) assert.deepEqual(kindLines(ok), [], JSON.stringify(ok.mode))
+  for (const bad of ['Tweak', 'small', 1, null]) {
+    const lines = kindLines({ ...base(), mode: bad })
+    assert.equal(lines.length, 1, String(bad))
+    assert.ok(lines[0].includes('full') && lines[0].includes('tweak'), lines[0])
+  }
 })
 
 test('不像任何已知键的：照样报、不瞎猜，列出 state.json 的键', () => {

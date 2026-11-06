@@ -1,0 +1,10 @@
+{
+  "S1": { "role": "at-pm",         "requires": [],                                "produces": ["00-contract.md"] },
+  "S4": { "role": "at-pm",         "requires": ["00-contract.md"],                "produces": ["04-dispatch.md"] },
+  "S5": { "role": "at-backend",
+          "producers": ["at-backend", "at-frontend", "at-ui", "at-ios", "at-android"],
+          "requires": ["04-dispatch.md"],
+          "produces": ["05-impl/<role>.md"] },
+  "S6": { "role": "at-pm",         "requires": ["04-dispatch.md"],                "produces": ["06-test.md"], "verifies": true, "test": true },
+  "S8": { "role": "at-pm",         "requires": ["06-test.md"],                    "produces": ["08-delivery.md"], "verifies": true }
+}

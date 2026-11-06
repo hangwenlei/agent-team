@@ -37,6 +37,12 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 ## 2. 核实磁盘，不要相信状态文件说的一切
 
+**微调这一趟**（`state.json` 的 `mode` 是 `"tweak"`）：阶段链是 `${CLAUDE_PLUGIN_ROOT}/stages.tweak.json`（S1、S4、S5、S6、S8），先 `Read`
+`${CLAUDE_PLUGIN_ROOT}/commands/at-tweak.md` 照它接着走（它说「照 /agent-team:at 第几节」的地方再读 `at.md` 的那一节）；下面这一段与核实磁盘照旧，只是段与产物按短链。
+停在 `S4` 的不核落盘清单（微调没有架构方案），`04-dispatch.md` 照 at-tweak 第 2 节核；停在 `S5` 的，实现记录照它第 3 节读。推进出 `S5` 要用户对现在这份契约
+说过「可以了，收尾」：上一个会话里门禁记下过「可以了，收尾」的（run 目录的 `approvals.jsonl` 里有 `kind` 为 `tweak-done` 的一行）不用重问，推进时门禁照它核，
+被 H6 拒了（之后又改过契约）就照 at-tweak 第 3 节再问一次。
+
 **先读规矩**：上下文可能已经压缩掉了 `/agent-team:at` 的正文——动手之前先 `Read` `${CLAUDE_PLUGIN_ROOT}/commands/at.md` 第 3–6 节
 （逐段推进、回退、问用户、收尾），下面说「照 /agent-team:at 第几节」的地方照它办，不凭记忆。
 
@@ -131,6 +137,7 @@ description: 从 state.json 续跑当前 run —— 压缩之后或换一个会�
 
 回到 `/agent-team:at` 的第 3 节（`${CLAUDE_PLUGIN_ROOT}/commands/at.md` 的「逐段推进」），按同一套动作推进：派 → 去磁盘核实 → 记账。
 派发同样的规矩：执行角色在第三层，S5 要派 `at-architect` 去分发。
+微调这一趟照 `/agent-team:at-tweak` 第 3–5 节接着走，`S5` 你直接派开发角色，不派 `at-architect`（这一趟里派不出去）。
 
 先用一段话告诉用户你读到的位置：哪一趟 run、停在哪一段、磁盘上已经有哪些产物、
 你打算从哪儿接着跑。

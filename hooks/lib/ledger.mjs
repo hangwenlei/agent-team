@@ -23,6 +23,7 @@ import { VERIFY_REDO, splitByAccept } from './freshness.mjs'
 import { closedAt, blockerLine, gateClock } from './closing.mjs'
 import { MAIN } from './decide.mjs'
 import { normalizeText } from './text-norm.mjs'
+import { DONE_LABEL, TWEAK_COMMAND } from './tweak.mjs'
 import { isDeepStrictEqual } from 'node:util'
 
 // 「这个动作只能由 PM 执行、非 PM 请回报上级」——stageDone 与 produce 两个分支都要
@@ -206,6 +207,8 @@ export function buildLedgerNotices({
   wordsNote = null,
   // docs/93：门禁的钟——【阶段】里 history 那一条的 at 与收口的 closed_at 照它写（测试注入）。
   now = new Date(),
+  // 微调（mode 为 tweak）：执行段齐了时项目经理那一句换成 IMPL_RECORD_TWEAK_NOTE。
+  tweak = false,
 } = {}) {
   const out = []
   const st = state && typeof state === 'object' ? state : {}
@@ -440,7 +443,7 @@ export function buildLedgerNotices({
           `${nxt}，并往 history 追加一条 { "stage": "${nxt}", "at": "${gateClock(now)}" }（at 是门禁此刻的时间，照抄，不要估；已有的 history 与 escalations 条目原样带着）${again}——用同一次 Write 把这一段的账一起记掉：` +
           `叫到的人累加进 roster（state.json 里有 stage_roles 的，同一批人并进它的这一段），决定不叫的产出角色写进 trimmed。` +
           `分两次写，推进那一次产者交代会把刚走完那一段的产者点名报出来（门禁记过派发的报成漏记，没记过的报成漏派）。` +
-          (implStage ? implRecordNote({ stage: stages?.[st.stage], writerIsPm, writer }) : '') +
+          (implStage ? implRecordNote({ stage: stages?.[st.stage], writerIsPm, writer, tweak }) : '') +
           `${who}${tail}${over}` +
           (acceptanceNote ? `\n${acceptanceNote}` : '') +
           // M4o（docs/50）：第一段的产物齐了、契约第 1 节对不上用户在 /agent-team:at 后面写的原话——推进出第一段会被 H6 拒（同一句）。
@@ -472,6 +475,12 @@ export const IMPL_RECORD_NOTE =
   '「测试」一节缺了、或者有新行为没有测试又不属于那两种情形的，同样不算（门禁看不出这两点；做法与那两种情形见 /agent-team:at 第 3 节' +
   '「各段的具体做法」里这一段那一条）。'
 
+// 微调里给项目经理的那一句：做法在 at-tweak 第 3 节（at.md 第 3 节那几条讲的是完整的一趟），推进出这一段还要「可以了，收尾」（decideTweakDone）。
+export const IMPL_RECORD_TWEAK_NOTE =
+  '这一段的产物是各开发角色的实现记录：推进之前逐份读，有「被写路径隔离拒绝」一节、里面还有没标「已解决」的条目的，那一份不算交齐；' +
+  '「测试」一节缺了、或者改了行为却没有测试又不属于那两种情形的，同样不算（门禁看不出这两点；做法见 /' + TWEAK_COMMAND + ' 第 3 节）。' +
+  '推进出这一段还要用户对现在这份契约说过「' + DONE_LABEL + '」——没问过、或者问过之后又改了契约的，先照那一节问，门禁没记到这一句 H6 会拒这次推进。'
+
 // 第二轮复核：同一条回传发给执行角色时用这一句——上面那句叫读者去逐份读、去照 /agent-team:at 做，它都做不了。
 // M4f 复核（docs/41 §8，审查低-12）：三句都带「测试」一节——只给 PM 那句带，产者与架构师照旧只报被拒那一条，PM 多绕一轮。
 export const IMPL_RECORD_ROLE_NOTE =
@@ -486,8 +495,8 @@ export const IMPL_RECORD_PEER_NOTE =
 
 // 执行段「齐了」那句按写者分三档：PM（推进者）、这一段的产者（写的是自己的实现记录）、其余非 PM 写者。产者按 stages.json 这一段
 // 的 role 与 producers 认（stageRoles），writer 是剥过前缀的调用者；读不出来时按「其余」说，那一句对谁都不是假话。
-function implRecordNote({ stage, writerIsPm, writer }) {
-  if (writerIsPm) return IMPL_RECORD_NOTE
+function implRecordNote({ stage, writerIsPm, writer, tweak = false }) {
+  if (writerIsPm) return tweak ? IMPL_RECORD_TWEAK_NOTE : IMPL_RECORD_NOTE
   return typeof writer === 'string' && stageRoles(stage).includes(writer) ? IMPL_RECORD_ROLE_NOTE : IMPL_RECORD_PEER_NOTE
 }
 

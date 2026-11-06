@@ -28,3 +28,8 @@
 同样是空的。
 
 有 `stage_roles` 的 run，别拿整趟 `roster` 去展开：`at-ui` 在 S2 交过东西，S5 就会去等一份它没被派去写的实现记录。
+
+## 微调这一趟
+
+`state.json` 的 `mode` 是 `"tweak"` 的一趟（`/agent-team:at-tweak` 起），阶段链是 `${CLAUDE_PLUGIN_ROOT}/stages.tweak.json`：只有 S1、S4、S5、S6、S8 五段，
+段号与产物名与正常链相同；S4 的派发、S6 的测试报告都由项目经理写，S5 照样按叫到的开发角色各一份实现记录。展开规则同上，只是换这一份阶段链。

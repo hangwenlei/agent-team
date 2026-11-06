@@ -196,7 +196,7 @@
     ],
     "UserPromptExpansion": [
       {
-        "matcher": "^agent-team:at$",
+        "matcher": "^agent-team:(at|at-tweak)$",
         "hooks": [
           {
             "type": "command",
@@ -211,7 +211,7 @@
         ]
       },
       {
-        "matcher": "^agent-team:(at|at-resume|at-status)$",
+        "matcher": "^agent-team:(at|at-resume|at-status|at-tweak)$",
         "hooks": [
           {
             "type": "command",

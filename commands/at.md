@@ -47,6 +47,7 @@ $ARGUMENTS
 
 - `closed_at` 是一个时间（不是 null）：那一趟已经收口、交付了，照常往下建新 run，不用问。
 - `stage` 是阶段链最后一段、没收口：先读那一趟的验收结论（`07-acceptance.md`），看交付文档（`08-delivery.md`）写了没有。
+  微调那一趟（`mode` 是 `"tweak"`）没有验收段，看测试报告的第一行，与下面整段裁掉了验收的同一个判法。
   验收过了（整段裁掉了验收、这一趟在 S7 没叫过 `at-acceptance` 的，没有验收结论，看测试报告的第一行是「结论：通过」、或者用户经「照现状交付」批准过、
   门禁记下了（测试那一段也整段裁掉的没有测试报告，这一条不看），再看交付文档；
   没过、但用户经「照现状交付」批准过、门禁记下了的也算）、交付文档也在、那一趟的契约里没说先别收口：照第 6 节第二、四步
@@ -91,11 +92,11 @@ $ARGUMENTS
   （例：`20260917-1430-login-sso`）。
 - 建目录 `.agent-team/runs/<run_id>/`。
 - 照 `${CLAUDE_PLUGIN_ROOT}/templates/state.json` 写 `.agent-team/runs/<run_id>/state.json`。
-  模板的顶层键**照着写，一个都不要省**：除 `trimmed`、`stage_roles`、`rework_base` 与 `closed_at` 以外，少任何一个都会被账本回传报成
-  状态不合法；这四个少了账本**不会**报——校验对它们是向后兼容的（都是后加的字段，更早落盘的
+  模板的顶层键**照着写，一个都不要省**：除 `mode`、`trimmed`、`stage_roles`、`rework_base` 与 `closed_at` 以外，少任何一个都会被账本回传报成
+  状态不合法；这五个少了账本**不会**报——校验对它们是向后兼容的（都是后加的字段，更早落盘的
   run 里没有它们），但那是给旧 run 留的口子，不是让新 run 省掉它们的理由。`stage_roles` 另有一道：建 run 那一次少了 `stage_roles`（或者值不是对象），门禁拒这次写入
   （少了它，门禁会按旧 run 的整趟口径判这一趟）；之后每次写 `state.json` 都带着它、值是对象，去掉它或者改成别的写入同样被拒。逐个填法如下：
-  `run_id` 填你上面生成的那个 run id（**必须与目录名逐字相同**），`stage` 填 `S1`，
+  `run_id` 填你上面生成的那个 run id（**必须与目录名逐字相同**），`mode` 照模板写 `"full"`（这是完整的一趟；建好之后不许改），`stage` 填 `S1`，
   `history` 填一条 `{ "stage": "S1", "at": "<门禁给的时间>" }`，`contract_sha` 保持
   `PENDING`，`roster` 与 `never_invoked` 先留空数组，`artifacts`、`rework`、`stage_roles`、`trimmed` 与 `rework_base`
   先留空对象——`artifacts` 会在每段产物写完之后按回传逐条补上，`rework_base` 只在回退时生成（见第 3 节的「回退」），

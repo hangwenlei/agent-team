@@ -43,6 +43,7 @@ import { SHA_RE } from './contract-hash.mjs'
 // 第 17 条（推进判据）：离开一段时核缺的、空文件、没记账；一次只推进一段。
 import { decideSingleStep, departureBlockers, departureLines } from './advance.mjs'
 import { EMPTY_SHA, gateClock } from './closing.mjs'
+import { TWEAK_MODE, modeOf } from './tweak.mjs'
 
 function counts(history) {
   const c = {}
@@ -272,6 +273,45 @@ export function decideStageRolesKey({ before, after, creating = false }) {
   if (creating) return { ok: false, reason: STAGE_ROLES_CREATE }
   if (isPlainObject(before) && isPlainObject(before.stage_roles)) return { ok: false, reason: STAGE_ROLES_DROP }
   return { ok: true }
+}
+
+/**
+ * 单个微调：这一趟是哪种（state 的 mode）在建 run 那一次定下，之后不许改——改了门禁就换一条阶段链判同一份磁盘状态。写入之前读得出 state.json、
+ * 而写入前后 modeOf 不同（缺与 full 都是 full）就拒；建 run 那一次（写之前读不出）随便写哪种。
+ */
+export function decideModeKey({ before, after, creating = false, tweakIntent = false, runTweak = false, firstStage = null }) {
+  if (!isPlainObject(after)) return { ok: true }
+  const now = modeOf(after)
+  // 建微调那一次 stage 要是链上第一段：原话记录只在第一段绑进 run 目录，别的段建出来的一趟没有它，派发白名单换不了、mode 又改不了——卡死。
+  if (creating && now === TWEAK_MODE && typeof firstStage === 'string' && after.stage !== firstStage) {
+    return {
+      ok: false,
+      reason:
+        `agent-team H6：建微调那一次 stage 要写第一段 ${firstStage}（这次写的是 ${quote(after.stage)}）——原话记录只在第一段绑进 run 目录，` +
+        `从别的段建出来的一趟派不出开发角色。照 /agent-team:at-tweak 第 1 节从 ${firstStage} 建，再逐段推进。`,
+    }
+  }
+  if (!isPlainObject(before)) {
+    // 写之前读不出 state.json：写成完整的一趟（更严的链）照放；写成微调要有门禁记下的 /agent-team:at-tweak——建 run 那一次看这个会话挂着的原话记录
+    // （tweakIntent），之后（state.json 坏了在修）看 run 目录里绑上的那一份（runTweak）。
+    if (now !== TWEAK_MODE || (creating ? tweakIntent : runTweak)) return { ok: true }
+    return {
+      ok: false,
+      reason:
+        'agent-team H6：mode 写 "tweak" 的一趟只能由用户发 /agent-team:at-tweak 起——门禁' +
+        (creating ? '在这个会话里没有记到用户发过它（带着要改什么）' : '在这一趟的 run 目录里没有它的原话记录') +
+        '。用户发的是 /agent-team:at 的，照完整的一趟建（mode 写 "full"）；要按微调走，请用户发 /agent-team:at-tweak <要改什么>。',
+    }
+  }
+  const was = modeOf(before)
+  if (was === now) return { ok: true }
+  return {
+    ok: false,
+    reason:
+      `agent-team H6：state.json 的 mode 建好之后不许改（这一趟是 ${was === TWEAK_MODE ? '微调（"tweak"）' : '完整的一趟（"full"）'}，这次写成了 ` +
+      `${now === TWEAK_MODE ? '"tweak"' : '"full" 或去掉了它'}）——门禁按它选阶段链，改了就换一条链判同一份磁盘状态。照原样带着它重写；要换成另一种，` +
+      '另起一趟（完整的用 /agent-team:at，微调用 /agent-team:at-tweak）。',
+  }
 }
 
 /**

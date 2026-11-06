@@ -44,7 +44,8 @@ export function testStageOf(stages) {
   const ids = Object.keys(stages)
   for (const [i, stageId] of ids.entries()) {
     const stage = stages[stageId]
-    if (!isVerifyStage(stage) || !stageRoles(stage).includes(TEST_ROLE)) continue
+    // 单个微调：短链的测试段由项目经理产出，靠段上的 "test": true 认（正常链不带它，照旧认 at-qa）。
+    if (!isVerifyStage(stage) || !(stageRoles(stage).includes(TEST_ROLE) || stage.test === true)) continue
     const name = productsOfStage(stage)[0]
     if (typeof name !== 'string') return null
     const implStage = ids.slice(0, i).reverse().find((id) => isRolePatternStage(stages[id])) ?? null
@@ -71,7 +72,8 @@ export function testBlock({ stages, state, prior, bytesOf, dispatched = null, ap
   const verdict = testVerdict(bytes)
   if (verdict === 'pass' || verdict === 'env') return null
   if (Array.isArray(approvedShas) && approvedShas.includes(sha256OfContract(bytes))) return null
-  return { ...ts, verdict }
+  // writer：测试报告是谁写的（测试段的 role）——短链上是项目经理自己，拒绝理由不叫它去派 at-qa。
+  return { ...ts, verdict, writer: stages[ts.stageId]?.role ?? null }
 }
 
 /** 测试报告那一句：首行怎么了、出路。段 id、角色名、产物名来自阶段链，原样。 */
@@ -85,6 +87,10 @@ export function testBlockText(block) {
       `（multiSelect 设 false），那一项的标签逐字写「${DELIVER_LABEL}」；用户选了它，门禁记下这条批准（只对现在这份 ${block.name} 有效），再推进。` +
       `问不了用户的（工具面里没有 AskUserQuestion），请用户在对话里单独发一条只写「${DELIVER_LABEL}」的消息`
     )
+  }
+  // 单个微调：短链的测试报告是项目经理自己写的（at-qa 在微调里派不出去）——叫它自己照格式重写。
+  if (block.writer && block.writer !== TEST_ROLE) {
+    return `${block.name} 第一行不是${LINES}之一，门禁读不出测试结论：这份是你自己写的，照格式把第一行重写一遍（第一行之前不写标题），再推进`
   }
   return (
     `${block.name} 第一行不是${LINES}之一，门禁读不出测试结论：在 ${block.stageId} 里同段重派 ${TEST_ROLE}，让它把第一行照格式写` +
@@ -115,8 +121,10 @@ export function decideTestVerdict({ before, after, stages, bytesOf, dispatched =
 export function trimmedCloseBlock({ stages, state, prior, bytesOf, dispatched = null, approvedShas = [] }) {
   const acc = acceptanceOf(stages)
   const ts = testStageOf(stages)
-  if (!acc || !ts) return null
-  if (!wholeStageTrimmed(stages, acc.stageId, state, prior, dispatched)) return null
+  if (!ts) return null
+  // 单个微调：短链（测试段带 "test": true、链上没有验收段）与验收整段裁掉同一个判法——收口读测试报告。正常链被改坏、丢了验收段的不算（照旧不判）。
+  if (!acc && stages[ts.stageId]?.test !== true) return null
+  if (acc && !wholeStageTrimmed(stages, acc.stageId, state, prior, dispatched)) return null
   if (wholeStageTrimmed(stages, ts.stageId, state, prior, dispatched)) return null
   let bytes = null
   try {
@@ -130,25 +138,32 @@ export function trimmedCloseBlock({ stages, state, prior, bytesOf, dispatched = 
   const verdict = testVerdict(bytes)
   if (verdict === 'pass') return null
   if (Array.isArray(approvedShas) && approvedShas.includes(digest)) return null
-  return { name: ts.name, stageId: ts.stageId, implStage: ts.implStage, accStageId: acc.stageId, verdict }
+  return { name: ts.name, stageId: ts.stageId, implStage: ts.implStage, accStageId: acc ? acc.stageId : null, verdict }
 }
 
 /** trimmedCloseBlock 那一句：首行怎么了、两条路（回退去验证、问用户照现状交付）。段 id、产物名来自阶段链，原样。 */
 export function trimmedCloseText(block) {
+  // 单个微调：短链上本来就没有验收段（accStageId 为 null）——不说「裁掉」，也不给「把验收派出去」那条路；测试报告是项目经理自己写的。
+  const noAcc = block.accStageId === null || block.accStageId === undefined
+  const without = noAcc ? '这一趟没有验收段' : '验收又裁掉了'
   const said =
     block.verdict === 'env'
-      ? '「结论：跑不起来」——测试没跑成、验收又裁掉了，这一趟没有一样验证过'
+      ? `「结论：跑不起来」——测试没跑成、${without}，这一趟没有一样验证过`
       : block.verdict === 'fail'
-        ? '「结论：不通过」——测试没过、验收又裁掉了'
+        ? `「结论：不通过」——测试没过、${without}`
         : `不是${LINES}之一，门禁读不出测试结论`
   return (
-    `验收那一段（${block.accStageId}）整段裁掉了，收口读测试报告 ${block.name} 的第一行：${said}。要验证的，照 /agent-team:at 第 3 节的「回退」` +
+    (noAcc ? '这一趟没有验收段' : `验收那一段（${block.accStageId}）整段裁掉了`) +
+    `，收口读测试报告 ${block.name} 的第一行：${said}。要验证的，照 /agent-team:at 第 3 节的「回退」` +
     (block.verdict === 'fail'
       ? `记回到 ${block.implStage ?? '实现那一段'} 修好、重测`
       : block.verdict === 'env'
         ? `记回到 ${block.stageId} 重测（环境好了之后）`
-        : `记回到 ${block.stageId}，让 ${TEST_ROLE} 照格式重写第一行`) +
-    `，或者回到 ${block.accStageId} 把验收派出去；要带着它交付的，那是用户的决定：照 /agent-team:at 第 4 节` +
+        : noAcc
+          ? `记回到 ${block.stageId}，照格式重写第一行`
+          : `记回到 ${block.stageId}，让 ${TEST_ROLE} 照格式重写第一行`) +
+    (noAcc ? '' : `，或者回到 ${block.accStageId} 把验收派出去`) +
+    '；要带着它交付的，那是用户的决定：照 /agent-team:at 第 4 节' +
     '先往 escalations 记一条（answer 写空串），再用 AskUserQuestion 问——一道单选题（multiSelect 设 false），那一项的标签逐字写' +
     `「${DELIVER_LABEL}」；用户选了它，门禁记下这条批准（只对现在这份 ${block.name} 有效），再收口。问不了用户的（工具面里没有 AskUserQuestion），` +
     `请用户在对话里单独发一条只写「${DELIVER_LABEL}」的消息`
@@ -166,7 +181,8 @@ export function decideTrimmedClose({ before, after, stages, bytesOf, dispatched 
   const block = trimmedCloseBlock({ stages, state: after, prior: prior ?? undefined, bytesOf, dispatched, approvedShas })
   if (!block) return { ok: true }
   // 复核（docs/71 §8，低 3）：这一次写入才把验收那一段记成整段裁掉的——记录器按磁盘上的 state.json 认，照理由去问，批准会绑到验收结论上、记不下。
-  const already = prior !== null && wholeStageTrimmed(stages, block.accStageId, prior, undefined, dispatched)
+  // 链上没有验收段（短链）：没有「这一次才记成裁掉」这回事。
+  const already = block.accStageId === null || (prior !== null && wholeStageTrimmed(stages, block.accStageId, prior, undefined, dispatched))
   const first = already
     ? ''
     : `这一次写入才把 ${block.accStageId} 记成整段裁掉：先单独一次 Write 把 trimmed 记上（不写 closed_at），再问用户——门禁按磁盘上的 state.json 认批准绑在哪一份。`

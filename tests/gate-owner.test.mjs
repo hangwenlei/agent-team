@@ -428,6 +428,15 @@ test('那一趟停在最后一段、交付文档写了：回传里说只差收�
   })
 })
 
+test('别的会话展开 /agent-team:at-tweak：同样回传【会话】，指向 /agent-team:at 第 1 节「别的会话的一趟」', () => {
+  world(({ projectDir }) => {
+    ownedRun(projectDir)
+    const n = noticeOf(run('session-notice', expand('at-tweak', 's-2'), GATE, projectDir))
+    assert.match(n, /【会话】/)
+    assert.match(n, /\/agent-team:at 第 1 节「别的会话的一趟」/)
+  })
+})
+
 test('展开 /agent-team:at-resume：指向 at-resume 第 1 节；展开 /agent-team:at-status：只陈述归属', () => {
   world(({ projectDir }) => {
     ownedRun(projectDir)

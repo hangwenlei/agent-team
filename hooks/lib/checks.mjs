@@ -54,11 +54,13 @@ export const CHECKS = {
   // 不写（hookOutput 对它恒给空）。matcher：生命周期事件上带 matcher 的两项之一（另一项是下面的 session-notice），只放本插件的 at 这一条命令——锚定，不锚定的「agent-team:at」
   // 会被平台当正则、连 at-init、at-resume 一起放进来（docs/50 §1）；插件名与 decide.mjs 的 PLUGIN_PREFIX 对得上（tests/plugin-name-sync.test.mjs）。
   // records：记录器记的是什么，失败时的说法按它分——这里记不下的是原话，不是批准。
-  'user-words': { event: 'UserPromptExpansion', toolNames: null, matcher: '^agent-team:at$', failClosed: false, recorder: true, records: 'user-words' },
+  // 单个微调：/agent-team:at-tweak 的原话同样记（记录里写明是哪条命令；建微调的一趟要它）。
+  'user-words': { event: 'UserPromptExpansion', toolNames: null, matcher: '^agent-team:(at|at-tweak)$', failClosed: false, recorder: true, records: 'user-words' },
   // 一趟只归一个会话（hooks/lib/owner.mjs）：/agent-team:at、at-resume、at-status 展开时，current-run 指着的那一趟归另一个会话、还没收口，就用
   // additionalContext 告诉项目经理（【会话】），正文照它问用户。不是门禁：不拦任何东西（这个事件上 exit 2 会把用户的命令拦掉）。speaks：这个事件上
   // 只有它可以发受信回传（不发 systemMessage）；user-words 照旧一个字都不写。matcher 与插件名同步（tests/plugin-name-sync.test.mjs）。
-  'session-notice': { event: 'UserPromptExpansion', toolNames: null, matcher: '^agent-team:(at|at-resume|at-status)$', failClosed: false, speaks: true },
+  // 单个微调：/agent-team:at-tweak 起的也是一趟，同样要说。
+  'session-notice': { event: 'UserPromptExpansion', toolNames: null, matcher: '^agent-team:(at|at-resume|at-status|at-tweak)$', failClosed: false, speaks: true },
 }
 
 export const KNOWN_CHECKS = new Set(Object.keys(CHECKS))

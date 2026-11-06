@@ -20,7 +20,8 @@ import { projectRootFrom, readProjectConfig, readRunContext, RUN_ID } from './li
 import { candidateStages, decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
-import { decideRework, decideReworkBase, decideStageRolesKey, parseStateText, replayEdit } from './lib/rework-guard.mjs'
+import { decideModeKey, decideRework, decideReworkBase, decideStageRolesKey, parseStateText, replayEdit } from './lib/rework-guard.mjs'
+import { TWEAK_MODE, TWEAK_STAGES_FILE, decideTweakDone, doneAnswer, doneLine, doneNotice, implStageOf, modeOf, promptDone, readDoneShas, stagesFileFor, tweakRoster } from './lib/tweak.mjs'
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { isBlankText } from './lib/text-norm.mjs'
 import { normalizeText } from './lib/text-norm.mjs'
@@ -1346,6 +1347,35 @@ function ownerUnjudged(input, agentTeamDir, target = null) {
   }
 }
 
+// 单个微调（hooks/lib/tweak.mjs）：H1 用的花名册。主线程（项目经理、不带 agent_type 的主会话；不带 agent_id）派人、current-run 指着的那一趟是微调时，
+// 项目经理两行的可派名单换成短链里实现段的产者（tweakRoster）；指针、那一趟的 state.json、短链读不出来，或者不是微调，照正常花名册（更严）。
+// 回 { roster, tweak }：tweak 为真表示换了（拒绝理由要换成微调的说法）。
+function delegationRoster(input) {
+  const roster = loadRoster()
+  const plain = { roster, tweak: false }
+  try {
+    if (malformedCaller(input) || !isContractWriter(callerOf(input)) || typeof input?.agent_id === 'string') return plain
+    const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+    const pid = pointerIdOf(agentTeamDir)
+    if (!pid) return plain
+    const runDir = join(agentTeamDir, 'runs', pid)
+    const st = runStateOf(runDir)
+    // 只认门禁记过的微调：state 写着 tweak、run 目录里绑着 /agent-team:at-tweak 的原话记录、还没收口。读原话记录不经 runWords（它读不出时的留痕
+    // 说的是契约第 1 节，放在派发这里不对）。
+    if (modeOf(st) !== TWEAK_MODE || closedAt(st) !== null) return plain
+    let words = null
+    try {
+      words = readWords(readFileSync(join(runDir, USER_WORDS_FILE)))
+    } catch {}
+    if (words?.command !== 'at-tweak') return plain
+    const tweakStages = JSON.parse(normalizeText(readFileSync(join(ROOT, TWEAK_STAGES_FILE), 'utf8')))
+    const swapped = tweakRoster(roster, tweakStages)
+    return { roster: swapped, tweak: swapped !== roster }
+  } catch {
+    return plain
+  }
+}
+
 // M4p：【指针】那一段。两个 run id 都是磁盘上的值（目录名、current-run 的内容），过 quote；文件名与角色名是插件自己的名字。复核（docs/51 §8）：
 // 出路按情形给——新建的就是那一趟（指针指过去；契约与项目经理自己的产物原样重写拿回传，别的角色的产物指过去之后 H3 拒项目经理写它，派它的产者
 // 重交）；写错了目录（照原样写进指针指着的那一趟，那一趟读不出来时不给）；要接着做那一趟（用户定过放弃的、拿不准的先问用户，它已经收口就不能接着做）。
@@ -1511,7 +1541,13 @@ function recordBrief(input) {
   } catch {}
   try {
     const rec = pendingRecord({ at: new Date().toISOString(), sessionId: sid, args: b.draft, runsBefore, source: 'ask' })
-    updateWordsBook(agentTeamDir, sid, (book) => withWords(book, sid, rec))
+    // 需求稿批准沿用这个会话还挂着（没绑、没作废）的那条命令（/agent-team:at-tweak 之后问清的需求稿，建的仍是微调）；绑上或作废了的旧记录不沿用——
+    // 不然一次旧的 at-tweak 会让之后的需求稿建成微调。
+    updateWordsBook(agentTeamDir, sid, (book) => {
+      const prev = wordsFor(book, sid)
+      const pending = prev && prev.bound === null && prev.dropped === null
+      return withWords(book, sid, { ...rec, command: pending ? prev.command : 'at' })
+    })
   } catch (e) {
     process.stderr.write(`agent-team approval-ask：需求稿记不下（${quote(e?.message ?? e, { max: 120 })}）。\n`)
     return skip('write-failed')
@@ -1560,6 +1596,40 @@ function recordTakeover(input) {
   }
   process.stderr.write(`agent-team approval-ask：已记下接手，${quote(runId)} 这一趟改归这个会话。\n`)
   return { kind: 'takeover-recorded', notice: takeoverNotice({ runId, why: null }) }
+}
+
+// 单个微调（hooks/lib/tweak.mjs）：用户说了「可以了，收尾」（AskUserQuestion 里干净地单选，或者对话里单独发这一句）——current-run 那一趟是微调、停在实现段、
+// 不归别的会话时，往它的 approvals.jsonl 追加一行，绑在门禁按磁盘算的契约 sha 上。回 null（不像这一句）或 { kind（给用户那一行）、notice（给项目经理那一段） }。
+function recordTweakDone(input, source) {
+  const hit = source === 'ask' ? doneAnswer(input?.tool_response) : promptDone(input?.prompt) ? { ok: true } : null
+  if (!hit) return null
+  const skip = (why) => {
+    process.stderr.write(`agent-team ${source === 'ask' ? 'approval-ask' : 'approval-prompt'}：没有记成「可以了，收尾」（${why}）。\n`)
+    return { kind: 'tweak-done-skipped', notice: doneNotice({ why }) }
+  }
+  if (hit.why) return skip(hit.why)
+  const ctx = readRunContext(ROOT_PROJECT, ROOT)
+  if (!ctx.ok) return skip('no-run')
+  if (modeOf(ctx.state) !== TWEAK_MODE) return skip('not-tweak')
+  if (ctx.state?.stage !== implStageOf(ctx.stages)) return skip('not-impl')
+  if (blocksMe(ownerInfoOf(ctx.agentTeamDir)(pointerIdOf(ctx.agentTeamDir)), input.session_id)) return skip('other-session')
+  const bytes = ctx.artifactBytes(CONTRACT_FILE)
+  if (!bytes) return skip('no-contract')
+  try {
+    withApprovalsLock(ctx.runDir, () => {
+      const file = join(ctx.runDir, APPROVALS_FILE)
+      let prev = null
+      try {
+        prev = readFileSync(file)
+      } catch {}
+      const sep = prev && prev.length && prev[prev.length - 1] !== 0x0a ? '\n' : ''
+      appendFileSync(file, `${sep}${doneLine({ at: new Date().toISOString(), source, contract: sha256OfContract(bytes) })}\n`)
+    })
+  } catch {
+    return skip('write-failed')
+  }
+  process.stderr.write(`agent-team ${source === 'ask' ? 'approval-ask' : 'approval-prompt'}：已记下「可以了，收尾」。\n`)
+  return { kind: 'tweak-done-recorded', notice: doneNotice({ why: null }) }
 }
 
 // M4o：这一趟 run 目录里的原话记录；没有回 null，在却读不出：留痕、当没有（少拦）。
@@ -1616,7 +1686,10 @@ function acceptanceOnDisk(ctx, name, kind = 'acceptance', envNeedsApproval = fal
 function acceptanceTrimmedNow(ctx) {
   try {
     const acc = acceptanceOf(ctx.stages)
-    if (!acc || !testStageOf(ctx.stages) || !isStageChain(ctx.stages)) return false
+    const ts = testStageOf(ctx.stages)
+    if (!ts || !isStageChain(ctx.stages)) return false
+    // 单个微调：短链（测试段带 "test": true、链上没有验收段）与验收整段裁掉同一个判法；正常链被改坏、丢了验收段的不算。
+    if (!acc) return ctx.stages[ts.stageId]?.test === true
     const logBytes = ctx.artifactBytes(DISPATCHES_FILE)
     const dispatched = logBytes ? dispatchedByStage(readDispatchLog(logBytes.toString('utf8'))) : null
     return wholeStageTrimmed(ctx.stages, acc.stageId, ctx.state, null, dispatched)
@@ -1711,7 +1784,9 @@ function withFileLock(dir, name, body) {
     try {
       fd = openSync(lock, 'wx')
     } catch (err) {
-      if (err?.code !== 'EEXIST') break
+      // Windows 上另一个进程正在删锁文件时，独占创建报 EPERM（还有 EACCES、EBUSY）而不是 EEXIST——那也是「锁被人拿着」，照样等；别的错（目录不在……）
+      // 才放弃加锁、照跑。只认 EEXIST 时十几个进程同时写，会有几个不等锁就写、互相覆盖。
+      if (err?.code !== 'EEXIST' && err?.code !== 'EPERM' && err?.code !== 'EACCES' && err?.code !== 'EBUSY') break
       try {
         if (Date.now() - statSync(lock).mtimeMs > 5000) {
           unlinkSync(lock)
@@ -2006,7 +2081,19 @@ function main() {
   }
 
   if (CHECK === 'delegation') {
-    const result = decideDelegation(input, loadRoster())
+    const { roster, tweak } = delegationRoster(input)
+    let result = decideDelegation(input, roster)
+    // 单个微调：换了花名册之后被拒的（项目经理派产品、架构、测试、验收），decideDelegation 会照新花名册说「没有哪个角色能派它」——那是假话。
+    // 换成实话：微调只派开发角色，要那些改走完整的一趟。派 at-pm 的拒绝有它自己的说法，不换。
+    const target = stripPluginPrefix(input?.tool_input?.subagent_type)
+    if (result.decision === 'deny' && tweak && target && target !== 'at-pm' && Object.hasOwn(roster, target)) {
+      result = {
+        decision: 'deny',
+        reason:
+          `agent-team 派发白名单：微调这一趟只派开发角色（${TWEAK_STAGES_FILE} 里 S5 的产者），不派 ${target}。要产品定义、架构方案、测试或验收的，` +
+          '这次改动就不是微调：告诉用户，改走 /agent-team:at <需求> 另起完整的一趟。',
+      }
+    }
     // M4i 复核（docs/44 §8）：被设置或 --agent 换掉的主会话（带 agent_type、不是项目经理、没有 agent_id）被拒时，理由末尾说身份——H1 的
     // 「冒泡给上级」对它不成立（M10e：架构师被 --agent 换成主会话）。别的调用者 selfCheckIdentity 返回空串。
     if (result.decision === 'deny') denyAndExit(result.reason + selfCheckIdentity(input, '派发'), spec.event)
@@ -2451,7 +2538,8 @@ function main() {
       // 当一条都没有——更严的一侧；拒绝理由末尾的诊断会说批准为什么可能记不下。
       let stagesForRework = null
       try {
-        stagesForRework = JSON.parse(normalizeText(readFileSync(join(ROOT, 'stages.json'), 'utf8')))
+        // 单个微调：按这次写入之后的那份（读不出时写入之前的）state.json 的 mode 选阶段链；mode 改不了由下面 decideModeKey 拒。
+        stagesForRework = JSON.parse(normalizeText(readFileSync(join(ROOT, stagesFileFor(after ?? before)), 'utf8')))
       } catch {
         stagesForRework = null
       }
@@ -2504,6 +2592,18 @@ function main() {
       const runSeen = GATE_FILES.map((p) => p.split('/').pop()).some((n) => existsSync(join(dirname(filePath), n)))
       const sk = decideStageRolesKey({ before, after, creating: before === null && beforeText === null && !runSeen })
       if (!sk.ok) denyAndExit(sk.reason, spec.event)
+      // 单个微调：mode 为 tweak 的写入要有门禁记下的 /agent-team:at-tweak——建 run 那一次看这个会话挂着的原话记录，之后 state.json 读不出来时看 run 目录
+      // 里绑上的那一份（rework-guard.mjs 的 decideModeKey）。
+      const myWords = wordsFor(readWordsBookAt(agentTeamDir), input.session_id)
+      const mk = decideModeKey({
+        before,
+        after,
+        creating: before === null && beforeText === null && !runSeen,
+        tweakIntent: Boolean(myWords && myWords.command === 'at-tweak' && myWords.bound === null && myWords.dropped === null),
+        runTweak: runWords(dirname(filePath))?.command === 'at-tweak',
+        firstStage: isStageChain(stagesForRework) ? Object.keys(stagesForRework)[0] : null,
+      })
+      if (!mk.ok) denyAndExit(mk.reason, spec.event)
 
       // M3y（docs/33，全量审查第 15 条）：rework_base——回退那一次写入照磁盘记下各份产物的 sha，之后原样带着，推进离开一段时
       // 那一段里不许还有上一轮的产物。规则在 decideReworkBase（hooks/lib/rework-guard.mjs 的 M3y 一节），这里只做 I/O：
@@ -2631,9 +2731,14 @@ function main() {
       // M4k（docs/46，docs/35 §5「收口不读验收结论」）：验收结论首行——推进出验收那一段与收口时，不是「结论：通过」、又没有门禁记下的
       // 照现状交付批准（approvals.jsonl 里 sha 等于它现在的 sha），拒（hooks/lib/verdict.mjs）。排在最后：对着上一版契约的结论先重出，
       // 读它的首行才有意义。批准读同一个目录下的 approvals.jsonl（上面读过；读不出来当一条都没有——更严的一侧）。
+      // 单个微调：推出实现段要用户对现在这份契约说过「可以了，收尾」（approvals.jsonl 里 tweak-done 那一行，hooks/lib/tweak.mjs 的 decideTweakDone）。
+      const td = decideTweakDone({ before, after, stages: stagesForRework, contractSha: diskSha(CONTRACT_FILE).sha, doneShas: readDoneShas(approvalsText) })
+      if (!td.ok) denyAndExit(td.reason, spec.event)
       const acceptanceDef = acceptanceOf(stagesForRework)
       // 评审 F11：阶段链读得出、却认不出验收那一段（插件的 stages.json 改坏了）：这一次不读验收结论，留一行痕。
-      if (isStageChain(stagesForRework) && !acceptanceDef) process.stderr.write('agent-team H6 验收结论：阶段链上认不出验收那一段，这一次不读验收结论。\n')
+      // 单个微调：短链本来就没有验收段（测试段带 "test": true），不留这一行；正常链被改坏、丢了验收段的照旧留。
+      const tweakTest = testStageOf(stagesForRework)
+      if (isStageChain(stagesForRework) && !acceptanceDef && stagesForRework[tweakTest?.stageId]?.test !== true) process.stderr.write('agent-team H6 验收结论：阶段链上认不出验收那一段，这一次不读验收结论。\n')
       const ac = decideAcceptance({
         before,
         after,
@@ -3153,6 +3258,7 @@ function main() {
       writer: callerOf(input),
       contractUnreadable: kind === 'state' && bytes === null && ctx.artifactExists(CONTRACT_FILE),
       dispatched: dispatchedNow,
+      tweak: modeOf(ctx.state) === TWEAK_MODE,
     })
     // M4u（docs/56）：这一趟已经收口时，列出门禁没见停下的派发（不拦，见 inflightHere）。
     if (kind === 'state' && closedAt(ctx.state) !== null) {
@@ -3297,7 +3403,7 @@ function main() {
       runsBefore = readdirSync(join(agentTeamDir, 'runs'))
     } catch {}
     try {
-      const rec = pendingRecord({ at: new Date().toISOString(), sessionId: w.sessionId, args: w.args, runsBefore })
+      const rec = pendingRecord({ at: new Date().toISOString(), sessionId: w.sessionId, args: w.args, runsBefore, command: w.command })
       // 一趟只归一个会话：只换这个会话那一条，别的会话挂着的不动。
       updateWordsBook(agentTeamDir, w.sessionId, (book) => withWords(book, w.sessionId, rec))
       process.stderr.write('agent-team user-words：已记下 /agent-team:at 后面的原话。\n')
@@ -3312,7 +3418,7 @@ function main() {
     // 项目经理（正文照它问用户）。不拦任何东西：这个事件上 exit 2 会把用户的命令拦掉。读不出来、判不出来的一律不出声；建它的会话、没有归属记录的旧 run、
     // 已收口的不出声——正常的一趟不多一个字。
     const command = typeof input.command_name === 'string' ? stripPluginPrefix(input.command_name) : ''
-    if (input.expansion_type !== 'slash_command' || !['at', 'at-resume', 'at-status'].includes(command) || input.command_name === command) process.exit(0)
+    if (input.expansion_type !== 'slash_command' || !['at', 'at-resume', 'at-status', 'at-tweak'].includes(command) || input.command_name === command) process.exit(0)
     const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
     const runId = pointerIdOf(agentTeamDir)
     if (!runId) process.exit(0)
@@ -3328,7 +3434,7 @@ function main() {
     const wordsHead = chars.length ? chars.slice(0, 40).join('') + (chars.length > 40 ? '…' : '') : null
     let delivered = false
     try {
-      const stages = JSON.parse(normalizeText(readFileSync(join(ROOT, 'stages.json'), 'utf8')))
+      const stages = JSON.parse(normalizeText(readFileSync(join(ROOT, stagesFileFor(st)), 'utf8')))
       const last = lastStageId(stages)
       const products = last ? productsOfStage(stages[last]) : []
       delivered =
@@ -3357,7 +3463,9 @@ function main() {
     const brief = ask ? recordBrief(input) : null
     // 一趟只归一个会话：接手也只在 AskUserQuestion 上认，与需求稿、返工、照现状交付互不相干。
     const takeover = ask ? recordTakeover(input) : null
-    const extras = [brief, takeover].filter(Boolean)
+    // 单个微调：「可以了，收尾」两个记录器都认（对话里单独发这一句的那一路什么都不回传，只留痕）。
+    const tweakDone = recordTweakDone(input, ask ? 'ask' : 'prompt')
+    const extras = [brief, takeover, ask ? tweakDone : null].filter(Boolean)
     // M4k（docs/46）：两个记录器也认「照现状交付」（候选 { deliver: true }，按 sha 绑在那一刻的验收结论上）。
     const found = ask
       ? askAnswers(input.tool_response)

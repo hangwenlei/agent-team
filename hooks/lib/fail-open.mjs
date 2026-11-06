@@ -274,6 +274,11 @@ export function systemMessage(kind, { cause, check } = {}) {
       return 'agent-team 会话归属：已记下这一趟改归这个会话，原来那个会话再写它会被拒，项目经理已收到。'
     case 'takeover-skipped':
       return 'agent-team 会话归属：这次的回答没有记成接手，项目经理已收到原因。'
+    // 单个微调：批准记录器记下的「可以了，收尾」。
+    case 'tweak-done-recorded':
+      return 'agent-team 微调：已记下你说的「可以了，收尾」（只对现在这份需求有效），项目经理已收到。'
+    case 'tweak-done-skipped':
+      return 'agent-team 微调：这次的回答没有记成「可以了，收尾」，项目经理已收到原因。'
     case 'input':
       if (RECORDERS.has(check)) {
         return 'agent-team 批准记录：读不出这次的 hook 输入，这次的回答没有记下。Claude Code 与插件的版本可能不匹配，两者都更新后再试。'
