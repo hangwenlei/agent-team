@@ -419,3 +419,17 @@ M4d（`docs/38`，全量审查第 17 条）：上面那句「推进本身照样�
 不许再改；关上那一次 `stage` 是最后一段、不往 `history` 追加、最后一段的 `requires` 与 `produces` 都在、不是空文件、读得出、不是上一轮的
 （整段裁掉、而且这一趟在那一段一个都没叫过的段产出的前置不要求；叫没叫过取写入前后的并集）。H2 在就绪判据之前判它：收口之后派花名册里的任何角色都拒；最后一段、没收口时派协调者拒。
 「最后一段」按 `stages.json` 的书写顺序（键序）取最后那一段，扩链时它跟着变。
+
+## 微调的短链 `stages.tweak.json`（单个微调，`docs/104`）
+
+`state.json` 的 `mode` 为 `"tweak"` 的一趟（`/agent-team:at-tweak` 起）按 `stages.tweak.json` 判：S1、S4、S5、S6、S8 五段，段号与产物名沿用正常链（`at-status`、
+`at-resume`、门禁回传与各角色正文里「S5」「实现记录」这些说法在微调里意思不变，测试结论、收口、交付快照、新鲜度这些判据能直接认）。选链的单一真源是
+`hooks/lib/tweak.mjs` 的 `stagesFileFor`（运行上下文、H6、【会话】三处调它）；`mode` 只认 `"tweak"`，缺、`"full"`、坏值都按正常链（坏值由 `validateState` 报），
+建好之后不许改（`rework-guard.mjs` 的 `decideModeKey`），写成 `"tweak"` 要有门禁记下的 `/agent-team:at-tweak` 原话记录。
+
+- **S6 的 `"test": true`**：短链的测试段由项目经理产出，`testStageOf` 靠这个键认（正常链不带，照旧认 `at-qa`）。短链没有验收段：收口照「验收整段裁掉」那一套读测试报告
+  （`trimmedCloseBlock`），只对带 `"test": true` 测试段的链成立——正常链被改坏、丢了验收段的照旧不判。
+- **派发白名单**：不另放一份花名册。H1 在微调这一趟里用 `tweakRoster(roster, 短链)`——只把项目经理两行的 `can_delegate_to` 换成短链里不归项目经理的那几段的参与者。
+- **推出实现段**：要用户对现在这份契约说过「可以了，收尾」（`approvals.jsonl` 里 `kind` 为 `tweak-done` 的行，`decideTweakDone`）。
+
+改 `stages.tweak.json` 时跟着看：`tests/tweak.test.mjs` 钉着它与正常链的对应（段号子集、同名段同产物、只有 S6 带 `test`）。
