@@ -48,7 +48,7 @@ import {
 import { mayWaive, dispatchedIn, wholeStageTrimmed, trimmedAt } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, OWNER_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
-import { ownerDenyReason, ownerDispatchBlock, ownerRecord, ownerWriteBlock, readOwner } from './lib/owner.mjs'
+import { blocksMe, ownerDenyReason, ownerDispatchBlock, ownerRecord, ownerWriteBlock, readOwner, sessionNotice } from './lib/owner.mjs'
 import {
   CONTRACT_BASE_FILE,
   DRIFT_FIX,
@@ -3275,6 +3275,45 @@ function main() {
       process.stderr.write(`agent-team user-words：原话记不下（${quote(e?.message ?? e, { max: 120 })}），这一趟契约第 1 节不跟它核。\n`)
     }
     process.exit(0)
+  }
+
+  if (CHECK === 'session-notice') {
+    // 一趟只归一个会话（hooks/lib/owner.mjs）：本插件的 at、at-resume、at-status 展开时，current-run 指着的那一趟归另一个会话、还没收口，就用【会话】告诉
+    // 项目经理（正文照它问用户）。不拦任何东西：这个事件上 exit 2 会把用户的命令拦掉。读不出来、判不出来的一律不出声；建它的会话、没有归属记录的旧 run、
+    // 已收口的不出声——正常的一趟不多一个字。
+    const command = typeof input.command_name === 'string' ? stripPluginPrefix(input.command_name) : ''
+    if (input.expansion_type !== 'slash_command' || !['at', 'at-resume', 'at-status'].includes(command) || input.command_name === command) process.exit(0)
+    const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+    const runId = pointerIdOf(agentTeamDir)
+    if (!runId) process.exit(0)
+    const info = ownerInfoOf(agentTeamDir)(runId)
+    if (!blocksMe(info, input.session_id)) process.exit(0)
+    const runDir = join(agentTeamDir, 'runs', runId)
+    const st = runStateOf(runDir)
+    const first = isPlainObject(st) && Array.isArray(st.history) ? st.history[0] : null
+    const startedAt = isPlainObject(first) && typeof first.at === 'string' ? first.at : null
+    const words = runWords(runDir)
+    const line = words ? words.args.split(/\r?\n/).find((l) => l.trim() !== '') : null
+    const chars = typeof line === 'string' ? Array.from(line.trim()) : []
+    const wordsHead = chars.length ? chars.slice(0, 40).join('') + (chars.length > 40 ? '…' : '') : null
+    let delivered = false
+    try {
+      const stages = JSON.parse(normalizeText(readFileSync(join(ROOT, 'stages.json'), 'utf8')))
+      const last = lastStageId(stages)
+      const products = last ? productsOfStage(stages[last]) : []
+      delivered =
+        isPlainObject(st) &&
+        st.stage === last &&
+        products.length > 0 &&
+        products.every((n) => {
+          try {
+            return !isBlankText(readFileSync(join(runDir, n)))
+          } catch {
+            return false
+          }
+        })
+    } catch {}
+    emitHookJson(spec.event, { contexts: [sessionNotice({ command, runId, startedAt, wordsHead, delivered, via: info.owner.via })] })
   }
 
   if (CHECK === 'approval-ask' || CHECK === 'approval-prompt') {

@@ -122,7 +122,8 @@ export function outputContractViolations(check, { stdout, stderr, status }) {
   const spec = Object.hasOwn(CHECKS, check) ? CHECKS[check] : null
   const event = spec ? spec.event : 'PreToolUse'
   // M4d（docs/38，全量审查第 19 条）：UserPromptSubmit 上只有标了 speaks 的检查项（completion）可以发 additionalContext，别的照旧不许写 stdout。
-  const speaks = event === 'UserPromptSubmit' && spec?.speaks === true
+  // 一趟只归一个会话：UserPromptExpansion 上标了 speaks 的（session-notice）同样只许 additionalContext。
+  const speaks = (event === 'UserPromptSubmit' || event === 'UserPromptExpansion') && spec?.speaks === true
   const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
   if (stdout.trim() !== '') {
     if (event !== 'PreToolUse' && event !== 'PostToolUse' && !speaks) out.push(`${event} 上 stdout 非空`)
@@ -138,7 +139,7 @@ export function outputContractViolations(check, { stdout, stderr, status }) {
     if ('decision' in v) out.push('顶层有 decision')
     if ('continue' in v) out.push('顶层有 continue')
     if ('systemMessage' in v && typeof v.systemMessage !== 'string') out.push('systemMessage 不是字符串')
-    if (speaks && 'systemMessage' in v) out.push('UserPromptSubmit 上发了 systemMessage')
+    if (speaks && 'systemMessage' in v) out.push(`${event} 上发了 systemMessage`)
     const h = v.hookSpecificOutput
     if (h !== undefined) {
       if (!isObj(h)) {

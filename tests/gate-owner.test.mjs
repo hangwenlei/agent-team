@@ -330,6 +330,90 @@ test('hook 输入没有 session_id：不按会话拦', () => {
 })
 
 // ---------------------------------------------------------------------------------------------------------------------------------
+// 命令展开时（session-notice，UserPromptExpansion）告诉项目经理这一趟归另一个会话。
+const ARGS = '做一个记账应用：能记收入和支出'
+const expand = (command, sid, args = '列表页加一个导出按钮') => ({
+  hook_event_name: 'UserPromptExpansion',
+  expansion_type: 'slash_command',
+  command_name: 'agent-team:' + command,
+  command_args: args,
+  command_source: 'plugin',
+  prompt: '/agent-team:' + command + ' ' + args,
+  session_id: sid,
+})
+const noticeOf = (out) => (out.stdout.trim() ? JSON.parse(out.stdout).hookSpecificOutput?.additionalContext ?? '' : '')
+
+// s-1 发了 /agent-team:at（原话记下、建 run 时绑上），建 r1。
+function ownedRun(projectDir) {
+  run('user-words', expand('at', 's-1', ARGS), GATE, projectDir)
+  return createRun(projectDir, 'r1', { sid: 's-1' }).dir
+}
+
+test('别的会话展开 /agent-team:at：回传【会话】，带 run id、起的时间、原话开头，指向第 1 节「别的会话的一趟」', () => {
+  world(({ projectDir }) => {
+    ownedRun(projectDir)
+    const out = run('session-notice', expand('at', 's-2'), GATE, projectDir)
+    assert.equal(out.status, 0, out.stderr)
+    const n = noticeOf(out)
+    assert.match(n, /【会话】/)
+    assert.match(n, /"r1"/)
+    assert.match(n, /"2026-11-05T10:00:00Z"/)
+    assert.match(n, /"做一个记账应用：能记收入和支出"/)
+    assert.match(n, /\/agent-team:at 第 1 节「别的会话的一趟」/)
+    assert.doesNotMatch(n, /只差收口/)
+  })
+})
+
+test('那一趟停在最后一段、交付文档写了：回传里说只差收口', () => {
+  world(({ projectDir }) => {
+    const dir = ownedRun(projectDir)
+    const ids = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8']
+    writeFileSync(join(dir, 'state.json'), JSON.stringify(stateOf('r1', 'S8', H(...ids)), null, 2))
+    writeFileSync(join(dir, '08-delivery.md'), '# 交付' + String.fromCharCode(10) + '做完了' + String.fromCharCode(10))
+    assert.match(noticeOf(run('session-notice', expand('at', 's-2'), GATE, projectDir)), /只差收口/)
+  })
+})
+
+test('展开 /agent-team:at-resume：指向 at-resume 第 1 节；展开 /agent-team:at-status：只陈述归属', () => {
+  world(({ projectDir }) => {
+    ownedRun(projectDir)
+    assert.match(noticeOf(run('session-notice', expand('at-resume', 's-2', ''), GATE, projectDir)), /\/agent-team:at-resume 第 1 节「别的会话的一趟」/)
+    const st = noticeOf(run('session-notice', expand('at-status', 's-2', ''), GATE, projectDir))
+    assert.match(st, /归另一个会话/)
+    assert.doesNotMatch(st, /问用户/)
+  })
+})
+
+test('建它的会话展开、没有 owner.json、已收口、没有 current-run、别的命令：stdout 为空', () => {
+  world(({ projectDir }) => {
+    assert.equal(run('session-notice', expand('at', 's-2'), GATE, projectDir).stdout, '', '没有 current-run')
+    const dir = ownedRun(projectDir)
+    assert.equal(run('session-notice', expand('at', 's-1'), GATE, projectDir).stdout, '', '建它的会话')
+    assert.equal(run('session-notice', expand('at-init', 's-2'), GATE, projectDir).stdout, '', '别的命令')
+    writeFileSync(join(dir, 'state.json'), JSON.stringify({ ...stateOf('r1'), closed_at: '2026-11-05T12:00:00Z' }, null, 2))
+    assert.equal(run('session-notice', expand('at', 's-2'), GATE, projectDir).stdout, '', '已收口')
+  })
+  const dirs = makeRun({ runId: 'r1', stage: 'S1' })
+  try {
+    assert.equal(run('session-notice', expand('at', 's-2'), GATE, dirs.projectDir).stdout, '', '没有 owner.json 的旧 run')
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('session-notice 永不 exit 2（坏掉的 owner.json、读不出的 state.json、读不出的输入）', () => {
+  world(({ projectDir }) => {
+    const dir = ownedRun(projectDir)
+    writeFileSync(ownerPath(dir), '{')
+    assert.equal(run('session-notice', expand('at', 's-2'), GATE, projectDir).status, 0)
+    writeFileSync(ownerPath(dir), JSON.stringify({ session_id: 's-1', at: 't', via: 'create' }))
+    writeFileSync(join(dir, 'state.json'), '{')
+    assert.equal(run('session-notice', expand('at', 's-2'), GATE, projectDir).status, 0)
+    assert.equal(run('session-notice', 'not json', GATE, projectDir).status, 0)
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------
 // H2：别的会话的主线程以这一趟的名义派人。
 const dispatchBy = (projectDir, sid, over = {}) =>
   run(

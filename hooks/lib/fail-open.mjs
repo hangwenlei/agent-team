@@ -315,7 +315,8 @@ export function hookOutput(event, { contexts = [], systemMessage: sm = null } = 
       bug: parts.length ? bug('受信回传') : null,
     }
   }
-  if (event === 'UserPromptSubmit' && typeof check === 'string' && CHECKS[check]?.event === event && CHECKS[check]?.speaks === true) {
+  // UserPromptSubmit（完成核验）与 UserPromptExpansion（命令展开时的【会话】）上，只有标了 speaks 的检查项可以发受信回传，不发 systemMessage。
+  if ((event === 'UserPromptSubmit' || event === 'UserPromptExpansion') && typeof check === 'string' && CHECKS[check]?.event === event && CHECKS[check]?.speaks === true) {
     return {
       stdout: parts.length ? JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: trustedBlock(parts.join('\n\n')) } }) : '',
       bug: message ? bug('systemMessage') : null,

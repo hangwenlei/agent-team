@@ -75,6 +75,7 @@ const INPUTS = {
   'approval-prompt': { hook_event_name: 'UserPromptSubmit', prompt: 'x' },
   completion: { hook_event_name: 'UserPromptSubmit', prompt: 'x' },
   'user-words': { hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'agent-team:at', command_args: 'x', session_id: 's' },
+  'session-notice': { hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'agent-team:at', command_args: 'x', session_id: 's' },
 }
 
 test('前置：INPUTS 覆盖 checks.mjs 里的每一个检查项——否则下面的逐项断言在空转', () => {

@@ -34,6 +34,19 @@ test('M4o 原话记录器认的命令是 PLUGIN_PREFIX + at：hooks.json 与 che
   assert.ok(existsSync(new URL('../commands/at.md', import.meta.url)), '插件里得有 at 这条命令')
 })
 
+// 一趟只归一个会话：命令展开时告诉项目经理这一趟归另一个会话（session-notice），只认本插件的 at、at-resume、at-status 三条——插件改名时没跟上，
+// 【会话】就再也不说，别的会话里起 /agent-team:at 的项目经理只能等到写入被拒才知道。
+test('session-notice 认的命令是 PLUGIN_PREFIX + at / at-resume / at-status：hooks.json 与 checks.mjs 的 matcher 相同、三条命令都在', async () => {
+  const hooks = JSON.parse(readFileSync(new URL('../hooks/hooks.json', import.meta.url), 'utf8'))
+  const { CHECKS } = await import('../hooks/lib/checks.mjs')
+  const want = `^${PLUGIN_PREFIX}(at|at-resume|at-status)$`
+  assert.equal(CHECKS['session-notice'].matcher, want)
+  const entry = (hooks.hooks.UserPromptExpansion ?? []).find((e) => (e.hooks ?? []).some((h) => (h.args ?? []).includes('session-notice')))
+  assert.ok(entry, 'hooks.json 里要有一条跑 session-notice 的 UserPromptExpansion')
+  assert.equal(entry.matcher, want)
+  for (const c of ['at', 'at-resume', 'at-status']) assert.ok(existsSync(new URL(`../commands/${c}.md`, import.meta.url)), c)
+})
+
 test('M4b settings.json 的 agent 是插件全名（PLUGIN_PREFIX + at-pm），剥掉前缀后对得上一份 agents/*.md', () => {
   const settings = JSON.parse(readFileSync(new URL('../settings.json', import.meta.url), 'utf8'))
   assert.equal(

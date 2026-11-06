@@ -435,6 +435,16 @@ const SCENARIOS = [
     setup: () => ({ ...cleanDir(), input: { hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'agent-team:at', command_args: 'x', session_id: 's' } }),
     shape: { status: 0, stdout: 'empty', stderr: 'nonempty' },
   },
+  // 一趟只归一个会话：命令展开时的【会话】。这一趟没有归属记录（旧 run），静默。
+  {
+    name: 'session-notice：current-run 指着的那一趟没有归属记录，静默',
+    check: 'session-notice',
+    setup: () => ({
+      ...fromRun({ runId: 'r1', stage: 'S2' }),
+      input: { hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'agent-team:at', command_args: 'x', session_id: 's' },
+    }),
+    shape: { status: 0, stdout: 'empty', stderr: 'empty' },
+  },
 ]
 
 function runBoth(sc) {
