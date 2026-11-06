@@ -83,8 +83,10 @@ export function ownerDispatchBlock({ sessionId, pointerId, infoOf }) {
   return blocksMe(info, sessionId) ? blockOf(pointerId, info, 'dispatch') : null
 }
 
+// 同一个窗口里用过 /clear 的，会话 id 已经换了一个：那也算原来那个会话关了。
 const OUT_WAY =
-  '照 /agent-team:at 第 1 节「别的会话的一趟」办：问用户这次是不是要补充给那一趟；原来那个会话已经关了的，用 /agent-team:at-resume 在这个会话接手。'
+  '照 /agent-team:at 第 1 节「别的会话的一趟」办：问用户这次是不是要补充给那一趟；原来那个会话已经关了的（同一个窗口里用过 /clear 也算），' +
+  '用 /agent-team:at-resume 在这个会话接手。'
 
 /** H3、H2 的拒绝理由。run id 是磁盘上的值，过 quote。 */
 export function ownerDenyReason(block) {

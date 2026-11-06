@@ -47,6 +47,17 @@ test('at-resume.md 第 1 节有「别的会话的一趟」，逐字带「回那�
   assert.ok(s.slice(at).includes('【会话】'))
 })
 
+// /clear 会换一个新的会话 id（CLI 2.1.310 实测）：同一个窗口清空之后就成了「别的会话」。问法、拒绝理由都要说清这算原来那个会话已经关了，
+// 不然用户看着同一个窗口会选「回那个会话」，然后找不到它。
+test('同一个窗口里用过 /clear 的，算原来那个会话已经关了：两份命令的那一段与拒绝理由都这么说', () => {
+  for (const cmd of ['at', 'at-resume']) {
+    const s = section1(read(cmd))
+    const part = s.slice(s.indexOf('**' + NAME + '**'))
+    assert.ok(part.includes('/clear'), cmd)
+  }
+  assert.match(ownerDenyReason({ runId: 'r1', kind: 'run', via: 'create' }), /\/clear/)
+})
+
 test('两处接手的题面都要原样写着那一趟的 run id（门禁凭它认用户批的是哪一趟）', () => {
   for (const cmd of ['at', 'at-resume']) {
     const s = section1(read(cmd))
