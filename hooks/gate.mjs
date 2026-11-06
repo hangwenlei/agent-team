@@ -47,7 +47,8 @@ import {
 } from './lib/completion.mjs'
 import { mayWaive, dispatchedIn, wholeStageTrimmed, trimmedAt } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
-import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
+import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, OWNER_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
+import { ownerRecord } from './lib/owner.mjs'
 import {
   CONTRACT_BASE_FILE,
   DRIFT_FIX,
@@ -1338,16 +1339,48 @@ function settleWords({ runDir, agentTeamDir, sessionId, state, stages, creating 
   }
 }
 
+// 写的是不是某个 .agent-team/runs/<id>/state.json（按字面认三段名字，Windows、macOS 上不分大小写）：是就给 { runDir, runsDir, agentTeamDir }，否则 null。
+// 不经运行上下文：建 run 的那一刻 current-run 多半还没写。
+function runStateFileOf(filePath) {
+  if (typeof filePath !== 'string') return null
+  const runDir = dirname(filePath)
+  const runsDir = dirname(runDir)
+  const agentTeamDir = dirname(runsDir)
+  const same = (a, b) => (process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase())
+  if (!same(basename(filePath), 'state.json') || !same(basename(runsDir), 'runs') || !same(basename(agentTeamDir), '.agent-team')) return null
+  return { runDir, runsDir, agentTeamDir }
+}
+
+// 一趟只归一个会话（hooks/lib/owner.mjs）：建 run 的那一次由账本记下归哪个会话（runs/<id>/owner.json，门禁专属）。只认主线程（项目经理、不带
+// agent_type 的主会话；不带 agent_id）用 Write 写 .agent-team/runs/<id>/state.json、已经落盘。「建 run」与 H6 认 stage_roles 的口径相同：run 目录里还没有
+// 任何一份门禁专属文件——所以排在 finishWordsBinding 之前（它会往 run 目录写原话记录）。升级之前建的、跑过一阵的 run（目录里有派发记录之类）不补；
+// hook 输入里读不到会话 id 的不记（这一趟没有归属，行为照旧），留痕；写不进留痕。
+function recordOwnerOnCreate(input, filePath) {
+  if (input?.tool_name !== 'Write' || typeof input?.agent_id === 'string' || !isContractWriter(input?.agent_type)) return
+  const parts = runStateFileOf(filePath)
+  if (!parts || !existsSync(filePath)) return
+  const { runDir } = parts
+  if (GATE_FILES.map((p) => p.split('/').pop()).some((n) => existsSync(join(runDir, n)))) return
+  const sid = input.session_id
+  if (typeof sid !== 'string' || sid === '') {
+    process.stderr.write('agent-team 会话归属：hook 输入里读不到会话 id，这一趟不记归属（别的会话写它、以它的名义派人不会被拦）。\n')
+    return
+  }
+  try {
+    writeFileSync(join(runDir, OWNER_FILE), `${JSON.stringify(ownerRecord({ sessionId: sid, at: new Date().toISOString(), via: 'create' }), null, 2)}\n`)
+  } catch (e) {
+    process.stderr.write(`agent-team 会话归属：归属记录写不进（${quote(e?.message ?? e, { max: 120 })}），这一趟不按会话管。\n`)
+  }
+}
+
 // M4w（docs/58 §8）：绑的第二步。项目经理 Write 的正是 .agent-team/runs/<id>/state.json、已经落盘，项目一级那份的 binding 指着这一趟、同一个会话、
 // 还没绑也没作废（finishBinding）——标上 bound，再写 run 目录那份（前一步先做：后一步写不进时，记录不会一直挂着被下一趟绑上，这一趟只是不核）。
 // 按路径认，不经运行上下文：这一刻 current-run 多半还没写（/agent-team:at 第 1 节先写 state.json、再写指针）。
 function finishWordsBinding(input, filePath) {
   if (!isContractWriter(input?.agent_type) || typeof filePath !== 'string') return
-  const runDir = dirname(filePath)
-  const runsDir = dirname(runDir)
-  const agentTeamDir = dirname(runsDir)
-  const same = (a, b) => (process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase())
-  if (!same(basename(filePath), 'state.json') || !same(basename(runsDir), 'runs') || !same(basename(agentTeamDir), '.agent-team')) return
+  const parts = runStateFileOf(filePath)
+  if (!parts) return
+  const { runDir, runsDir, agentTeamDir } = parts
   const pendingPath = join(agentTeamDir, USER_WORDS_FILE)
   let pending = null
   try {
@@ -1497,7 +1530,10 @@ function gateFileReason(checked, exotic) {
           ? // M4o 复核（docs/50 §9，正文中 3）：原来落到交付快照那一句，来历与出路都是错的。
             '这是门禁在用户发出 /agent-team:at 时记下的原话（项目一级那份，或者绑进这一趟 run 目录的那份），不用、也不许改；契约第 1 节对不上它，' +
             '就照它改第 1 节。'
-          : '这是门禁自己拍的交付快照，PM 推进或回退之后由门禁照磁盘重拍，不用、也不许改。'
+          : leafIs(OWNER_FILE)
+            ? '这是门禁记下的这一趟归哪个会话（建它的那个会话，或者用户经「在这个会话接手」接过去的那个会话），不用、也不许改；要换会话，照 ' +
+              '/agent-team:at-resume 第 1 节「别的会话的一趟」问用户。'
+            : '这是门禁自己拍的交付快照，PM 推进或回退之后由门禁照磁盘重拍，不用、也不许改。'
   return (
     `agent-team 门禁：不得写 ${inline(checked)}——${exotic ? `${exotic}；它可能就是门禁专属文件。` : ''}${what}` +
     '任何人（包括项目经理与主线程）都不用 Edit/Write 写它。'
@@ -2477,6 +2513,8 @@ function main() {
         ? input?.tool_input?.notebook_path
         : input?.tool_input?.file_path
 
+    // 一趟只归一个会话：建出这一趟的那一次 Write 落盘之后记下归哪个会话。排在原话绑定之前（那一步会往 run 目录写门禁专属文件）。
+    recordOwnerOnCreate(input, filePath)
     // M4w（docs/58 §8）：原话记录绑的第二步——建出这一趟的那一次 Write 落盘之后。排在读运行上下文之前：这一刻 current-run 多半还没写。
     finishWordsBinding(input, filePath)
 

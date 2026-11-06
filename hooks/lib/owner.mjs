@@ -12,7 +12,7 @@ import { normalizeText } from './text-norm.mjs'
 import { normalizeLabel } from './budget.mjs'
 import { quote } from './trusted.mjs'
 
-export const OWNER_FILE = 'owner.json'
+export { OWNER_FILE } from './control-files.mjs'
 
 // 规范标签。前两个是「别的会话里起 /agent-team:at、那一趟还在跑」时的两个选项；后两个是接手（门禁只记这两个）；最后一个是「回那个会话」。
 export const SUPPLEMENT_LABEL = '是，回那个会话补充'
