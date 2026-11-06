@@ -48,7 +48,7 @@ import {
 import { mayWaive, dispatchedIn, wholeStageTrimmed, trimmedAt } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, OWNER_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
-import { blocksMe, ownerDenyReason, ownerDispatchBlock, ownerRecord, ownerWriteBlock, readOwner, sessionNotice, takeoverAnswer, takeoverNotice } from './lib/owner.mjs'
+import { blocksMe, mentionsRunId, ownerDenyReason, ownerDispatchBlock, ownerRecord, ownerWriteBlock, readOwner, sessionNotice, takeoverAnswer, takeoverNotice } from './lib/owner.mjs'
 import {
   CONTRACT_BASE_FILE,
   DRIFT_FIX,
@@ -1551,6 +1551,8 @@ function recordTakeover(input) {
   if (typeof sid !== 'string' || sid === '') return skip('no-session')
   const info = runId ? ownerInfoOf(agentTeamDir)(runId) : null
   if (!info) return skip('no-run')
+  // 绑在用户看到的那一趟上：题面里要原样写着 current-run 现在指着的那一趟的 run id。
+  if (!mentionsRunId(a.question, runId)) return skip('unbound')
   if (info.closed) return skip('closed')
   if (info.owner && info.owner.session_id === sid) return skip('already-mine')
   try {

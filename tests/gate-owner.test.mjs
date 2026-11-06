@@ -415,8 +415,9 @@ test('session-notice 永不 exit 2（坏掉的 owner.json、读不出的 state.j
 
 // ---------------------------------------------------------------------------------------------------------------------------------
 // 接手：批准记录器认两个接手标签，把 current-run 指着的那一趟改归这个会话。
-const askTakeover = (answer, sid, { multiSelect = false, notes = null } = {}) => {
-  const questions = [{ question: '原来那个会话还在吗？', header: '接手', multiSelect, options: [{ label: BACK_LABEL, description: '' }, { label: TAKEOVER_LABEL, description: '' }] }]
+// 题面里原样带着那一趟的 run id：门禁凭它认用户批的是哪一趟。
+const askTakeover = (answer, sid, { multiSelect = false, notes = null, question = '这一趟（r1）归另一个会话。原来那个会话还在吗？' } = {}) => {
+  const questions = [{ question, header: '接手', multiSelect, options: [{ label: BACK_LABEL, description: '' }, { label: TAKEOVER_LABEL, description: '' }] }]
   return {
     hook_event_name: 'PostToolUse',
     tool_name: 'AskUserQuestion',
@@ -442,6 +443,19 @@ test('s-2 选「在这个会话接手」：owner.json 改成 s-2、via takeover�
     const ctx = JSON.parse(out.stdout).hookSpecificOutput.additionalContext
     assert.match(ctx, /已记下/)
     assert.match(JSON.parse(out.stdout).systemMessage, /改归这个会话/)
+  })
+})
+
+test('题面里没有 current-run 指着的那一趟的 run id（问的是别的一趟、问和答之间指针换了）：不记接手，回传说要带上 run id', () => {
+  world(({ projectDir }) => {
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    for (const question of ['原来那个会话还在吗？', '这一趟（r0）归另一个会话。原来那个会话还在吗？']) {
+      const out = run('approval-ask', askTakeover(TAKEOVER_LABEL, 's-2', { question }), GATE, projectDir)
+      assert.equal(ownerOf(dir).session_id, 's-1', question)
+      const ctx = JSON.parse(out.stdout).hookSpecificOutput.additionalContext
+      assert.match(ctx, /没有记成接手/, question)
+      assert.match(ctx, /run id/, question)
+    }
   })
 })
 

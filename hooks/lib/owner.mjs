@@ -110,8 +110,24 @@ export function ownerDenyReason(block) {
   return `agent-team 会话归属：${what}${OUT_WAY}`
 }
 
+const RUN_ID_CHAR = /[A-Za-z0-9._-]/
+
 /**
- * PostToolUse:AskUserQuestion 的 tool_response 里有没有选接手：一个像样的都没有回 null；认上了回 { label }（两个接手标签之一）；像是接手、却不记
+ * 题面里有没有原样写着这一趟的 run id（前后不能紧挨着 run id 里能出现的字符：r1 不算写了 r10）。接手要绑在用户看到的那一趟上——问和答之间指针
+ * 换了、问的是别的一趟，都不能落到 current-run 现在指着的这一趟。
+ */
+export function mentionsRunId(text, runId) {
+  if (typeof text !== 'string' || typeof runId !== 'string' || runId === '') return false
+  for (let i = text.indexOf(runId); i >= 0; i = text.indexOf(runId, i + 1)) {
+    const before = i > 0 ? text[i - 1] : ''
+    const after = text[i + runId.length] ?? ''
+    if (!RUN_ID_CHAR.test(before) && !RUN_ID_CHAR.test(after)) return true
+  }
+  return false
+}
+
+/**
+ * PostToolUse:AskUserQuestion 的 tool_response 里有没有选接手：一个像样的都没有回 null；认上了回 { label, question }（两个接手标签之一、那道题的题面）；像是接手、却不记
  * 回 { why }。不记的形状与需求稿批准同一套：离开键盘自动提交、要追问、另写了一段话、带备注、多选、答案是数组、标签后面夹了别的话、对不上显示过的题、
  * 这一次问里还有别的题。
  */
@@ -136,7 +152,7 @@ export function takeoverAnswer(toolResponse) {
     else if (q.multiSelect === true) hits.push({ why: 'multi' })
     else if (isPlainObject(tr.annotations) && isPlainObject(tr.annotations[text]) && typeof tr.annotations[text].notes === 'string' && tr.annotations[text].notes.trim() !== '')
       hits.push({ why: 'notes' })
-    else hits.push({ label: hit[0] })
+    else hits.push({ label: hit[0], question: text })
   }
   if (!hits.length) return null
   if (tr.afkTimeoutMs !== undefined) return { why: 'afk' }
@@ -179,6 +195,7 @@ const TAKEOVER_WHY = {
   malformed: `标签后面夹了别的话（要逐字是「${TAKEOVER_LABEL}」或「${TAKEOVER_CLOSE_LABEL}」）`,
   unmatched: '回答对不上任何一道显示过的题',
   'not-alone': '这一次问里还有别的题',
+  unbound: '题面里没有 current-run 现在指着的那一趟的 run id（门禁认不出用户批的是哪一趟：问的可能是别的一趟，或者问和答之间指针换了）',
 }
 const ANSWER_SIDE = new Set(['afk', 'follow-up', 'response', 'notes', 'multi', 'array', 'malformed', 'unmatched', 'not-alone'])
 
@@ -189,7 +206,8 @@ export function takeoverNotice({ runId, why = null }) {
   }
   const reason = Object.hasOwn(TAKEOVER_WHY, why) ? TAKEOVER_WHY[why] : '门禁认不出原因'
   let way
-  if (ANSWER_SIDE.has(why)) way = '要接手的话，单独再问一次这一道单选题（标签逐字），用户选了才算。'
+  if (why === 'unbound') way = '要接手的话，先重读 current-run，再单独问一次这一道单选题，题面里原样写上那一趟的 run id（标签逐字），用户选了才算。'
+  else if (ANSWER_SIDE.has(why)) way = '要接手的话，单独再问一次这一道单选题（题面里原样写上那一趟的 run id，标签逐字），用户选了才算。'
   else if (why === 'already-mine' || why === 'closed' || why === 'no-run') way = '照命令正文往下做，不用接手。'
   else way = '这一趟仍归原来那个会话：告诉用户这次接手没有成，这个会话不写它、不以它的名义派人。'
   return `【会话】这次的回答没有记成接手：${reason}。${way}`

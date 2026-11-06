@@ -18,6 +18,7 @@ import {
   takeoverAnswer,
   sessionNotice,
   takeoverNotice,
+  mentionsRunId,
 } from '../hooks/lib/owner.mjs'
 
 test('常量：文件名与五个规范标签逐字', () => {
@@ -141,8 +142,9 @@ test('ownerDenyReason：说归另一个会话（接手过的说被接手），�
 
 test('takeoverAnswer：只认单独一道单选题里干净地选了两个接手标签之一', () => {
   const tr = (answer, extra = {}) => ({ questions: [{ question: 'Q', multiSelect: false }], answers: { Q: answer }, ...extra })
-  assert.deepEqual(takeoverAnswer(tr(TAKEOVER_LABEL)), { label: TAKEOVER_LABEL })
-  assert.deepEqual(takeoverAnswer(tr(TAKEOVER_CLOSE_LABEL + '（推荐）')), { label: TAKEOVER_CLOSE_LABEL })
+  // 认上了连题面一起给：门禁拿题面核用户批的是不是 current-run 指着的那一趟。
+  assert.deepEqual(takeoverAnswer(tr(TAKEOVER_LABEL)), { label: TAKEOVER_LABEL, question: 'Q' })
+  assert.deepEqual(takeoverAnswer(tr(TAKEOVER_CLOSE_LABEL + '（推荐）')), { label: TAKEOVER_CLOSE_LABEL, question: 'Q' })
   assert.equal(takeoverAnswer(tr(BACK_LABEL)), null)
   assert.equal(takeoverAnswer(tr('随便说点什么')), null)
   assert.equal(takeoverAnswer(null), null)
@@ -166,6 +168,17 @@ test('takeoverAnswer：只认单独一道单选题里干净地选了两个接手
   )
 })
 
+test('mentionsRunId：题面里原样写着 run id 才算；紧挨着 run id 里能出现的字符的不算', () => {
+  assert.equal(mentionsRunId('这一趟（20261105-1430-todo）归另一个会话', '20261105-1430-todo'), true)
+  assert.equal(mentionsRunId('"r1" 这一趟', 'r1'), true)
+  assert.equal(mentionsRunId('r10 这一趟', 'r1'), false)
+  assert.equal(mentionsRunId('xr1 这一趟', 'r1'), false)
+  assert.equal(mentionsRunId('r1.bak', 'r1'), false)
+  assert.equal(mentionsRunId('r10 与 r1', 'r1'), true, '后面那一处算')
+  assert.equal(mentionsRunId('原来那个会话还在吗？', 'r1'), false)
+  assert.equal(mentionsRunId(null, 'r1'), false)
+})
+
 test('sessionNotice：三条命令各自的出路；交付了只差收口的另说；磁盘上的值带引号', () => {
   const base = { runId: 'r1', startedAt: '2026-11-05T10:00:00Z', wordsHead: '做一个记账应用', delivered: false, via: 'create' }
   assert.match(sessionNotice({ ...base, command: 'at' }), /^【会话】[\s\S]*归另一个会话[\s\S]*\/agent-team:at 第 1 节「别的会话的一趟」/)
@@ -187,7 +200,8 @@ test('sessionNotice：三条命令各自的出路；交付了只差收口的另�
 
 test('takeoverNotice：记下了说改归这个会话、原会话再写会被拒；没记下说为什么', () => {
   assert.match(takeoverNotice({ runId: 'r1', why: null }), /^【会话】[\s\S]*已记下[\s\S]*"r1"[\s\S]*改归这个会话/)
-  for (const why of ['no-run', 'closed', 'already-mine', 'no-session', 'write-failed', 'multi', 'notes', 'follow-up']) {
+  assert.match(takeoverNotice({ runId: 'r1', why: 'unbound' }), /run id/)
+  for (const why of ['no-run', 'closed', 'already-mine', 'no-session', 'write-failed', 'multi', 'notes', 'follow-up', 'unbound']) {
     const t = takeoverNotice({ runId: 'r1', why })
     assert.match(t, /没有记成接手/, why)
     assert.doesNotMatch(t, /undefined/, why)
