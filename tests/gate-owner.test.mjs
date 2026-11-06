@@ -357,11 +357,30 @@ test('run 目录名写成 Windows 会去掉的样子（结尾带空格）：照�
   })
 })
 
-test('hook 输入没有 session_id：不按会话拦', () => {
+test('hook 输入没有 session_id：不按会话拦，碰到有主人、没收口的一趟时 stderr 留一行痕（写入与派发都是）', () => {
   world(({ projectDir }) => {
     const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
-    assert.doesNotMatch(reasonOf(writeBy(projectDir, join(dir, '00-contract.md'), null)), OWNED)
+    const w = writeBy(projectDir, join(dir, '00-contract.md'), null)
+    assert.doesNotMatch(reasonOf(w), OWNED)
+    assert.match(w.stderr, /读不到会话 id/)
+    const input = {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Agent',
+      agent_type: PM,
+      tool_input: { subagent_type: 'agent-team:at-product', description: 'x', prompt: 'x' },
+    }
+    const d = run('readiness', input, GATE, projectDir)
+    assert.doesNotMatch(reasonOf(d), OWNED)
+    assert.match(d.stderr, /读不到会话 id/)
   })
+  // 没有归属的旧 run：不留这行痕（正常的一趟不多一行）。
+  const dirs = makeRun({ runId: 'r1', stage: 'S1' })
+  try {
+    const w = writeBy(dirs.projectDir, join(dirs.projectDir, '.agent-team', 'runs', 'r1', '00-contract.md'), null)
+    assert.doesNotMatch(w.stderr, /读不到会话 id/)
+  } finally {
+    cleanup(dirs)
+  }
 })
 
 // ---------------------------------------------------------------------------------------------------------------------------------

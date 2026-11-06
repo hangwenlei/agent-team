@@ -1327,6 +1327,20 @@ function updateWordsBook(agentTeamDir, update) {
   })
 }
 
+// 一趟只归一个会话：hook 输入里读不到会话 id 时判不出来、放行——这一次碰到的那一趟（写的 run 目录、current-run 指着的）有主人、没收口时留一行痕，
+// 不然这次放行与「判过了、是主人」分不出来。没有归属的旧 run 不留（正常的一趟不多一行）。
+function ownerUnjudged(input, agentTeamDir, target = null) {
+  if (typeof input?.session_id === 'string' && input.session_id !== '') return
+  const infoOf = ownerInfoOf(agentTeamDir)
+  for (const id of [target && target.kind === 'run-file' ? target.runId : null, pointerIdOf(agentTeamDir)]) {
+    const info = typeof id === 'string' ? infoOf(id) : null
+    if (info && info.owner && !info.closed) {
+      process.stderr.write(`agent-team 会话归属：hook 输入里读不到会话 id，判不出这一次是不是 ${quote(id)} 那一趟的会话，不按会话拦、放行。\n`)
+      return
+    }
+  }
+}
+
 // M4p：【指针】那一段。两个 run id 都是磁盘上的值（目录名、current-run 的内容），过 quote；文件名与角色名是插件自己的名字。复核（docs/51 §8）：
 // 出路按情形给——新建的就是那一趟（指针指过去；契约与项目经理自己的产物原样重写拿回传，别的角色的产物指过去之后 H3 拒项目经理写它，派它的产者
 // 重交）；写错了目录（照原样写进指针指着的那一趟，那一趟读不出来时不给）；要接着做那一趟（用户定过放弃的、拿不准的先问用户，它已经收口就不能接着做）。
@@ -1998,6 +2012,7 @@ function main() {
     // 派人，拒。排在读运行上下文之前：它只看指针、那一趟的收口与归属，读不出运行上下文时照样判。子代理往下派照旧按派发记录认，不归这一道管。
     if (!malformedCaller(input) && isContractWriter(callerOf(input)) && typeof input.agent_id !== 'string') {
       const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+      ownerUnjudged(input, agentTeamDir)
       const block = ownerDispatchBlock({ sessionId: input.session_id, pointerId: pointerIdOf(agentTeamDir), infoOf: ownerInfoOf(agentTeamDir) })
       if (block) denyAndExit(ownerDenyReason(block) + selfCheckIdentity(input, '派发'), spec.event)
     }
@@ -2156,9 +2171,11 @@ function main() {
     if (isContractWriter(role) && typeof input.agent_id !== 'string') {
       const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
       const runsDir = join(agentTeamDir, 'runs')
+      const target = ownerTargetOf(agentTeamDir, checked)
+      ownerUnjudged(input, agentTeamDir, target)
       const block = ownerWriteBlock({
         sessionId: input.session_id,
-        target: ownerTargetOf(agentTeamDir, checked),
+        target,
         pointerId: pointerIdOf(agentTeamDir),
         infoOf: ownerInfoOf(agentTeamDir),
         same: (a, b) => norm(join(runsDir, a)) === norm(join(runsDir, b)),
