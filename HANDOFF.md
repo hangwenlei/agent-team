@@ -154,7 +154,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   子代理第一次写一个项目文件，落盘之后账本记进这一趟的 `runs/<id>/claims.jsonl`（门禁专属，认领键是 `norm()` 之后的绝对路径），别的没收尾的微调再写它 H3 拒、叫它冒泡；
   派发时按 `04-dispatch.md` 预先认领不做。放弃收尾（`abandon.mjs`）：用户在 `AskUserQuestion` 里选「放弃这一趟」（题面带 run id），批准记录器记 `kind: abandon`，之后一次写入
   记 `closed_at` 与 `abandoned: true`、`stage` 与 `history` 原样，H6 不核产物；`closedAt` 认它收口，冻结里 `abandoned` 也不许改。命令展开时【微调】告诉项目经理开着哪些微调，
-  接手认别的会话名下的微调。判据：`tests/runpick.test.mjs`、`tests/parallel.test.mjs`、`tests/claims.test.mjs`、`tests/abandon.test.mjs`、`tests/gate-parallel.test.mjs`（含两个会话
+  接手认别的会话名下的微调。开销：一个门禁进程里 `runs/` 只扫一遍、派发记录按需读（`TWEAKS_MEMO`、`AGENT_IDS_MEMO`，门禁自己写了归属、原话记录、派发记录之后 `forgetRuns`；
+  `pickRun` 收 getter，依次问开着的微调、`current-run` 那一趟、收口了的微调、别的 run，`docs/106`）。判据：`tests/runpick.test.mjs`、`tests/parallel.test.mjs`、`tests/claims.test.mjs`、`tests/abandon.test.mjs`、`tests/gate-parallel.test.mjs`（含两个会话
   并行走通）、`tests/parallel-prose.test.mjs`。理由在 `docs/105`；这是边看边改微调那份设计的第三步。
 - **根级文件共列，不加 `shared` 键**：根级清单、构建配置、顶层测试目录列给每个会改它们的 S5 产者；S3 的「落盘清单」与 S4「照清单补 `paths`」
   是对齐的那一步（加了 `shared` 也省不掉，前缀按字面比、S0 时文件还不存在）。S5 被拒的在实现记录里留「被写路径隔离拒绝」一节、标「已解决」，
