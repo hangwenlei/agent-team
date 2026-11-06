@@ -28,6 +28,8 @@ test('pickRun：agent_id 认不出时按会话认这个会话名下没收尾的�
   assert.equal(pickRun({ agentId: 'zz', sessionId: 's-9', tweaks: T() }), null)
   assert.equal(pickRun({ agentId: 'zz', sessionId: 's-1', tweaks: T({ t1: { open: false } }) }), null)
   assert.equal(pickRun({ agentId: 'zz', tweaks: T() }), null)
+  // 终审：agent_id 在别的一趟（不是微调）的派发记录里——不走按会话认的退路。
+  assert.equal(pickRun({ agentId: 'zz', sessionId: 's-1', tweaks: T(), agentElsewhere: true }), null)
 })
 
 test('pickRun：主线程按会话认它名下没收口的那一趟；收口了的、读不到会话 id、不是主线程都不认', () => {

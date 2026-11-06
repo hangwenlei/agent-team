@@ -1339,6 +1339,17 @@ function agentIdsAt(dir) {
   }
 }
 
+// 并行微调：这个 agent_id 在不是微调的那些 run 的派发记录里有没有（skip：微调目录的规范化路径）。读不出的跳过。
+function agentInOtherRuns(agentTeamDir, agentId, skip) {
+  let ids
+  try {
+    ids = readdirSync(join(agentTeamDir, 'runs'), { withFileTypes: true }).filter((e) => e.isDirectory() || e.isSymbolicLink()).map((e) => e.name)
+  } catch {
+    return false
+  }
+  return ids.some((id) => RUN_ID.test(id) && !skip.has(norm(join(agentTeamDir, 'runs', id))) && agentIdsAt(join(agentTeamDir, 'runs', id)).includes(agentId))
+}
+
 // 并行微调：门禁这一次该按哪一趟判（hooks/lib/runpick.mjs 的 pickRun）。子代理（带 agent_id）按派发记录认回派它的那一趟微调；主线程（项目经理、
 // 不带 agent_type 的主会话；不带 agent_id）认这个会话名下没收口的那一趟微调；都不是回 null，调用方照旧按 current-run。agentId 默认取 hook 输入里的。
 // 主线程读不到会话 id、项目里又开着微调时挑不出：留一行痕再照 current-run（静默的退路与「判过了」分不出来）。出任何意外都回 null。
@@ -1350,12 +1361,11 @@ function pickedRunOf(input, agentId = input?.agent_id) {
     const tweaks = tweaksAt(join(ROOT_PROJECT, '.agent-team'))
     if (!tweaks.length) return null
     const sid = input?.session_id
-    const picked = pickRun({
-      agentId: isAgent ? agentId : null,
-      mainThread,
-      sessionId: sid,
-      tweaks: tweaks.map((t) => ({ id: t.id, open: t.open, owner: t.owner, agentIds: isAgent ? agentIdsAt(t.dir) : [] })),
-    })
+    const mapped = tweaks.map((t) => ({ id: t.id, open: t.open, owner: t.owner, agentIds: isAgent ? agentIdsAt(t.dir) : [] }))
+    // 按会话认的退路之前先查别的（不是微调的）run 的派发记录：别的一趟派的子代理不认到这个会话名下的微调上（终审）。
+    const agentElsewhere =
+      isAgent && !mapped.some((t) => t.agentIds.includes(agentId)) && agentInOtherRuns(join(ROOT_PROJECT, '.agent-team'), agentId, new Set(tweaks.map((t) => norm(t.dir))))
+    const picked = pickRun({ agentId: isAgent ? agentId : null, mainThread, sessionId: sid, tweaks: mapped, agentElsewhere })
     if (!picked && mainThread && !(typeof sid === 'string' && sid !== '') && tweaks.some((t) => t.open)) {
       process.stderr.write('agent-team 挑这一趟：hook 输入里读不到会话 id，认不出这个会话名下的微调，这一次按 current-run 判。\n')
     }
@@ -1437,8 +1447,19 @@ function startedAtOf(state) {
 // 不是项目经理），写的是项目文件（项目根之下、.agent-team/ 之外）。要管回 { key（norm 之后的绝对路径）, path（相对项目根的显示路径） }，不管回 null。
 function claimTargetOf(ctx, role, input, filePath) {
   try {
+    const claim = claimCheckOf(ctx, role, input, filePath)
+    if (!claim || closedAt(ctx.state) !== null || !isTweakRun({ state: ctx.state, words: quietWords(ctx.runDir) })) return null
+    return claim
+  } catch {
+    return null
+  }
+}
+
+// 并行微调（终审）：这一次写入要不要拿别的开着的微调的认领去比——子代理（带 agent_id、不是项目经理）写项目文件就要，不看它那一趟开没开、是不是微调：
+// 收尾、放弃了的那一趟还在跑的人，同样不许覆盖别的微调正在改的文件。要比回 { key, path }，不比回 null。
+function claimCheckOf(ctx, role, input, filePath) {
+  try {
     if (!ctx?.ok || isContractWriter(role) || typeof input?.agent_id !== 'string' || typeof filePath !== 'string' || filePath === '') return null
-    if (closedAt(ctx.state) !== null || !isTweakRun({ state: ctx.state, words: quietWords(ctx.runDir) })) return null
     const projectRoot = dirname(ctx.agentTeamDir)
     if (!underDir(filePath, projectRoot) || underDir(filePath, ctx.agentTeamDir)) return null
     return { key: norm(filePath), path: relative(projectRoot, filePath).split(/[\\/]/).join('/') }
@@ -2668,8 +2689,8 @@ function main() {
       }
     }
 
-    // 并行微调（hooks/lib/claims.mjs）：这一次属于一趟没收尾的微调、写的是项目文件——别的没收尾的微调认领了它，拒。
-    const claim = claimTargetOf(ctx, role, input, filePath)
+    // 并行微调（hooks/lib/claims.mjs）：子代理写项目文件——别的没收尾的微调认领了它，拒（不看它自己那一趟开没开、是不是微调）。
+    const claim = claimCheckOf(ctx, role, input, filePath)
     if (claim) {
       const other = claimBlock({ key: claim.key, others: otherClaimsOf(ctx) })
       if (other) denyAndExit(claimDenyReason({ path: claim.path, other }) + selfCheckIdentity(input, '写入'), spec.event)

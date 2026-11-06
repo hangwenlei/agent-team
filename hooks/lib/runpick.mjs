@@ -19,16 +19,17 @@ const isSid = (v) => typeof v === 'string' && v !== ''
 
 /**
  * 挑这一趟。tweaks：[{ id, open, owner（会话 id 或 null）, agentIds（派发记录里的 agent_id） }]，只放门禁记过的微调。
- * @returns {{ runId: string, via: 'agent'|'session' } | null}
+ * agentElsewhere：这个 agent_id 在别的一趟（不是微调的）派发记录里——那就不是这个会话名下那趟微调派的，不走按会话认的退路。
+ * @returns {{ runId: string, via: 'agent'|'agent-session'|'session' } | null}
  */
-export function pickRun({ agentId = null, mainThread = false, sessionId = null, tweaks = [] } = {}) {
+export function pickRun({ agentId = null, mainThread = false, sessionId = null, tweaks = [], agentElsewhere = false } = {}) {
   const list = Array.isArray(tweaks) ? tweaks.filter((t) => isPlainObject(t) && typeof t.id === 'string' && t.id !== '') : []
   if (isSid(agentId)) {
     const hit = list.find((t) => Array.isArray(t.agentIds) && t.agentIds.includes(agentId))
     if (hit) return { runId: hit.id, via: 'agent' }
     // 前台派发（-p、SDK 宿主）：派发记录要等子代理跑完才记，它跑着的时候认不出 agent_id（实测）。子代理 hook 输入里的会话 id 是派它的主会话那一个，
     // 这个会话名下恰好一趟没收尾的微调就是它（一个会话同一时刻只有一趟微调）；会话也对不上的回 null。
-    const mine = isSid(sessionId) ? list.filter((t) => t.open === true && t.owner === sessionId) : []
+    const mine = isSid(sessionId) && agentElsewhere !== true ? list.filter((t) => t.open === true && t.owner === sessionId) : []
     return mine.length === 1 ? { runId: mine[0].id, via: 'agent-session' } : null
   }
   if (!mainThread || !isSid(sessionId)) return null

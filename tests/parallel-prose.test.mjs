@@ -38,6 +38,20 @@ test('at-tweak.md：第 3 节讲认领冲突（不叫它绕开）与共用页面
   assert.ok(section(TWEAK, 5).includes('别的微调还开着'))
 })
 
+// 终审：并行时按代码基线 git diff 会混进别的微调的改动——微调里「这一趟改过的文件」以这一趟的认领记录与实现记录为准，别的开着的微调认领的不退。
+test('微调里改过的文件以这一趟的认领记录与实现记录为准：at.md「放弃这一趟」、at-tweak 第 5、6 节；放弃之前先等派出去的人停下', () => {
+  const s1 = section(AT, 1)
+  assert.ok(s1.includes('`claims.jsonl`') && s1.includes('另一趟微调在改，不退'))
+  assert.ok(s1.includes('先等这一趟派出去的人都停下'))
+  assert.ok(section(TWEAK, 5).includes('`claims.jsonl`'))
+  assert.ok(section(TWEAK, 6).includes('另一趟微调在改，不退'))
+})
+
+// 终审：起微调时 current-run 指着一趟只差收口的完整需求（这个会话的），先替它收口再起——不叫用户放弃一趟交付了的。
+test('at-tweak 第 1 节：完整需求只差收口的，先照 at 第 1 节替它收口再起微调', () => {
+  assert.ok(section(TWEAK, 1).includes('只差收口的'))
+})
+
 test('at.md 第 1 节：「有微调开着」「放弃这一趟」两段，放弃的问法与写法逐字', () => {
   const s1 = section(AT, 1)
   assert.ok(s1.includes('**有微调开着**'))

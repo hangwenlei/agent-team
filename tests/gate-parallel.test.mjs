@@ -328,6 +328,31 @@ test('认领：a1 先写 web/a.ts，记进 t1 的认领（t2 的没有）；a2 �
   })
 })
 
+// 终审：查认领不看自己那一趟开没开、是不是微调——收尾、放弃了的那一趟还在跑的子代理，同样不许覆盖别的开着的微调认领的文件（完整的一趟同理）。
+test('认领：放弃了的 t1 还在跑的 a1 写 t2 认领的文件，拒；放弃了的完整一趟留下的 af 同样拒', () => {
+  withProject(TWO_S5({ t1: { extra: { closed_at: AT, abandoned: true } } }), (p) => {
+    land(p, join(p, 'web', 'b.ts'), A2)
+    assert.match(claimsOf(p, 't2'), /b\.ts/)
+    const out = write(p, join(p, 'web', 'b.ts'), A1)
+    assert.equal(denied(out), true)
+    assert.match(reasonOf(out), /"t2"/)
+  })
+  const opts = { pointer: 'f1', runs: [{ id: 'f1', mode: 'full', stage: 'S5', owner: 's-9', dispatches: [{ agent_id: 'af', role: 'at-frontend' }], extra: { closed_at: AT, abandoned: true } }, { id: 't2', owner: 's-2', dispatches: [{ agent_id: 'a2', role: 'at-frontend' }] }] }
+  withProject(opts, (p) => {
+    land(p, join(p, 'web', 'b.ts'), A2)
+    assert.equal(denied(write(p, join(p, 'web', 'b.ts'), { role: 'at-frontend', agentId: 'af', sid: 's-9' })), true)
+  })
+})
+
+// 终审：按会话认的退路只在 agent_id 哪一趟的派发记录里都没有时才走——别的一趟（这里是放弃了的完整一趟）派的子代理，不认到这个会话名下的微调上、不替它记认领。
+test('按会话认之前先查所有 run 的派发记录：放弃了的 f1 派的 af（会话 s-1）写文件，不算进 s-1 名下的 t1', () => {
+  const opts = { pointer: 'f1', runs: [{ id: 'f1', mode: 'full', stage: 'S5', owner: 's-1', dispatches: [{ agent_id: 'af', role: 'at-frontend' }], extra: { closed_at: AT, abandoned: true } }, { id: 't1', owner: 's-1', dispatches: [] }] }
+  withProject(opts, (p) => {
+    land(p, join(p, 'web', 'x.ts'), { role: 'at-frontend', agentId: 'af', sid: 's-1' })
+    assert.equal(claimsOf(p, 't1'), '', 't1 不替 af 记认领')
+  })
+})
+
 test('认领：t1 收口之后 a2 写 web/a.ts 放行；项目经理（主线程）不受认领管；任何人 Write claims.jsonl 都拒', () => {
   withProject(TWO_S5(), (p) => {
     land(p, join(p, 'web', 'a.ts'), A1)
