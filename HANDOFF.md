@@ -128,8 +128,9 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   判据：`tests/skills-lib.test.mjs`、`tests/skills-cli.test.mjs`、`tests/skills-prose.test.mjs`、`tests/writepath.test.mjs` 里那一条。理由在 `docs/102`。
 - **一趟只归一个会话，门禁按会话认**：建 run 的那一次由账本记下主人（`runs/<id>/owner.json`，门禁专属；「建 run」与 H6 认 `stage_roles` 同一个口径——
   run 目录里还没有任何门禁专属文件）。主线程（项目经理、不带 `agent_type` 的主会话；不带 `agent_id`）对有主人、没收口、主人不是自己的一趟——写它的文件、
-  另建一趟、把 `current-run` 从它切走或指到它（指针两路都认：规范化之后的路径，或叶名加所在目录；Edit 照 `replayEdit` 重放，算不出时有一趟挡这个会话就拒）——
-  H3 拒，以它的名义派人 H2 拒；子代理照旧按派发记录认，不归这一道管。命令展开时（`session-notice`，UserPromptExpansion，`speaks`）门禁用【会话】告诉项目经理，
+  另建一趟、把 `current-run` 从它切走（指针两路都认：规范化之后的路径，或叶名加所在目录；改成指向哪一趟不判——指针空着时指到别的会话的一趟放行，丢了指针、
+  放弃了的一趟要在别的会话接回得先指过去）——H3 拒，以它的名义派人 H2 拒，两个批准记录器不记；子代理照旧按派发记录认，不归这一道管。`/clear` 会换会话 id
+  （`--resume` 与压缩不换），同一个窗口清空之后要接手一次，问法与拒绝理由写明。命令展开时（`session-notice`，UserPromptExpansion，`speaks`）门禁用【会话】告诉项目经理，
   `/agent-team:at` 第 1 节与 `at-resume` 第 1 节「别的会话的一趟」照它问用户；接手只认 `AskUserQuestion` 里的「在这个会话接手」「接手并收口，再开始这次」，
   而且题面里要原样写着那一趟的 run id（`owner.mjs` 的 `mentionsRunId`，按词边界认）。没有 `owner.json` 的旧 run 一切照旧。项目一级的原话记录按会话分开记
   （`user-words.mjs` 的 `readWordsBook`，旧的单份记录照旧认）。标签与判定的单一真源是 `hooks/lib/owner.mjs`。判据：`tests/owner.test.mjs`、`tests/gate-owner.test.mjs`、
