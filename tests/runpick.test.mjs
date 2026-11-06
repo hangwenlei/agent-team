@@ -16,10 +16,18 @@ const T = (over = {}) => [
   { id: 't2', open: true, owner: 's-2', agentIds: ['a2'], ...(over.t2 ?? {}) },
 ]
 
-test('pickRun：带 agent_id 只按派发记录认（收尾了的微调也认），认不出回 null、不再按会话认', () => {
-  assert.deepEqual(pickRun({ agentId: 'a2', tweaks: T() }), { runId: 't2', via: 'agent' })
-  assert.equal(pickRun({ agentId: 'zz', mainThread: true, sessionId: 's-1', tweaks: T() }), null)
+test('pickRun：带 agent_id 先按派发记录认（收尾了的微调也认）', () => {
+  assert.deepEqual(pickRun({ agentId: 'a2', sessionId: 's-1', tweaks: T() }), { runId: 't2', via: 'agent' }, '派发记录优先于会话')
   assert.deepEqual(pickRun({ agentId: 'a2', tweaks: T({ t2: { open: false } }) }), { runId: 't2', via: 'agent' })
+})
+
+// 实测（docs/105 §8）：前台派发（-p、SDK 宿主）的派发记录要等子代理跑完才记，它跑着的时候认不出 agent_id。子代理 hook 输入里的会话 id 是派它的主会话那一个，
+// 这个会话名下恰好一趟没收尾的微调就是它；会话也对不上的回 null。
+test('pickRun：agent_id 认不出时按会话认这个会话名下没收尾的那一趟（via agent-session）；会话对不上、只有收尾了的、读不到会话 id 回 null', () => {
+  assert.deepEqual(pickRun({ agentId: 'zz', sessionId: 's-1', tweaks: T() }), { runId: 't1', via: 'agent-session' })
+  assert.equal(pickRun({ agentId: 'zz', sessionId: 's-9', tweaks: T() }), null)
+  assert.equal(pickRun({ agentId: 'zz', sessionId: 's-1', tweaks: T({ t1: { open: false } }) }), null)
+  assert.equal(pickRun({ agentId: 'zz', tweaks: T() }), null)
 })
 
 test('pickRun：主线程按会话认它名下没收口的那一趟；收口了的、读不到会话 id、不是主线程都不认', () => {

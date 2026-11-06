@@ -129,9 +129,17 @@ test('子代理按派发记录认回 t1：a1 写自己认领的 web/ 放行、�
   })
 })
 
-test('认不出是哪一趟派的团队角色：开着微调时拒、叫它冒泡；项目里没有微调也没有 current-run 时照旧放行（自举不变）', () => {
+// 实测（docs/105 §8）：前台派发时派发记录还没记，子代理按会话认回派它的那一趟——照那一趟判写路径。
+test('前台派发：派发记录里还没有它，会话 s-1 名下有 t1——照 t1 判（web/ 放行、api/ 拒）', () => {
   withProject(TWO(), (p) => {
-    const out = write(p, join(p, 'web', 'x.ts'), { role: 'at-frontend', agentId: 'zz', sid: 's-1' })
+    assert.equal(denied(write(p, join(p, 'web', 'x.ts'), { role: 'at-frontend', agentId: 'zz', sid: 's-1' })), false)
+    assert.equal(denied(write(p, join(p, 'api', 'x.ts'), { role: 'at-frontend', agentId: 'zz', sid: 's-1' })), true)
+  })
+})
+
+test('认不出是哪一趟派的团队角色（派发记录里没有、会话名下也没有微调）：开着微调时拒、叫它冒泡；项目里没有微调也没有 current-run 时照旧放行（自举不变）', () => {
+  withProject(TWO(), (p) => {
+    const out = write(p, join(p, 'web', 'x.ts'), { role: 'at-frontend', agentId: 'zz', sid: 's-9' })
     assert.equal(denied(out), true)
     assert.match(reasonOf(out), /冒泡：/)
     assert.match(reasonOf(out), /认不出/)
@@ -174,7 +182,7 @@ test('current-run 指着一趟完整的 run、又开着微调：派发记录里�
   opts.pointer = 'f1'
   opts.runs.push({ id: 'f1', mode: 'full', stage: 'S5', owner: 's-9', dispatches: [{ agent_id: 'af', role: 'at-frontend' }] })
   withProject(opts, (p) => {
-    const out = write(p, join(p, 'web', 'x.ts'), { role: 'at-frontend', agentId: 'zz', sid: 's-1' })
+    const out = write(p, join(p, 'web', 'x.ts'), { role: 'at-frontend', agentId: 'zz', sid: 's-8' })
     assert.equal(denied(out), true)
     assert.match(reasonOf(out), /冒泡：/)
     assert.equal(denied(write(p, join(p, 'web', 'x.ts'), { role: 'at-frontend', agentId: 'af', sid: 's-9' })), false)
