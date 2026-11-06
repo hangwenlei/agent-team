@@ -279,9 +279,18 @@ export function decideStageRolesKey({ before, after, creating = false }) {
  * 单个微调：这一趟是哪种（state 的 mode）在建 run 那一次定下，之后不许改——改了门禁就换一条阶段链判同一份磁盘状态。写入之前读得出 state.json、
  * 而写入前后 modeOf 不同（缺与 full 都是 full）就拒；建 run 那一次（写之前读不出）随便写哪种。
  */
-export function decideModeKey({ before, after, creating = false, tweakIntent = false, runTweak = false }) {
+export function decideModeKey({ before, after, creating = false, tweakIntent = false, runTweak = false, firstStage = null }) {
   if (!isPlainObject(after)) return { ok: true }
   const now = modeOf(after)
+  // 建微调那一次 stage 要是链上第一段：原话记录只在第一段绑进 run 目录，别的段建出来的一趟没有它，派发白名单换不了、mode 又改不了——卡死。
+  if (creating && now === TWEAK_MODE && typeof firstStage === 'string' && after.stage !== firstStage) {
+    return {
+      ok: false,
+      reason:
+        `agent-team H6：建微调那一次 stage 要写第一段 ${firstStage}（这次写的是 ${quote(after.stage)}）——原话记录只在第一段绑进 run 目录，` +
+        `从别的段建出来的一趟派不出开发角色。照 /agent-team:at-tweak 第 1 节从 ${firstStage} 建，再逐段推进。`,
+    }
+  }
   if (!isPlainObject(before)) {
     // 写之前读不出 state.json：写成完整的一趟（更严的链）照放；写成微调要有门禁记下的 /agent-team:at-tweak——建 run 那一次看这个会话挂着的原话记录
     // （tweakIntent），之后（state.json 坏了在修）看 run 目录里绑上的那一份（runTweak）。

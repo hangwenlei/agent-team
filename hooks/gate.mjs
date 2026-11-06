@@ -1349,21 +1349,30 @@ function ownerUnjudged(input, agentTeamDir, target = null) {
 
 // 单个微调（hooks/lib/tweak.mjs）：H1 用的花名册。主线程（项目经理、不带 agent_type 的主会话；不带 agent_id）派人、current-run 指着的那一趟是微调时，
 // 项目经理两行的可派名单换成短链里实现段的产者（tweakRoster）；指针、那一趟的 state.json、短链读不出来，或者不是微调，照正常花名册（更严）。
+// 回 { roster, tweak }：tweak 为真表示换了（拒绝理由要换成微调的说法）。
 function delegationRoster(input) {
   const roster = loadRoster()
+  const plain = { roster, tweak: false }
   try {
-    if (malformedCaller(input) || !isContractWriter(callerOf(input)) || typeof input?.agent_id === 'string') return roster
+    if (malformedCaller(input) || !isContractWriter(callerOf(input)) || typeof input?.agent_id === 'string') return plain
     const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
     const pid = pointerIdOf(agentTeamDir)
-    if (!pid) return roster
+    if (!pid) return plain
     const runDir = join(agentTeamDir, 'runs', pid)
     const st = runStateOf(runDir)
-    // 只认门禁记过的微调：state 写着 tweak、run 目录里绑着 /agent-team:at-tweak 的原话记录、还没收口。
-    if (modeOf(st) !== TWEAK_MODE || closedAt(st) !== null || runWords(runDir)?.command !== 'at-tweak') return roster
+    // 只认门禁记过的微调：state 写着 tweak、run 目录里绑着 /agent-team:at-tweak 的原话记录、还没收口。读原话记录不经 runWords（它读不出时的留痕
+    // 说的是契约第 1 节，放在派发这里不对）。
+    if (modeOf(st) !== TWEAK_MODE || closedAt(st) !== null) return plain
+    let words = null
+    try {
+      words = readWords(readFileSync(join(runDir, USER_WORDS_FILE)))
+    } catch {}
+    if (words?.command !== 'at-tweak') return plain
     const tweakStages = JSON.parse(normalizeText(readFileSync(join(ROOT, TWEAK_STAGES_FILE), 'utf8')))
-    return tweakRoster(roster, tweakStages)
+    const swapped = tweakRoster(roster, tweakStages)
+    return { roster: swapped, tweak: swapped !== roster }
   } catch {
-    return roster
+    return plain
   }
 }
 
@@ -2072,7 +2081,19 @@ function main() {
   }
 
   if (CHECK === 'delegation') {
-    const result = decideDelegation(input, delegationRoster(input))
+    const { roster, tweak } = delegationRoster(input)
+    let result = decideDelegation(input, roster)
+    // 单个微调：换了花名册之后被拒的（项目经理派产品、架构、测试、验收），decideDelegation 会照新花名册说「没有哪个角色能派它」——那是假话。
+    // 换成实话：微调只派开发角色，要那些改走完整的一趟。派 at-pm 的拒绝有它自己的说法，不换。
+    const target = stripPluginPrefix(input?.tool_input?.subagent_type)
+    if (result.decision === 'deny' && tweak && target && target !== 'at-pm' && Object.hasOwn(roster, target)) {
+      result = {
+        decision: 'deny',
+        reason:
+          `agent-team 派发白名单：微调这一趟只派开发角色（${TWEAK_STAGES_FILE} 里 S5 的产者），不派 ${target}。要产品定义、架构方案、测试或验收的，` +
+          '这次改动就不是微调：告诉用户，改走 /agent-team:at <需求> 另起完整的一趟。',
+      }
+    }
     // M4i 复核（docs/44 §8）：被设置或 --agent 换掉的主会话（带 agent_type、不是项目经理、没有 agent_id）被拒时，理由末尾说身份——H1 的
     // 「冒泡给上级」对它不成立（M10e：架构师被 --agent 换成主会话）。别的调用者 selfCheckIdentity 返回空串。
     if (result.decision === 'deny') denyAndExit(result.reason + selfCheckIdentity(input, '派发'), spec.event)
@@ -2580,6 +2601,7 @@ function main() {
         creating: before === null && beforeText === null && !runSeen,
         tweakIntent: Boolean(myWords && myWords.command === 'at-tweak' && myWords.bound === null && myWords.dropped === null),
         runTweak: runWords(dirname(filePath))?.command === 'at-tweak',
+        firstStage: isStageChain(stagesForRework) ? Object.keys(stagesForRework)[0] : null,
       })
       if (!mk.ok) denyAndExit(mk.reason, spec.event)
 
@@ -3236,6 +3258,7 @@ function main() {
       writer: callerOf(input),
       contractUnreadable: kind === 'state' && bytes === null && ctx.artifactExists(CONTRACT_FILE),
       dispatched: dispatchedNow,
+      tweak: modeOf(ctx.state) === TWEAK_MODE,
     })
     // M4u（docs/56）：这一趟已经收口时，列出门禁没见停下的派发（不拦，见 inflightHere）。
     if (kind === 'state' && closedAt(ctx.state) !== null) {

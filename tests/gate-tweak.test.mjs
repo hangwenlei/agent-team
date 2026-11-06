@@ -197,6 +197,22 @@ test('/agent-team:at-tweak 带参数展开：原话照样记下，建 run 时绑
   }
 })
 
+// 终审：建 run 那一次 stage 不是第一段的，原话记录绑不上（bindDecision 只在第一段绑），run 目录里没有 at-tweak 记录，H1 一直不换白名单、mode 又改不了——卡死。
+test('H6：建微调那一次 stage 不是第一段（S1），拒，理由说要从 S1 起', () => {
+  const dirs = makeRun({ runId: 'r0', stage: 'S1' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r0'), { recursive: true, force: true })
+    rmSync(join(dirs.projectDir, '.agent-team', 'current-run'), { force: true })
+    run('user-words', expandCmd('at-tweak'), GATE, dirs.projectDir)
+    const file = join(dirs.projectDir, '.agent-team', 'runs', 'r1', 'state.json')
+    const out = write(dirs.projectDir, file, JSON.stringify(stateOf('20261105-1000-tweak', { stage: 'S4', history: H('S1', 'S4') }), null, 2), { check: 'rework' })
+    assert.equal(denied(out), true)
+    assert.match(reasonOf(out), /S1/)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
 test('H6：state.json 读不出来时写 mode tweak——run 目录里门禁绑进去的原话记录是 /agent-team:at-tweak 的放行，不是或没有的拒', () => {
   for (const [words, deny] of [
     ['at-tweak', false],
@@ -311,6 +327,20 @@ test('对话里单独发「可以了，收尾」同样记', () => {
   withRun(({ projectDir, runDir }) => {
     run('approval-prompt', { hook_event_name: 'UserPromptSubmit', session_id: 's-1', prompt: '可以了，收尾' }, GATE, projectDir)
     assert.match(readFileSync(join(runDir, 'approvals.jsonl'), 'utf8'), /tweak-done/)
+  }, S5_RUN)
+})
+
+// 终审：微调的 S5 齐了时，【阶段】要提「可以了，收尾」，读实现记录的做法指向 at-tweak 第 3 节（不是 at.md 第 3 节）。
+test('微调停在 S5、实现记录交齐：项目经理写 state.json 时【阶段】提醒先问「可以了，收尾」，做法指向 /agent-team:at-tweak 第 3 节', () => {
+  withRun(({ projectDir, runDir }) => {
+    const st = JSON.parse(readFileSync(join(runDir, 'state.json'), 'utf8'))
+    writeFileSync(join(runDir, 'state.json'), JSON.stringify({ ...st, stage_roles: { S5: ['at-frontend'] }, roster: ['at-frontend'] }, null, 2))
+    const out = run('ledger', { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: PM, session_id: 's-1', tool_input: { file_path: join(runDir, 'state.json') } }, GATE, projectDir)
+    const ctx = ctxText(out)
+    assert.match(ctx, /【阶段】S5 的产物已经齐了/)
+    assert.match(ctx, /可以了，收尾/)
+    assert.match(ctx, /\/agent-team:at-tweak 第 3 节/)
+    assert.doesNotMatch(ctx, /\/agent-team:at 第 3 节\s*「各段的具体做法」/)
   }, S5_RUN)
 })
 
@@ -432,6 +462,21 @@ test('微调里项目经理派五个开发角色：H1 放行；派产品、架�
     ({ projectDir }) => {
       for (const r of DEVS) assert.equal(denied(dispatch(projectDir, r, { check: 'delegation' })), false, r)
       for (const r of OTHERS) assert.equal(denied(dispatch(projectDir, r, { check: 'delegation' })), true, r)
+    },
+    { stage: 'S5', history: H('S1', 'S4', 'S5') },
+  )
+})
+
+// 终审：换了花名册之后，decideDelegation 照新花名册说「没有哪个角色能派 at-qa、它不是这支团队里干活的人」——那是假话。
+test('微调里项目经理派产品、架构、测试、验收被拒时，理由说微调只派开发角色、要那些改走 /agent-team:at，不说「不是团队里的人」', () => {
+  withRun(
+    ({ projectDir }) => {
+      for (const r of OTHERS) {
+        const why = reasonOf(dispatch(projectDir, r, { check: 'delegation' }))
+        assert.match(why, /微调这一趟只派开发角色/, r)
+        assert.match(why, /\/agent-team:at /, r)
+        assert.doesNotMatch(why, /不是这支团队/, r)
+      }
     },
     { stage: 'S5', history: H('S1', 'S4', 'S5') },
   )

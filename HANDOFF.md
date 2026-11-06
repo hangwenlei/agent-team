@@ -27,7 +27,7 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `hooks/boot.mjs` — 门禁的进程入口（`hooks/hooks.json` 里每一道门禁注册的都是它）：先比 `process.versions.node` 与 `MIN_NODE`，太旧就不加载 `gate.mjs`；版本够就动态 import `gate.mjs`。两种失败都照 `checks.mjs` 的失败策略表收尾。
 - `hooks/gate.mjs` — 门禁的判定主体，按 argv 分派检查项；`hooks/hooks.json` — 事件到检查项的注册，外加一条不走 node 的每轮自检提醒（UserPromptSubmit）。`hooks/lib/gate-check.mjs` — 门禁自检（协议在 `agents/at-pm.md` 的「门禁自检」一节）。
 - `hooks/lib/` — 判定用的纯函数（`runctx.mjs` 读运行上下文、`trace.mjs` 门禁留痕、`retry-budget.mjs` 那份重试上限说明的单一真源等）。
-- `agents/` — 各角色正文；`commands/` — 五条 `/agent-team:*` 命令。
+- `agents/` — 各角色正文；`commands/` — 各条 `/agent-team:*` 命令（清单由 `tests/commands.test.mjs` 的 `FILES` 钉着）。
 - `hooks/skills-cli.mjs` 与 `hooks/lib/skills.mjs` — 用户 skill 的登记、复制、比对（`/agent-team:at-skills` 与起新一趟之前那一步经 `Bash` 调；不是门禁）。
 - `hooks/lib/owner.mjs` — 一趟只归一个会话：归属记录、主线程的写入与派发碰不碰别的会话的一趟、拒绝理由、接手标签与【会话】文案（I/O 在 `gate.mjs`）。
 - `hooks/lib/tweak.mjs` 与 `stages.tweak.json` — 单个微调：`mode`、选链、微调的派发白名单、「可以了，收尾」的认法与 H6 判定；短链五段（`/agent-team:at-tweak` 起的一趟按它判）。

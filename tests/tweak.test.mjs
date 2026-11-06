@@ -135,6 +135,18 @@ test('decideTweakDone：微调从 S5 推进出去，要有绑在现在契约上�
   assert.equal(d(null, st('S6'), []).ok, true, '读不出写入之前的不核')
 })
 
+// 终审：短链的测试报告是项目经理自己写的，at-qa 在微调里派不出去——拒绝理由不许叫它「重派 at-qa」（拒绝文案只许诺门禁认的出口）。
+test('testBlockText：短链上测试报告首行读不出，叫项目经理自己照格式重写；正常链照旧重派 at-qa', async () => {
+  const { testBlock, testBlockText } = await import('../hooks/lib/test-verdict.mjs')
+  const state = { stage: 'S6', roster: [], stage_roles: {}, trimmed: {}, history: [] }
+  const tweak = testBlock({ stages: TWEAK, state, bytesOf: () => Buffer.from('大概过了\n') })
+  const t = testBlockText(tweak)
+  assert.doesNotMatch(t, /at-qa/)
+  assert.match(t, /你自己/)
+  const full = testBlock({ stages: STAGES, state, bytesOf: () => Buffer.from('大概过了\n') })
+  assert.match(testBlockText(full), /重派 at-qa/)
+})
+
 test('implStageOf：正常链与短链都是 S5', () => {
   assert.equal(implStageOf(STAGES), 'S5')
   assert.equal(implStageOf(TWEAK), 'S5')

@@ -48,6 +48,30 @@ test('at-tweak.md 点名的 /agent-team:at 小节在 at.md 的那一节里真的
   assert.ok(section(TWEAK, 4).includes('/agent-team:at` 第 3 节末尾的「回退」'))
 })
 
+// 终审：at-resume 第 4 节原来对谁都说「S5 要派 at-architect 去分发」——微调里派不出去（H1 拒）；第 2 节停在 S4 要核落盘清单，微调没有架构方案。
+test('at-resume.md：微调接着跑照 at-tweak 第 3–5 节、S5 直接派开发角色；停在 S4 不核落盘清单', () => {
+  const RESUME = read('commands/at-resume.md')
+  assert.ok(section(RESUME, 4).includes('微调这一趟照 `/agent-team:at-tweak` 第 3–5 节接着走，`S5` 你直接派开发角色，不派 `at-architect`'))
+  const s2 = section(RESUME, 2)
+  assert.ok(s2.includes('停在 `S4` 的不核落盘清单'), '第 2 节微调那一段说停在 S4 不核落盘清单')
+  assert.ok(s2.includes('上一个会话里门禁记下过「' + DONE_LABEL + '」'), '续跑时认得出上一个会话里记过的那一句')
+})
+
+// 终审：交付文档要「照 /agent-team:at 第 6 节列改动的办法」列改了哪些文件，那办法读 04-dispatch.md 的代码基线——微调的 S4 也要记；建 run 之前同样核登记的 skill。
+test('at-tweak.md：建 run 之前核登记的 skill；04-dispatch.md 记代码基线；测试之后再要改的回退到 S5 再问', () => {
+  assert.ok(section(TWEAK, 1).includes('「建 run 之前核登记的 skill」'))
+  assert.ok(section(AT, 1).includes('建 run 之前核登记的 skill'))
+  assert.ok(section(TWEAK, 2).includes('`## 6. 代码基线`'))
+  assert.ok(read('templates/04-dispatch.md').includes('## 6. 代码基线'))
+  const s5 = section(TWEAK, 5)
+  assert.ok(s5.includes('回退') && s5.includes('「' + DONE_LABEL + '」'), '第 5 节：收口之前再要改的怎么走')
+})
+
+// 终审：at.md 第 1 节「只差收口」那一条只读验收结论——微调那一趟没有验收段，要看测试报告的第一行。
+test('at.md 第 1 节：替只差收口的那一趟收口时，微调那一趟看测试报告的第一行', () => {
+  assert.ok(section(AT, 1).includes('微调那一趟（`mode` 是 `"tweak"`）没有验收段，看测试报告的第一行'))
+})
+
 test('五个开发角色的「在微调里」逐字相同，排在「新行为要有自动化测试」之后、「红线」之前', () => {
   const sections = ['at-backend', 'at-frontend', 'at-ui', 'at-ios', 'at-android'].map((r) => {
     const t = read(`agents/${r}.md`)

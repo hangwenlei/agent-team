@@ -72,7 +72,8 @@ export function testBlock({ stages, state, prior, bytesOf, dispatched = null, ap
   const verdict = testVerdict(bytes)
   if (verdict === 'pass' || verdict === 'env') return null
   if (Array.isArray(approvedShas) && approvedShas.includes(sha256OfContract(bytes))) return null
-  return { ...ts, verdict }
+  // writer：测试报告是谁写的（测试段的 role）——短链上是项目经理自己，拒绝理由不叫它去派 at-qa。
+  return { ...ts, verdict, writer: stages[ts.stageId]?.role ?? null }
 }
 
 /** 测试报告那一句：首行怎么了、出路。段 id、角色名、产物名来自阶段链，原样。 */
@@ -86,6 +87,10 @@ export function testBlockText(block) {
       `（multiSelect 设 false），那一项的标签逐字写「${DELIVER_LABEL}」；用户选了它，门禁记下这条批准（只对现在这份 ${block.name} 有效），再推进。` +
       `问不了用户的（工具面里没有 AskUserQuestion），请用户在对话里单独发一条只写「${DELIVER_LABEL}」的消息`
     )
+  }
+  // 单个微调：短链的测试报告是项目经理自己写的（at-qa 在微调里派不出去）——叫它自己照格式重写。
+  if (block.writer && block.writer !== TEST_ROLE) {
+    return `${block.name} 第一行不是${LINES}之一，门禁读不出测试结论：这份是你自己写的，照格式把第一行重写一遍（第一行之前不写标题），再推进`
   }
   return (
     `${block.name} 第一行不是${LINES}之一，门禁读不出测试结论：在 ${block.stageId} 里同段重派 ${TEST_ROLE}，让它把第一行照格式写` +
