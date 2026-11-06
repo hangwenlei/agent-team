@@ -47,7 +47,8 @@ import {
 } from './lib/completion.mjs'
 import { mayWaive, dispatchedIn, wholeStageTrimmed, trimmedAt } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
-import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
+import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, OWNER_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
+import { blocksMe, mentionsRunId, ownerDenyReason, ownerDispatchBlock, ownerRecord, ownerWriteBlock, readOwner, sessionNotice, takeoverAnswer, takeoverNotice } from './lib/owner.mjs'
 import {
   CONTRACT_BASE_FILE,
   DRIFT_FIX,
@@ -82,7 +83,7 @@ import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
 import { isPlainObject, isStageChain, isVerifyStage, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName, verifyStageOf } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
-import { USER_WORDS_FILE, WORDS_FIX, bindDecision, blankAtSession, briefAnswer, briefNotice, finishBinding, matchedSection1, pendingRecord, readWords, section1Mismatch, wordsMismatchText, wordsOf } from './lib/user-words.mjs'
+import { USER_WORDS_FILE, WORDS_FIX, bindDecision, blankAtSession, bookText, briefAnswer, briefNotice, finishBinding, matchedSection1, pendingRecord, readWords, readWordsBook, withWords, wordsFor,section1Mismatch, wordsMismatchText, wordsOf } from './lib/user-words.mjs'
 import { GATE_CHECK_PATH, gateCheckReason, isGateCheck, selfCheckIdentity } from './lib/gate-check.mjs'
 import {
   SECOND_WRITE_NOTE,
@@ -1260,6 +1261,91 @@ function pointerIdOf(agentTeamDir) {
   }
 }
 
+// 一趟只归一个会话（hooks/lib/owner.mjs）：某一趟收没收口、归哪个会话——给 ownerWriteBlock、ownerDispatchBlock 的 infoOf。id 不合法、run 目录不在：null。
+// state.json 读不出来当没收口；owner.json 不在当没有归属，在却读不出来：留痕、当没有（少拦）。同一个 id 只读一次。
+function ownerInfoOf(agentTeamDir) {
+  const runsDir = join(agentTeamDir, 'runs')
+  const seen = new Map()
+  return (id) => {
+    if (typeof id !== 'string' || !RUN_ID.test(id)) return null
+    if (seen.has(id)) return seen.get(id)
+    const dir = join(runsDir, id)
+    let info = null
+    if (existsSync(dir)) {
+      let bytes = null
+      try {
+        bytes = readFileSync(join(dir, OWNER_FILE))
+      } catch {}
+      const owner = bytes === null ? null : readOwner(bytes)
+      if (bytes !== null && !owner) process.stderr.write(`agent-team 会话归属：${quote(id)} 那一趟的归属记录在却读不出来，这一次不按会话管它。\n`)
+      info = { closed: runClosed(dir), owner }
+    }
+    seen.set(id, info)
+    return info
+  }
+}
+
+// 一趟只归一个会话：主线程这次写的是什么——
+//   - current-run：{ kind: 'pointer' }。两路都认：规范化之后的路径就是它（经链接、8.3 短名写进去的），或者叶名是它、所在目录就是
+//     .agent-team（剥掉流后缀、结尾的点与空格：那些写法在 Windows 上落到的正是指针）。改成指向哪一趟不看（ownerWriteBlock 只判切走）；
+//   - 某一趟 run 目录里的文件：{ kind: 'run-file', runId, creatingState }。runId 取规范化之后的那一段（解析过链接、目录联接与别名，Windows、macOS 上折成
+//     小写）：照字面取的话，经一个名字不合 run id 格式的链接写进去，就查不到那一趟的归属。creatingState：写的是那一趟的 state.json、写之前它不在；
+//   - 别的：null。
+function ownerTargetOf(agentTeamDir, filePath) {
+  if (typeof filePath !== 'string' || filePath === '') return null
+  const runsDir = join(agentTeamDir, 'runs')
+  const target = norm(filePath)
+  const pointerPath = join(agentTeamDir, 'current-run')
+  if (target === norm(pointerPath) || (leafName(filePath) === 'current-run' && norm(dirname(filePath)) === norm(agentTeamDir))) return { kind: 'pointer' }
+  const base = norm(runsDir)
+  if (!target.startsWith(`${base}/`)) return null
+  const rel = target.slice(base.length + 1).split('/')
+  if (!rel[0]) return null
+  return { kind: 'run-file', runId: rel[0], creatingState: rel.length === 2 && rel[1] === 'state.json' && !existsSync(filePath) }
+}
+
+
+// 一趟只归一个会话：项目一级的原话记录按会话分开记（hooks/lib/user-words.mjs 的 readWordsBook）。readWordsBookAt 只读；updateWordsBook 在锁里读出整张表、
+// 交给 update 改（回 null 是不改）、写回——表空了就删掉文件（与原来清掉单份记录时一样）。写不进的异常照抛，调用方各自留痕。
+function readWordsBookAt(agentTeamDir) {
+  try {
+    return readWordsBook(readFileSync(join(agentTeamDir, USER_WORDS_FILE)))
+  } catch {
+    return readWordsBook(null)
+  }
+}
+
+// keep：这一次写的是哪个会话的。写回时顺手清掉别的会话里已经绑上或作废的条目——它们之后没有任何读者（run 目录里留着绑上的那一份），不清的话这张表
+// 只增不减、每个起过命令的会话都留着整段原话。还挂着的（没绑、没作废）不动。update 回 null（不改）时也不清。
+function updateWordsBook(agentTeamDir, keep, update) {
+  const file = join(agentTeamDir, USER_WORDS_FILE)
+  return withFileLock(agentTeamDir, USER_WORDS_FILE, () => {
+    let next = update(readWordsBookAt(agentTeamDir))
+    if (!next) return null
+    for (const [sid, rec] of Object.entries(next.sessions)) {
+      if (sid !== keep && (rec.bound !== null || rec.dropped !== null)) next = withWords(next, sid, null)
+    }
+    if (Object.keys(next.sessions).length === 0) {
+      if (existsSync(file)) unlinkSync(file)
+    } else writeFileSync(file, bookText(next))
+    return next
+  })
+}
+
+// 一趟只归一个会话：hook 输入里读不到会话 id 时判不出来、放行——这一次碰到的那一趟（写的 run 目录、current-run 指着的）有主人、没收口时留一行痕，
+// 不然这次放行与「判过了、是主人」分不出来。没有归属的旧 run 不留（正常的一趟不多一行）。
+function ownerUnjudged(input, agentTeamDir, target = null) {
+  if (typeof input?.session_id === 'string' && input.session_id !== '') return
+  const infoOf = ownerInfoOf(agentTeamDir)
+  for (const id of [target && target.kind === 'run-file' ? target.runId : null, pointerIdOf(agentTeamDir)]) {
+    const info = typeof id === 'string' ? infoOf(id) : null
+    if (info && info.owner && !info.closed) {
+      process.stderr.write(`agent-team 会话归属：hook 输入里读不到会话 id，判不出这一次是不是 ${quote(id)} 那一趟的会话，不按会话拦、放行。\n`)
+      return
+    }
+  }
+}
+
 // M4p：【指针】那一段。两个 run id 都是磁盘上的值（目录名、current-run 的内容），过 quote；文件名与角色名是插件自己的名字。复核（docs/51 §8）：
 // 出路按情形给——新建的就是那一趟（指针指过去；契约与项目经理自己的产物原样重写拿回传，别的角色的产物指过去之后 H3 拒项目经理写它，派它的产者
 // 重交）；写错了目录（照原样写进指针指着的那一趟，那一趟读不出来时不给）；要接着做那一趟（用户定过放弃的、拿不准的先问用户，它已经收口就不能接着做）。
@@ -1305,11 +1391,8 @@ function runClosed(dir) {
 // 基线互相卡死，续跑一趟自带记录的旧 run 不作废。写不进只是这一趟不核，留痕。
 function settleWords({ runDir, agentTeamDir, sessionId, state, stages, creating }) {
   if (typeof runDir !== 'string' || typeof agentTeamDir !== 'string') return
-  const pendingPath = join(agentTeamDir, USER_WORDS_FILE)
-  let pending = null
-  try {
-    pending = readWords(readFileSync(pendingPath))
-  } catch {}
+  // 一趟只归一个会话：只看这个会话那一条（别的会话挂着的不动）。
+  const pending = wordsFor(readWordsBookAt(agentTeamDir), sessionId)
   if (!pending) return
   const runsDir = join(agentTeamDir, 'runs')
   const ids = isStageChain(stages) ? Object.keys(stages) : []
@@ -1323,18 +1406,57 @@ function settleWords({ runDir, agentTeamDir, sessionId, state, stages, creating 
     closed: isPlainObject(state) && closedAt(state) !== null,
   })
   if (!decision) return
+  const patchMine = (patch) =>
+    updateWordsBook(agentTeamDir, sessionId, (book) => {
+      const cur = wordsFor(book, sessionId)
+      return cur ? withWords(book, sessionId, { ...cur, ...patch }) : null
+    })
   try {
     if (decision === 'drop') {
-      writeFileSync(pendingPath, `${JSON.stringify({ ...pending, dropped: runId }, null, 2)}\n`)
+      patchMine({ dropped: runId })
       process.stderr.write(`agent-team user-words：${quote(runId)} 是记下原话之前就有的一趟、这次被续跑了，那份原话记录（命令带的参数或批准的需求稿）作废。\n`)
       return
     }
     // 实测（docs/58，§8 是复核）：这里是 PreToolUse——run 目录还不在（项目经理直接 Write runs/<id>/state.json，落盘时才建），这次写入也还可能被
     // 用户的权限确认拒掉。原来这里就标 bound、往 run 目录里写：目录不在时抛 ENOENT 被接住，项目一级那份却已经标了 bound，这一趟从此不核第 1 节；
     // 先建目录再写，写入被拒时又留下一个只有原话记录的空壳。现在只记 binding（打算绑到哪一趟），落盘之后由账本完成（finishWordsBinding）。
-    writeFileSync(pendingPath, `${JSON.stringify({ ...pending, binding: runId }, null, 2)}\n`)
+    patchMine({ binding: runId })
   } catch (e) {
     process.stderr.write(`agent-team user-words：原话记录写不进（${quote(e?.message ?? e, { max: 120 })}），这一趟可能不核契约第 1 节。\n`)
+  }
+}
+
+// 写的是不是某个 .agent-team/runs/<id>/state.json（按字面认三段名字，Windows、macOS 上不分大小写）：是就给 { runDir, runsDir, agentTeamDir }，否则 null。
+// 不经运行上下文：建 run 的那一刻 current-run 多半还没写。
+function runStateFileOf(filePath) {
+  if (typeof filePath !== 'string') return null
+  const runDir = dirname(filePath)
+  const runsDir = dirname(runDir)
+  const agentTeamDir = dirname(runsDir)
+  const same = (a, b) => (process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase())
+  if (!same(basename(filePath), 'state.json') || !same(basename(runsDir), 'runs') || !same(basename(agentTeamDir), '.agent-team')) return null
+  return { runDir, runsDir, agentTeamDir }
+}
+
+// 一趟只归一个会话（hooks/lib/owner.mjs）：建 run 的那一次由账本记下归哪个会话（runs/<id>/owner.json，门禁专属）。只认主线程（项目经理、不带
+// agent_type 的主会话；不带 agent_id）用 Write 写 .agent-team/runs/<id>/state.json、已经落盘。「建 run」与 H6 认 stage_roles 的口径相同：run 目录里还没有
+// 任何一份门禁专属文件——所以排在 finishWordsBinding 之前（它会往 run 目录写原话记录）。升级之前建的、跑过一阵的 run（目录里有派发记录之类）不补；
+// hook 输入里读不到会话 id 的不记（这一趟没有归属，行为照旧），留痕；写不进留痕。
+function recordOwnerOnCreate(input, filePath) {
+  if (input?.tool_name !== 'Write' || typeof input?.agent_id === 'string' || !isContractWriter(input?.agent_type)) return
+  const parts = runStateFileOf(filePath)
+  if (!parts || !existsSync(filePath)) return
+  const { runDir } = parts
+  if (GATE_FILES.map((p) => p.split('/').pop()).some((n) => existsSync(join(runDir, n)))) return
+  const sid = input.session_id
+  if (typeof sid !== 'string' || sid === '') {
+    process.stderr.write('agent-team 会话归属：hook 输入里读不到会话 id，这一趟不记归属（别的会话写它、以它的名义派人不会被拦）。\n')
+    return
+  }
+  try {
+    writeFileSync(join(runDir, OWNER_FILE), `${JSON.stringify(ownerRecord({ sessionId: sid, at: new Date().toISOString(), via: 'create' }), null, 2)}\n`)
+  } catch (e) {
+    process.stderr.write(`agent-team 会话归属：归属记录写不进（${quote(e?.message ?? e, { max: 120 })}），这一趟不按会话管。\n`)
   }
 }
 
@@ -1343,21 +1465,19 @@ function settleWords({ runDir, agentTeamDir, sessionId, state, stages, creating 
 // 按路径认，不经运行上下文：这一刻 current-run 多半还没写（/agent-team:at 第 1 节先写 state.json、再写指针）。
 function finishWordsBinding(input, filePath) {
   if (!isContractWriter(input?.agent_type) || typeof filePath !== 'string') return
-  const runDir = dirname(filePath)
-  const runsDir = dirname(runDir)
-  const agentTeamDir = dirname(runsDir)
-  const same = (a, b) => (process.platform === 'linux' ? a === b : a.toLowerCase() === b.toLowerCase())
-  if (!same(basename(filePath), 'state.json') || !same(basename(runsDir), 'runs') || !same(basename(agentTeamDir), '.agent-team')) return
-  const pendingPath = join(agentTeamDir, USER_WORDS_FILE)
-  let pending = null
-  try {
-    pending = readWords(readFileSync(pendingPath))
-  } catch {}
+  const parts = runStateFileOf(filePath)
+  if (!parts) return
+  const { runDir, runsDir, agentTeamDir } = parts
+  const sid = input.session_id
+  const pending = wordsFor(readWordsBookAt(agentTeamDir), sid)
   const runId = basename(runDir)
   const sameRun = (a, b) => norm(join(runsDir, a)) === norm(join(runsDir, b))
-  if (!finishBinding(pending, { sessionId: input.session_id, runId, sameRun }) || !existsSync(filePath)) return
+  if (!finishBinding(pending, { sessionId: sid, runId, sameRun }) || !existsSync(filePath)) return
   try {
-    writeFileSync(pendingPath, `${JSON.stringify({ ...pending, binding: null, bound: runId }, null, 2)}\n`)
+    updateWordsBook(agentTeamDir, sid, (book) => {
+      const cur = wordsFor(book, sid)
+      return cur ? withWords(book, sid, { ...cur, binding: null, bound: runId }) : null
+    })
     const own = join(runDir, USER_WORDS_FILE)
     if (!existsSync(own)) writeFileSync(own, `${JSON.stringify({ ...pending, binding: null, bound: runId, bound_at: new Date().toISOString() }, null, 2)}\n`)
   } catch (e) {
@@ -1391,7 +1511,7 @@ function recordBrief(input) {
   } catch {}
   try {
     const rec = pendingRecord({ at: new Date().toISOString(), sessionId: sid, args: b.draft, runsBefore, source: 'ask' })
-    writeFileSync(join(agentTeamDir, USER_WORDS_FILE), `${JSON.stringify(rec, null, 2)}\n`)
+    updateWordsBook(agentTeamDir, sid, (book) => withWords(book, sid, rec))
   } catch (e) {
     process.stderr.write(`agent-team approval-ask：需求稿记不下（${quote(e?.message ?? e, { max: 120 })}）。\n`)
     return skip('write-failed')
@@ -1409,6 +1529,37 @@ function recordBrief(input) {
     }
   } catch {}
   return { kind: 'brief-recorded', notice: briefNotice(null, { staleRun }) }
+}
+
+// 一趟只归一个会话（hooks/lib/owner.mjs）：用户在 AskUserQuestion 里选了「在这个会话接手」或「接手并收口，再开始这次」——把 current-run 指着的那一趟改归
+// 这个会话（owner.json，via: 'takeover'，previous 记原来的主人）。只认 AskUserQuestion：对话里打字不认（门禁看不到用户是对着哪一道题、哪一趟说的）。
+// 没有归属记录的旧 run 也记（补上归属）。回 null（回答里没有像接手的）或 { kind（给用户那一行）、notice（给项目经理那一段） }。
+function recordTakeover(input) {
+  const a = takeoverAnswer(input?.tool_response)
+  if (!a) return null
+  const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+  const runId = pointerIdOf(agentTeamDir)
+  const skip = (why) => {
+    process.stderr.write(`agent-team approval-ask：没有记成接手（${why}）。\n`)
+    return { kind: 'takeover-skipped', notice: takeoverNotice({ runId, why }) }
+  }
+  if (a.why) return skip(a.why)
+  const sid = input.session_id
+  if (typeof sid !== 'string' || sid === '') return skip('no-session')
+  const info = runId ? ownerInfoOf(agentTeamDir)(runId) : null
+  if (!info) return skip('no-run')
+  // 绑在用户看到的那一趟上：题面里要原样写着 current-run 现在指着的那一趟的 run id。
+  if (!mentionsRunId(a.question, runId)) return skip('unbound')
+  if (info.closed) return skip('closed')
+  if (info.owner && info.owner.session_id === sid) return skip('already-mine')
+  try {
+    const rec = ownerRecord({ sessionId: sid, at: new Date().toISOString(), via: 'takeover', previous: info.owner ? info.owner.session_id : null })
+    writeFileSync(join(agentTeamDir, 'runs', runId, OWNER_FILE), `${JSON.stringify(rec, null, 2)}\n`)
+  } catch {
+    return skip('write-failed')
+  }
+  process.stderr.write(`agent-team approval-ask：已记下接手，${quote(runId)} 这一趟改归这个会话。\n`)
+  return { kind: 'takeover-recorded', notice: takeoverNotice({ runId, why: null }) }
 }
 
 // M4o：这一趟 run 目录里的原话记录；没有回 null，在却读不出：留痕、当没有（少拦）。
@@ -1497,7 +1648,10 @@ function gateFileReason(checked, exotic) {
           ? // M4o 复核（docs/50 §9，正文中 3）：原来落到交付快照那一句，来历与出路都是错的。
             '这是门禁在用户发出 /agent-team:at 时记下的原话（项目一级那份，或者绑进这一趟 run 目录的那份），不用、也不许改；契约第 1 节对不上它，' +
             '就照它改第 1 节。'
-          : '这是门禁自己拍的交付快照，PM 推进或回退之后由门禁照磁盘重拍，不用、也不许改。'
+          : leafIs(OWNER_FILE)
+            ? '这是门禁记下的这一趟归哪个会话（建它的那个会话，或者用户经「在这个会话接手」接过去的那个会话），不用、也不许改；要换会话，照 ' +
+              '/agent-team:at-resume 第 1 节「别的会话的一趟」问用户。'
+            : '这是门禁自己拍的交付快照，PM 推进或回退之后由门禁照磁盘重拍，不用、也不许改。'
   return (
     `agent-team 门禁：不得写 ${inline(checked)}——${exotic ? `${exotic}；它可能就是门禁专属文件。` : ''}${what}` +
     '任何人（包括项目经理与主线程）都不用 Edit/Write 写它。'
@@ -1545,7 +1699,13 @@ function approvalDiagnostic(stateFile) {
 // 最多约 5 秒；锁文件比 5 秒还旧就当是崩掉的进程留下的，删了再拿。到头还拿不到就不加锁照做——记录器 fail open，宁可在极端情形下
 // 多记一条，也不让一条真的批准因为锁丢掉。锁文件在 run 目录里不是任何阶段的产物，H3 不让角色碰它。
 function withApprovalsLock(runDir, body) {
-  const lock = join(runDir, `${APPROVALS_FILE}.lock`)
+  return withFileLock(runDir, APPROVALS_FILE, body)
+}
+
+// 一把按文件名起的锁（<dir>/<name>.lock，O_EXCL 建、用完删；拿不到锁时最多等约 5 秒，超过 5 秒没人删的当成死锁清掉）。拿不到也照跑 body——
+// 锁只防并行的几个门禁进程互相覆盖，不是正确性的前提。批准记录、项目一级的原话记录各用一把。
+function withFileLock(dir, name, body) {
+  const lock = join(dir, `${name}.lock`)
   let fd = null
   for (let i = 0; i < 200 && fd === null; i++) {
     try {
@@ -1853,6 +2013,14 @@ function main() {
   }
 
   if (CHECK === 'readiness') {
+    // 一趟只归一个会话（hooks/lib/owner.mjs）：主线程（项目经理、不带 agent_type 的主会话；不带 agent_id）在 current-run 指着的一趟归别的会话、还没收口时
+    // 派人，拒。排在读运行上下文之前：它只看指针、那一趟的收口与归属，读不出运行上下文时照样判。子代理往下派照旧按派发记录认，不归这一道管。
+    if (!malformedCaller(input) && isContractWriter(callerOf(input)) && typeof input.agent_id !== 'string') {
+      const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+      ownerUnjudged(input, agentTeamDir)
+      const block = ownerDispatchBlock({ sessionId: input.session_id, pointerId: pointerIdOf(agentTeamDir), infoOf: ownerInfoOf(agentTeamDir) })
+      if (block) denyAndExit(ownerDenyReason(block) + selfCheckIdentity(input, '派发'), spec.event)
+    }
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
     // H2 是流程辅助：读不到运行上下文时 fail open，但规格 §6 写的是
     // allow + warning，不是静默放行——必须留痕，不能一声不吭就 exit(0)。
@@ -2001,6 +2169,25 @@ function main() {
     // 下面「花名册外的调用者放行」）。
     if (malformedCaller(input)) denyAndExit(malformedCallerReason('写入'), spec.event)
     const role = callerOf(input)
+
+    // 一趟只归一个会话（hooks/lib/owner.mjs）：主线程（项目经理、不带 agent_type 的主会话；不带 agent_id）写别的会话的一趟、另建一趟、把 current-run
+    // 从它切走或指到它，拒。排在主线程豁免与读运行上下文之前：豁免放行的正是主线程，建 run 那一刻运行上下文也读不出来。子代理照旧按派发记录认回
+    // 派它的那一趟，不归这一道管。hook 输入里读不到会话 id 时判不出来，不拦。
+    if (isContractWriter(role) && typeof input.agent_id !== 'string') {
+      const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+      const runsDir = join(agentTeamDir, 'runs')
+      const target = ownerTargetOf(agentTeamDir, checked)
+      ownerUnjudged(input, agentTeamDir, target)
+      const block = ownerWriteBlock({
+        sessionId: input.session_id,
+        target,
+        pointerId: pointerIdOf(agentTeamDir),
+        infoOf: ownerInfoOf(agentTeamDir),
+        same: (a, b) => norm(join(runsDir, a)) === norm(join(runsDir, b)),
+      })
+      if (block) denyAndExit(ownerDenyReason(block) + selfCheckIdentity(input, '写入'), spec.event)
+    }
+
     if (role === MAIN) process.exit(0)
 
     const ctx = readRunContext(ROOT_PROJECT, ROOT)
@@ -2477,6 +2664,8 @@ function main() {
         ? input?.tool_input?.notebook_path
         : input?.tool_input?.file_path
 
+    // 一趟只归一个会话：建出这一趟的那一次 Write 落盘之后记下归哪个会话。排在原话绑定之前（那一步会往 run 目录写门禁专属文件）。
+    recordOwnerOnCreate(input, filePath)
     // M4w（docs/58 §8）：原话记录绑的第二步——建出这一趟的那一次 Write 落盘之后。排在读运行上下文之前：这一刻 current-run 多半还没写。
     finishWordsBinding(input, filePath)
 
@@ -3083,10 +3272,12 @@ function main() {
     const blank = blankAtSession(input)
     if (blank) {
       try {
-        const p = readWords(readFileSync(join(agentTeamDir, USER_WORDS_FILE)))
-        if (p && p.session_id === blank && p.bound === null && p.dropped === null) {
-          unlinkSync(join(agentTeamDir, USER_WORDS_FILE))
-          process.stderr.write('agent-team user-words：/agent-team:at 这次没带参数，这个会话之前记下的原话作废。\n')
+        if (existsSync(join(agentTeamDir, USER_WORDS_FILE))) {
+          const done = updateWordsBook(agentTeamDir, blank, (book) => {
+            const p = wordsFor(book, blank)
+            return p && p.bound === null && p.dropped === null ? withWords(book, blank, null) : null
+          })
+          if (done) process.stderr.write('agent-team user-words：/agent-team:at 这次没带参数，这个会话之前记下的原话作废。\n')
         }
       } catch {}
       process.exit(0)
@@ -3107,12 +3298,52 @@ function main() {
     } catch {}
     try {
       const rec = pendingRecord({ at: new Date().toISOString(), sessionId: w.sessionId, args: w.args, runsBefore })
-      writeFileSync(join(agentTeamDir, USER_WORDS_FILE), `${JSON.stringify(rec, null, 2)}\n`)
+      // 一趟只归一个会话：只换这个会话那一条，别的会话挂着的不动。
+      updateWordsBook(agentTeamDir, w.sessionId, (book) => withWords(book, w.sessionId, rec))
       process.stderr.write('agent-team user-words：已记下 /agent-team:at 后面的原话。\n')
     } catch (e) {
       process.stderr.write(`agent-team user-words：原话记不下（${quote(e?.message ?? e, { max: 120 })}），这一趟契约第 1 节不跟它核。\n`)
     }
     process.exit(0)
+  }
+
+  if (CHECK === 'session-notice') {
+    // 一趟只归一个会话（hooks/lib/owner.mjs）：本插件的 at、at-resume、at-status 展开时，current-run 指着的那一趟归另一个会话、还没收口，就用【会话】告诉
+    // 项目经理（正文照它问用户）。不拦任何东西：这个事件上 exit 2 会把用户的命令拦掉。读不出来、判不出来的一律不出声；建它的会话、没有归属记录的旧 run、
+    // 已收口的不出声——正常的一趟不多一个字。
+    const command = typeof input.command_name === 'string' ? stripPluginPrefix(input.command_name) : ''
+    if (input.expansion_type !== 'slash_command' || !['at', 'at-resume', 'at-status'].includes(command) || input.command_name === command) process.exit(0)
+    const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+    const runId = pointerIdOf(agentTeamDir)
+    if (!runId) process.exit(0)
+    const info = ownerInfoOf(agentTeamDir)(runId)
+    if (!blocksMe(info, input.session_id)) process.exit(0)
+    const runDir = join(agentTeamDir, 'runs', runId)
+    const st = runStateOf(runDir)
+    const first = isPlainObject(st) && Array.isArray(st.history) ? st.history[0] : null
+    const startedAt = isPlainObject(first) && typeof first.at === 'string' ? first.at : null
+    const words = runWords(runDir)
+    const line = words ? words.args.split(/\r?\n/).find((l) => l.trim() !== '') : null
+    const chars = typeof line === 'string' ? Array.from(line.trim()) : []
+    const wordsHead = chars.length ? chars.slice(0, 40).join('') + (chars.length > 40 ? '…' : '') : null
+    let delivered = false
+    try {
+      const stages = JSON.parse(normalizeText(readFileSync(join(ROOT, 'stages.json'), 'utf8')))
+      const last = lastStageId(stages)
+      const products = last ? productsOfStage(stages[last]) : []
+      delivered =
+        isPlainObject(st) &&
+        st.stage === last &&
+        products.length > 0 &&
+        products.every((n) => {
+          try {
+            return !isBlankText(readFileSync(join(runDir, n)))
+          } catch {
+            return false
+          }
+        })
+    } catch {}
+    emitHookJson(spec.event, { contexts: [sessionNotice({ command, runId, startedAt, wordsHead, delivered, via: info.owner.via })] })
   }
 
   if (CHECK === 'approval-ask' || CHECK === 'approval-prompt') {
@@ -3124,12 +3355,15 @@ function main() {
     const ask = CHECK === 'approval-ask'
     // docs/95：需求稿的批准只在 AskUserQuestion 上认（门禁得看得见批的是哪一份）；与返工、照现状交付的批准互不相干，先记它。
     const brief = ask ? recordBrief(input) : null
+    // 一趟只归一个会话：接手也只在 AskUserQuestion 上认，与需求稿、返工、照现状交付互不相干。
+    const takeover = ask ? recordTakeover(input) : null
+    const extras = [brief, takeover].filter(Boolean)
     // M4k（docs/46）：两个记录器也认「照现状交付」（候选 { deliver: true }，按 sha 绑在那一刻的验收结论上）。
     const found = ask
       ? askAnswers(input.tool_response)
       : { excluded: null, items: promptAnswer(input.prompt) ? [{ stage: promptAnswer(input.prompt) }] : promptDeliver(input.prompt) ? [{ deliver: true }] : [] }
     if (!found.excluded && !found.items.length) {
-      if (brief) emitHookJson(spec.event, { contexts: [brief.notice], systemMessage: systemMessage(brief.kind) })
+      if (extras.length) emitHookJson(spec.event, { contexts: extras.map((e) => e.notice), systemMessage: extras.map((e) => systemMessage(e.kind)).join(' ') })
       process.exit(0)
     }
     let results
@@ -3144,6 +3378,10 @@ function main() {
         cause = ctx.cause ?? null
         const why = ctx.kind === 'no-run' ? 'no-run' : 'unreadable'
         results = found.items.map((item) => (item.stage ? { stage: item.stage, why } : item.deliver && !item.why ? { deliver: true, why } : item))
+      } else if (blocksMe(ownerInfoOf(ctx.agentTeamDir)(pointerIdOf(ctx.agentTeamDir)), input.session_id)) {
+        // 一趟只归一个会话：current-run 指着的那一趟归别的会话（指针空着时别的会话指得过来，为了接回丢了指针的一趟）——这个会话里的回答不记进它。
+        stages = ctx.stages
+        results = found.items.map((item) => (item.stage ? { stage: item.stage, why: 'other-session' } : item.deliver && !item.why ? { deliver: true, why: 'other-session' } : item))
       } else {
         stages = ctx.stages
         // 复核（platform-3）：读批准、判需不需要、追加，三步在一把锁里做——插件被加载了两份时，同一个事件上会并行起几个记录器，
@@ -3213,9 +3451,9 @@ function main() {
     // 同一次问里既有像批准需求稿的、又有返工或照现状交付的回答（项目经理不该这么问，需求稿那一道按「不是单独问的」不记）：两段都回给项目经理，
     // 给用户那一行两句都说（都是固定文字，并成一行）。
     emitHookJson(spec.event, {
-      contexts: [...(brief ? [brief.notice] : []), ...approvalNotices({ results, total, cause, stages })],
+      contexts: [...extras.map((e) => e.notice), ...approvalNotices({ results, total, cause, stages })],
       systemMessage: [
-        brief ? systemMessage(brief.kind) : null,
+        ...extras.map((e) => systemMessage(e.kind)),
         systemMessage(
           results.some((r) => r.covers) ? 'approval-recorded' : results.some((r) => r.deliver && r.sha) ? 'deliver-recorded' : results.some((r) => r.deliver) ? 'deliver-skipped' : 'approval-skipped',
         ),

@@ -210,6 +210,9 @@ function whyText(why, name, cause, ask = ASK_AGAIN, what = '再返工一轮') {
       return '这一趟已经收口，批准记不进去：收口之后不再回退、不再返工。交付之后的新改动或修复另起一趟（/agent-team:at）。'
     case 'no-run':
       return '当前没有进行中的 run，批准无处可记。'
+    case 'other-session':
+      // 一趟只归一个会话：别的会话里的回答不记进这一趟。
+      return 'current-run 指着的那一趟归另一个会话，这个会话里的回答不记进它。要在这里接着做那一趟，先照 /agent-team:at-resume 第 1 节「别的会话的一趟」问用户接手。'
     case 'unreadable':
       return `门禁读不到这个项目的运行状态，批准记不下。修法：${runContextFix(cause)}修好之后重新问一次。`
     case 'write-failed':

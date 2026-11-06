@@ -92,12 +92,15 @@ export function mayBeStateFile(filePath) {
 //   - runs/*/user-words.json 与项目一级的 user-words.json（M4o，docs/50，审查第 20 条修法 A）：用户在 /agent-team:at 后面写的原话——
 //     记录器在命令展开时记进项目一级那份，这一趟的 run 建起来之后绑进 run 目录（hooks/lib/user-words.mjs）。改得了它，第 1 节就能照着
 //     改过的「原话」写。项目一级那份是唯一一份不在 runs/<id>/ 下的门禁专属文件：命令展开那一刻这一趟的 run 还没建。
-export const GATE_FILES = ['runs/*/approvals.jsonl', 'runs/*/contract-base.json', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl', 'runs/*/user-words.json']
+//   - runs/*/owner.json（一趟只归一个会话，hooks/lib/owner.mjs）：这一趟归哪个会话——账本在建 run 的那一次记，用户在别的会话里经规范标签接手时由
+//     批准记录器改。改得了它，别的会话就能悄悄接过一趟正在跑的 run。
+export const GATE_FILES = ['runs/*/approvals.jsonl', 'runs/*/contract-base.json', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl', 'runs/*/owner.json', 'runs/*/user-words.json']
 export const PROJECT_GATE_FILES = ['user-words.json']
 export const APPROVALS_FILE = 'approvals.jsonl'
 export const DELIVERED_FILE = 'delivered.json'
 export const DISPATCHES_FILE = 'dispatches.jsonl'
 export const CONTRACT_BASE_FILE = 'contract-base.json'
+export const OWNER_FILE = 'owner.json'
 export const USER_WORDS_FILE = 'user-words.json'
 
 /** 按规范化之后的字面末段认：门禁认不出的写法（流后缀、结尾带点）也认——gate.mjs 拿它决定要不要先查 exoticPath。不认 8.3 短名：
@@ -106,7 +109,8 @@ export const USER_WORDS_FILE = 'user-words.json'
  * 也当成它。 */
 export function mayBeGateFile(filePath) {
   const leaf = leafName(filePath)
-  return leaf === APPROVALS_FILE || leaf === DELIVERED_FILE || leaf === DISPATCHES_FILE || leaf === CONTRACT_BASE_FILE || leaf === USER_WORDS_FILE
+  // 叶名从两份清单派生：加一份门禁专属文件时这里不会漏认（一趟只归一个会话加 owner.json 时漏过一次）。
+  return GATE_FILES.some((p) => p.split('/').pop() === leaf) || PROJECT_GATE_FILES.includes(leaf)
 }
 
 /** 任何项目的 .agent-team/runs/<id>/ 下的门禁专属文件——按路径形状认，不只认门禁这一刻认的项目根：写别的项目的批准记录

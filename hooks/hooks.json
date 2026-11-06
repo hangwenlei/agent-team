@@ -209,6 +209,21 @@
             "statusMessage": "记下需求原话…"
           }
         ]
+      },
+      {
+        "matcher": "^agent-team:(at|at-resume|at-status)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/hooks/boot.mjs",
+              "session-notice"
+            ],
+            "timeout": 30,
+            "statusMessage": "核对这一趟归哪个会话…"
+          }
+        ]
       }
     ]
   }

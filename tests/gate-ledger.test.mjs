@@ -708,7 +708,8 @@ const stateJsonOf = (projectDir) => join(projectDir, '.agent-team', 'runs', 'r1'
 // MAIN，但 JSON.stringify 会把显式的 undefined 整个键丢掉，留着它等于让测试依赖一个
 // 它没打算依赖的序列化细节）。
 const writeState = (projectDir, agentType = 'at-pm') => {
-  const input = { tool_name: 'Write', tool_input: { file_path: stateJsonOf(projectDir) } }
+  // session_id：真实的 hook 输入总带着它；不带时账本会为「读不到会话 id、这一趟不记归属」留一行痕，与这里要核的那几行痕无关。
+  const input = { tool_name: 'Write', session_id: 's-ledger', tool_input: { file_path: stateJsonOf(projectDir) } }
   if (agentType !== null) input.agent_type = agentType
   return run('ledger', input, GATE, projectDir)
 }

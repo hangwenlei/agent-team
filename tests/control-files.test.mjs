@@ -64,8 +64,16 @@ test('控制文件清单是闭集合，改了要回头同步规格 §6.2.1 与�
 import { GATE_FILES, PROJECT_GATE_FILES, leafName, mayBeGateFile, isGateFile, mayBeStateFile } from '../hooks/lib/control-files.mjs'
 
 test('M3z 门禁专属文件清单是闭集合', () => {
-  assert.deepEqual([...GATE_FILES].sort(), ['runs/*/approvals.jsonl', 'runs/*/contract-base.json', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl', 'runs/*/user-words.json'])
+  assert.deepEqual([...GATE_FILES].sort(), ['runs/*/approvals.jsonl', 'runs/*/contract-base.json', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl', 'runs/*/owner.json', 'runs/*/user-words.json'])
   assert.deepEqual([...PROJECT_GATE_FILES].sort(), ['user-words.json'])
+})
+
+test('mayBeGateFile 认得清单里的每一个叶名（加一份门禁专属文件时预筛跟着认，带流后缀、结尾带点的写法才会被拒）', () => {
+  const leaves = [...GATE_FILES.map((p) => p.split('/').pop()), ...PROJECT_GATE_FILES]
+  for (const leaf of leaves) {
+    assert.equal(mayBeGateFile('/proj/.agent-team/runs/r1/' + leaf), true, leaf)
+    assert.equal(mayBeGateFile('/proj/.agent-team/runs/r1/' + leaf + '::$DATA'), true, leaf + '::$DATA')
+  }
 })
 
 test('M4o isGateFile：项目一级的原话记录 .agent-team/user-words.json 也是门禁专属；多一层、.agent-team 之外的同名文件不是', () => {
