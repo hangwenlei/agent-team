@@ -128,11 +128,19 @@ export function mentionsRunId(text, runId) {
  * 这一次问里还有别的题。
  */
 export function takeoverAnswer(toolResponse) {
+  return labelAnswer(toolResponse, [TAKEOVER_LABEL, TAKEOVER_CLOSE_LABEL])
+}
+
+/**
+ * 通用的认法：tool_response 里有没有在单独一道单选题里干净地选了 labels 之一。认上了回 { label, question }；像是选了、却不记回 { why }（形状同 takeoverAnswer）；
+ * 一个像样的都没有回 null。接手与放弃（hooks/lib/abandon.mjs）共用。
+ */
+export function labelAnswer(toolResponse, labels) {
   if (!isPlainObject(toolResponse) || !isPlainObject(toolResponse.answers)) return null
   const tr = toolResponse
   const questions = Array.isArray(tr.questions) ? tr.questions : []
   // 用到时才归一化：加载这个模块时不调任何会被注入异常的内建。
-  const keys = [TAKEOVER_LABEL, TAKEOVER_CLOSE_LABEL].map((l) => [l, normalizeLabel(l)])
+  const keys = labels.map((l) => [l, normalizeLabel(l)])
   const labelOf = (a) => (typeof a === 'string' ? keys.find(([, k]) => normalizeLabel(a).startsWith(k)) : undefined)
   const hits = []
   for (const [text, answer] of Object.entries(tr.answers)) {

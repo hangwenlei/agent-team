@@ -92,15 +92,15 @@ $ARGUMENTS
   （例：`20260917-1430-login-sso`）。
 - 建目录 `.agent-team/runs/<run_id>/`。
 - 照 `${CLAUDE_PLUGIN_ROOT}/templates/state.json` 写 `.agent-team/runs/<run_id>/state.json`。
-  模板的顶层键**照着写，一个都不要省**：除 `mode`、`trimmed`、`stage_roles`、`rework_base` 与 `closed_at` 以外，少任何一个都会被账本回传报成
-  状态不合法；这五个少了账本**不会**报——校验对它们是向后兼容的（都是后加的字段，更早落盘的
+  模板的顶层键**照着写，一个都不要省**：除 `mode`、`trimmed`、`stage_roles`、`rework_base`、`closed_at` 与 `abandoned` 以外，少任何一个都会被账本回传报成
+  状态不合法；这几个少了账本**不会**报——校验对它们是向后兼容的（都是后加的字段，更早落盘的
   run 里没有它们），但那是给旧 run 留的口子，不是让新 run 省掉它们的理由。`stage_roles` 另有一道：建 run 那一次少了 `stage_roles`（或者值不是对象），门禁拒这次写入
   （少了它，门禁会按旧 run 的整趟口径判这一趟）；之后每次写 `state.json` 都带着它、值是对象，去掉它或者改成别的写入同样被拒。逐个填法如下：
   `run_id` 填你上面生成的那个 run id（**必须与目录名逐字相同**），`mode` 照模板写 `"full"`（这是完整的一趟；建好之后不许改），`stage` 填 `S1`，
   `history` 填一条 `{ "stage": "S1", "at": "<门禁给的时间>" }`，`contract_sha` 保持
   `PENDING`，`roster` 与 `never_invoked` 先留空数组，`artifacts`、`rework`、`stage_roles`、`trimmed` 与 `rework_base`
   先留空对象——`artifacts` 会在每段产物写完之后按回传逐条补上，`rework_base` 只在回退时生成（见第 3 节的「回退」），
-  `escalations` 先留空数组；`closed_at` 先写成 null（JSON 的空值，不带引号）——它是收口标记，收口时（第 6 节）才写成时间。
+  `escalations` 先留空数组；`closed_at` 先写成 null（JSON 的空值，不带引号）——它是收口标记，收口时（第 6 节）才写成时间；`abandoned` 照模板写 false（放弃这一趟时才与 `closed_at` 一起写成 true，见第 1 节「放弃这一趟」）。
   `state.json` 里这次新写的时间（`history` 新追加的那一条、`escalations` 新记的那一条的 at、`closed_at`）和契约的冻结时间写真实的时间：用这次写入之前最后拿到的门禁时间（自检的回复与【阶段】都带着），不要估——你没有钟，估出来的会越写越偏；已经写下的时间原样带着，不跟着换。拿到之后又等过用户或角色的，先照你的角色说明里「门禁自检」那一节再做一次、取一次时间（门禁照样拒那次写入，回复里带着此刻的时间，不弹权限窗）。
 - 写 `.agent-team/current-run`，内容就是 run id 本身，**不带换行以外的任何东西，
   不含路径分隔符**。写完之后要是收到【project.json】，里面的阻断与要改先照 `/agent-team:at-init`

@@ -23,6 +23,7 @@ import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideModeKey, decideRework, decideReworkBase, decideStageRolesKey, parseStateText, replayEdit } from './lib/rework-guard.mjs'
 import { isTweakRun, pickRun } from './lib/runpick.mjs'
 import { decideExclusion } from './lib/parallel.mjs'
+import { abandonAnswer, abandonLine, abandonNotice, decideAbandon, isAbandoning, readAbandoned } from './lib/abandon.mjs'
 import { claimLine, readClaims, claimBlock, claimDenyReason } from './lib/claims.mjs'
 import { TWEAK_MODE, TWEAK_STAGES_FILE, decideTweakDone, doneAnswer, doneLine, doneNotice, implStageOf, modeOf, promptDone, readDoneShas, stagesFileFor, tweakRoster } from './lib/tweak.mjs'
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
@@ -1791,6 +1792,38 @@ function recordTakeover(input) {
   return { kind: 'takeover-recorded', notice: takeoverNotice({ runId, why: null }) }
 }
 
+// 放弃收尾（hooks/lib/abandon.mjs）：用户在 AskUserQuestion 里选了「放弃这一趟」——挑出来的这一趟（这个会话名下的微调，不然 current-run 指着的那一趟）
+// 题面里原样写着它的 run id、没收口、不归别的会话时，往它的 approvals.jsonl 追加一行。回 null（不像这一句）或 { kind（给用户那一行）、notice（给项目经理那一段） }。
+function recordAbandon(input) {
+  const a = abandonAnswer(input?.tool_response)
+  if (!a) return null
+  const skip = (why, runId = null) => {
+    process.stderr.write(`agent-team approval-ask：没有记成放弃（${why}）。\n`)
+    return { kind: 'abandon-skipped', notice: abandonNotice({ runId, why }) }
+  }
+  if (a.why) return skip(a.why)
+  const ctx = runCtxFor(input)
+  if (!ctx.ok) return skip('no-run')
+  if (!mentionsRunId(a.question, ctx.runId)) return skip('unbound', ctx.runId)
+  if (closedAt(ctx.state) !== null) return skip('closed', ctx.runId)
+  if (blocksMe(ownerInfoOf(ctx.agentTeamDir)(ctx.runId), input.session_id)) return skip('other-session', ctx.runId)
+  try {
+    withApprovalsLock(ctx.runDir, () => {
+      const file = join(ctx.runDir, APPROVALS_FILE)
+      let prev = null
+      try {
+        prev = readFileSync(file)
+      } catch {}
+      const sep = prev && prev.length && prev[prev.length - 1] !== 0x0a ? '\n' : ''
+      appendFileSync(file, `${sep}${abandonLine({ at: new Date().toISOString(), runId: ctx.runId })}\n`)
+    })
+  } catch {
+    return skip('write-failed', ctx.runId)
+  }
+  process.stderr.write(`agent-team approval-ask：已记下放弃 ${quote(ctx.runId)} 这一趟的批准。\n`)
+  return { kind: 'abandon-recorded', notice: abandonNotice({ runId: ctx.runId, why: null }) }
+}
+
 // 单个微调（hooks/lib/tweak.mjs）：用户说了「可以了，收尾」（AskUserQuestion 里干净地单选，或者对话里单独发这一句）——current-run 那一趟是微调、停在实现段、
 // 不归别的会话时，往它的 approvals.jsonl 追加一行，绑在门禁按磁盘算的契约 sha 上。回 null（不像这一句）或 { kind（给用户那一行）、notice（给项目经理那一段） }。
 function recordTweakDone(input, source) {
@@ -2815,7 +2848,12 @@ function main() {
         dispatchLog = readDispatchLog(readFileSync(join(runDir, DISPATCHES_FILE), 'utf8'))
         dispatched = dispatchedByStage(dispatchLog)
       } catch {}
-      const closing = decideClosing({ before, after, stages: stagesForRework, diskSha, atPath: join(ROOT, 'commands', 'at.md'), dispatched })
+      // 放弃收尾（hooks/lib/abandon.mjs）：abandoned 的形状与放弃那一次的条件（批准记在同一个目录的 approvals.jsonl）。放弃那一次不核产物：
+      // decideClosing 的关上判据与下面收口、推进时读产物的几条（契约基线、测试报告、验收结论、「可以了，收尾」）都不跑。
+      const ab = decideAbandon({ before, after, approved: readAbandoned(approvalsText) })
+      if (!ab.ok) denyAndExit(ab.reason, spec.event)
+      const abandoning = isAbandoning(before, after)
+      const closing = abandoning ? { ok: true } : decideClosing({ before, after, stages: stagesForRework, diskSha, atPath: join(ROOT, 'commands', 'at.md'), dispatched })
       if (!closing.ok) denyAndExit(closing.reason, spec.event)
 
       const r = decideRework({ before, after, stages: stagesForRework, grants: readGrants(approvalsText, stagesForRework) })
@@ -2892,7 +2930,7 @@ function main() {
         diskSha,
         lastDispatchAt: lastDispatchAtOf(stagesForRework, dispatchLog),
       })
-      if (!cb.ok) denyAndExit(cb.reason, spec.event)
+      if (!cb.ok && !abandoning) denyAndExit(cb.reason, spec.event)
 
       // M4o（docs/50，审查第 20 条修法 A）：推进出第一段时，契约第 1 节对不上用户在 /agent-team:at 后面写的原话或批准的需求稿（docs/95）（这一趟建起来那一次绑进 run 目录的
       // 记录），拒。没有记录的（更早建的 run、别的会话建的、不经门禁建的、命令没带参数、收口之后照用户的消息另起的）不核。
@@ -2961,7 +2999,7 @@ function main() {
         },
         dispatched,
       })
-      if (!tv.ok) denyAndExit(tv.reason + approvalDiagnostic(filePath, input), spec.event)
+      if (!tv.ok && !abandoning) denyAndExit(tv.reason + approvalDiagnostic(filePath, input), spec.event)
 
       // docs/71：验收那一段整段裁掉时，收口那一次读测试报告的第一行——不是「结论：通过」、又没有门禁记下的照现状交付批准的，拒（跑不起来也算：
       // 这一趟没有一样验证过）。验收那一段没裁的，由下面的验收结论判据管。
@@ -2979,14 +3017,14 @@ function main() {
         },
         dispatched,
       })
-      if (!tc.ok) denyAndExit(tc.reason + approvalDiagnostic(filePath, input), spec.event)
+      if (!tc.ok && !abandoning) denyAndExit(tc.reason + approvalDiagnostic(filePath, input), spec.event)
 
       // M4k（docs/46，docs/35 §5「收口不读验收结论」）：验收结论首行——推进出验收那一段与收口时，不是「结论：通过」、又没有门禁记下的
       // 照现状交付批准（approvals.jsonl 里 sha 等于它现在的 sha），拒（hooks/lib/verdict.mjs）。排在最后：对着上一版契约的结论先重出，
       // 读它的首行才有意义。批准读同一个目录下的 approvals.jsonl（上面读过；读不出来当一条都没有——更严的一侧）。
       // 单个微调：推出实现段要用户对现在这份契约说过「可以了，收尾」（approvals.jsonl 里 tweak-done 那一行，hooks/lib/tweak.mjs 的 decideTweakDone）。
       const td = decideTweakDone({ before, after, stages: stagesForRework, contractSha: diskSha(CONTRACT_FILE).sha, doneShas: readDoneShas(approvalsText) })
-      if (!td.ok) denyAndExit(td.reason, spec.event)
+      if (!td.ok && !abandoning) denyAndExit(td.reason, spec.event)
       const acceptanceDef = acceptanceOf(stagesForRework)
       // 评审 F11：阶段链读得出、却认不出验收那一段（插件的 stages.json 改坏了）：这一次不读验收结论，留一行痕。
       // 单个微调：短链本来就没有验收段（测试段带 "test": true），不留这一行；正常链被改坏、丢了验收段的照旧留。
@@ -3007,7 +3045,7 @@ function main() {
         dispatched,
       })
       // 评审 F10：照理由问用户之前，补一句批准会不会记不下（与返工预算那一支同一份诊断）。
-      if (!ac.ok) denyAndExit(ac.reason + approvalDiagnostic(filePath, input), spec.event)
+      if (!ac.ok && !abandoning) denyAndExit(ac.reason + approvalDiagnostic(filePath, input), spec.event)
     }
   }
 
@@ -3720,7 +3758,9 @@ function main() {
     const takeover = ask ? recordTakeover(input) : null
     // 单个微调：「可以了，收尾」两个记录器都认（对话里单独发这一句的那一路什么都不回传，只留痕）。
     const tweakDone = recordTweakDone(input, ask ? 'ask' : 'prompt')
-    const extras = [brief, takeover, ask ? tweakDone : null].filter(Boolean)
+    // 放弃收尾：只在 AskUserQuestion 上认（题面要带 run id）。
+    const abandon = ask ? recordAbandon(input) : null
+    const extras = [brief, takeover, ask ? tweakDone : null, abandon].filter(Boolean)
     // M4k（docs/46）：两个记录器也认「照现状交付」（候选 { deliver: true }，按 sha 绑在那一刻的验收结论上）。
     const found = ask
       ? askAnswers(input.tool_response)

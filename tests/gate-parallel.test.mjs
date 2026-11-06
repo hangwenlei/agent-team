@@ -330,3 +330,58 @@ test('认领：t1 收口之后 a2 写 web/a.ts 放行；项目经理（主线程
     assert.equal(denied(write(p, join(p, 'web', 'a.ts'), A2)), false)
   })
 })
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// 放弃收尾（hooks/lib/abandon.mjs）：用户在 AskUserQuestion 里选「放弃这一趟」（题面带 run id），门禁记下；之后一次写入记 closed_at 与 abandoned: true。
+const writeState = (p, id, sid, state) =>
+  run(
+    'rework',
+    { hook_event_name: 'PreToolUse', tool_name: 'Write', agent_type: PM, session_id: sid, tool_input: { file_path: join(p, '.agent-team', 'runs', id, 'state.json'), content: JSON.stringify(state, null, 2) } },
+    GATE,
+    p,
+  )
+const askAbandon = (p, runId, sid, answer = '放弃这一趟') => {
+  const questions = [{ question: `放弃 ${runId} 这一趟吗？改过的文件已经列在上面。`, header: '放弃', multiSelect: false, options: [{ label: '放弃这一趟', description: '' }, { label: '不放弃', description: '' }] }]
+  return run(
+    'approval-ask',
+    { hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion', agent_type: PM, session_id: sid, tool_input: { questions }, tool_response: { questions, answers: { [questions[0].question]: answer } } },
+    GATE,
+    p,
+  )
+}
+const approvalsOf = (p, id) => {
+  try {
+    return readFileSync(join(p, '.agent-team', 'runs', id, 'approvals.jsonl'), 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+test('放弃一趟微调：没批准写 abandoned 拒；s-1 选「放弃这一趟」记进 t1；之后停在 S5 也放弃得了；放弃之后建完整的一趟放行；s-2 选这个标签不记', () => {
+  withProject({ runs: [{ id: 't1', owner: 's-1' }] }, (p) => {
+    const abandoned = { ...stateOf('t1', { stage: 'S5' }), closed_at: AT, abandoned: true }
+    const no = writeState(p, 't1', 's-1', abandoned)
+    assert.equal(denied(no), true)
+    assert.match(reasonOf(no), /放弃这一趟/)
+    assert.equal(denied(askAbandon(p, 't1', 's-2')), false)
+    assert.doesNotMatch(approvalsOf(p, 't1'), /abandon/, 's-2 的回答不记')
+    const rec = askAbandon(p, 't1', 's-1')
+    assert.match(ctxText(rec), /【放弃】/)
+    assert.match(approvalsOf(p, 't1'), /"kind":"abandon"/)
+    assert.equal(denied(writeState(p, 't1', 's-1', abandoned)), false, ctxText(rec))
+    writeFileSync(join(p, '.agent-team', 'runs', 't1', 'state.json'), JSON.stringify(abandoned))
+    assert.equal(denied(create(p, 'f9', 'full', 's-3')), false, '放弃了的微调不再挡完整的一趟')
+  })
+})
+
+test('放弃一趟完整的需求：current-run 指着 s-1 的 f1（停在 S3），选「放弃这一趟」、写 abandoned 放行；之后 s-1 建微调放行', () => {
+  withProject({ pointer: 'f1', runs: [{ id: 'f1', mode: 'full', stage: 'S3', owner: 's-1', history: H('S1', 'S2', 'S3') }] }, (p) => {
+    askAbandon(p, 'f1', 's-1')
+    assert.match(approvalsOf(p, 'f1'), /"kind":"abandon"/)
+    const abandoned = { ...stateOf('f1', { mode: 'full', stage: 'S3', history: H('S1', 'S2', 'S3') }), closed_at: AT, abandoned: true }
+    assert.equal(denied(writeState(p, 'f1', 's-1', abandoned)), false)
+    writeFileSync(join(p, '.agent-team', 'runs', 'f1', 'state.json'), JSON.stringify(abandoned))
+    pendingWords(p, 's-1')
+    assert.equal(denied(create(p, 't3', 'tweak', 's-1')), false)
+  })
+})

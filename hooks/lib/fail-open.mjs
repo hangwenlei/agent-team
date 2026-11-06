@@ -281,6 +281,11 @@ export function systemMessage(kind, { cause, check } = {}) {
       return 'agent-team 微调：已记下你说的「可以了，收尾」（只对现在这份需求有效），项目经理已收到。'
     case 'tweak-done-skipped':
       return 'agent-team 微调：这次的回答没有记成「可以了，收尾」，项目经理已收到原因。'
+    // 放弃收尾：批准记录器记下的「放弃这一趟」。
+    case 'abandon-recorded':
+      return 'agent-team 放弃：已记下你批准放弃这一趟，项目经理照这个收尾、冻结它，项目经理已收到。'
+    case 'abandon-skipped':
+      return 'agent-team 放弃：这次的回答没有记成放弃，项目经理已收到原因。'
     case 'input':
       if (RECORDERS.has(check)) {
         return 'agent-team 批准记录：读不出这次的 hook 输入，这次的回答没有记下。Claude Code 与插件的版本可能不匹配，两者都更新后再试。'
