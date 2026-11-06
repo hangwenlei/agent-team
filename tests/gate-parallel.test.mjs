@@ -539,3 +539,39 @@ test('一整趟并行：s-1 的 t1 与 s-2 的 t2 同时走到 S5，a2 撞上 t1
     assert.equal(ownerOf(p, 't2'), 's-2')
   })
 })
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// 平台没给会话 id 时（挑不出这个会话名下的微调、按 current-run 判了），回传不叫项目经理去改 current-run——微调不写它。
+const ledgerOf = (p, file, sid) => write(p, file, sid === null ? { sid: null } : { sid }, { check: 'ledger', event: 'PostToolUse' })
+
+test('读不到会话 id：项目经理写微调 t1 的派发，current-run 指着 f1——账本说是微调、不要去改 current-run，不叫它把指针指过去', () => {
+  withProject({ pointer: 'f1', runs: [{ id: 'f1', mode: 'full', stage: 'S3', owner: 's-9', history: H('S1', 'S2', 'S3') }, { id: 't1', owner: 's-1' }] }, (p) => {
+    const ctx = ctxText(ledgerOf(p, join(p, '.agent-team', 'runs', 't1', '04-dispatch.md'), null))
+    assert.match(ctx, /微调/)
+    assert.match(ctx, /不要去改/)
+    assert.doesNotMatch(ctx, /current-run 指到它/)
+  })
+})
+
+test('读不到会话 id、current-run 指着的那一趟 state.json 坏了：写微调 t1 的契约，同样说是微调、不叫它改指针', () => {
+  withProject({ pointer: 'f1', runs: [{ id: 'f1', mode: 'full', stage: 'S3', owner: 's-9' }, { id: 't1', owner: 's-1' }] }, (p) => {
+    writeFileSync(join(p, '.agent-team', 'runs', 'f1', 'state.json'), '{ 坏')
+    const ctx = ctxText(ledgerOf(p, join(p, '.agent-team', 'runs', 't1', '00-contract.md'), null))
+    assert.match(ctx, /微调/)
+    assert.doesNotMatch(ctx, /current-run 指到它/)
+  })
+})
+
+test('读不到会话 id：微调 t1 推进被拒时，诊断说是微调、不叫它把 current-run 指回来；带着会话 id 不加这一句', () => {
+  const files = { '00-contract.md': DOC('契约'), '04-dispatch.md': DOC('派发'), '05-impl/at-frontend.md': DOC('实现'), '06-test.md': '结论：不通过\n' }
+  withProject({ runs: [{ id: 't1', owner: 's-1', stage: 'S6', files, extra: { stage_roles: { S5: ['at-frontend'] }, roster: ['at-frontend'] } }] }, (p) => {
+    const next = { ...stateOf('t1', { stage: 'S8', extra: { stage_roles: { S5: ['at-frontend'] }, roster: ['at-frontend'] } }) }
+    const noSid = run('rework', { hook_event_name: 'PreToolUse', tool_name: 'Write', agent_type: PM, tool_input: { file_path: join(p, '.agent-team', 'runs', 't1', 'state.json'), content: JSON.stringify(next, null, 2) } }, GATE, p)
+    assert.equal(denied(noSid), true)
+    assert.match(reasonOf(noSid), /微调/)
+    assert.doesNotMatch(reasonOf(noSid), /指回/)
+    const withSid = writeState(p, 't1', 's-1', next)
+    assert.equal(denied(withSid), true)
+    assert.doesNotMatch(reasonOf(withSid), /另外：/)
+  })
+})

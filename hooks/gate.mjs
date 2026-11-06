@@ -1636,6 +1636,26 @@ function delegationRoster(input) {
 // 出路按情形给——新建的就是那一趟（指针指过去；契约与项目经理自己的产物原样重写拿回传，别的角色的产物指过去之后 H3 拒项目经理写它，派它的产者
 // 重交）；写错了目录（照原样写进指针指着的那一趟，那一趟读不出来时不给）；要接着做那一趟（用户定过放弃的、拿不准的先问用户，它已经收口就不能接着做）。
 // 目录名当不了 run id 的，不给「指过去」「接着做」。指针指着的那一趟读不出来（currentBroken）：叫它别去修那一趟（/agent-team:at 第 1 节）。
+// 并行微调：这个 run 目录是不是一趟门禁记过的微调（tweaksAt 里的那一项，不是回 null）。
+function tweakOfDir(agentTeamDir, dir) {
+  try {
+    if (typeof agentTeamDir !== 'string' || typeof dir !== 'string') return null
+    const key = norm(dir)
+    return tweaksAt(agentTeamDir).find((t) => norm(t.dir) === key) ?? null
+  } catch {
+    return null
+  }
+}
+
+// 并行微调：项目经理写了一趟微调的 run 目录、门禁却没认出它归这个会话（平台没给会话 id，按 current-run 判了）——不叫它去改 current-run（微调不写它）。
+// run id 是磁盘上的目录名，过 quote；产物名是插件自己的名字。
+function tweakUnpickedNotice(id, name) {
+  return (
+    `【微调】这次写的是微调 ${quote(id)} 那一趟 run 目录里的 ${name}。门禁按会话认微调，这一次没认出它归这个会话（hook 输入里读不到会话 id），按 current-run 判了：` +
+    '这次写入没有 sha 回传、不进账本比对。微调不写 current-run，不要去改它；照常接着做这一趟，告诉用户门禁这一次没核这份文件。'
+  )
+}
+
 function pointerNotice(other, currentId, { currentBroken = false } = {}) {
   const X = quote(other.id)
   const C = quote(currentId)
@@ -2053,6 +2073,14 @@ function withDupFix(report, dups) {
 function approvalDiagnostic(stateFile, input) {
   try {
     const ctx = runCtxFor(input)
+    // 并行微调：这份 state.json 是一趟微调的、门禁这一次没认出它归这个会话——记录器同样认不出，回答记不下；不叫它去改 current-run（微调不写它）。
+    const tw = tweakOfDir(join(ROOT_PROJECT, '.agent-team'), dirname(stateFile))
+    if (tw && (!ctx.ok || norm(ctx.runDir) !== norm(dirname(stateFile)))) {
+      return (
+        `\n另外：这份 state.json 是微调 ${quote(tw.id)} 的。门禁按会话认微调，这一次没认出它归这个会话（hook 输入里读不到会话 id，或者它归别的会话），` +
+        '用户的回答会记不下。微调不写 current-run，不要去改它；告诉用户这一次的批准记不下。'
+      )
+    }
     if (!ctx.ok) {
       return ctx.kind === 'no-run'
         ? '\n另外：门禁现在找不到进行中的 run（.agent-team/current-run 不在），用户的回答会记不下——先把 current-run 指回这一趟 run。'
@@ -3351,7 +3379,8 @@ function main() {
             stages = JSON.parse(normalizeText(readFileSync(join(ROOT, 'stages.json'), 'utf8')))
           } catch {}
           const other = otherRunWrite({ agentTeamDir: ctx.agentTeamDir, currentRunDir: join(ctx.agentTeamDir, 'runs', pid), stages }, filePath)
-          if (other) emitHookJson(spec.event, { contexts: [pointerNotice({ ...other, closed: runClosed(other.dir) }, pid, { currentBroken: true })] })
+          if (other && tweakOfDir(ctx.agentTeamDir, other.dir)) emitHookJson(spec.event, { contexts: [tweakUnpickedNotice(other.id, other.name)] })
+          else if (other) emitHookJson(spec.event, { contexts: [pointerNotice({ ...other, closed: runClosed(other.dir) }, pid, { currentBroken: true })] })
         }
       }
       if (
@@ -3379,7 +3408,9 @@ function main() {
     // 不进账本比对，门禁照旧按指针指着的那一趟判。只在写者是项目经理时说（执行角色写别的 run 的目录，H3 本来就拒）。
     if (isContractWriter(input.agent_type)) {
       const other = otherRunWrite({ agentTeamDir: ctx.agentTeamDir, currentRunDir: ctx.runDir, stages: ctx.stages }, filePath)
-      if (other) emitHookJson(spec.event, { contexts: [pointerNotice({ ...other, closed: runClosed(other.dir) }, basename(ctx.runDir))] })
+      // 并行微调：写的是一趟微调（没认出它归这个会话），说微调那一句、不叫它改指针。
+      if (other && tweakOfDir(ctx.agentTeamDir, other.dir)) emitHookJson(spec.event, { contexts: [tweakUnpickedNotice(other.id, other.name)] })
+      else if (other) emitHookJson(spec.event, { contexts: [pointerNotice({ ...other, closed: runClosed(other.dir) }, basename(ctx.runDir))] })
     }
     if (!isControlFile(filePath, ctx.agentTeamDir) && !underDir(filePath, ctx.runDir)) {
       process.exit(0)
