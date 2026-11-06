@@ -195,17 +195,62 @@ export function briefNotice(why = null, { staleRun = false } = {}) {
   return `【需求稿】用户这次的回答没有记成批准：${reason}。照用户的话改好需求稿，再问一次（${REASK}）；在那之前不要建 run。`
 }
 
-/** 读一份记录（两级同一个形状，run 一级多一个 bound_at 也照读）；读不出、形状不对回 null。 */
-export function readWords(bytes) {
-  if (bytes === null || bytes === undefined) return null
+function parseJsonBytes(bytes) {
+  if (bytes === null || bytes === undefined) return undefined
   let text = Buffer.isBuffer(bytes) ? bytes.toString('utf8') : String(bytes)
   if (text.startsWith(BOM)) text = text.slice(1)
-  let v
   try {
-    v = JSON.parse(text)
+    return JSON.parse(text)
   } catch {
-    return null
+    return undefined
   }
+}
+
+/** 读一份记录（两级同一个形状，run 一级多一个 bound_at 也照读）；读不出、形状不对回 null。 */
+export function readWords(bytes) {
+  return wordsOfValue(parseJsonBytes(bytes))
+}
+
+// 一趟只归一个会话：项目一级那份原话记录按会话分开记——{ version: 2, sessions: { 会话 id: 记录 } }。两个会话先后起命令时各记各的，不再整份互相覆盖；
+// 绑定、作废、清掉都只动这个会话那一条（bindDecision、finishBinding 本来就要求同一个会话）。旧的单份记录读成只有它那个会话的一张表：升级之前挂着的照旧认。
+// run 目录里那一份（绑上之后的）仍是单份记录。
+
+/** 项目一级那份的原文 → 一张表。读不出、形状不对：空表。键与记录里的 session_id 对不上、记录形状不对的那一条不算。 */
+export function readWordsBook(bytes) {
+  const v = parseJsonBytes(bytes)
+  const sessions = {}
+  if (isPlainObject(v) && v.version === 2 && isPlainObject(v.sessions)) {
+    for (const [sid, r] of Object.entries(v.sessions)) {
+      const rec = wordsOfValue(r)
+      if (rec && rec.session_id === sid && sid !== '__proto__') sessions[sid] = rec
+    }
+    return { version: 2, sessions }
+  }
+  const one = wordsOfValue(v)
+  if (one && one.session_id !== '__proto__') sessions[one.session_id] = one
+  return { version: 2, sessions }
+}
+
+/** 这个会话那一条；没有回 null。 */
+export function wordsFor(book, sessionId) {
+  if (!isPlainObject(book) || !isPlainObject(book.sessions) || typeof sessionId !== 'string') return null
+  return Object.hasOwn(book.sessions, sessionId) ? book.sessions[sessionId] : null
+}
+
+/** 换掉（record 为 null 是删掉）这个会话那一条，给一张新表；入参不变。 */
+export function withWords(book, sessionId, record) {
+  const sessions = { ...(isPlainObject(book) && isPlainObject(book.sessions) ? book.sessions : {}) }
+  if (record === null) delete sessions[sessionId]
+  else if (typeof sessionId === 'string' && sessionId !== '__proto__') sessions[sessionId] = record
+  return { version: 2, sessions }
+}
+
+/** 写盘用的原文（两格缩进，结尾换行）。 */
+export function bookText(book) {
+  return `${JSON.stringify({ version: 2, sessions: isPlainObject(book) && isPlainObject(book.sessions) ? book.sessions : {} }, null, 2)}\n`
+}
+
+function wordsOfValue(v) {
   if (!isPlainObject(v)) return null
   if (typeof v.args !== 'string' || v.args.trim() === '') return null
   if (typeof v.session_id !== 'string' || v.session_id === '') return null

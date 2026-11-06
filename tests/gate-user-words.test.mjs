@@ -15,7 +15,7 @@ import { join } from 'node:path'
 import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { reworkFromHistory } from '../hooks/lib/state.mjs'
-import { USER_WORDS_FILE } from '../hooks/lib/user-words.mjs'
+import { USER_WORDS_FILE, pendingRecord, readWordsBook, wordsFor } from '../hooks/lib/user-words.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 
 const NL = String.fromCharCode(10)
@@ -43,7 +43,8 @@ const expansion = (args = ARGS, over = {}) => ({
 })
 const posted = (file, sid = 's-1') => ({ hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'agent-team:at-pm', session_id: sid, tool_input: { file_path: file } })
 const pendingPath = (projectDir) => join(projectDir, '.agent-team', USER_WORDS_FILE)
-const pendingOf = (projectDir) => JSON.parse(readFileSync(pendingPath(projectDir), 'utf8'))
+// 项目一级那份按会话分开记：取这个会话那一条。
+const pendingOf = (projectDir, sid = 's-1') => wordsFor(readWordsBook(readFileSync(pendingPath(projectDir))), sid)
 const boundOf = (runDir) => JSON.parse(readFileSync(join(runDir, USER_WORDS_FILE), 'utf8'))
 const point = (projectDir, id) => writeFileSync(join(projectDir, '.agent-team', 'current-run'), id)
 // docs/78：建 run 的那一次要带着 stage_roles（照模板写成 {}），不带的 H6 拒。
@@ -106,7 +107,7 @@ function advance(runDir, to, sid = 's-1') {
   return stateWrite(runDir, { ...now, stage: to, history: next, rework: reworkFromHistory(next), contract_sha }, sid)
 }
 
-test('记录器：/agent-team:at 展开时把参数、会话 id、那一刻 runs/ 下已有的 run 记进 .agent-team/user-words.json；stdout 一个字都不写；再来一次就换成新的', () => {
+test('记录器：/agent-team:at 展开时把参数、会话 id、那一刻 runs/ 下已有的 run 记进 .agent-team/user-words.json；stdout 一个字都不写；同一个会话再来一次就换成新的，别的会话的那份不动', () => {
   const dirs = makeRun({ runId: 'r0', stage: 'S5' })
   try {
     const r = run('user-words', expansion(), GATE, dirs.projectDir)
@@ -120,8 +121,11 @@ test('记录器：/agent-team:at 展开时把参数、会话 id、那一刻 runs
     assert.equal(p.dropped, null)
     assert.ok(typeof p.at === 'string' && !Number.isNaN(Date.parse(p.at)), p.at)
     run('user-words', expansion('换一个需求', { session_id: 's-2' }), GATE, dirs.projectDir)
-    assert.equal(pendingOf(dirs.projectDir).args, '换一个需求')
-    assert.equal(pendingOf(dirs.projectDir).session_id, 's-2')
+    assert.equal(pendingOf(dirs.projectDir, 's-2').args, '换一个需求')
+    assert.equal(pendingOf(dirs.projectDir, 's-2').session_id, 's-2')
+    assert.equal(pendingOf(dirs.projectDir, 's-1').args, ARGS, '别的会话的那份不动')
+    run('user-words', expansion('同一个会话再来一次'), GATE, dirs.projectDir)
+    assert.equal(pendingOf(dirs.projectDir, 's-1').args, '同一个会话再来一次', '同一个会话的换成新的')
   } finally {
     cleanup(dirs)
   }
@@ -165,7 +169,7 @@ test('记录器（复核 docs/50 §9，门禁低 3）：不带参数的 /agent-t
     assert.ok(!existsSync(pendingPath(dirs.projectDir)), '这个会话的那份清掉了')
     run('user-words', expansion('别的会话的需求', { session_id: 's-2' }), GATE, dirs.projectDir)
     run('user-words', expansion('  ', { prompt: '/agent-team:at' }), GATE, dirs.projectDir)
-    assert.equal(pendingOf(dirs.projectDir).args, '别的会话的需求', '别的会话的那份不动')
+    assert.equal(pendingOf(dirs.projectDir, 's-2').args, '别的会话的需求', '别的会话的那份不动')
   } finally {
     cleanup(dirs)
   }
@@ -487,6 +491,72 @@ test('H3：两份原话记录都是门禁专属文件——项目经理的 Write
       }
     }
   })
+})
+
+// 一趟只归一个会话：项目一级那份原话记录按会话分开记，两个会话起命令不再互相覆盖。
+test('按会话分开记：两个会话先后展开 /agent-team:at，两份原话都在；s-1 之后建 run，绑的是 s-1 那一份、s-2 那份不动', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S1' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r1'), { recursive: true, force: true })
+    run('user-words', expansion(ARGS), GATE, dirs.projectDir)
+    run('user-words', expansion('另一个会话的需求', { session_id: 's-2' }), GATE, dirs.projectDir)
+    assert.equal(pendingOf(dirs.projectDir, 's-1').args, ARGS)
+    assert.equal(pendingOf(dirs.projectDir, 's-2').args, '另一个会话的需求')
+    const runDir = createRun(dirs.projectDir, 'r1', { sid: 's-1' })
+    assert.equal(boundOf(runDir).args, ARGS)
+    assert.equal(boundOf(runDir).session_id, 's-1')
+    assert.equal(pendingOf(dirs.projectDir, 's-1').bound, 'r1')
+    assert.equal(pendingOf(dirs.projectDir, 's-2').bound, null)
+    assert.equal(pendingOf(dirs.projectDir, 's-2').args, '另一个会话的需求')
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('按会话分开记：s-2 不带参数的命令只清掉 s-2 那一份', () => {
+  const dirs = makeRun({ runId: 'r0', stage: 'S5' })
+  try {
+    run('user-words', expansion(ARGS), GATE, dirs.projectDir)
+    run('user-words', expansion('另一个会话的需求', { session_id: 's-2' }), GATE, dirs.projectDir)
+    run('user-words', expansion('', { session_id: 's-2', prompt: '/agent-team:at' }), GATE, dirs.projectDir)
+    assert.equal(pendingOf(dirs.projectDir, 's-2'), null)
+    assert.equal(pendingOf(dirs.projectDir, 's-1').args, ARGS)
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('按会话分开记：升级之前写下的单份 user-words.json（s-1 的、还没绑）照旧绑给 s-1 建的那一趟', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S1' })
+  try {
+    rmSync(join(dirs.projectDir, '.agent-team', 'runs', 'r1'), { recursive: true, force: true })
+    const legacy = pendingRecord({ at: '2026-11-01T10:00:00Z', sessionId: 's-1', args: ARGS, runsBefore: [] })
+    writeFileSync(pendingPath(dirs.projectDir), JSON.stringify(legacy, null, 2) + NL)
+    const runDir = createRun(dirs.projectDir, 'r1', { sid: 's-1' })
+    assert.equal(boundOf(runDir).args, ARGS)
+    assert.equal(pendingOf(dirs.projectDir, 's-1').bound, 'r1')
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('按会话分开记：s-2 记原话时，s-1 那份记下的 binding（建 run 的那一次 H6 记的）不会被冲掉', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S1' })
+  try {
+    const projectDir = dirs.projectDir
+    rmSync(join(projectDir, '.agent-team', 'runs', 'r1'), { recursive: true, force: true })
+    run('user-words', expansion(ARGS), GATE, projectDir)
+    const dir = join(projectDir, '.agent-team', 'runs', 'r1')
+    // s-1 建 r1：H6 记下 binding → s-2 在落盘之前起了命令 → 落盘 → 账本绑上。
+    assert.equal(decisionOf(run('rework', stateWrite(dir, stateOf('r1'), 's-1'), GATE, projectDir).stdout), null)
+    run('user-words', expansion('另一个会话的需求', { session_id: 's-2' }), GATE, projectDir)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'state.json'), JSON.stringify(stateOf('r1'), null, 2))
+    run('ledger', posted(join(dir, 'state.json'), 's-1'), GATE, projectDir)
+    assert.equal(boundOf(dir).args, ARGS)
+  } finally {
+    cleanup(dirs)
+  }
 })
 
 test('记录器：读不出这次的 hook 输入——不拦、stdout 不写，stderr 说原话没有记下（不说「回答」）', () => {

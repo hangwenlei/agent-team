@@ -83,7 +83,7 @@ import { exoticPath, norm, underDir } from './lib/path-norm.mjs'
 import { isPlainObject, isStageChain, isVerifyStage, participantsOf, isRolePatternStage, expandProduces, productsOfStage, stageRoles, producerOfName, verifyStageOf } from './lib/stages.mjs'
 import { inline, quote } from './lib/trusted.mjs'
 import { installTrace } from './lib/trace.mjs'
-import { USER_WORDS_FILE, WORDS_FIX, bindDecision, blankAtSession, briefAnswer, briefNotice, finishBinding, matchedSection1, pendingRecord, readWords, section1Mismatch, wordsMismatchText, wordsOf } from './lib/user-words.mjs'
+import { USER_WORDS_FILE, WORDS_FIX, bindDecision, blankAtSession, bookText, briefAnswer, briefNotice, finishBinding, matchedSection1, pendingRecord, readWords, readWordsBook, withWords, wordsFor,section1Mismatch, wordsMismatchText, wordsOf } from './lib/user-words.mjs'
 import { GATE_CHECK_PATH, gateCheckReason, isGateCheck, selfCheckIdentity } from './lib/gate-check.mjs'
 import {
   SECOND_WRITE_NOTE,
@@ -1327,6 +1327,28 @@ function runDirNames(agentTeamDir) {
   }
 }
 
+// 一趟只归一个会话：项目一级的原话记录按会话分开记（hooks/lib/user-words.mjs 的 readWordsBook）。readWordsBookAt 只读；updateWordsBook 在锁里读出整张表、
+// 交给 update 改（回 null 是不改）、写回——表空了就删掉文件（与原来清掉单份记录时一样）。写不进的异常照抛，调用方各自留痕。
+function readWordsBookAt(agentTeamDir) {
+  try {
+    return readWordsBook(readFileSync(join(agentTeamDir, USER_WORDS_FILE)))
+  } catch {
+    return readWordsBook(null)
+  }
+}
+
+function updateWordsBook(agentTeamDir, update) {
+  const file = join(agentTeamDir, USER_WORDS_FILE)
+  return withFileLock(agentTeamDir, USER_WORDS_FILE, () => {
+    const next = update(readWordsBookAt(agentTeamDir))
+    if (!next) return null
+    if (Object.keys(next.sessions).length === 0) {
+      if (existsSync(file)) unlinkSync(file)
+    } else writeFileSync(file, bookText(next))
+    return next
+  })
+}
+
 // M4p：【指针】那一段。两个 run id 都是磁盘上的值（目录名、current-run 的内容），过 quote；文件名与角色名是插件自己的名字。复核（docs/51 §8）：
 // 出路按情形给——新建的就是那一趟（指针指过去；契约与项目经理自己的产物原样重写拿回传，别的角色的产物指过去之后 H3 拒项目经理写它，派它的产者
 // 重交）；写错了目录（照原样写进指针指着的那一趟，那一趟读不出来时不给）；要接着做那一趟（用户定过放弃的、拿不准的先问用户，它已经收口就不能接着做）。
@@ -1372,11 +1394,8 @@ function runClosed(dir) {
 // 基线互相卡死，续跑一趟自带记录的旧 run 不作废。写不进只是这一趟不核，留痕。
 function settleWords({ runDir, agentTeamDir, sessionId, state, stages, creating }) {
   if (typeof runDir !== 'string' || typeof agentTeamDir !== 'string') return
-  const pendingPath = join(agentTeamDir, USER_WORDS_FILE)
-  let pending = null
-  try {
-    pending = readWords(readFileSync(pendingPath))
-  } catch {}
+  // 一趟只归一个会话：只看这个会话那一条（别的会话挂着的不动）。
+  const pending = wordsFor(readWordsBookAt(agentTeamDir), sessionId)
   if (!pending) return
   const runsDir = join(agentTeamDir, 'runs')
   const ids = isStageChain(stages) ? Object.keys(stages) : []
@@ -1390,16 +1409,21 @@ function settleWords({ runDir, agentTeamDir, sessionId, state, stages, creating 
     closed: isPlainObject(state) && closedAt(state) !== null,
   })
   if (!decision) return
+  const patchMine = (patch) =>
+    updateWordsBook(agentTeamDir, (book) => {
+      const cur = wordsFor(book, sessionId)
+      return cur ? withWords(book, sessionId, { ...cur, ...patch }) : null
+    })
   try {
     if (decision === 'drop') {
-      writeFileSync(pendingPath, `${JSON.stringify({ ...pending, dropped: runId }, null, 2)}\n`)
+      patchMine({ dropped: runId })
       process.stderr.write(`agent-team user-words：${quote(runId)} 是记下原话之前就有的一趟、这次被续跑了，那份原话记录（命令带的参数或批准的需求稿）作废。\n`)
       return
     }
     // 实测（docs/58，§8 是复核）：这里是 PreToolUse——run 目录还不在（项目经理直接 Write runs/<id>/state.json，落盘时才建），这次写入也还可能被
     // 用户的权限确认拒掉。原来这里就标 bound、往 run 目录里写：目录不在时抛 ENOENT 被接住，项目一级那份却已经标了 bound，这一趟从此不核第 1 节；
     // 先建目录再写，写入被拒时又留下一个只有原话记录的空壳。现在只记 binding（打算绑到哪一趟），落盘之后由账本完成（finishWordsBinding）。
-    writeFileSync(pendingPath, `${JSON.stringify({ ...pending, binding: runId }, null, 2)}\n`)
+    patchMine({ binding: runId })
   } catch (e) {
     process.stderr.write(`agent-team user-words：原话记录写不进（${quote(e?.message ?? e, { max: 120 })}），这一趟可能不核契约第 1 节。\n`)
   }
@@ -1447,16 +1471,16 @@ function finishWordsBinding(input, filePath) {
   const parts = runStateFileOf(filePath)
   if (!parts) return
   const { runDir, runsDir, agentTeamDir } = parts
-  const pendingPath = join(agentTeamDir, USER_WORDS_FILE)
-  let pending = null
-  try {
-    pending = readWords(readFileSync(pendingPath))
-  } catch {}
+  const sid = input.session_id
+  const pending = wordsFor(readWordsBookAt(agentTeamDir), sid)
   const runId = basename(runDir)
   const sameRun = (a, b) => norm(join(runsDir, a)) === norm(join(runsDir, b))
-  if (!finishBinding(pending, { sessionId: input.session_id, runId, sameRun }) || !existsSync(filePath)) return
+  if (!finishBinding(pending, { sessionId: sid, runId, sameRun }) || !existsSync(filePath)) return
   try {
-    writeFileSync(pendingPath, `${JSON.stringify({ ...pending, binding: null, bound: runId }, null, 2)}\n`)
+    updateWordsBook(agentTeamDir, (book) => {
+      const cur = wordsFor(book, sid)
+      return cur ? withWords(book, sid, { ...cur, binding: null, bound: runId }) : null
+    })
     const own = join(runDir, USER_WORDS_FILE)
     if (!existsSync(own)) writeFileSync(own, `${JSON.stringify({ ...pending, binding: null, bound: runId, bound_at: new Date().toISOString() }, null, 2)}\n`)
   } catch (e) {
@@ -1490,7 +1514,7 @@ function recordBrief(input) {
   } catch {}
   try {
     const rec = pendingRecord({ at: new Date().toISOString(), sessionId: sid, args: b.draft, runsBefore, source: 'ask' })
-    writeFileSync(join(agentTeamDir, USER_WORDS_FILE), `${JSON.stringify(rec, null, 2)}\n`)
+    updateWordsBook(agentTeamDir, (book) => withWords(book, sid, rec))
   } catch (e) {
     process.stderr.write(`agent-team approval-ask：需求稿记不下（${quote(e?.message ?? e, { max: 120 })}）。\n`)
     return skip('write-failed')
@@ -1647,7 +1671,13 @@ function approvalDiagnostic(stateFile) {
 // 最多约 5 秒；锁文件比 5 秒还旧就当是崩掉的进程留下的，删了再拿。到头还拿不到就不加锁照做——记录器 fail open，宁可在极端情形下
 // 多记一条，也不让一条真的批准因为锁丢掉。锁文件在 run 目录里不是任何阶段的产物，H3 不让角色碰它。
 function withApprovalsLock(runDir, body) {
-  const lock = join(runDir, `${APPROVALS_FILE}.lock`)
+  return withFileLock(runDir, APPROVALS_FILE, body)
+}
+
+// 一把按文件名起的锁（<dir>/<name>.lock，O_EXCL 建、用完删；拿不到锁时最多等约 5 秒，超过 5 秒没人删的当成死锁清掉）。拿不到也照跑 body——
+// 锁只防并行的几个门禁进程互相覆盖，不是正确性的前提。批准记录、项目一级的原话记录各用一把。
+function withFileLock(dir, name, body) {
+  const lock = join(dir, `${name}.lock`)
   let fd = null
   for (let i = 0; i < 200 && fd === null; i++) {
     try {
@@ -3212,10 +3242,12 @@ function main() {
     const blank = blankAtSession(input)
     if (blank) {
       try {
-        const p = readWords(readFileSync(join(agentTeamDir, USER_WORDS_FILE)))
-        if (p && p.session_id === blank && p.bound === null && p.dropped === null) {
-          unlinkSync(join(agentTeamDir, USER_WORDS_FILE))
-          process.stderr.write('agent-team user-words：/agent-team:at 这次没带参数，这个会话之前记下的原话作废。\n')
+        if (existsSync(join(agentTeamDir, USER_WORDS_FILE))) {
+          const done = updateWordsBook(agentTeamDir, (book) => {
+            const p = wordsFor(book, blank)
+            return p && p.bound === null && p.dropped === null ? withWords(book, blank, null) : null
+          })
+          if (done) process.stderr.write('agent-team user-words：/agent-team:at 这次没带参数，这个会话之前记下的原话作废。\n')
         }
       } catch {}
       process.exit(0)
@@ -3236,7 +3268,8 @@ function main() {
     } catch {}
     try {
       const rec = pendingRecord({ at: new Date().toISOString(), sessionId: w.sessionId, args: w.args, runsBefore })
-      writeFileSync(join(agentTeamDir, USER_WORDS_FILE), `${JSON.stringify(rec, null, 2)}\n`)
+      // 一趟只归一个会话：只换这个会话那一条，别的会话挂着的不动。
+      updateWordsBook(agentTeamDir, (book) => withWords(book, w.sessionId, rec))
       process.stderr.write('agent-team user-words：已记下 /agent-team:at 后面的原话。\n')
     } catch (e) {
       process.stderr.write(`agent-team user-words：原话记不下（${quote(e?.message ?? e, { max: 120 })}），这一趟契约第 1 节不跟它核。\n`)

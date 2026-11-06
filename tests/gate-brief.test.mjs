@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { reworkFromHistory } from '../hooks/lib/state.mjs'
-import { BRIEF_LABEL, USER_WORDS_FILE } from '../hooks/lib/user-words.mjs'
+import { BRIEF_LABEL, USER_WORDS_FILE, readWordsBook, wordsFor } from '../hooks/lib/user-words.mjs'
 import { sha256OfContract } from '../hooks/lib/contract-hash.mjs'
 
 const NL = String.fromCharCode(10)
@@ -47,7 +47,8 @@ const asked = (answer, { question = DRAFT, sid = 's-1', extra = {}, notes = null
 }
 const posted = (file, sid = 's-1') => ({ hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: 'agent-team:at-pm', session_id: sid, tool_input: { file_path: file } })
 const pendingPath = (projectDir) => join(projectDir, '.agent-team', USER_WORDS_FILE)
-const pendingOf = (projectDir) => JSON.parse(readFileSync(pendingPath(projectDir), 'utf8'))
+// 项目一级那份按会话分开记：取这个会话那一条。
+const pendingOf = (projectDir, sid = 's-1') => wordsFor(readWordsBook(readFileSync(pendingPath(projectDir))), sid)
 const stateOf = (id, stage = 'S1', history = H('S1')) => ({ run_id: id, stage, contract_sha: 'PENDING', roster: [], stage_roles: {}, artifacts: {}, rework: {}, never_invoked: [], escalations: [], history })
 const stateWrite = (runDir, state, sid = 's-1') => ({
   hook_event_name: 'PreToolUse',
@@ -95,6 +96,17 @@ function project(body) {
     cleanup(dirs)
   }
 }
+
+test('批准：需求稿只写这个会话那一条，别的会话挂着的原话不动', () => {
+  project(({ projectDir }) => {
+    run('user-words', expansion('另一个会话的需求', 's-2'), GATE, projectDir)
+    run('user-words', expansion(ROUGH), GATE, projectDir)
+    run('approval-ask', asked(BRIEF_LABEL), GATE, projectDir)
+    assert.equal(pendingOf(projectDir, 's-1').args, DRAFT)
+    assert.equal(pendingOf(projectDir, 's-2').args, '另一个会话的需求')
+    assert.equal(pendingOf(projectDir, 's-2').source, 'command')
+  })
+})
 
 test('批准：选了「照这份需求开始」——题面记成这一次的原话（来源 ask），整份换掉命令那一次记下的；回传【需求稿】、给用户一行', () => {
   project(({ projectDir }) => {

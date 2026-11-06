@@ -15,6 +15,10 @@ import {
   section1Mismatch,
   wordsMismatchText,
   wordsOf,
+  readWordsBook,
+  wordsFor,
+  withWords,
+  bookText,
 } from '../hooks/lib/user-words.mjs'
 
 const NL = String.fromCharCode(10)
@@ -228,4 +232,37 @@ test('section1Mismatch 与 wordsMismatchText（复核 docs/50 §9）：对不上
   const shorter = section1Mismatch(contract(['输入格式']), '输入格式：数字')
   assert.equal(shorter.col, null, '一边是另一边的开头：不报码位')
   assert.ok(!wordsMismatchText(shorter).includes('U+'), wordsMismatchText(shorter))
+})
+
+// 项目一级那份原话记录按会话分开记（两个会话起命令不再互相覆盖）。
+const rec = (sid, args = '需求 ' + sid) => pendingRecord({ at: '2026-11-05T10:00:00Z', sessionId: sid, args, runsBefore: [] })
+
+test('readWordsBook 把旧的单份记录读成一张只有它那个会话的表；读不出的当空表', () => {
+  const legacy = readWordsBook(Buffer.from(JSON.stringify(rec('s-1'))))
+  assert.deepEqual(Object.keys(legacy.sessions), ['s-1'])
+  assert.equal(wordsFor(legacy, 's-1').args, '需求 s-1')
+  assert.equal(wordsFor(legacy, 's-2'), null)
+  assert.deepEqual(readWordsBook(Buffer.from('{')), { version: 2, sessions: {} })
+  assert.deepEqual(readWordsBook(null), { version: 2, sessions: {} })
+  assert.equal(wordsFor(readWordsBook(Buffer.from(BOM + JSON.stringify(rec('s-1')))), 's-1').args, '需求 s-1', '带 BOM 照读')
+})
+
+test('readWordsBook 读新格式：键与记录里的 session_id 对不上、记录形状不对的那一条不算', () => {
+  const raw = { version: 2, sessions: { 's-1': rec('s-1'), 's-2': rec('s-9'), 's-3': { args: '' }, ['__proto__']: rec('__proto__') } }
+  const book = readWordsBook(Buffer.from(JSON.stringify(raw)))
+  assert.deepEqual(Object.keys(book.sessions), ['s-1'])
+  assert.equal(Object.getPrototypeOf(book.sessions), Object.prototype)
+})
+
+test('withWords 只动这个会话那一条（null 删掉），不改入参；bookText 读回来是同一张表', () => {
+  const a = withWords(readWordsBook(null), 's-1', rec('s-1'))
+  const b = withWords(a, 's-2', rec('s-2'))
+  assert.deepEqual(Object.keys(a.sessions), ['s-1'])
+  assert.deepEqual(Object.keys(b.sessions).sort(), ['s-1', 's-2'])
+  const c = withWords(b, 's-1', null)
+  assert.deepEqual(Object.keys(c.sessions), ['s-2'])
+  assert.deepEqual(Object.keys(b.sessions).sort(), ['s-1', 's-2'], '入参不变')
+  const text = bookText(b)
+  assert.ok(text.endsWith(NL))
+  assert.deepEqual(readWordsBook(Buffer.from(text)), b)
 })
