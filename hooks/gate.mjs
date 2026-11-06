@@ -21,6 +21,10 @@ import { candidateStages, decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideModeKey, decideRework, decideReworkBase, decideStageRolesKey, parseStateText, replayEdit } from './lib/rework-guard.mjs'
+import { isTweakRun, pickRun } from './lib/runpick.mjs'
+import { decideExclusion, tweaksNotice } from './lib/parallel.mjs'
+import { abandonAnswer, abandonLine, abandonNotice, decideAbandon, isAbandoning, readAbandoned } from './lib/abandon.mjs'
+import { claimLine, readClaims, claimBlock, claimDenyReason } from './lib/claims.mjs'
 import { TWEAK_MODE, TWEAK_STAGES_FILE, decideTweakDone, doneAnswer, doneLine, doneNotice, implStageOf, modeOf, promptDone, readDoneShas, stagesFileFor, tweakRoster } from './lib/tweak.mjs'
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { isBlankText } from './lib/text-norm.mjs'
@@ -48,7 +52,7 @@ import {
 } from './lib/completion.mjs'
 import { mayWaive, dispatchedIn, wholeStageTrimmed, trimmedAt } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
-import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, OWNER_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
+import { APPROVALS_FILE, CLAIMS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, OWNER_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
 import { blocksMe, mentionsRunId, ownerDenyReason, ownerDispatchBlock, ownerRecord, ownerWriteBlock, readOwner, sessionNotice, takeoverAnswer, takeoverNotice } from './lib/owner.mjs'
 import {
   CONTRACT_BASE_FILE,
@@ -563,7 +567,7 @@ function selfCheckTail(input, checked) {
   try {
     if (!isContractWriter(input?.agent_type)) return ''
     if (norm(checked) !== norm(join(ROOT_PROJECT, GATE_CHECK_PATH))) return ''
-    return selfCheckAppendix(readRunContext(ROOT_PROJECT, ROOT))
+    return selfCheckAppendix(runCtxFor(input))
   } catch {
     return ''
   }
@@ -1279,10 +1283,221 @@ function ownerInfoOf(agentTeamDir) {
       } catch {}
       const owner = bytes === null ? null : readOwner(bytes)
       if (bytes !== null && !owner) process.stderr.write(`agent-team 会话归属：${quote(id)} 那一趟的归属记录在却读不出来，这一次不按会话管它。\n`)
-      info = { closed: runClosed(dir), owner }
+      info = { closed: runClosed(dir), owner, tweak: isTweakRun({ state: runStateOf(dir), words: quietWords(dir) }) }
     }
     seen.set(id, info)
     return info
+  }
+}
+
+// 并行微调：run 目录里绑上的原话记录，读不出给 null、不留痕（runWords 读不出时的留痕说的是契约第 1 节，放在这里不对）。
+function quietWords(dir) {
+  try {
+    return readWords(readFileSync(join(dir, USER_WORDS_FILE)))
+  } catch {
+    return null
+  }
+}
+
+// 并行微调（hooks/lib/runpick.mjs）：runs/ 下门禁记过的微调——[{ id, dir, open, owner（会话 id 或 null）, state, words }]，收口、放弃了的也列（open 为假）。
+// 名字不合 RUN_ID 的目录不列（当不了一趟 run），同一个目录的别名只算一次。读不出 runs/ 回空表。
+function tweaksAt(agentTeamDir) {
+  const runsDir = join(agentTeamDir, 'runs')
+  let ids
+  try {
+    ids = readdirSync(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory() || e.isSymbolicLink()).map((e) => e.name)
+  } catch {
+    return []
+  }
+  const seen = new Set()
+  const out = []
+  for (const id of ids.sort()) {
+    if (!RUN_ID.test(id)) continue
+    const dir = join(runsDir, id)
+    const key = norm(dir)
+    if (seen.has(key)) continue
+    seen.add(key)
+    const state = runStateOf(dir)
+    if (modeOf(state) !== TWEAK_MODE) continue
+    const words = quietWords(dir)
+    if (!isTweakRun({ state, words })) continue
+    let owner = null
+    try {
+      owner = readOwner(readFileSync(join(dir, OWNER_FILE)))?.session_id ?? null
+    } catch {}
+    out.push({ id, dir, open: closedAt(state) === null, owner, state, words })
+  }
+  return out
+}
+
+// 一趟微调派发记录里的 agent_id（读不出给空表）。
+function agentIdsAt(dir) {
+  try {
+    return readDispatchLog(readFileSync(join(dir, DISPATCHES_FILE), 'utf8')).dispatches.map((d) => d.agent_id)
+  } catch {
+    return []
+  }
+}
+
+// 并行微调：这个 agent_id 在不是微调的那些 run 的派发记录里有没有（skip：微调目录的规范化路径）。读不出的跳过。
+function agentInOtherRuns(agentTeamDir, agentId, skip) {
+  let ids
+  try {
+    ids = readdirSync(join(agentTeamDir, 'runs'), { withFileTypes: true }).filter((e) => e.isDirectory() || e.isSymbolicLink()).map((e) => e.name)
+  } catch {
+    return false
+  }
+  return ids.some((id) => RUN_ID.test(id) && !skip.has(norm(join(agentTeamDir, 'runs', id))) && agentIdsAt(join(agentTeamDir, 'runs', id)).includes(agentId))
+}
+
+// 并行微调：门禁这一次该按哪一趟判（hooks/lib/runpick.mjs 的 pickRun）。子代理（带 agent_id）按派发记录认回派它的那一趟微调；主线程（项目经理、
+// 不带 agent_type 的主会话；不带 agent_id）认这个会话名下没收口的那一趟微调；都不是回 null，调用方照旧按 current-run。agentId 默认取 hook 输入里的。
+// 主线程读不到会话 id、项目里又开着微调时挑不出：留一行痕再照 current-run（静默的退路与「判过了」分不出来）。出任何意外都回 null。
+function pickedRunOf(input, agentId = input?.agent_id) {
+  try {
+    const isAgent = typeof agentId === 'string' && agentId !== ''
+    const mainThread = !isAgent && !malformedCaller(input) && isContractWriter(callerOf(input))
+    if (!isAgent && !mainThread) return null
+    const tweaks = tweaksAt(join(ROOT_PROJECT, '.agent-team'))
+    if (!tweaks.length) return null
+    const sid = input?.session_id
+    const mapped = tweaks.map((t) => ({ id: t.id, open: t.open, owner: t.owner, agentIds: isAgent ? agentIdsAt(t.dir) : [] }))
+    // 按会话认的退路之前先查别的（不是微调的）run 的派发记录：别的一趟派的子代理不认到这个会话名下的微调上（终审）。
+    const agentElsewhere =
+      isAgent && !mapped.some((t) => t.agentIds.includes(agentId)) && agentInOtherRuns(join(ROOT_PROJECT, '.agent-team'), agentId, new Set(tweaks.map((t) => norm(t.dir))))
+    const picked = pickRun({ agentId: isAgent ? agentId : null, mainThread, sessionId: sid, tweaks: mapped, agentElsewhere })
+    if (!picked && mainThread && !(typeof sid === 'string' && sid !== '') && tweaks.some((t) => t.open)) {
+      process.stderr.write('agent-team 挑这一趟：hook 输入里读不到会话 id，认不出这个会话名下的微调，这一次按 current-run 判。\n')
+    }
+    return picked
+  } catch {
+    return null
+  }
+}
+
+// 并行微调：这一次的运行上下文——先挑这一趟（pickedRunOf），挑出来就读那一趟，不然照旧按 current-run。gate.mjs 里读运行上下文只经这里
+// （tests/gate-parallel.test.mjs 钉着）。
+function runCtxFor(input, agentId = input?.agent_id) {
+  const picked = pickedRunOf(input, agentId)
+  if (!picked && unclaimedTeamAgent(input, agentId)) {
+    // 开着微调、团队角色的子代理哪一趟的派发记录里都没有（current-run 那一趟的也没有）：不退回按指针判、也不按「没有 run」放行——判读不出，
+    // H3、H4 照「读不出」拒，叫它冒泡（安全审查：退回按指针判，一次没记下的派发就绕开了认领与写路径隔离）。
+    return {
+      ok: false,
+      kind: 'unreadable',
+      cause: 'agent',
+      agentTeamDir: join(ROOT_PROJECT, '.agent-team'),
+      reason: '项目里开着微调，门禁认不出你是哪一趟派的（哪一趟的派发记录里都没有你）。以「冒泡：」停下，把这一句原样回报派你的项目经理',
+    }
+  }
+  return readRunContext(ROOT_PROJECT, ROOT, picked ? { runId: picked.runId } : undefined)
+}
+
+// 并行微调（安全审查）：这一次是不是「开着微调、却认不出是哪一趟派的团队角色子代理」——带 agent_id、调用者是花名册里的角色（项目经理除外）、
+// 有没收尾的微调、current-run 那一趟的派发记录里也没有它。花名册外的子代理（别家插件的）不归这一条：它们本来就不在任何派发记录里。
+function unclaimedTeamAgent(input, agentId) {
+  try {
+    if (typeof agentId !== 'string' || agentId === '' || malformedCaller(input)) return false
+    const role = callerOf(input)
+    if (isContractWriter(role) || !Object.hasOwn(loadRoster() ?? {}, role)) return false
+    const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+    if (!tweaksAt(agentTeamDir).some((t) => t.open)) return false
+    const pid = pointerIdOf(agentTeamDir)
+    return !(pid && agentIdsAt(join(agentTeamDir, 'runs', pid)).includes(agentId))
+  } catch {
+    return false
+  }
+}
+
+// 并行微调（安全审查第二轮）：非项目经理写 .agent-team/runs/ 下、不是这一趟的 run 目录里的文件（别的一趟的契约、产物）。几趟微调并行之后
+// 「别的一趟」随时都在跑；执行角色本来就被写路径隔离挡在那里之外，花名册外的调用者原来只挡控制文件。
+function otherRunDirWrite(ctx, role, filePath) {
+  try {
+    if (isContractWriter(role) || typeof filePath !== 'string' || filePath === '' || typeof ctx?.agentTeamDir !== 'string') return false
+    return underDir(filePath, join(ctx.agentTeamDir, 'runs')) && !(typeof ctx.runDir === 'string' && underDir(filePath, ctx.runDir))
+  } catch {
+    return false
+  }
+}
+
+// 并行微调（安全审查）：只有微调、判「没有 run」时，非项目经理写 .agent-team/ 下的文件（微调的 state.json、契约、产物都在那里）——H3、H4 拒。
+// 没有微调的项目不归这一条（自举不变）。
+function tweakDirsUnguarded(ctx, role, filePath) {
+  try {
+    return !isContractWriter(role) && typeof filePath === 'string' && underDir(filePath, ctx.agentTeamDir) && tweaksAt(ctx.agentTeamDir).length > 0
+  } catch {
+    return false
+  }
+}
+
+// 原话开头（第一行非空的那一行，最多 40 个字）：【会话】【微调】与认领的拒绝理由用它帮用户认出是哪一趟。读不出给 null。
+function wordsHeadOf(words) {
+  const line = words && typeof words.args === 'string' ? words.args.split(/\r?\n/).find((l) => l.trim() !== '') : null
+  const chars = typeof line === 'string' ? Array.from(line.trim()) : []
+  return chars.length ? chars.slice(0, 40).join('') + (chars.length > 40 ? '…' : '') : null
+}
+
+// 一趟 run 的 history 第一条的时间（读不出给 null）。
+function startedAtOf(state) {
+  const first = isPlainObject(state) && Array.isArray(state.history) ? state.history[0] : null
+  return isPlainObject(first) && typeof first.at === 'string' ? first.at : null
+}
+
+// 并行微调（hooks/lib/claims.mjs）：这一次写入要不要按认领管——挑出来的这一趟是一趟没收尾、门禁记过的微调，调用者是它派出去的子代理（带 agent_id、
+// 不是项目经理），写的是项目文件（项目根之下、.agent-team/ 之外）。要管回 { key（norm 之后的绝对路径）, path（相对项目根的显示路径） }，不管回 null。
+function claimTargetOf(ctx, role, input, filePath) {
+  try {
+    const claim = claimCheckOf(ctx, role, input, filePath)
+    if (!claim || closedAt(ctx.state) !== null || !isTweakRun({ state: ctx.state, words: quietWords(ctx.runDir) })) return null
+    return claim
+  } catch {
+    return null
+  }
+}
+
+// 并行微调（终审）：这一次写入要不要拿别的开着的微调的认领去比——子代理（带 agent_id、不是项目经理）写项目文件就要，不看它那一趟开没开、是不是微调：
+// 收尾、放弃了的那一趟还在跑的人，同样不许覆盖别的微调正在改的文件。要比回 { key, path }，不比回 null。
+function claimCheckOf(ctx, role, input, filePath) {
+  try {
+    if (!ctx?.ok || isContractWriter(role) || typeof input?.agent_id !== 'string' || typeof filePath !== 'string' || filePath === '') return null
+    const projectRoot = dirname(ctx.agentTeamDir)
+    if (!underDir(filePath, projectRoot) || underDir(filePath, ctx.agentTeamDir)) return null
+    return { key: norm(filePath), path: relative(projectRoot, filePath).split(/[\\/]/).join('/') }
+  } catch {
+    return null
+  }
+}
+
+// 并行微调：别的没收尾的微调各自认领了什么——[{ id, keys, startedAt, wordsHead }]（不含这一趟）。认领记录读不出当没有。
+function otherClaimsOf(ctx) {
+  return tweaksAt(ctx.agentTeamDir)
+    .filter((t) => t.open && norm(t.dir) !== norm(ctx.runDir))
+    .map((t) => {
+      let text = null
+      try {
+        text = readFileSync(join(t.dir, CLAIMS_FILE), 'utf8')
+      } catch {}
+      return { id: t.id, keys: readClaims(text), startedAt: startedAtOf(t.state), wordsHead: wordsHeadOf(t.words) }
+    })
+}
+
+// 并行微调：落盘之后（账本）把这一次写的项目文件记进这一趟的认领——还没认领过的才记，读改写在锁里做。写不进只留痕：下一次写它时照样会记。
+function recordClaim(ctx, role, input, filePath) {
+  const claim = claimTargetOf(ctx, role, input, filePath)
+  if (!claim) return
+  try {
+    withFileLock(ctx.runDir, CLAIMS_FILE, () => {
+      const file = join(ctx.runDir, CLAIMS_FILE)
+      let prev = null
+      try {
+        prev = readFileSync(file, 'utf8')
+      } catch {}
+      if (readClaims(prev).has(claim.key)) return
+      const sep = prev && prev.length && !prev.endsWith('\n') ? '\n' : ''
+      appendFileSync(file, `${sep}${claimLine({ at: new Date().toISOString(), key: claim.key, path: claim.path, role })}\n`)
+    })
+  } catch (err) {
+    process.stderr.write(`agent-team 认领：没有记下 ${inline(claim.path)}（${quote(err?.message ?? String(err), { max: 120 })}），这一趟下一次写它时再记。\n`)
   }
 }
 
@@ -1356,7 +1571,7 @@ function delegationRoster(input) {
   try {
     if (malformedCaller(input) || !isContractWriter(callerOf(input)) || typeof input?.agent_id === 'string') return plain
     const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
-    const pid = pointerIdOf(agentTeamDir)
+    const pid = pickedRunOf(input)?.runId ?? pointerIdOf(agentTeamDir)
     if (!pid) return plain
     const runDir = join(agentTeamDir, 'runs', pid)
     const st = runStateOf(runDir)
@@ -1574,7 +1789,7 @@ function recordTakeover(input) {
   const a = takeoverAnswer(input?.tool_response)
   if (!a) return null
   const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
-  const runId = pointerIdOf(agentTeamDir)
+  let runId = pointerIdOf(agentTeamDir)
   const skip = (why) => {
     process.stderr.write(`agent-team approval-ask：没有记成接手（${why}）。\n`)
     return { kind: 'takeover-skipped', notice: takeoverNotice({ runId, why }) }
@@ -1582,12 +1797,21 @@ function recordTakeover(input) {
   if (a.why) return skip(a.why)
   const sid = input.session_id
   if (typeof sid !== 'string' || sid === '') return skip('no-session')
-  const info = runId ? ownerInfoOf(agentTeamDir)(runId) : null
+  const infoOf = ownerInfoOf(agentTeamDir)
+  // 候选：current-run 指着的那一趟（目录在的），加上别的会话名下没收尾的微调（并行微调：微调不占 current-run，原会话关了要在这里接手）。
+  const open = tweaksAt(agentTeamDir).filter((t) => t.open)
+  const candidates = [...new Set([...(runId && infoOf(runId) ? [runId] : []), ...open.filter((t) => t.owner !== sid).map((t) => t.id)])]
+  if (!candidates.length) return skip('no-run')
+  // 绑在用户看到的那一趟上：题面里要原样写着恰好一个候选的 run id。
+  const named = candidates.filter((id) => mentionsRunId(a.question, id))
+  if (named.length !== 1) return skip('unbound')
+  runId = named[0]
+  const info = infoOf(runId)
   if (!info) return skip('no-run')
-  // 绑在用户看到的那一趟上：题面里要原样写着 current-run 现在指着的那一趟的 run id。
-  if (!mentionsRunId(a.question, runId)) return skip('unbound')
   if (info.closed) return skip('closed')
   if (info.owner && info.owner.session_id === sid) return skip('already-mine')
+  // 一个会话同一时刻只做一趟微调：名下已有一趟没收尾的，不再接手另一趟微调。
+  if (info.tweak === true && open.some((t) => t.owner === sid)) return skip('has-tweak')
   try {
     const rec = ownerRecord({ sessionId: sid, at: new Date().toISOString(), via: 'takeover', previous: info.owner ? info.owner.session_id : null })
     writeFileSync(join(agentTeamDir, 'runs', runId, OWNER_FILE), `${JSON.stringify(rec, null, 2)}\n`)
@@ -1596,6 +1820,38 @@ function recordTakeover(input) {
   }
   process.stderr.write(`agent-team approval-ask：已记下接手，${quote(runId)} 这一趟改归这个会话。\n`)
   return { kind: 'takeover-recorded', notice: takeoverNotice({ runId, why: null }) }
+}
+
+// 放弃收尾（hooks/lib/abandon.mjs）：用户在 AskUserQuestion 里选了「放弃这一趟」——挑出来的这一趟（这个会话名下的微调，不然 current-run 指着的那一趟）
+// 题面里原样写着它的 run id、没收口、不归别的会话时，往它的 approvals.jsonl 追加一行。回 null（不像这一句）或 { kind（给用户那一行）、notice（给项目经理那一段） }。
+function recordAbandon(input) {
+  const a = abandonAnswer(input?.tool_response)
+  if (!a) return null
+  const skip = (why, runId = null) => {
+    process.stderr.write(`agent-team approval-ask：没有记成放弃（${why}）。\n`)
+    return { kind: 'abandon-skipped', notice: abandonNotice({ runId, why }) }
+  }
+  if (a.why) return skip(a.why)
+  const ctx = runCtxFor(input)
+  if (!ctx.ok) return skip('no-run')
+  if (!mentionsRunId(a.question, ctx.runId)) return skip('unbound', ctx.runId)
+  if (closedAt(ctx.state) !== null) return skip('closed', ctx.runId)
+  if (blocksMe(ownerInfoOf(ctx.agentTeamDir)(ctx.runId), input.session_id)) return skip('other-session', ctx.runId)
+  try {
+    withApprovalsLock(ctx.runDir, () => {
+      const file = join(ctx.runDir, APPROVALS_FILE)
+      let prev = null
+      try {
+        prev = readFileSync(file)
+      } catch {}
+      const sep = prev && prev.length && prev[prev.length - 1] !== 0x0a ? '\n' : ''
+      appendFileSync(file, `${sep}${abandonLine({ at: new Date().toISOString(), runId: ctx.runId })}\n`)
+    })
+  } catch {
+    return skip('write-failed', ctx.runId)
+  }
+  process.stderr.write(`agent-team approval-ask：已记下放弃 ${quote(ctx.runId)} 这一趟的批准。\n`)
+  return { kind: 'abandon-recorded', notice: abandonNotice({ runId: ctx.runId, why: null }) }
 }
 
 // 单个微调（hooks/lib/tweak.mjs）：用户说了「可以了，收尾」（AskUserQuestion 里干净地单选，或者对话里单独发这一句）——current-run 那一趟是微调、停在实现段、
@@ -1608,11 +1864,11 @@ function recordTweakDone(input, source) {
     return { kind: 'tweak-done-skipped', notice: doneNotice({ why }) }
   }
   if (hit.why) return skip(hit.why)
-  const ctx = readRunContext(ROOT_PROJECT, ROOT)
+  const ctx = runCtxFor(input)
   if (!ctx.ok) return skip('no-run')
   if (modeOf(ctx.state) !== TWEAK_MODE) return skip('not-tweak')
   if (ctx.state?.stage !== implStageOf(ctx.stages)) return skip('not-impl')
-  if (blocksMe(ownerInfoOf(ctx.agentTeamDir)(pointerIdOf(ctx.agentTeamDir)), input.session_id)) return skip('other-session')
+  if (blocksMe(ownerInfoOf(ctx.agentTeamDir)(ctx.runId), input.session_id)) return skip('other-session')
   const bytes = ctx.artifactBytes(CONTRACT_FILE)
   if (!bytes) return skip('no-contract')
   try {
@@ -1721,6 +1977,8 @@ function gateFileReason(checked, exotic) {
           ? // M4o 复核（docs/50 §9，正文中 3）：原来落到交付快照那一句，来历与出路都是错的。
             '这是门禁在用户发出 /agent-team:at 时记下的原话（项目一级那份，或者绑进这一趟 run 目录的那份），不用、也不许改；契约第 1 节对不上它，' +
             '就照它改第 1 节。'
+          : leafIs(CLAIMS_FILE)
+            ? '这是门禁记下的这一趟微调认领了哪些项目文件（它派出去的人第一次写一个文件时记），不用、也不许改；认领在这一趟收尾或放弃之后自然不算。'
           : leafIs(OWNER_FILE)
             ? '这是门禁记下的这一趟归哪个会话（建它的那个会话，或者用户经「在这个会话接手」接过去的那个会话），不用、也不许改；要换会话，照 ' +
               '/agent-team:at-resume 第 1 节「别的会话的一趟」问用户。'
@@ -1748,9 +2006,9 @@ function withDupFix(report, dups) {
 
 // M3z：H6 因为返工预算拒绝时，补一句「用户的批准会不会记不下」——记录器记在 current-run 指向的那一趟 run 里，读不到运行状态、
 // 或者这份 state.json 不在那一趟里时，照拒绝理由问了也白问。出任何意外都只是不补。
-function approvalDiagnostic(stateFile) {
+function approvalDiagnostic(stateFile, input) {
   try {
-    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    const ctx = runCtxFor(input)
     if (!ctx.ok) {
       return ctx.kind === 'no-run'
         ? '\n另外：门禁现在找不到进行中的 run（.agent-team/current-run 不在），用户的回答会记不下——先把 current-run 指回这一趟 run。'
@@ -2036,6 +2294,30 @@ function progressOf({ ctx, fresh, log, coordinator, coordinatorId, stageId, reci
   return coordinatorProgress({ role: coordinator, stageId, rows, recipientIsPm, selfDone, selfMissing, impl: isRolePatternStage(stage) })
 }
 
+// 一趟只归一个会话：命令展开时的【会话】——current-run 指着的那一趟归另一个会话、没收口。停在最后一段、产物都写了的说「只差收口」。
+function ownerNoticeFor(command, agentTeamDir, runId, info) {
+  const runDir = join(agentTeamDir, 'runs', runId)
+  const st = runStateOf(runDir)
+  let delivered = false
+  try {
+    const stages = JSON.parse(normalizeText(readFileSync(join(ROOT, stagesFileFor(st)), 'utf8')))
+    const last = lastStageId(stages)
+    const products = last ? productsOfStage(stages[last]) : []
+    delivered =
+      isPlainObject(st) &&
+      st.stage === last &&
+      products.length > 0 &&
+      products.every((n) => {
+        try {
+          return !isBlankText(readFileSync(join(runDir, n)))
+        } catch {
+          return false
+        }
+      })
+  } catch {}
+  return sessionNotice({ command, runId, startedAt: startedAtOf(st), wordsHead: wordsHeadOf(runWords(runDir)), delivered, via: info.owner.via })
+}
+
 function main() {
   // 门禁留痕用：只是一个标记，不参与任何判定（见上面 TRACE_STATE 那段）。
   TRACE_STATE.entered = true
@@ -2105,10 +2387,10 @@ function main() {
     if (!malformedCaller(input) && isContractWriter(callerOf(input)) && typeof input.agent_id !== 'string') {
       const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
       ownerUnjudged(input, agentTeamDir)
-      const block = ownerDispatchBlock({ sessionId: input.session_id, pointerId: pointerIdOf(agentTeamDir), infoOf: ownerInfoOf(agentTeamDir) })
+      const block = ownerDispatchBlock({ sessionId: input.session_id, pointerId: pickedRunOf(input)?.runId ?? pointerIdOf(agentTeamDir), infoOf: ownerInfoOf(agentTeamDir) })
       if (block) denyAndExit(ownerDenyReason(block) + selfCheckIdentity(input, '派发'), spec.event)
     }
-    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    const ctx = runCtxFor(input)
     // H2 是流程辅助：读不到运行上下文时 fail open，但规格 §6 写的是
     // allow + warning，不是静默放行——必须留痕，不能一声不吭就 exit(0)。
     // M3v（docs/30）：这里只往 stderr 留痕，告诉 PM 与用户的那一段在 H5a（PostToolUse:Agent）上说。理由两条，都实测过：
@@ -2277,7 +2559,7 @@ function main() {
 
     if (role === MAIN) process.exit(0)
 
-    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    const ctx = runCtxFor(input)
     // ctx.ok 为 false 时按 ctx.kind 分派，不能笼统 fail closed。两种 kind
     // 的定义、为什么要分、不分会怎样自举死锁——权威解释在
     // hooks/lib/runctx.mjs 头部注释，不在这里重复第二遍：'no-run' 按 H2
@@ -2285,6 +2567,24 @@ function main() {
     // 一模一样）；'unreadable' 继续 denyAndExit。
     if (!ctx.ok) {
       if (ctx.kind === 'no-run') {
+        // 并行微调：项目里开着微调、这个团队角色哪一趟的派发记录里都没有——不按「没有 run」放行（那会把认领与写路径隔离一起绕开）。
+        // 项目经理不在此列（它不经派发记录认）；没有微调开着的项目照旧放行（自举不变）。
+        if (!isContractWriter(role) && Object.hasOwn(loadRoster() ?? {}, role) && tweaksAt(ctx.agentTeamDir).some((t) => t.open)) {
+          denyAndExit(
+            `agent-team 写路径门禁：项目里开着微调，门禁认不出你是哪一趟派的（哪一趟的派发记录里都没有你），按安全边界拒绝。` +
+              '以「冒泡：」停下，把这一句原样回报派你的项目经理。' +
+              selfCheckIdentity(input, '写入'),
+            spec.event,
+          )
+        }
+        if (tweakDirsUnguarded(ctx, role, checked)) {
+          denyAndExit(
+            `agent-team 写路径门禁：${inline(checked)} 在 .agent-team/ 下——这个项目里只有微调、没有进行中的完整 run，那里是各趟微调的 run 目录与控制文件，` +
+              '只有项目经理能写。你要是哪一趟微调派出去的，把这一句冒泡给项目经理。' +
+              selfCheckIdentity(input, '写入'),
+            spec.event,
+          )
+        }
         process.stderr.write(failOpenNotice('H3 写路径门禁', ctx))
         process.exit(0)
       }
@@ -2357,6 +2657,14 @@ function main() {
       const ownRunDir = mine && typeof filePath === 'string' && underDir(filePath, mine.dir)
       denyAndExit((ownRunDir ? elsewhereWriteReason(mine.id) : r.reason) + selfCheckIdentity(input, '写入'), spec.event)
     }
+    if (otherRunDirWrite(ctx, role, filePath)) {
+      denyAndExit(
+        `agent-team 写路径门禁：${inline(filePath)} 在另一趟 run 的目录里——那里的契约、产物与记录只归那一趟（只有项目经理能写），你写不了。` +
+          '你要是那一趟派出去的，把这一句冒泡给项目经理。' +
+          selfCheckIdentity(input, '写入'),
+        spec.event,
+      )
+    }
 
     // M3z（docs/34，全量审查第 16 条）：不记回退就重做。非 PM 写 run 目录里自己名下、早于 state.stage 那一段的产物，它在当前段
     // 又没有活、那份已经交过 → 拒（hooks/lib/redo.mjs）。PM 自己的产物不判（契约修订块、04-dispatch.md 的增补都是正文明令）。
@@ -2380,6 +2688,13 @@ function main() {
         if (rd.decision === 'deny') denyAndExit(rd.reason, spec.event)
       }
     }
+
+    // 并行微调（hooks/lib/claims.mjs）：子代理写项目文件——别的没收尾的微调认领了它，拒（不看它自己那一趟开没开、是不是微调）。
+    const claim = claimCheckOf(ctx, role, input, filePath)
+    if (claim) {
+      const other = claimBlock({ key: claim.key, others: otherClaimsOf(ctx) })
+      if (other) denyAndExit(claimDenyReason({ path: claim.path, other }) + selfCheckIdentity(input, '写入'), spec.event)
+    }
   }
 
   if (CHECK === 'contract') {
@@ -2402,13 +2717,18 @@ function main() {
     // 算不出哪个文件是契约，那时拒绝是对的；这条短路只免除 PM 自己。
     if (isContractWriter(input?.agent_type)) process.exit(0)
 
-    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    const ctx = runCtxFor(input)
     // ctx.kind 的处理照抄 writepath：'no-run' fail open + stderr 留痕，
     // 'unreadable' 才 denyAndExit——权威解释见 hooks/lib/runctx.mjs 头部
     // 注释，不在这里重复第二遍。没有 run 就没有契约文件可保护，H4 的全部
     // 前提也是"一个 run 正在跑"。
     if (!ctx.ok) {
       if (ctx.kind === 'no-run') {
+        // 并行微调（安全审查）：只有微调时，各趟微调的契约在 .agent-team/ 下——与 H3 同一条，非项目经理不许写。
+        const fp = input.tool_name === 'NotebookEdit' ? input?.tool_input?.notebook_path : input?.tool_input?.file_path
+        if (tweakDirsUnguarded(ctx, callerOf(input), fp)) {
+          denyAndExit(`agent-team 契约保护：${inline(fp)} 在微调的 run 目录所在的 .agent-team/ 下，只有项目经理能写。` + selfCheckIdentity(input, '写入'), spec.event)
+        }
         process.stderr.write(failOpenNotice('H4 契约保护', ctx))
         process.exit(0)
       }
@@ -2431,6 +2751,10 @@ function main() {
       runDir: ctx.runDir,
     })
     if (r.decision === 'deny') denyAndExit(r.reason + selfCheckIdentity(input, '写入'), spec.event)
+    // 并行微调（安全审查第二轮）：别的一趟 run 目录里的契约——与 H3 同一条，非项目经理不许写。
+    if (leafName(filePath) === CONTRACT_FILE && otherRunDirWrite(ctx, callerOf(input), filePath)) {
+      denyAndExit(`agent-team 契约保护：${inline(filePath)} 是另一趟 run 的契约，只有项目经理能写。` + selfCheckIdentity(input, '写入'), spec.event)
+    }
   }
 
   if (CHECK === 'rework') {
@@ -2578,11 +2902,20 @@ function main() {
         dispatchLog = readDispatchLog(readFileSync(join(runDir, DISPATCHES_FILE), 'utf8'))
         dispatched = dispatchedByStage(dispatchLog)
       } catch {}
-      const closing = decideClosing({ before, after, stages: stagesForRework, diskSha, atPath: join(ROOT, 'commands', 'at.md'), dispatched })
+      // 放弃收尾（hooks/lib/abandon.mjs）：abandoned 的形状与放弃那一次的条件（批准记在同一个目录的 approvals.jsonl）。放弃那一次不核产物：
+      // decideClosing 的关上判据与下面收口、推进时读产物的几条（契约基线、测试报告、验收结论、「可以了，收尾」）都不跑。
+      const ab = decideAbandon({
+        before,
+        after,
+        approved: readAbandoned(approvalsText, (id) => RUN_ID.test(id) && norm(join(agentTeamDir, 'runs', id)) === norm(runDir)),
+      })
+      if (!ab.ok) denyAndExit(ab.reason, spec.event)
+      const abandoning = isAbandoning(before, after)
+      const closing = abandoning ? { ok: true } : decideClosing({ before, after, stages: stagesForRework, diskSha, atPath: join(ROOT, 'commands', 'at.md'), dispatched })
       if (!closing.ok) denyAndExit(closing.reason, spec.event)
 
       const r = decideRework({ before, after, stages: stagesForRework, grants: readGrants(approvalsText, stagesForRework) })
-      if (!r.ok) denyAndExit(r.reason + (r.budget ? approvalDiagnostic(filePath) : ''), spec.event)
+      if (!r.ok) denyAndExit(r.reason + (r.budget ? approvalDiagnostic(filePath, input) : ''), spec.event)
 
       // docs/78：新 run 的 stage_roles——建 run 的那一次要带着它（值是对象），写入之前是对象的不许去掉、改成别的（hooks/lib/rework-guard.mjs 的
       // decideStageRolesKey）。复核（docs/78 §8）两轮：认「建 run」比 settleWords 多一条——写之前读不到 state.json，而且这一趟的目录里没有一份门禁在
@@ -2604,6 +2937,22 @@ function main() {
         firstStage: isStageChain(stagesForRework) ? Object.keys(stagesForRework)[0] : null,
       })
       if (!mk.ok) denyAndExit(mk.reason, spec.event)
+      // 并行微调（hooks/lib/parallel.mjs）：建 run 的那一次判互斥——完整的一趟开着不能起微调，微调开着不能起完整的一趟，一个会话同一时刻只有一趟微调。
+      // 「完整的一趟」只认 current-run 指着的那一趟（不是这次建的）；微调按 tweaksAt 列没收尾的（不含这次建的）。
+      if (before === null && beforeText === null && !runSeen) {
+        const pid = pointerIdOf(agentTeamDir)
+        const pinfo = pid && norm(join(agentTeamDir, 'runs', pid)) !== norm(runDir) ? ownerInfoOf(agentTeamDir)(pid) : null
+        const ex = decideExclusion({
+          creating: true,
+          mode: modeOf(after),
+          sessionId: input.session_id,
+          pointerRun: pinfo ? { id: pid, open: !pinfo.closed, tweak: pinfo.tweak === true } : null,
+          openTweaks: tweaksAt(agentTeamDir)
+            .filter((t) => t.open && norm(t.dir) !== norm(runDir))
+            .map((t) => ({ id: t.id, owner: t.owner })),
+        })
+        if (!ex.ok) denyAndExit(ex.reason, spec.event)
+      }
 
       // M3y（docs/33，全量审查第 15 条）：rework_base——回退那一次写入照磁盘记下各份产物的 sha，之后原样带着，推进离开一段时
       // 那一段里不许还有上一轮的产物。规则在 decideReworkBase（hooks/lib/rework-guard.mjs 的 M3y 一节），这里只做 I/O：
@@ -2639,7 +2988,7 @@ function main() {
         diskSha,
         lastDispatchAt: lastDispatchAtOf(stagesForRework, dispatchLog),
       })
-      if (!cb.ok) denyAndExit(cb.reason, spec.event)
+      if (!cb.ok && !abandoning) denyAndExit(cb.reason, spec.event)
 
       // M4o（docs/50，审查第 20 条修法 A）：推进出第一段时，契约第 1 节对不上用户在 /agent-team:at 后面写的原话或批准的需求稿（docs/95）（这一趟建起来那一次绑进 run 目录的
       // 记录），拒。没有记录的（更早建的 run、别的会话建的、不经门禁建的、命令没带参数、收口之后照用户的消息另起的）不核。
@@ -2708,7 +3057,7 @@ function main() {
         },
         dispatched,
       })
-      if (!tv.ok) denyAndExit(tv.reason + approvalDiagnostic(filePath), spec.event)
+      if (!tv.ok && !abandoning) denyAndExit(tv.reason + approvalDiagnostic(filePath, input), spec.event)
 
       // docs/71：验收那一段整段裁掉时，收口那一次读测试报告的第一行——不是「结论：通过」、又没有门禁记下的照现状交付批准的，拒（跑不起来也算：
       // 这一趟没有一样验证过）。验收那一段没裁的，由下面的验收结论判据管。
@@ -2726,14 +3075,14 @@ function main() {
         },
         dispatched,
       })
-      if (!tc.ok) denyAndExit(tc.reason + approvalDiagnostic(filePath), spec.event)
+      if (!tc.ok && !abandoning) denyAndExit(tc.reason + approvalDiagnostic(filePath, input), spec.event)
 
       // M4k（docs/46，docs/35 §5「收口不读验收结论」）：验收结论首行——推进出验收那一段与收口时，不是「结论：通过」、又没有门禁记下的
       // 照现状交付批准（approvals.jsonl 里 sha 等于它现在的 sha），拒（hooks/lib/verdict.mjs）。排在最后：对着上一版契约的结论先重出，
       // 读它的首行才有意义。批准读同一个目录下的 approvals.jsonl（上面读过；读不出来当一条都没有——更严的一侧）。
       // 单个微调：推出实现段要用户对现在这份契约说过「可以了，收尾」（approvals.jsonl 里 tweak-done 那一行，hooks/lib/tweak.mjs 的 decideTweakDone）。
       const td = decideTweakDone({ before, after, stages: stagesForRework, contractSha: diskSha(CONTRACT_FILE).sha, doneShas: readDoneShas(approvalsText) })
-      if (!td.ok) denyAndExit(td.reason, spec.event)
+      if (!td.ok && !abandoning) denyAndExit(td.reason, spec.event)
       const acceptanceDef = acceptanceOf(stagesForRework)
       // 评审 F11：阶段链读得出、却认不出验收那一段（插件的 stages.json 改坏了）：这一次不读验收结论，留一行痕。
       // 单个微调：短链本来就没有验收段（测试段带 "test": true），不留这一行；正常链被改坏、丢了验收段的照旧留。
@@ -2754,7 +3103,7 @@ function main() {
         dispatched,
       })
       // 评审 F10：照理由问用户之前，补一句批准会不会记不下（与返工预算那一支同一份诊断）。
-      if (!ac.ok) denyAndExit(ac.reason + approvalDiagnostic(filePath), spec.event)
+      if (!ac.ok && !abandoning) denyAndExit(ac.reason + approvalDiagnostic(filePath, input), spec.event)
     }
   }
 
@@ -2774,7 +3123,9 @@ function main() {
     // M4w（docs/58 §8）：原话记录绑的第二步——建出这一趟的那一次 Write 落盘之后。排在读运行上下文之前：这一刻 current-run 多半还没写。
     finishWordsBinding(input, filePath)
 
-    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    const ctx = runCtxFor(input)
+    // 并行微调：子代理第一次写一个项目文件，记进它那一趟微调的认领（hooks/lib/claims.mjs）。
+    if (ctx.ok) recordClaim(ctx, callerOf(input), input, filePath)
     if (!ctx.ok) {
       // ⚠️ 这里**不能**无条件 fail open（M1b 终审 C1）。
       //
@@ -3420,36 +3771,20 @@ function main() {
     const command = typeof input.command_name === 'string' ? stripPluginPrefix(input.command_name) : ''
     if (input.expansion_type !== 'slash_command' || !['at', 'at-resume', 'at-status', 'at-tweak'].includes(command) || input.command_name === command) process.exit(0)
     const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+    const contexts = []
     const runId = pointerIdOf(agentTeamDir)
-    if (!runId) process.exit(0)
-    const info = ownerInfoOf(agentTeamDir)(runId)
-    if (!blocksMe(info, input.session_id)) process.exit(0)
-    const runDir = join(agentTeamDir, 'runs', runId)
-    const st = runStateOf(runDir)
-    const first = isPlainObject(st) && Array.isArray(st.history) ? st.history[0] : null
-    const startedAt = isPlainObject(first) && typeof first.at === 'string' ? first.at : null
-    const words = runWords(runDir)
-    const line = words ? words.args.split(/\r?\n/).find((l) => l.trim() !== '') : null
-    const chars = typeof line === 'string' ? Array.from(line.trim()) : []
-    const wordsHead = chars.length ? chars.slice(0, 40).join('') + (chars.length > 40 ? '…' : '') : null
-    let delivered = false
-    try {
-      const stages = JSON.parse(normalizeText(readFileSync(join(ROOT, stagesFileFor(st)), 'utf8')))
-      const last = lastStageId(stages)
-      const products = last ? productsOfStage(stages[last]) : []
-      delivered =
-        isPlainObject(st) &&
-        st.stage === last &&
-        products.length > 0 &&
-        products.every((n) => {
-          try {
-            return !isBlankText(readFileSync(join(runDir, n)))
-          } catch {
-            return false
-          }
-        })
-    } catch {}
-    emitHookJson(spec.event, { contexts: [sessionNotice({ command, runId, startedAt, wordsHead, delivered, via: info.owner.via })] })
+    const info = runId ? ownerInfoOf(agentTeamDir)(runId) : null
+    // 并行微调：current-run 指着的是一趟微调（升级之前的单个微调）时不说【会话】——微调不占 current-run，由下面的【微调】说。
+    if (info && info.tweak !== true && blocksMe(info, input.session_id)) contexts.push(ownerNoticeFor(command, agentTeamDir, runId, info))
+    // 并行微调（hooks/lib/parallel.mjs）：这个项目里没收尾的微调——这个会话名下的、别的会话名下的。
+    const sid = typeof input.session_id === 'string' && input.session_id !== '' ? input.session_id : null
+    const open = tweaksAt(agentTeamDir).filter((t) => t.open)
+    const desc = (t) => ({ id: t.id, startedAt: startedAtOf(t.state), wordsHead: wordsHeadOf(t.words) })
+    const mineT = sid ? (open.find((t) => t.owner === sid) ?? null) : null
+    const tn = tweaksNotice({ command, mine: mineT ? desc(mineT) : null, others: open.filter((t) => t !== mineT).map(desc) })
+    if (tn) contexts.push(tn)
+    if (!contexts.length) process.exit(0)
+    emitHookJson(spec.event, { contexts })
   }
 
   if (CHECK === 'approval-ask' || CHECK === 'approval-prompt') {
@@ -3465,7 +3800,9 @@ function main() {
     const takeover = ask ? recordTakeover(input) : null
     // 单个微调：「可以了，收尾」两个记录器都认（对话里单独发这一句的那一路什么都不回传，只留痕）。
     const tweakDone = recordTweakDone(input, ask ? 'ask' : 'prompt')
-    const extras = [brief, takeover, ask ? tweakDone : null].filter(Boolean)
+    // 放弃收尾：只在 AskUserQuestion 上认（题面要带 run id）。
+    const abandon = ask ? recordAbandon(input) : null
+    const extras = [brief, takeover, ask ? tweakDone : null, abandon].filter(Boolean)
     // M4k（docs/46）：两个记录器也认「照现状交付」（候选 { deliver: true }，按 sha 绑在那一刻的验收结论上）。
     const found = ask
       ? askAnswers(input.tool_response)
@@ -3481,12 +3818,12 @@ function main() {
     if (found.excluded) {
       results = [{ why: found.excluded, ...(found.deliver ? { deliver: true } : {}) }]
     } else {
-      const ctx = readRunContext(ROOT_PROJECT, ROOT)
+      const ctx = runCtxFor(input)
       if (!ctx.ok) {
         cause = ctx.cause ?? null
         const why = ctx.kind === 'no-run' ? 'no-run' : 'unreadable'
         results = found.items.map((item) => (item.stage ? { stage: item.stage, why } : item.deliver && !item.why ? { deliver: true, why } : item))
-      } else if (blocksMe(ownerInfoOf(ctx.agentTeamDir)(pointerIdOf(ctx.agentTeamDir)), input.session_id)) {
+      } else if (blocksMe(ownerInfoOf(ctx.agentTeamDir)(ctx.runId), input.session_id)) {
         // 一趟只归一个会话：current-run 指着的那一趟归别的会话（指针空着时别的会话指得过来，为了接回丢了指针的一趟）——这个会话里的回答不记进它。
         stages = ctx.stages
         results = found.items.map((item) => (item.stage ? { stage: item.stage, why: 'other-session' } : item.deliver && !item.why ? { deliver: true, why: 'other-session' } : item))
@@ -3582,7 +3919,7 @@ function main() {
     // 不触发这个事件——交回消息与完成通知同样核（parseHandbacks），报告就是它的 <result>。
     const notes = [...parseNotifications(input.prompt), ...parseHandbacks(input.prompt)]
     if (!notes.length) process.exit(0)
-    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    const ctx = runCtxFor(input)
     if (!ctx.ok) {
       if (ctx.kind !== 'no-run') process.stderr.write(failOpenNotice('完成核验', ctx))
       process.exit(0)
@@ -3772,7 +4109,7 @@ function main() {
     // （docs/11 §5.35 的收口）。
     if ((CHECK === 'stop-gate' || HANDING_BACK) && isContractWriter(rawTarget)) process.exit(0)
 
-    const ctx = readRunContext(ROOT_PROJECT, ROOT)
+    const ctx = runCtxFor(input)
     // H5 两道都是 fail open（规格 §6：流程辅助，坏了不该把整趟跑卡死）——
     // 且不像 H3/H4 要按 ctx.kind 分派：H5 从头到尾没有 fail closed 的那
     // 一半，no-run 与 unreadable 在这里一视同仁放行。但不能静默：跟着

@@ -53,7 +53,7 @@ const blockOf = (runId, info, kind) => ({ runId, kind, via: info.owner.via === '
 /**
  * 主线程这一次写入碰不碰别的会话的一趟。
  * target：{ kind: 'run-file', runId, creatingState }（写 runs/<id>/ 下的文件；creatingState：写的是那一趟的 state.json、写之前它不在）、
- * { kind: 'pointer' }（写 current-run）或 null（不归这一道管）。infoOf(id) → { closed, owner } | null；same(a, b) 判两个 run id 是不是同一个目录。
+ * { kind: 'pointer' }（写 current-run）或 null（不归这一道管）。infoOf(id) → { closed, owner, tweak } | null（tweak：门禁记过的微调）；same(a, b) 判两个 run id 是不是同一个目录。
  * 写 current-run 只看它现在指着的那一趟挡不挡这个会话（切走）；改成指向哪一趟不看：指针空着（丢了、指着已收口或自己的一趟）时指到别的会话的一趟放行——
  * 单是指过去什么都拿不到（写与派照旧被拒），而丢了指针、放弃了的那一趟要在别的会话里接回，正得先把指针指过去，接手才认得到它。
  * @returns {null | { runId: string, kind: 'run'|'create'|'pointer', via: 'create'|'takeover' }}
@@ -69,7 +69,12 @@ export function ownerWriteBlock({ sessionId, target, pointerId, infoOf, same }) 
   if (target.kind === 'run-file') {
     const own = check(target.runId, 'run')
     if (own) return own
-    if (target.creatingState === true && typeof pointerId === 'string' && !eq(pointerId, target.runId)) return check(pointerId, 'create')
+    if (target.creatingState === true && typeof pointerId === 'string' && !eq(pointerId, target.runId)) {
+      // 并行微调：微调不占 current-run（指着它的是升级之前的单个微调），建 run 那一次的互斥由 H6 判（parallel.mjs）。
+      const pinfo = infoOf(pointerId)
+      if (isPlainObject(pinfo) && pinfo.tweak === true) return null
+      return check(pointerId, 'create')
+    }
     return null
   }
   if (target.kind === 'pointer') return check(pointerId, 'pointer')
@@ -123,11 +128,19 @@ export function mentionsRunId(text, runId) {
  * 这一次问里还有别的题。
  */
 export function takeoverAnswer(toolResponse) {
+  return labelAnswer(toolResponse, [TAKEOVER_LABEL, TAKEOVER_CLOSE_LABEL])
+}
+
+/**
+ * 通用的认法：tool_response 里有没有在单独一道单选题里干净地选了 labels 之一。认上了回 { label, question }；像是选了、却不记回 { why }（形状同 takeoverAnswer）；
+ * 一个像样的都没有回 null。接手与放弃（hooks/lib/abandon.mjs）共用。
+ */
+export function labelAnswer(toolResponse, labels) {
   if (!isPlainObject(toolResponse) || !isPlainObject(toolResponse.answers)) return null
   const tr = toolResponse
   const questions = Array.isArray(tr.questions) ? tr.questions : []
   // 用到时才归一化：加载这个模块时不调任何会被注入异常的内建。
-  const keys = [TAKEOVER_LABEL, TAKEOVER_CLOSE_LABEL].map((l) => [l, normalizeLabel(l)])
+  const keys = labels.map((l) => [l, normalizeLabel(l)])
   const labelOf = (a) => (typeof a === 'string' ? keys.find(([, k]) => normalizeLabel(a).startsWith(k)) : undefined)
   const hits = []
   for (const [text, answer] of Object.entries(tr.answers)) {
@@ -187,7 +200,8 @@ const TAKEOVER_WHY = {
   malformed: `标签后面夹了别的话（要逐字是「${TAKEOVER_LABEL}」或「${TAKEOVER_CLOSE_LABEL}」）`,
   unmatched: '回答对不上任何一道显示过的题',
   'not-alone': '这一次问里还有别的题',
-  unbound: '题面里没有 current-run 现在指着的那一趟的 run id（门禁认不出用户批的是哪一趟：问的可能是别的一趟，或者问和答之间指针换了）',
+  unbound: '题面里没有要接手的那一趟的 run id（current-run 现在指着的那一趟，或者别的会话开着的一趟微调；门禁认不出用户批的是哪一趟：问的可能是别的一趟，或者问和答之间指针换了）',
+  'has-tweak': '这个会话已经有一趟没收口的微调（一个会话同一时刻只做一趟）',
 }
 const ANSWER_SIDE = new Set(['afk', 'follow-up', 'response', 'notes', 'multi', 'array', 'malformed', 'unmatched', 'not-alone'])
 

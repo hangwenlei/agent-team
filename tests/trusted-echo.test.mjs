@@ -25,11 +25,11 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { runAsync } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { TRUSTED_PREFIX } from '../hooks/lib/trusted.mjs'
-import { exoticPath } from '../hooks/lib/path-norm.mjs'
+import { exoticPath, norm } from '../hooks/lib/path-norm.mjs'
 import { HANDBACK_FRAME } from '../hooks/lib/completion.mjs'
 
 // 特殊字符一律用 fromCharCode 构造，不在源码里写 \u 转义（docs/27 §5）。
@@ -675,6 +675,45 @@ const SCENARIOS = [
     anchor: (all, P) => reached(all, P) && all.includes('【会话】'),
   },
   {
+    // 并行微调：命令展开时的【微调】引用各趟微调 history 第一条的时间与原话开头（run 目录的 user-words.json）——都在磁盘上、Bash 写得进，一律过 quote。
+    name: '【微调】里各趟微调起的时间与原话开头（session-notice）',
+    disk: true,
+    otherRuns: { t1: {
+      'state.json': (P) => JSON.stringify({ run_id: 'x', mode: 'tweak', stage: 'S5', closed_at: null, history: [{ stage: 'S1', at: P }] }),
+      'user-words.json': (P) => JSON.stringify({ at: 't', session_id: 's-1', args: P, command: 'at-tweak', runs_before: [], bound: 'x', dropped: null }),
+      'owner.json': () => JSON.stringify({ session_id: 's-1', at: 't', via: 'create', previous: null }),
+    } },
+    calls: () => [
+      ['session-notice', { hook_event_name: 'UserPromptExpansion', expansion_type: 'slash_command', command_name: 'agent-team:at', command_args: 'x', command_source: 'plugin', prompt: '/agent-team:at x', session_id: 's-2' }],
+    ],
+    anchor: (all, P) => reached(all, P) && all.includes('【微调】'),
+  },
+  {
+    // 并行微调：认领的拒绝理由引用认领了那个文件的那一趟起的时间与原话开头——磁盘上的值，过 quote。
+    name: '认领的拒绝理由里那一趟起的时间与原话开头（writepath）',
+    disk: true,
+    otherRuns: {
+      t1: {
+      'state.json': (P) => JSON.stringify({ run_id: 'x', mode: 'tweak', stage: 'S5', closed_at: null, history: [{ stage: 'S1', at: P }] }),
+      'user-words.json': (P) => JSON.stringify({ at: 't', session_id: 's-1', args: P, command: 'at-tweak', runs_before: [], bound: 'x', dropped: null }),
+      'owner.json': () => JSON.stringify({ session_id: 's-1', at: 't', via: 'create', previous: null }),
+      'claims.jsonl': (P, p) => JSON.stringify({ kind: 'claim', at: 't', key: norm(join(p, 'src', 'server', 'x.ts')), path: 'src/server/x.ts', role: 'at-backend' }) + '\n',
+    },
+      t2: {
+      'state.json': (P) => JSON.stringify({ run_id: 'x', mode: 'tweak', stage: 'S5', closed_at: null, history: [{ stage: 'S1', at: P }] }),
+      'user-words.json': (P) => JSON.stringify({ at: 't', session_id: 's-2', args: P, command: 'at-tweak', runs_before: [], bound: 'x', dropped: null }),
+      'owner.json': () => JSON.stringify({ session_id: 's-2', at: 't', via: 'create', previous: null }),
+      'dispatches.jsonl': () => JSON.stringify({ kind: 'dispatch', at: 't', agent_id: 'a2', tool_use_id: null, role: 'at-backend', stage: 'S5', caller: 'at-pm', caller_id: null, mode: 'async' }) + '\n',
+      '00-contract.md': () => '# c\n',
+      '04-dispatch.md': () => '# d\n',
+    },
+    },
+    calls: ({ p }) => [
+      ['writepath', { hook_event_name: 'PreToolUse', tool_name: 'Write', agent_type: 'agent-team:at-backend', agent_id: 'a2', session_id: 's-2', tool_input: { file_path: join(p, 'src', 'server', 'x.ts'), content: 'x' } }],
+    ],
+    anchor: (all, P) => reached(all, P) && all.includes('agent-team 认领'),
+  },
+  {
     // docs/95：同一个入口的另一个来源——用户批准的需求稿（批准记录器把 AskUserQuestion 的题面记进同一份 user-words.json，source 是 ask）。对不上时
     // 换一种说法（「对不上用户批准的需求稿」），引的照旧过 quote。
     name: '原话记录里用户批准的需求稿与契约第 1 节的行（【契约】、【阶段】补句、H6 推进出第一段的拒绝理由）',
@@ -986,6 +1025,13 @@ async function runScenario(sc, pname, P) {
     if (sc.pointer) writeFileSync(join(p, '.agent-team', 'current-run'), sc.pointer(P))
     if (sc.approvals) writeFileSync(join(run, 'approvals.jsonl'), sc.approvals(P).map((a) => JSON.stringify(a)).join('\n') + '\n')
     for (const [f, make] of Object.entries(sc.runFiles ?? {})) writeFileSync(join(run, f), make(P))
+    for (const [id, files] of Object.entries(sc.otherRuns ?? {})) {
+      for (const [f, make] of Object.entries(files)) {
+        const target = join(p, '.agent-team', 'runs', id, f)
+        mkdirSync(dirname(target), { recursive: true })
+        writeFileSync(target, make(P, p))
+      }
+    }
     const results = await Promise.all(sc.calls({ p, run }, P).map(([check, input]) => gate(check, input, p)))
     const bad = results.flatMap((r) => violations(r, sc).map((v) => `${pname} · ${r.check}：${v}`))
     const all = results.flatMap((r) => channels(r).map((c) => c.text)).join('\n')

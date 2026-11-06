@@ -94,9 +94,12 @@ export function mayBeStateFile(filePath) {
 //     改过的「原话」写。项目一级那份是唯一一份不在 runs/<id>/ 下的门禁专属文件：命令展开那一刻这一趟的 run 还没建。
 //   - runs/*/owner.json（一趟只归一个会话，hooks/lib/owner.mjs）：这一趟归哪个会话——账本在建 run 的那一次记，用户在别的会话里经规范标签接手时由
 //     批准记录器改。改得了它，别的会话就能悄悄接过一趟正在跑的 run。
-export const GATE_FILES = ['runs/*/approvals.jsonl', 'runs/*/contract-base.json', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl', 'runs/*/owner.json', 'runs/*/user-words.json']
+//   - runs/*/claims.jsonl（并行微调，hooks/lib/claims.mjs）：这一趟微调认领了哪些项目文件——子代理第一次写一个项目文件时账本记。改得了它，
+//     一趟微调就能悄悄放掉认领、让另一趟覆盖它正在改的文件。
+export const GATE_FILES = ['runs/*/approvals.jsonl', 'runs/*/claims.jsonl', 'runs/*/contract-base.json', 'runs/*/delivered.json', 'runs/*/dispatches.jsonl', 'runs/*/owner.json', 'runs/*/user-words.json']
 export const PROJECT_GATE_FILES = ['user-words.json']
 export const APPROVALS_FILE = 'approvals.jsonl'
+export const CLAIMS_FILE = 'claims.jsonl'
 export const DELIVERED_FILE = 'delivered.json'
 export const DISPATCHES_FILE = 'dispatches.jsonl'
 export const CONTRACT_BASE_FILE = 'contract-base.json'

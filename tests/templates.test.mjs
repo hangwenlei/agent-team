@@ -50,9 +50,9 @@ const withoutKey = (k) => {
 // M4a 的 closed_at——缺了就是没收口）。
 // 正文里的例外名单（commands/at.md 建 run 那一段、主规格 §4.4）由下面「例外名单与正文一致」那条对着它核。
 // mode（单个微调）：缺就是完整的一趟（没有它的旧 run 门禁按 full 判）。
-const OPTIONAL_STATE_KEYS = ['mode', 'trimmed', 'stage_roles', 'rework_base', 'closed_at']
+const OPTIONAL_STATE_KEYS = ['mode', 'trimmed', 'stage_roles', 'rework_base', 'closed_at', 'abandoned']
 
-test('state.json 模板里除 mode、trimmed、stage_roles、rework_base 与 closed_at 之外的每个顶层键，删掉就会被 validateState 报', () => {
+test('state.json 模板里除 mode、trimmed、stage_roles、rework_base、closed_at 与 abandoned 之外的每个顶层键，删掉就会被 validateState 报', () => {
   for (const k of stateTemplateKeys()) {
     if (OPTIONAL_STATE_KEYS.includes(k)) continue
     assert.notDeepEqual(

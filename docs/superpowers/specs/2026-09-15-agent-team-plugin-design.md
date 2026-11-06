@@ -422,11 +422,11 @@ sha 相同的产物就是上一轮的，H5a/H5b、H2、【阶段】与 H5a「停
 条数都不许再改，派发门禁也不再派人——交付之后的新改动另起一趟。为什么需要它：没有它，门禁把交付之后的改动当成旧 run 的重做，
 只给「记回退」；【阶段】对走完的 run 反复说「该收口了」；收口本身不经任何门禁。
 
-⚠️ **`mode`、`trimmed`、`stage_roles`、`rework_base` 与 `closed_at` 缺失不报错**，这是向后兼容：这五个字段是后加的（`mode` 是单个微调加的，缺了就是完整的一趟），更早落盘的 `state.json`
+⚠️ **`mode`、`trimmed`、`stage_roles`、`rework_base`、`closed_at` 与 `abandoned` 缺失不报错**，这是向后兼容：这几个字段是后加的（`mode` 是单个微调加的，缺了就是完整的一趟；`abandoned` 是放弃收尾加的，缺了就是没放弃），更早落盘的 `state.json`
 没有它们，而 `/agent-team:at-resume` 要去读那些 run（没有 `stage_roles` 的 run，按段的消费方退回 `roster`；没有 `rework_base`
 的 run 当作没回退过，回退时照样要写；没有 `closed_at` 的 run 当作没收口）。
 **其余每一个顶层键都是必须的**
-（判据：拿 `templates/state.json` 逐个删键跑 `validateState`，除 `mode`、`trimmed`、`stage_roles`、`rework_base` 与 `closed_at` 外每一个都报
+（判据：拿 `templates/state.json` 逐个删键跑 `validateState`，除 `mode`、`trimmed`、`stage_roles`、`rework_base`、`closed_at` 与 `abandoned` 外每一个都报
 ——`tests/templates.test.mjs` 里那条从模板派生的测试钉着这件事，不在测试里另抄一份键名清单）。
 
 `artifacts` 由 `ledger` 的 `produce` 回传填写：某个阶段的 `produces` 被写到磁盘上时，

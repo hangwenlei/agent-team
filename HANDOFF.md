@@ -31,6 +31,8 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
 - `hooks/skills-cli.mjs` 与 `hooks/lib/skills.mjs` — 用户 skill 的登记、复制、比对（`/agent-team:at-skills` 与起新一趟之前那一步经 `Bash` 调；不是门禁）。
 - `hooks/lib/owner.mjs` — 一趟只归一个会话：归属记录、主线程的写入与派发碰不碰别的会话的一趟、拒绝理由、接手标签与【会话】文案（I/O 在 `gate.mjs`）。
 - `hooks/lib/tweak.mjs` 与 `stages.tweak.json` — 单个微调：`mode`、选链、微调的派发白名单、「可以了，收尾」的认法与 H6 判定；短链五段（`/agent-team:at-tweak` 起的一趟按它判）。
+- `hooks/lib/runpick.mjs`、`parallel.mjs`、`claims.mjs`、`abandon.mjs` — 并行微调：挑这一趟（子代理按派发记录、主线程按会话，都不是照 `current-run`；gate.mjs 里读运行上下文只经 `runCtxFor`）、
+  建 run 时的互斥与命令展开时的【微调】、认领文件（`runs/<id>/claims.jsonl`）、放弃收尾（「放弃这一趟」、`abandoned: true`）。
 - `stages.json` 阶段链；`roster.json` 花名册（派发白名单）；`templates/` 新 run 与 `project.json` 的模板；`settings.json` 把主会话钉成 `at-pm`。
   `stages.produces.md` 是 at-resume 与 at-status 运行时让模型读的「一段该交哪些产物」；`stages.README.md` 只给维护者（理由、消费方表、开发史）。
 - `docs/91` — 遗留项的处置裁定与实测清单：不再从索引逐条挑，照它跑完实测再修补回归（维护者能跑的那几场结果在 `docs/92`，交给用户的两场与两场拒绝路实测在 `docs/93`、`docs/94`）。
@@ -141,8 +143,19 @@ agent-team：一个 Claude Code 插件，十角色软件开发 agent team。项�
   `command`；建 run 看这个会话挂着的、修坏了的 `state.json` 看 run 目录绑上的，需求稿批准只沿用还挂着的命令）——不然项目经理写一个 `mode` 就绕开了产品定义与架构。
   短链 S1、S4、S5、S6、S8，段号与产物名沿用正常链；S6 的 `"test": true` 让项目经理写的测试报告被认成测试段，短链没有验收段、收口照「验收整段裁掉」读测试报告
   （只对带 `test` 的链成立）。H1 在门禁记过、没收口的微调里用 `tweakRoster`（只换项目经理两行）。推出实现段要用户对现在这份契约说过「可以了，收尾」
-  （两个批准记录器记进 `approvals.jsonl`、`kind: tweak-done`、绑契约 sha，`decideTweakDone`）。微调照旧用 `current-run`：按会话认、不写指针、互斥与认领、
-  放弃收尾都在第三步。判据：`tests/tweak.test.mjs`、`tests/gate-tweak.test.mjs`（含一整趟走通）、`tests/tweak-prose.test.mjs`。理由在 `docs/104`。
+  （两个批准记录器记进 `approvals.jsonl`、`kind: tweak-done`、绑契约 sha，`decideTweakDone`）。微调不写 `current-run`（下一条）。
+  判据：`tests/tweak.test.mjs`、`tests/gate-tweak.test.mjs`（含一整趟走通）、`tests/tweak-prose.test.mjs`。理由在 `docs/104`。
+- **并行微调：门禁每一次先挑这一趟**（`hooks/lib/runpick.mjs`）：子代理（带 `agent_id`）按派发记录认回派它的那一趟微调（收口、放弃了的也找；认不出时按 hook 输入里的会话 id 认这个会话名下恰好一趟——
+  前台派发的派发记录跑完才记，实测），主线程认这个会话名下
+  没收尾的那一趟微调，都不是照旧按 `current-run`；gate.mjs 里读运行上下文只经 `runCtxFor`（判据数调用点）。「是不是微调」只认门禁记过的（`mode` 写 tweak、run 目录绑着
+  at-tweak 原话记录）。`current-run` 不在、`runs/` 下只有微调时判 no-run（第一趟就是微调的项目）；但开着微调时，派发记录里哪儿都没有的团队角色判读不出（新成因 `agent`）、
+  只有微调时非项目经理写不了 `.agent-team/`、任何时候非项目经理写不了别的一趟 run 目录（两轮后台安全审查）。互斥在 H6 建 run 那一次判（`parallel.mjs` 的 `decideExclusion`）：
+  `current-run` 指着没收口的完整一趟时不能起微调，有没收尾的微调时不能起完整一趟，一个会话同一时刻只有一趟微调，读不到会话 id 建不了微调。认领（`claims.mjs`）：
+  子代理第一次写一个项目文件，落盘之后账本记进这一趟的 `runs/<id>/claims.jsonl`（门禁专属，认领键是 `norm()` 之后的绝对路径），别的没收尾的微调再写它 H3 拒、叫它冒泡；
+  派发时按 `04-dispatch.md` 预先认领不做。放弃收尾（`abandon.mjs`）：用户在 `AskUserQuestion` 里选「放弃这一趟」（题面带 run id），批准记录器记 `kind: abandon`，之后一次写入
+  记 `closed_at` 与 `abandoned: true`、`stage` 与 `history` 原样，H6 不核产物；`closedAt` 认它收口，冻结里 `abandoned` 也不许改。命令展开时【微调】告诉项目经理开着哪些微调，
+  接手认别的会话名下的微调。判据：`tests/runpick.test.mjs`、`tests/parallel.test.mjs`、`tests/claims.test.mjs`、`tests/abandon.test.mjs`、`tests/gate-parallel.test.mjs`（含两个会话
+  并行走通）、`tests/parallel-prose.test.mjs`。理由在 `docs/105`；这是边看边改微调那份设计的第三步。
 - **根级文件共列，不加 `shared` 键**：根级清单、构建配置、顶层测试目录列给每个会改它们的 S5 产者；S3 的「落盘清单」与 S4「照清单补 `paths`」
   是对齐的那一步（加了 `shared` 也省不掉，前缀按字面比、S0 时文件还不存在）。S5 被拒的在实现记录里留「被写路径隔离拒绝」一节、标「已解决」，
   PM、at-resume、at-qa 按它判交没交齐，执行段「齐了」时门禁提醒先读它（`IMPL_RECORD_NOTE`）。规格段的产者（S2 的 `at-ui`）被拒时，H3 与 H5b 按当前段给出路——写进这一段的产物、不补 `paths`

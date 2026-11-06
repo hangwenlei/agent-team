@@ -419,6 +419,22 @@ async function walkTweak({ askDoneAtS5 = true } = {}) {
       steps.push('派 at-frontend（' + check + '）')
       assert.equal(denied(out), false, `${check}：${reasonOf(out)}`)
     }
+    // 后台派发启动那一刻 H5a 记下派发（真实会话里每一次派发都有这一步；并行微调起，子代理的写入靠它认回这一趟）。
+    run(
+      'deliverable',
+      {
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Agent',
+        agent_type: PM,
+        session_id: 's-1',
+        tool_input: { subagent_type: 'agent-team:at-frontend', description: 'x', prompt: 'x' },
+        tool_response: { isAsync: true, status: 'async_launched', agentId: 'a0123456789abcdef', description: 'x', prompt: 'x' },
+      },
+      GATE,
+      p,
+    )
+    steps.push('派 at-frontend（deliverable）')
+    assert.match(readFileSync(join(dir, 'dispatches.jsonl'), 'utf8'), /a0123456789abcdef/, 'H5a 记下了派发')
     must(
       'at-frontend 写实现记录',
       doWrite(join(dir, '05-impl', 'at-frontend.md'), DOC('实现记录') + NL + '## 测试' + NL + NL + '改了设置页的测试' + NL, { agent_type: 'agent-team:at-frontend', input: { agent_id: 'a0123456789abcdef' } }),

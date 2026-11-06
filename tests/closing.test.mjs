@@ -195,6 +195,18 @@ test('M4a 冻结：改 closed_at、去掉它、改 stage、往 history 追加 �
   }
 })
 
+// 放弃收尾（hooks/lib/abandon.mjs）：放弃也是一次收口——之后 abandoned 去掉、改掉都拒（不然一趟放弃了的就成了「正常收口」，没核过产物）。
+test('冻结：已收口之后去掉或改了 abandoned → 拒；原样带着放行', () => {
+  const ABANDONED = { ...FROZEN, abandoned: true }
+  assert.equal(close({ before: ABANDONED, after: { ...ABANDONED, roster: ['at-qa', 'at-ui'] } }).ok, true)
+  for (const after of [(({ abandoned: _a, ...rest }) => rest)(ABANDONED), { ...ABANDONED, abandoned: false }]) {
+    const r = close({ before: ABANDONED, after })
+    assert.equal(r.ok, false, JSON.stringify(after.abandoned))
+    assert.match(r.reason, /abandoned/)
+  }
+  assert.equal(close({ before: FROZEN, after: { ...FROZEN, abandoned: true } }).ok, false, '正常收口之后补一个 abandoned 也算改')
+})
+
 test('M4a 冻结：不依赖阶段链——阶段链读不出来时照样拒', () => {
   const r = close({ before: FROZEN, after: { ...FROZEN, stage: 'S5' }, stages: null })
   assert.equal(r.ok, false)

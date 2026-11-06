@@ -177,11 +177,13 @@ export function decideClosing({ before, after, stages, diskSha, atPath, dispatch
     else if (closedAt(after) !== was) what.push('改了 closed_at')
     if (after.stage !== before.stage) what.push('改了 stage')
     if (historyLength(after) !== historyLength(before)) what.push('改了 history 的条数')
+    // 放弃收尾（hooks/lib/abandon.mjs）：放弃了的去掉 abandoned 就成了「正常收口」（没核过产物），正常收口的补上它也不对。
+    if ((after.abandoned === true) !== (before.abandoned === true)) what.push('改了 abandoned')
     if (!what.length) return { ok: true }
     return {
       ok: false,
       reason:
-        `这一趟已经收口（closed_at ${quote(was)}）：不再推进、回退或重开——stage、history 与 closed_at 都不许再改，这次写入${what.join('、')}。` +
+        `这一趟已经收口（closed_at ${quote(was)}）：不再推进、回退或重开——stage、history、closed_at 与 abandoned 都不许再改，这次写入${what.join('、')}。` +
         `别的记账字段照常能补。${newRun(atPath)}`,
     }
   }
