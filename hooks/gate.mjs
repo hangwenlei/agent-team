@@ -1299,44 +1299,72 @@ function quietWords(dir) {
   }
 }
 
+// 开销：一个门禁进程里 runs/ 的扫描与派发记录各只读一遍（tweaksAt、agentIdsAt 记在这里）。门禁自己改了归属、原话记录、派发记录之后 forgetRuns 清掉，
+// 之后再问照新的读。
+const TWEAKS_MEMO = new Map()
+const AGENT_IDS_MEMO = new Map()
+function forgetRuns() {
+  TWEAKS_MEMO.clear()
+  AGENT_IDS_MEMO.clear()
+}
+
 // 并行微调（hooks/lib/runpick.mjs）：runs/ 下门禁记过的微调——[{ id, dir, open, owner（会话 id 或 null）, state, words }]，收口、放弃了的也列（open 为假）。
-// 名字不合 RUN_ID 的目录不列（当不了一趟 run），同一个目录的别名只算一次。读不出 runs/ 回空表。
+// 名字不合 RUN_ID 的目录不列（当不了一趟 run），同一个目录的别名只算一次。读不出 runs/ 回空表。先读 run 目录的原话记录（小）：不是 at-tweak 的不读 state.json。
 function tweaksAt(agentTeamDir) {
+  const memoKey = norm(agentTeamDir)
+  if (TWEAKS_MEMO.has(memoKey)) return TWEAKS_MEMO.get(memoKey)
+  const out = scanTweaks(agentTeamDir)
+  TWEAKS_MEMO.set(memoKey, out)
+  return out
+}
+
+function scanTweaks(agentTeamDir) {
   const runsDir = join(agentTeamDir, 'runs')
-  let ids
+  let entries
   try {
-    ids = readdirSync(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory() || e.isSymbolicLink()).map((e) => e.name)
+    entries = readdirSync(runsDir, { withFileTypes: true }).filter((e) => e.isDirectory() || e.isSymbolicLink())
   } catch {
     return []
   }
+  // 同一个目录的别名只有链接造得出来：没有链接时目录名本身就不重，不必逐个规范化（每个一次 realpath）；有链接才逐个去重。
+  const anyLink = entries.some((e) => e.isSymbolicLink())
   const seen = new Set()
   const out = []
-  for (const id of ids.sort()) {
+  for (const id of entries.map((e) => e.name).sort()) {
     if (!RUN_ID.test(id)) continue
     const dir = join(runsDir, id)
-    const key = norm(dir)
-    if (seen.has(key)) continue
-    seen.add(key)
-    const state = runStateOf(dir)
-    if (modeOf(state) !== TWEAK_MODE) continue
+    if (anyLink) {
+      const key = norm(dir)
+      if (seen.has(key)) continue
+      seen.add(key)
+    }
     const words = quietWords(dir)
+    if (words?.command !== 'at-tweak') continue
+    const state = runStateOf(dir)
     if (!isTweakRun({ state, words })) continue
+    const open = closedAt(state) === null
+    // 归属只有没收尾的微调用得到（按会话认、互斥、接手的候选都只看没收尾的）。
     let owner = null
-    try {
-      owner = readOwner(readFileSync(join(dir, OWNER_FILE)))?.session_id ?? null
-    } catch {}
-    out.push({ id, dir, open: closedAt(state) === null, owner, state, words })
+    if (open) {
+      try {
+        owner = readOwner(readFileSync(join(dir, OWNER_FILE)))?.session_id ?? null
+      } catch {}
+    }
+    out.push({ id, dir, open, owner, state, words })
   }
   return out
 }
 
 // 一趟微调派发记录里的 agent_id（读不出给空表）。
 function agentIdsAt(dir) {
+  const key = norm(dir)
+  if (AGENT_IDS_MEMO.has(key)) return AGENT_IDS_MEMO.get(key)
+  let ids = []
   try {
-    return readDispatchLog(readFileSync(join(dir, DISPATCHES_FILE), 'utf8')).dispatches.map((d) => d.agent_id)
-  } catch {
-    return []
-  }
+    ids = readDispatchLog(readFileSync(join(dir, DISPATCHES_FILE), 'utf8')).dispatches.map((d) => d.agent_id)
+  } catch {}
+  AGENT_IDS_MEMO.set(key, ids)
+  return ids
 }
 
 // 并行微调：这个 agent_id 在不是微调的那些 run 的派发记录里有没有（skip：微调目录的规范化路径）。读不出的跳过。
@@ -1361,11 +1389,24 @@ function pickedRunOf(input, agentId = input?.agent_id) {
     const tweaks = tweaksAt(join(ROOT_PROJECT, '.agent-team'))
     if (!tweaks.length) return null
     const sid = input?.session_id
-    const mapped = tweaks.map((t) => ({ id: t.id, open: t.open, owner: t.owner, agentIds: isAgent ? agentIdsAt(t.dir) : [] }))
+    const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+    const tweakDirs = new Set(tweaks.map((t) => norm(t.dir)))
+    const pid = pointerIdOf(agentTeamDir)
+    const pointerDir = pid ? join(agentTeamDir, 'runs', pid) : null
+    // 派发记录按需读（pickRun 依次问：开着的微调 → current-run 那一趟 → 收口了的微调 → 按会话认之前别的 run；前面认到了，后面的不读）。
     // 按会话认的退路之前先查别的（不是微调的）run 的派发记录：别的一趟派的子代理不认到这个会话名下的微调上（终审）。
-    const agentElsewhere =
-      isAgent && !mapped.some((t) => t.agentIds.includes(agentId)) && agentInOtherRuns(join(ROOT_PROJECT, '.agent-team'), agentId, new Set(tweaks.map((t) => norm(t.dir))))
-    const picked = pickRun({ agentId: isAgent ? agentId : null, mainThread, sessionId: sid, tweaks: mapped, agentElsewhere })
+    const picked = pickRun({
+      agentId: isAgent ? agentId : null,
+      mainThread,
+      sessionId: sid,
+      tweaks: tweaks.map((t) => ({ id: t.id, open: t.open, owner: t.owner, get agentIds() { return isAgent ? agentIdsAt(t.dir) : [] } })),
+      get agentInPointer() {
+        return isAgent && pointerDir !== null && !tweakDirs.has(norm(pointerDir)) && agentIdsAt(pointerDir).includes(agentId)
+      },
+      get agentElsewhere() {
+        return isAgent && agentInOtherRuns(agentTeamDir, agentId, tweakDirs)
+      },
+    })
     if (!picked && mainThread && !(typeof sid === 'string' && sid !== '') && tweaks.some((t) => t.open)) {
       process.stderr.write('agent-team 挑这一趟：hook 输入里读不到会话 id，认不出这个会话名下的微调，这一次按 current-run 判。\n')
     }
@@ -1700,6 +1741,7 @@ function recordOwnerOnCreate(input, filePath) {
   }
   try {
     writeFileSync(join(runDir, OWNER_FILE), `${JSON.stringify(ownerRecord({ sessionId: sid, at: new Date().toISOString(), via: 'create' }), null, 2)}\n`)
+    forgetRuns()
   } catch (e) {
     process.stderr.write(`agent-team 会话归属：归属记录写不进（${quote(e?.message ?? e, { max: 120 })}），这一趟不按会话管。\n`)
   }
@@ -1725,6 +1767,7 @@ function finishWordsBinding(input, filePath) {
     })
     const own = join(runDir, USER_WORDS_FILE)
     if (!existsSync(own)) writeFileSync(own, `${JSON.stringify({ ...pending, binding: null, bound: runId, bound_at: new Date().toISOString() }, null, 2)}\n`)
+    forgetRuns()
   } catch (e) {
     process.stderr.write(`agent-team user-words：原话记录写不进（${quote(e?.message ?? e, { max: 120 })}），这一趟可能不核契约第 1 节。\n`)
   }
@@ -1815,6 +1858,7 @@ function recordTakeover(input) {
   try {
     const rec = ownerRecord({ sessionId: sid, at: new Date().toISOString(), via: 'takeover', previous: info.owner ? info.owner.session_id : null })
     writeFileSync(join(agentTeamDir, 'runs', runId, OWNER_FILE), `${JSON.stringify(rec, null, 2)}\n`)
+    forgetRuns()
   } catch {
     return skip('write-failed')
   }
@@ -2091,6 +2135,7 @@ function appendDispatchLog(runDir, line, label, consequence = '完成核验这�
       }
     } catch {}
     appendFileSync(file, `${sep}${line}\n`)
+    forgetRuns()
     return true
   } catch (err) {
     process.stderr.write(`agent-team ${label}：派发记录没有写成（${quote(err?.message ?? err, { max: 120 })}），${consequence}。\n`)

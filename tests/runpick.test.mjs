@@ -49,3 +49,29 @@ test('pickRun：同一个会话名下有两趟没收口的（正路上不会有�
   ]
   assert.deepEqual(pickRun({ mainThread: true, sessionId: 's-1', tweaks }), { runId: '20261106-1200-b', via: 'session' })
 })
+
+// 开销（docs/106）：派发记录按需读——agentIds、agentInPointer、agentElsewhere 都可以是 getter，用到才读。顺序：开着的微调 → current-run 那一趟 → 收口了的微调 → 按会话认。
+test('pickRun 按需读：开着的微调里认到就不读收口了的；在 current-run 那一趟的派发记录里就不读收口了的微调；会话名下不是恰好一趟时不问别的 run', () => {
+  const reads = []
+  const tw = (id, open, owner, ids) => ({ id, open, owner, get agentIds() { reads.push(id); return ids } })
+  assert.deepEqual(pickRun({ agentId: 'a1', tweaks: [tw('c1', false, 's-x', ['zz']), tw('o1', true, 's-1', ['a1'])] }), { runId: 'o1', via: 'agent' })
+  assert.deepEqual(reads, ['o1'], '开着的那一趟认到了，收口了的不读')
+
+  reads.length = 0
+  let pointerAsked = 0
+  const inPointer = { agentId: 'af', sessionId: 's-1', tweaks: [tw('c1', false, 's-x', []), tw('o1', true, 's-1', [])], get agentInPointer() { pointerAsked++; return true } }
+  assert.equal(pickRun(inPointer), null, '派它的是 current-run 那一趟：照指针判')
+  assert.deepEqual(reads, ['o1'], '收口了的不读')
+  assert.equal(pointerAsked, 1)
+
+  reads.length = 0
+  assert.deepEqual(pickRun({ agentId: 'ac', tweaks: [tw('c1', false, 's-x', ['ac']), tw('o1', true, 's-1', [])], agentInPointer: false }), { runId: 'c1', via: 'agent' }, '收口了的照样认')
+
+  let elsewhereAsked = 0
+  const noSession = { agentId: 'zz', sessionId: 's-9', tweaks: [tw('o1', true, 's-1', [])], agentInPointer: false, get agentElsewhere() { elsewhereAsked++; return false } }
+  assert.equal(pickRun(noSession), null)
+  assert.equal(elsewhereAsked, 0, '会话名下没有微调，不问别的 run')
+  const withSession = { agentId: 'zz', sessionId: 's-1', tweaks: [tw('o1', true, 's-1', [])], agentInPointer: false, get agentElsewhere() { elsewhereAsked++; return false } }
+  assert.deepEqual(pickRun(withSession), { runId: 'o1', via: 'agent-session' })
+  assert.equal(elsewhereAsked, 1)
+})
