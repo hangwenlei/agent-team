@@ -248,6 +248,22 @@ test('别的会话用带流后缀、结尾带点的写法写 current-run，照�
   })
 })
 
+test('经一个指向 current-run 的文件链接写指针（叶名不是 current-run），照样认成指针、拒', (t) => {
+  world(({ projectDir }) => {
+    createRun(projectDir, 'r1', { sid: 's-1' })
+    const alias = join(projectDir, '.agent-team', 'ptr')
+    try {
+      symlinkSync(join(projectDir, '.agent-team', 'current-run'), alias, 'file')
+    } catch (e) {
+      t.skip('建不了文件链接：' + e.code)
+      return
+    }
+    const out = run('writepath', preWrite(alias, 'r2', 's-2'), GATE, projectDir)
+    assert.equal(decisionOf(out.stdout)?.permissionDecision, 'deny')
+    assert.match(reasonOf(out), /current-run/)
+  })
+})
+
 // 两趟：r0 归 s-2（指针指着它），r1 归 s-1、没收口。
 function twoRuns(projectDir) {
   createRun(projectDir, 'r1', { sid: 's-1' })

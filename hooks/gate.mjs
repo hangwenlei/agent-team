@@ -1286,7 +1286,8 @@ function ownerInfoOf(agentTeamDir) {
 }
 
 // 一趟只归一个会话：主线程这次写的是什么——
-//   - current-run：{ kind: 'pointer', newId, newUnknown }。按叶名认（剥掉流后缀、结尾的点与空格：那些写法在 Windows 上落到的正是指针）。改完之后的内容：
+//   - current-run：{ kind: 'pointer', newId, newUnknown }。两路都认：规范化之后的路径就是它（经链接、8.3 短名写进去的），或者叶名是它、所在目录就是
+//     .agent-team（剥掉流后缀、结尾的点与空格：那些写法在 Windows 上落到的正是指针）。改完之后的内容：
 //     Write 就是新全文，Edit 照平台的口径在磁盘那份上重放（replayEdit）；算不出来（找不到 old_string、NotebookEdit……）标 newUnknown；
 //   - 某一趟 run 目录里的文件：{ kind: 'run-file', runId, creatingState }。runId 取规范化之后的那一段（解析过链接、目录联接与别名，Windows、macOS 上折成
 //     小写）：照字面取的话，经一个名字不合 run id 格式的链接写进去，就查不到那一趟的归属。creatingState：写的是那一趟的 state.json、写之前它不在；
@@ -1294,7 +1295,9 @@ function ownerInfoOf(agentTeamDir) {
 function ownerTargetOf(agentTeamDir, filePath, toolName, toolInput) {
   if (typeof filePath !== 'string' || filePath === '') return null
   const runsDir = join(agentTeamDir, 'runs')
-  if (leafName(filePath) === 'current-run' && norm(dirname(filePath)) === norm(agentTeamDir)) {
+  const target = norm(filePath)
+  const pointerPath = join(agentTeamDir, 'current-run')
+  if (target === norm(pointerPath) || (leafName(filePath) === 'current-run' && norm(dirname(filePath)) === norm(agentTeamDir))) {
     let after = null
     if (toolName === 'Write') after = typeof toolInput?.content === 'string' ? toolInput.content : null
     else if (toolName === 'Edit') {
@@ -1308,7 +1311,6 @@ function ownerTargetOf(agentTeamDir, filePath, toolName, toolInput) {
     const c = after.trim()
     return { kind: 'pointer', newId: RUN_ID.test(c) ? c : null, newUnknown: false }
   }
-  const target = norm(filePath)
   const base = norm(runsDir)
   if (!target.startsWith(`${base}/`)) return null
   const rel = target.slice(base.length + 1).split('/')
