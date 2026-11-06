@@ -21,7 +21,7 @@ import { candidateStages, decideReadiness } from './lib/readiness.mjs'
 import { decideWritePath, stageOwnerOfRunPath } from './lib/writepath.mjs'
 import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideModeKey, decideRework, decideReworkBase, decideStageRolesKey, parseStateText, replayEdit } from './lib/rework-guard.mjs'
-import { stagesFileFor } from './lib/tweak.mjs'
+import { TWEAK_MODE, TWEAK_STAGES_FILE, modeOf, stagesFileFor, tweakRoster } from './lib/tweak.mjs'
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { isBlankText } from './lib/text-norm.mjs'
 import { normalizeText } from './lib/text-norm.mjs'
@@ -1347,6 +1347,22 @@ function ownerUnjudged(input, agentTeamDir, target = null) {
   }
 }
 
+// 单个微调（hooks/lib/tweak.mjs）：H1 用的花名册。主线程（项目经理、不带 agent_type 的主会话；不带 agent_id）派人、current-run 指着的那一趟是微调时，
+// 项目经理两行的可派名单换成短链里实现段的产者（tweakRoster）；指针、那一趟的 state.json、短链读不出来，或者不是微调，照正常花名册（更严）。
+function delegationRoster(input) {
+  const roster = loadRoster()
+  try {
+    if (malformedCaller(input) || !isContractWriter(callerOf(input)) || typeof input?.agent_id === 'string') return roster
+    const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+    const pid = pointerIdOf(agentTeamDir)
+    if (!pid || modeOf(runStateOf(join(agentTeamDir, 'runs', pid))) !== TWEAK_MODE) return roster
+    const tweakStages = JSON.parse(normalizeText(readFileSync(join(ROOT, TWEAK_STAGES_FILE), 'utf8')))
+    return tweakRoster(roster, tweakStages)
+  } catch {
+    return roster
+  }
+}
+
 // M4p：【指针】那一段。两个 run id 都是磁盘上的值（目录名、current-run 的内容），过 quote；文件名与角色名是插件自己的名字。复核（docs/51 §8）：
 // 出路按情形给——新建的就是那一趟（指针指过去；契约与项目经理自己的产物原样重写拿回传，别的角色的产物指过去之后 H3 拒项目经理写它，派它的产者
 // 重交）；写错了目录（照原样写进指针指着的那一趟，那一趟读不出来时不给）；要接着做那一趟（用户定过放弃的、拿不准的先问用户，它已经收口就不能接着做）。
@@ -2007,7 +2023,7 @@ function main() {
   }
 
   if (CHECK === 'delegation') {
-    const result = decideDelegation(input, loadRoster())
+    const result = decideDelegation(input, delegationRoster(input))
     // M4i 复核（docs/44 §8）：被设置或 --agent 换掉的主会话（带 agent_type、不是项目经理、没有 agent_id）被拒时，理由末尾说身份——H1 的
     // 「冒泡给上级」对它不成立（M10e：架构师被 --agent 换成主会话）。别的调用者 selfCheckIdentity 返回空串。
     if (result.decision === 'deny') denyAndExit(result.reason + selfCheckIdentity(input, '派发'), spec.event)

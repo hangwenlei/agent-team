@@ -148,6 +148,45 @@ test('H6：建 run 的那一次写 mode 为 tweak 放行', () => {
   }
 })
 
+// ---------------------------------------------------------------------------------------------------------------------------------
+// H1：微调这一趟里项目经理直接派开发角色。
+const DEVS = ['at-frontend', 'at-backend', 'at-ui', 'at-ios', 'at-android']
+const OTHERS = ['at-product', 'at-architect', 'at-qa', 'at-acceptance']
+
+test('微调里项目经理派五个开发角色：H1 放行；派产品、架构、测试、验收：H1 拒', () => {
+  withRun(
+    ({ projectDir }) => {
+      for (const r of DEVS) assert.equal(denied(dispatch(projectDir, r, { check: 'delegation' })), false, r)
+      for (const r of OTHERS) assert.equal(denied(dispatch(projectDir, r, { check: 'delegation' })), true, r)
+    },
+    { stage: 'S5', history: H('S1', 'S4', 'S5') },
+  )
+})
+
+test('正常一趟里项目经理派 at-frontend：H1 照旧拒；at-architect 派 at-frontend 照旧放行', () => {
+  withRun(
+    ({ projectDir }) => {
+      assert.equal(denied(dispatch(projectDir, 'at-frontend', { check: 'delegation' })), true)
+      assert.equal(denied(dispatch(projectDir, 'at-architect', { check: 'delegation' })), false)
+      const arch = dispatch(projectDir, 'at-frontend', { check: 'delegation', input: { agent_type: 'agent-team:at-architect', agent_id: 'a0123456789abcdef' } })
+      assert.equal(denied(arch), false)
+    },
+    { mode: 'full', stage: 'S5', history: H('S1', 'S2', 'S3', 'S4', 'S5') },
+  )
+})
+
+test('指针不在、那一趟 state.json 坏了：照正常花名册判（项目经理派开发角色拒）', () => {
+  withRun(
+    ({ projectDir, runDir }) => {
+      writeFileSync(join(runDir, 'state.json'), '{')
+      assert.equal(denied(dispatch(projectDir, 'at-frontend', { check: 'delegation' })), true, 'state 坏了')
+      rmSync(join(projectDir, '.agent-team', 'current-run'))
+      assert.equal(denied(dispatch(projectDir, 'at-frontend', { check: 'delegation' })), true, '指针不在')
+    },
+    { stage: 'S5', history: H('S1', 'S4', 'S5') },
+  )
+})
+
 test('mode 写坏（"Tweak"、1）：运行上下文按正常链读，账本的回传报出来', () => {
   for (const bad of ['Tweak', 1]) {
     withRun(
