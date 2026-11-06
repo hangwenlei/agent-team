@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
+import { run, runAsync, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
 import { reworkFromHistory } from '../hooks/lib/state.mjs'
 import { USER_WORDS_FILE, pendingRecord, readWordsBook, wordsFor } from '../hooks/lib/user-words.mjs'
@@ -525,6 +525,17 @@ test('按会话分开记：别的会话已经绑上或作废的条目，下一�
     assert.equal(pendingOf(dirs.projectDir, 's-1'), null, 's-1 那一条已经绑上，清掉')
     assert.equal(pendingOf(dirs.projectDir, 's-3').args, '还挂着的需求', '还挂着的不动')
     assert.equal(pendingOf(dirs.projectDir, 's-2').args, '另一个会话的需求')
+  } finally {
+    cleanup(dirs)
+  }
+})
+
+test('按会话分开记：十几个会话同时展开 /agent-team:at，每个会话那一条都在（读改写在锁里做）', async () => {
+  const dirs = makeRun({ runId: 'r0', stage: 'S5' })
+  try {
+    const sids = Array.from({ length: 14 }, (_, i) => 'c-' + i)
+    await Promise.all(sids.map((sid) => runAsync('user-words', expansion('并发的需求 ' + sid, { session_id: sid }), { cwd: dirs.projectDir })))
+    for (const sid of sids) assert.equal(pendingOf(dirs.projectDir, sid)?.args, '并发的需求 ' + sid, sid)
   } finally {
     cleanup(dirs)
   }
