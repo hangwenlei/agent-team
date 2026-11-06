@@ -23,6 +23,7 @@ import { decideContractGuard, isContractWriter } from './lib/contract-guard.mjs'
 import { decideModeKey, decideRework, decideReworkBase, decideStageRolesKey, parseStateText, replayEdit } from './lib/rework-guard.mjs'
 import { isTweakRun, pickRun } from './lib/runpick.mjs'
 import { decideExclusion } from './lib/parallel.mjs'
+import { claimLine, readClaims, claimBlock, claimDenyReason } from './lib/claims.mjs'
 import { TWEAK_MODE, TWEAK_STAGES_FILE, decideTweakDone, doneAnswer, doneLine, doneNotice, implStageOf, modeOf, promptDone, readDoneShas, stagesFileFor, tweakRoster } from './lib/tweak.mjs'
 import { makeFreshness, staleByStage, splitByAccept, VERIFY_REDO } from './lib/freshness.mjs'
 import { isBlankText } from './lib/text-norm.mjs'
@@ -50,7 +51,7 @@ import {
 } from './lib/completion.mjs'
 import { mayWaive, dispatchedIn, wholeStageTrimmed, trimmedAt } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
-import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, OWNER_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
+import { APPROVALS_FILE, CLAIMS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, OWNER_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
 import { blocksMe, mentionsRunId, ownerDenyReason, ownerDispatchBlock, ownerRecord, ownerWriteBlock, readOwner, sessionNotice, takeoverAnswer, takeoverNotice } from './lib/owner.mjs'
 import {
   CONTRACT_BASE_FILE,
@@ -1397,6 +1398,17 @@ function unclaimedTeamAgent(input, agentId) {
   }
 }
 
+// 并行微调（安全审查第二轮）：非项目经理写 .agent-team/runs/ 下、不是这一趟的 run 目录里的文件（别的一趟的契约、产物）。几趟微调并行之后
+// 「别的一趟」随时都在跑；执行角色本来就被写路径隔离挡在那里之外，花名册外的调用者原来只挡控制文件。
+function otherRunDirWrite(ctx, role, filePath) {
+  try {
+    if (isContractWriter(role) || typeof filePath !== 'string' || filePath === '' || typeof ctx?.agentTeamDir !== 'string') return false
+    return underDir(filePath, join(ctx.agentTeamDir, 'runs')) && !(typeof ctx.runDir === 'string' && underDir(filePath, ctx.runDir))
+  } catch {
+    return false
+  }
+}
+
 // 并行微调（安全审查）：只有微调、判「没有 run」时，非项目经理写 .agent-team/ 下的文件（微调的 state.json、契约、产物都在那里）——H3、H4 拒。
 // 没有微调的项目不归这一条（自举不变）。
 function tweakDirsUnguarded(ctx, role, filePath) {
@@ -1404,6 +1416,66 @@ function tweakDirsUnguarded(ctx, role, filePath) {
     return !isContractWriter(role) && typeof filePath === 'string' && underDir(filePath, ctx.agentTeamDir) && tweaksAt(ctx.agentTeamDir).length > 0
   } catch {
     return false
+  }
+}
+
+// 原话开头（第一行非空的那一行，最多 40 个字）：【会话】【微调】与认领的拒绝理由用它帮用户认出是哪一趟。读不出给 null。
+function wordsHeadOf(words) {
+  const line = words && typeof words.args === 'string' ? words.args.split(/\r?\n/).find((l) => l.trim() !== '') : null
+  const chars = typeof line === 'string' ? Array.from(line.trim()) : []
+  return chars.length ? chars.slice(0, 40).join('') + (chars.length > 40 ? '…' : '') : null
+}
+
+// 一趟 run 的 history 第一条的时间（读不出给 null）。
+function startedAtOf(state) {
+  const first = isPlainObject(state) && Array.isArray(state.history) ? state.history[0] : null
+  return isPlainObject(first) && typeof first.at === 'string' ? first.at : null
+}
+
+// 并行微调（hooks/lib/claims.mjs）：这一次写入要不要按认领管——挑出来的这一趟是一趟没收尾、门禁记过的微调，调用者是它派出去的子代理（带 agent_id、
+// 不是项目经理），写的是项目文件（项目根之下、.agent-team/ 之外）。要管回 { key（norm 之后的绝对路径）, path（相对项目根的显示路径） }，不管回 null。
+function claimTargetOf(ctx, role, input, filePath) {
+  try {
+    if (!ctx?.ok || isContractWriter(role) || typeof input?.agent_id !== 'string' || typeof filePath !== 'string' || filePath === '') return null
+    if (closedAt(ctx.state) !== null || !isTweakRun({ state: ctx.state, words: quietWords(ctx.runDir) })) return null
+    const projectRoot = dirname(ctx.agentTeamDir)
+    if (!underDir(filePath, projectRoot) || underDir(filePath, ctx.agentTeamDir)) return null
+    return { key: norm(filePath), path: relative(projectRoot, filePath).split(/[\\/]/).join('/') }
+  } catch {
+    return null
+  }
+}
+
+// 并行微调：别的没收尾的微调各自认领了什么——[{ id, keys, startedAt, wordsHead }]（不含这一趟）。认领记录读不出当没有。
+function otherClaimsOf(ctx) {
+  return tweaksAt(ctx.agentTeamDir)
+    .filter((t) => t.open && norm(t.dir) !== norm(ctx.runDir))
+    .map((t) => {
+      let text = null
+      try {
+        text = readFileSync(join(t.dir, CLAIMS_FILE), 'utf8')
+      } catch {}
+      return { id: t.id, keys: readClaims(text), startedAt: startedAtOf(t.state), wordsHead: wordsHeadOf(t.words) }
+    })
+}
+
+// 并行微调：落盘之后（账本）把这一次写的项目文件记进这一趟的认领——还没认领过的才记，读改写在锁里做。写不进只留痕：下一次写它时照样会记。
+function recordClaim(ctx, role, input, filePath) {
+  const claim = claimTargetOf(ctx, role, input, filePath)
+  if (!claim) return
+  try {
+    withFileLock(ctx.runDir, CLAIMS_FILE, () => {
+      const file = join(ctx.runDir, CLAIMS_FILE)
+      let prev = null
+      try {
+        prev = readFileSync(file, 'utf8')
+      } catch {}
+      if (readClaims(prev).has(claim.key)) return
+      const sep = prev && prev.length && !prev.endsWith('\n') ? '\n' : ''
+      appendFileSync(file, `${sep}${claimLine({ at: new Date().toISOString(), key: claim.key, path: claim.path, role })}\n`)
+    })
+  } catch (err) {
+    process.stderr.write(`agent-team 认领：没有记下 ${inline(claim.path)}（${quote(err?.message ?? String(err), { max: 120 })}），这一趟下一次写它时再记。\n`)
   }
 }
 
@@ -1842,6 +1914,8 @@ function gateFileReason(checked, exotic) {
           ? // M4o 复核（docs/50 §9，正文中 3）：原来落到交付快照那一句，来历与出路都是错的。
             '这是门禁在用户发出 /agent-team:at 时记下的原话（项目一级那份，或者绑进这一趟 run 目录的那份），不用、也不许改；契约第 1 节对不上它，' +
             '就照它改第 1 节。'
+          : leafIs(CLAIMS_FILE)
+            ? '这是门禁记下的这一趟微调认领了哪些项目文件（它派出去的人第一次写一个文件时记），不用、也不许改；认领在这一趟收尾或放弃之后自然不算。'
           : leafIs(OWNER_FILE)
             ? '这是门禁记下的这一趟归哪个会话（建它的那个会话，或者用户经「在这个会话接手」接过去的那个会话），不用、也不许改；要换会话，照 ' +
               '/agent-team:at-resume 第 1 节「别的会话的一趟」问用户。'
@@ -2496,6 +2570,14 @@ function main() {
       const ownRunDir = mine && typeof filePath === 'string' && underDir(filePath, mine.dir)
       denyAndExit((ownRunDir ? elsewhereWriteReason(mine.id) : r.reason) + selfCheckIdentity(input, '写入'), spec.event)
     }
+    if (otherRunDirWrite(ctx, role, filePath)) {
+      denyAndExit(
+        `agent-team 写路径门禁：${inline(filePath)} 在另一趟 run 的目录里——那里的契约、产物与记录只归那一趟（只有项目经理能写），你写不了。` +
+          '你要是那一趟派出去的，把这一句冒泡给项目经理。' +
+          selfCheckIdentity(input, '写入'),
+        spec.event,
+      )
+    }
 
     // M3z（docs/34，全量审查第 16 条）：不记回退就重做。非 PM 写 run 目录里自己名下、早于 state.stage 那一段的产物，它在当前段
     // 又没有活、那份已经交过 → 拒（hooks/lib/redo.mjs）。PM 自己的产物不判（契约修订块、04-dispatch.md 的增补都是正文明令）。
@@ -2518,6 +2600,13 @@ function main() {
         })
         if (rd.decision === 'deny') denyAndExit(rd.reason, spec.event)
       }
+    }
+
+    // 并行微调（hooks/lib/claims.mjs）：这一次属于一趟没收尾的微调、写的是项目文件——别的没收尾的微调认领了它，拒。
+    const claim = claimTargetOf(ctx, role, input, filePath)
+    if (claim) {
+      const other = claimBlock({ key: claim.key, others: otherClaimsOf(ctx) })
+      if (other) denyAndExit(claimDenyReason({ path: claim.path, other }) + selfCheckIdentity(input, '写入'), spec.event)
     }
   }
 
@@ -2575,6 +2664,10 @@ function main() {
       runDir: ctx.runDir,
     })
     if (r.decision === 'deny') denyAndExit(r.reason + selfCheckIdentity(input, '写入'), spec.event)
+    // 并行微调（安全审查第二轮）：别的一趟 run 目录里的契约——与 H3 同一条，非项目经理不许写。
+    if (leafName(filePath) === CONTRACT_FILE && otherRunDirWrite(ctx, callerOf(input), filePath)) {
+      denyAndExit(`agent-team 契约保护：${inline(filePath)} 是另一趟 run 的契约，只有项目经理能写。` + selfCheckIdentity(input, '写入'), spec.event)
+    }
   }
 
   if (CHECK === 'rework') {
@@ -2935,6 +3028,8 @@ function main() {
     finishWordsBinding(input, filePath)
 
     const ctx = runCtxFor(input)
+    // 并行微调：子代理第一次写一个项目文件，记进它那一趟微调的认领（hooks/lib/claims.mjs）。
+    if (ctx.ok) recordClaim(ctx, callerOf(input), input, filePath)
     if (!ctx.ok) {
       // ⚠️ 这里**不能**无条件 fail open（M1b 终审 C1）。
       //

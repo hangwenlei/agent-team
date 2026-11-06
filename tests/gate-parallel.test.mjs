@@ -151,6 +151,22 @@ test('只有微调、没有 current-run：花名册外的子代理写微调的 s
   })
 })
 
+// 安全审查（第二轮）：运行上下文读得出时也一样——非项目经理写 .agent-team/runs/ 下不是这一趟的 run 目录（别的微调的契约、产物），H3 拒、契约 H4 也拒。
+test('运行上下文读得出时：花名册外的子代理写别的一趟 run 目录里的契约与产物，H3 拒（契约 H4 也拒）；a1 写别的一趟的实现记录也拒', () => {
+  const opts = TWO()
+  opts.pointer = 'f1'
+  opts.runs.push({ id: 'f1', mode: 'full', stage: 'S5', owner: 's-9' })
+  withProject(opts, (p) => {
+    const other = { agentType: 'helper:writer', agentId: 'o1', sid: 's-9' }
+    for (const name of ['00-contract.md', '04-dispatch.md']) {
+      assert.equal(denied(write(p, join(p, '.agent-team', 'runs', 't1', name), other)), true, name)
+    }
+    assert.equal(denied(write(p, join(p, '.agent-team', 'runs', 't1', '00-contract.md'), other, { check: 'contract' })), true, 'H4')
+    assert.equal(denied(write(p, join(p, '.agent-team', 'runs', 't2', '05-impl', 'at-frontend.md'), { role: 'at-frontend', agentId: 'a1', sid: 's-1' })), true)
+    assert.equal(denied(write(p, join(p, '.agent-team', 'runs', 't1', '05-impl', 'at-frontend.md'), { role: 'at-frontend', agentId: 'a1', sid: 's-1' })), false, '自己那一趟的实现记录照写')
+  })
+})
+
 // 安全审查：开着微调时，团队角色的子代理只有在 current-run 那一趟的派发记录里确有它时才退回按指针判；不然认不出、拒，叫它冒泡。
 test('current-run 指着一趟完整的 run、又开着微调：派发记录里哪儿都没有的团队角色拒；在 current-run 那一趟派发记录里的照它判', () => {
   const opts = TWO()
@@ -257,5 +273,60 @@ test('互斥：有微调没收口时建完整的一趟，H6 拒，理由列出�
   })
   withProject({ runs: [{ id: 't1', owner: 's-1', extra: { closed_at: AT } }] }, (p) => {
     assert.equal(denied(create(p, 'f9', 'full', 's-3')), false)
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// 认领文件（hooks/lib/claims.mjs）：子代理第一次写一个项目文件，落盘之后账本记进它那一趟的 claims.jsonl；别的没收尾的微调再写它，H3 拒。
+const TWO_S5 = (over = {}) => ({
+  runs: [
+    { id: 't1', owner: 's-1', dispatches: [{ agent_id: 'a1', role: 'at-frontend' }], ...(over.t1 ?? {}) },
+    { id: 't2', owner: 's-2', dispatches: [{ agent_id: 'a2', role: 'at-frontend' }], ...(over.t2 ?? {}) },
+  ],
+})
+const A1 = { role: 'at-frontend', agentId: 'a1', sid: 's-1' }
+const A2 = { role: 'at-frontend', agentId: 'a2', sid: 's-2' }
+// 一次真实的写入：H3 放行之后落盘，再跑账本。
+const land = (p, file, who) => {
+  const pre = write(p, file, who)
+  if (denied(pre)) return pre
+  mkdirSync(join(file, '..'), { recursive: true })
+  writeFileSync(file, 'x')
+  write(p, file, who, { check: 'ledger', event: 'PostToolUse' })
+  return pre
+}
+const claimsOf = (p, id) => {
+  try {
+    return readFileSync(join(p, '.agent-team', 'runs', id, 'claims.jsonl'), 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+test('认领：a1 先写 web/a.ts，记进 t1 的认领（t2 的没有）；a2 再写它（含 web/./a.ts 的写法）拒、点名 t1、叫它冒泡；a2 写别的文件放行', () => {
+  withProject(TWO_S5(), (p) => {
+    assert.equal(denied(land(p, join(p, 'web', 'a.ts'), A1)), false)
+    assert.match(claimsOf(p, 't1'), /a\.ts/)
+    assert.equal(claimsOf(p, 't2'), '')
+    for (const file of [join(p, 'web', 'a.ts'), join(p, 'web', '.', 'a.ts')]) {
+      const out = write(p, file, A2)
+      assert.equal(denied(out), true, file)
+      assert.match(reasonOf(out), /"t1"/)
+      assert.match(reasonOf(out), /冒泡：/)
+    }
+    assert.equal(denied(land(p, join(p, 'web', 'b.ts'), A2)), false)
+    assert.match(claimsOf(p, 't2'), /b\.ts/)
+    assert.equal(denied(write(p, join(p, 'web', 'a.ts'), A1)), false, '自己认领的照写')
+  })
+})
+
+test('认领：t1 收口之后 a2 写 web/a.ts 放行；项目经理（主线程）不受认领管；任何人 Write claims.jsonl 都拒', () => {
+  withProject(TWO_S5(), (p) => {
+    land(p, join(p, 'web', 'a.ts'), A1)
+    assert.equal(denied(write(p, join(p, 'web', 'a.ts'), { sid: 's-2' })), false, '项目经理')
+    assert.equal(denied(write(p, join(p, '.agent-team', 'runs', 't1', 'claims.jsonl'), { sid: 's-1' })), true, '门禁专属')
+    const st = JSON.parse(readFileSync(join(p, '.agent-team', 'runs', 't1', 'state.json'), 'utf8'))
+    writeFileSync(join(p, '.agent-team', 'runs', 't1', 'state.json'), JSON.stringify({ ...st, closed_at: AT }))
+    assert.equal(denied(write(p, join(p, 'web', 'a.ts'), A2)), false)
   })
 })
