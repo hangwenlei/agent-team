@@ -345,6 +345,84 @@ test('不是微调、不停在 S5、归别的会话：不记，回传说为什�
 })
 
 // ---------------------------------------------------------------------------------------------------------------------------------
+// 一整趟微调经门禁走通：每一次 Write 照真实平台那样同时过 H3、H4、H6，放行之后落盘，再过账本；派发过 H1、H2。
+async function walkTweak({ askDoneAtS5 = true } = {}) {
+  const { sha256OfContract } = await import('../hooks/lib/contract-hash.mjs')
+  const dirs = makeRun({ runId: 'r0', stage: 'S1' })
+  const steps = []
+  try {
+    const p = dirs.projectDir
+    rmSync(join(p, '.agent-team', 'runs', 'r0'), { recursive: true, force: true })
+    rmSync(join(p, '.agent-team', 'current-run'), { force: true })
+    const id = '20261105-1000-tweak'
+    const dir = join(p, '.agent-team', 'runs', id)
+    const doWrite = (file, content, over = {}) => {
+      for (const check of ['writepath', 'contract', 'rework']) {
+        const out = write(p, file, content, { check, ...over })
+        if (denied(out)) return { denied: true, check, reason: reasonOf(out) }
+      }
+      mkdirSync(join(file, '..'), { recursive: true })
+      writeFileSync(file, content)
+      run('ledger', { hook_event_name: 'PostToolUse', tool_name: 'Write', agent_type: over.agent_type ?? PM, session_id: 's-1', ...(over.input ?? {}), tool_input: { file_path: file } }, GATE, p)
+      return { denied: false }
+    }
+    const must = (label, r) => {
+      steps.push(label)
+      assert.equal(r.denied, false, `${label}：${r.check} 拒了——${r.reason}`)
+    }
+    const state = (stage, extra = {}) => {
+      const ids = ['S1', 'S4', 'S5', 'S6', 'S8']
+      const hist = H(...ids.slice(0, ids.indexOf(stage) + 1))
+      return JSON.stringify(stateOf(id, { stage, history: hist, extra }), null, 2)
+    }
+    run('user-words', expandCmd('at-tweak', 's-1', '把设置页的弹窗换成抽屉'), GATE, p)
+    must('建 run', doWrite(join(dir, 'state.json'), state('S1')))
+    writeFileSync(join(p, '.agent-team', 'current-run'), id)
+    const contract = ['# 00 契约', '', '## 1. 用户原话', '', '把设置页的弹窗换成抽屉', '', '## 2. PM 的理解（可改）', '', '- 网页版。', '', '## 4. 修订记录', ''].join(NL)
+    must('写契约', doWrite(join(dir, '00-contract.md'), contract))
+    const sha = sha256OfContract(Buffer.from(contract))
+    must('推进到 S4', doWrite(join(dir, 'state.json'), state('S4', { contract_sha: sha })))
+    must('写派发', doWrite(join(dir, '04-dispatch.md'), DOC('派发：at-frontend 改设置页')))
+    must('推进到 S5', doWrite(join(dir, 'state.json'), state('S5', { contract_sha: sha })))
+    for (const check of ['delegation', 'readiness']) {
+      const out = dispatch(p, 'at-frontend', { check })
+      steps.push('派 at-frontend（' + check + '）')
+      assert.equal(denied(out), false, `${check}：${reasonOf(out)}`)
+    }
+    must(
+      'at-frontend 写实现记录',
+      doWrite(join(dir, '05-impl', 'at-frontend.md'), DOC('实现记录') + NL + '## 测试' + NL + NL + '改了设置页的测试' + NL, { agent_type: 'agent-team:at-frontend', input: { agent_id: 'a0123456789abcdef' } }),
+    )
+    if (askDoneAtS5) run('approval-ask', askDone(), GATE, p)
+    const toS6 = doWrite(join(dir, 'state.json'), state('S6', { contract_sha: sha, stage_roles: { S5: ['at-frontend'] }, roster: ['at-frontend'] }))
+    if (!askDoneAtS5) return { toS6, steps }
+    must('推进到 S6', toS6)
+    must('写测试报告', doWrite(join(dir, '06-test.md'), '结论：通过' + NL + NL + 'npm test：12 条通过' + NL))
+    must('推进到 S8', doWrite(join(dir, 'state.json'), state('S8', { contract_sha: sha, stage_roles: { S5: ['at-frontend'] }, roster: ['at-frontend'] })))
+    must('写交付文档', doWrite(join(dir, '08-delivery.md'), DOC('交付')))
+    const closedAtNow = new Date().toISOString()
+    must(
+      '收口',
+      doWrite(join(dir, 'state.json'), state('S8', { contract_sha: sha, stage_roles: { S5: ['at-frontend'] }, roster: ['at-frontend'], never_invoked: [], closed_at: closedAtNow })),
+    )
+    return { closed: JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8')).closed_at, steps }
+  } finally {
+    cleanup(dirs)
+  }
+}
+
+test('一整趟微调：建 run（mode tweak）→ 写契约推进 → 写派发推进 → 直接派 at-frontend → 它写实现记录 → 选「可以了，收尾」→ 推进 S6 → 测试报告通过 → 推进 S8 → 交付文档 → 收口', async () => {
+  const r = await walkTweak()
+  assert.match(r.closed, /^\d{4}-\d{2}-\d{2}T/)
+})
+
+test('同样走到 S5，不选「可以了，收尾」直接推进：H6 拒', async () => {
+  const r = await walkTweak({ askDoneAtS5: false })
+  assert.equal(r.toS6.denied, true)
+  assert.match(r.toS6.reason, /可以了，收尾/)
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------
 // H1：微调这一趟里项目经理直接派开发角色。
 const DEVS = ['at-frontend', 'at-backend', 'at-ui', 'at-ios', 'at-android']
 const OTHERS = ['at-product', 'at-architect', 'at-qa', 'at-acceptance']
