@@ -269,6 +269,11 @@ export function systemMessage(kind, { cause, check } = {}) {
       return 'agent-team 需求稿：已记下你批准的这份需求稿，契约第 1 节照它核，项目经理已收到。'
     case 'brief-skipped':
       return 'agent-team 需求稿：这次的回答没有记成批准，项目经理已收到原因。'
+    // 一趟只归一个会话：批准记录器记下的接手（用户选了「在这个会话接手」或「接手并收口，再开始这次」）。
+    case 'takeover-recorded':
+      return 'agent-team 会话归属：已记下这一趟改归这个会话，原来那个会话再写它会被拒，项目经理已收到。'
+    case 'takeover-skipped':
+      return 'agent-team 会话归属：这次的回答没有记成接手，项目经理已收到原因。'
     case 'input':
       if (RECORDERS.has(check)) {
         return 'agent-team 批准记录：读不出这次的 hook 输入，这次的回答没有记下。Claude Code 与插件的版本可能不匹配，两者都更新后再试。'

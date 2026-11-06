@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync
 import { join } from 'node:path'
 import { run, decisionOf, GATE } from './helpers/gate-runner.mjs'
 import { makeRun } from './fixtures/make-run.mjs'
-import { OWNER_FILE } from '../hooks/lib/owner.mjs'
+import { BACK_LABEL, OWNER_FILE, TAKEOVER_CLOSE_LABEL, TAKEOVER_LABEL } from '../hooks/lib/owner.mjs'
 
 const H = (...ids) => ids.map((stage) => ({ stage, at: '2026-11-05T10:00:00Z' }))
 const stateOf = (id, stage = 'S1', history = H('S1')) => ({
@@ -411,6 +411,89 @@ test('session-notice 永不 exit 2（坏掉的 owner.json、读不出的 state.j
     assert.equal(run('session-notice', expand('at', 's-2'), GATE, projectDir).status, 0)
     assert.equal(run('session-notice', 'not json', GATE, projectDir).status, 0)
   })
+})
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// 接手：批准记录器认两个接手标签，把 current-run 指着的那一趟改归这个会话。
+const askTakeover = (answer, sid, { multiSelect = false, notes = null } = {}) => {
+  const questions = [{ question: '原来那个会话还在吗？', header: '接手', multiSelect, options: [{ label: BACK_LABEL, description: '' }, { label: TAKEOVER_LABEL, description: '' }] }]
+  return {
+    hook_event_name: 'PostToolUse',
+    tool_name: 'AskUserQuestion',
+    agent_type: PM,
+    session_id: sid,
+    tool_input: { questions },
+    tool_response: {
+      questions,
+      answers: { [questions[0].question]: answer },
+      ...(notes === null ? {} : { annotations: { [questions[0].question]: { notes } } }),
+    },
+  }
+}
+
+test('s-2 选「在这个会话接手」：owner.json 改成 s-2、via takeover、previous s-1；回传含「已记下」', () => {
+  world(({ projectDir }) => {
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    const out = run('approval-ask', askTakeover(TAKEOVER_LABEL, 's-2'), GATE, projectDir)
+    const o = ownerOf(dir)
+    assert.equal(o.session_id, 's-2')
+    assert.equal(o.via, 'takeover')
+    assert.equal(o.previous, 's-1')
+    const ctx = JSON.parse(out.stdout).hookSpecificOutput.additionalContext
+    assert.match(ctx, /已记下/)
+    assert.match(JSON.parse(out.stdout).systemMessage, /改归这个会话/)
+  })
+})
+
+test('选「接手并收口，再开始这次」同样记', () => {
+  world(({ projectDir }) => {
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    run('approval-ask', askTakeover(TAKEOVER_CLOSE_LABEL, 's-2'), GATE, projectDir)
+    assert.equal(ownerOf(dir).session_id, 's-2')
+  })
+})
+
+test('接手之后 s-1 写 state.json，H3 拒，理由含「被另一个会话接手」；s-2 写放行', () => {
+  world(({ projectDir }) => {
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    run('approval-ask', askTakeover(TAKEOVER_LABEL, 's-2'), GATE, projectDir)
+    const s1 = writeBy(projectDir, join(dir, '00-contract.md'), 's-1')
+    assert.equal(decisionOf(s1.stdout)?.permissionDecision, 'deny')
+    assert.match(reasonOf(s1), /被另一个会话接手/)
+    assert.equal(decisionOf(writeBy(projectDir, join(dir, '00-contract.md'), 's-2').stdout), null)
+  })
+})
+
+test('已经归这个会话、已收口、没有 current-run、多选题、带备注：不记，回传说为什么', () => {
+  world(({ projectDir }) => {
+    const noRun = run('approval-ask', askTakeover(TAKEOVER_LABEL, 's-2'), GATE, projectDir)
+    assert.match(JSON.parse(noRun.stdout).hookSpecificOutput.additionalContext, /没有记成接手/)
+    const { dir } = createRun(projectDir, 'r1', { sid: 's-1' })
+    const mine = run('approval-ask', askTakeover(TAKEOVER_LABEL, 's-1'), GATE, projectDir)
+    assert.match(JSON.parse(mine.stdout).hookSpecificOutput.additionalContext, /本来就归这个会话/)
+    for (const opts of [{ multiSelect: true }, { notes: '先别动' }]) {
+      const out = run('approval-ask', askTakeover(TAKEOVER_LABEL, 's-2', opts), GATE, projectDir)
+      assert.match(JSON.parse(out.stdout).hookSpecificOutput.additionalContext, /没有记成接手/, JSON.stringify(opts))
+      assert.equal(ownerOf(dir).session_id, 's-1', JSON.stringify(opts))
+    }
+    writeFileSync(join(dir, 'state.json'), JSON.stringify({ ...stateOf('r1'), closed_at: '2026-11-05T12:00:00Z' }, null, 2))
+    const closed = run('approval-ask', askTakeover(TAKEOVER_LABEL, 's-2'), GATE, projectDir)
+    assert.match(JSON.parse(closed.stdout).hookSpecificOutput.additionalContext, /已经收口/)
+    assert.equal(ownerOf(dir).session_id, 's-1')
+  })
+})
+
+test('没有 owner.json 的旧 run：选了接手就补上归属（via takeover，previous 为 null）', () => {
+  const dirs = makeRun({ runId: 'r1', stage: 'S2' })
+  try {
+    run('approval-ask', askTakeover(TAKEOVER_LABEL, 's-2'), GATE, dirs.projectDir)
+    const o = ownerOf(join(dirs.projectDir, '.agent-team', 'runs', 'r1'))
+    assert.equal(o.session_id, 's-2')
+    assert.equal(o.via, 'takeover')
+    assert.equal(o.previous, null)
+  } finally {
+    cleanup(dirs)
+  }
 })
 
 // ---------------------------------------------------------------------------------------------------------------------------------

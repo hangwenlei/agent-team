@@ -48,7 +48,7 @@ import {
 import { mayWaive, dispatchedIn, wholeStageTrimmed, trimmedAt } from './lib/advance.mjs'
 import { SUBAGENT_STOP_RETRY_NOTE } from './lib/retry-budget.mjs'
 import { APPROVALS_FILE, DELIVERED_FILE, DISPATCHES_FILE, GATE_FILES, OWNER_FILE, isControlFile, isGateFile, leafName, mayBeGateFile, mayBeStateFile } from './lib/control-files.mjs'
-import { blocksMe, ownerDenyReason, ownerDispatchBlock, ownerRecord, ownerWriteBlock, readOwner, sessionNotice } from './lib/owner.mjs'
+import { blocksMe, ownerDenyReason, ownerDispatchBlock, ownerRecord, ownerWriteBlock, readOwner, sessionNotice, takeoverAnswer, takeoverNotice } from './lib/owner.mjs'
 import {
   CONTRACT_BASE_FILE,
   DRIFT_FIX,
@@ -1532,6 +1532,35 @@ function recordBrief(input) {
     }
   } catch {}
   return { kind: 'brief-recorded', notice: briefNotice(null, { staleRun }) }
+}
+
+// 一趟只归一个会话（hooks/lib/owner.mjs）：用户在 AskUserQuestion 里选了「在这个会话接手」或「接手并收口，再开始这次」——把 current-run 指着的那一趟改归
+// 这个会话（owner.json，via: 'takeover'，previous 记原来的主人）。只认 AskUserQuestion：对话里打字不认（门禁看不到用户是对着哪一道题、哪一趟说的）。
+// 没有归属记录的旧 run 也记（补上归属）。回 null（回答里没有像接手的）或 { kind（给用户那一行）、notice（给项目经理那一段） }。
+function recordTakeover(input) {
+  const a = takeoverAnswer(input?.tool_response)
+  if (!a) return null
+  const agentTeamDir = join(ROOT_PROJECT, '.agent-team')
+  const runId = pointerIdOf(agentTeamDir)
+  const skip = (why) => {
+    process.stderr.write(`agent-team approval-ask：没有记成接手（${why}）。\n`)
+    return { kind: 'takeover-skipped', notice: takeoverNotice({ runId, why }) }
+  }
+  if (a.why) return skip(a.why)
+  const sid = input.session_id
+  if (typeof sid !== 'string' || sid === '') return skip('no-session')
+  const info = runId ? ownerInfoOf(agentTeamDir)(runId) : null
+  if (!info) return skip('no-run')
+  if (info.closed) return skip('closed')
+  if (info.owner && info.owner.session_id === sid) return skip('already-mine')
+  try {
+    const rec = ownerRecord({ sessionId: sid, at: new Date().toISOString(), via: 'takeover', previous: info.owner ? info.owner.session_id : null })
+    writeFileSync(join(agentTeamDir, 'runs', runId, OWNER_FILE), `${JSON.stringify(rec, null, 2)}\n`)
+  } catch {
+    return skip('write-failed')
+  }
+  process.stderr.write(`agent-team approval-ask：已记下接手，${quote(runId)} 这一趟改归这个会话。\n`)
+  return { kind: 'takeover-recorded', notice: takeoverNotice({ runId, why: null }) }
 }
 
 // M4o：这一趟 run 目录里的原话记录；没有回 null，在却读不出：留痕、当没有（少拦）。
@@ -3325,12 +3354,15 @@ function main() {
     const ask = CHECK === 'approval-ask'
     // docs/95：需求稿的批准只在 AskUserQuestion 上认（门禁得看得见批的是哪一份）；与返工、照现状交付的批准互不相干，先记它。
     const brief = ask ? recordBrief(input) : null
+    // 一趟只归一个会话：接手也只在 AskUserQuestion 上认，与需求稿、返工、照现状交付互不相干。
+    const takeover = ask ? recordTakeover(input) : null
+    const extras = [brief, takeover].filter(Boolean)
     // M4k（docs/46）：两个记录器也认「照现状交付」（候选 { deliver: true }，按 sha 绑在那一刻的验收结论上）。
     const found = ask
       ? askAnswers(input.tool_response)
       : { excluded: null, items: promptAnswer(input.prompt) ? [{ stage: promptAnswer(input.prompt) }] : promptDeliver(input.prompt) ? [{ deliver: true }] : [] }
     if (!found.excluded && !found.items.length) {
-      if (brief) emitHookJson(spec.event, { contexts: [brief.notice], systemMessage: systemMessage(brief.kind) })
+      if (extras.length) emitHookJson(spec.event, { contexts: extras.map((e) => e.notice), systemMessage: extras.map((e) => systemMessage(e.kind)).join(' ') })
       process.exit(0)
     }
     let results
@@ -3414,9 +3446,9 @@ function main() {
     // 同一次问里既有像批准需求稿的、又有返工或照现状交付的回答（项目经理不该这么问，需求稿那一道按「不是单独问的」不记）：两段都回给项目经理，
     // 给用户那一行两句都说（都是固定文字，并成一行）。
     emitHookJson(spec.event, {
-      contexts: [...(brief ? [brief.notice] : []), ...approvalNotices({ results, total, cause, stages })],
+      contexts: [...extras.map((e) => e.notice), ...approvalNotices({ results, total, cause, stages })],
       systemMessage: [
-        brief ? systemMessage(brief.kind) : null,
+        ...extras.map((e) => systemMessage(e.kind)),
         systemMessage(
           results.some((r) => r.covers) ? 'approval-recorded' : results.some((r) => r.deliver && r.sha) ? 'deliver-recorded' : results.some((r) => r.deliver) ? 'deliver-skipped' : 'approval-skipped',
         ),
