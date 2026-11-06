@@ -394,11 +394,12 @@ export function validateState(state, { stages, grants } = {}) {
     p(`run_id 不是 YYYYMMDD-HHmm-<slug> 形状（拿到 ${quote(state.run_id)}）`)
   }
   // 单个微调：mode 只认 full 与 tweak（缺也算 full）。别的值门禁一律按 full 读——写成 Tweak 的微调会被当成完整的一趟判，所以要报出来。
-  if (Object.hasOwn(state, 'abandoned') && typeof state.abandoned !== 'boolean') {
-    p(`abandoned 是 ${quote(state.abandoned)}：它只能是 true（这一趟放弃了，与 closed_at 同一次写）或 false`)
-  }
   if (Object.hasOwn(state, 'mode') && state.mode !== 'full' && state.mode !== 'tweak') {
     p(`mode 是 ${quote(state.mode)}：它只能是 "full"（完整的一趟）或 "tweak"（微调），别的值门禁一律按 full 读`)
+  }
+  // 放弃收尾（hooks/lib/abandon.mjs）：abandoned 只认布尔（H6 拒别的值，这里只报）。
+  if (Object.hasOwn(state, 'abandoned') && typeof state.abandoned !== 'boolean') {
+    p(`abandoned 是 ${quote(state.abandoned)}：它只能是 true（这一趟放弃了，与 closed_at 同一次写）或 false`)
   }
   if (typeof state.stage !== 'string' || !state.stage) {
     p('stage 缺失或不是字符串')
