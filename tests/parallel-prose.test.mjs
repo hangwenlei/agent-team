@@ -33,6 +33,8 @@ test('at-tweak.md：第 3 节讲认领冲突（不叫它绕开）与共用页面
   assert.ok(s3.includes('另一个微调正在改它'))
   assert.ok(s3.includes('不另起'))
   assert.ok(section(TWEAK, 4).includes('另一个还开着的微调'))
+  // 实测（docs/105 §8）：占位的测试命令（echo no-tests）两次实测一次写成「通过」、一次写成「跑不起来」——正文要说清它算哪一种。
+  assert.ok(section(TWEAK, 4).includes('一条用例都没跑到'))
   assert.ok(section(TWEAK, 5).includes('别的微调还开着'))
 })
 
